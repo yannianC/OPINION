@@ -1261,7 +1261,7 @@ def click_opinion_open_orders_tab(driver, serial_number):
         return False
 
 
-def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=False):
+def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=False, trending_part1=''):
     """
     获取 Opinion Trade 的table中tr的数量
     
@@ -1269,6 +1269,7 @@ def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=Fa
         driver: Selenium WebDriver对象
         serial_number: 浏览器序列号
         need_click_open_orders: 是否需要先点击 Open Orders 按钮
+        trending_part1: 子标题名称，如果有，需要检查tr内p标签内容
         
     Returns:
         int: tr数量，失败返回-1
@@ -1300,6 +1301,28 @@ def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=Fa
         
         count = len(tr_list)
         log_print(f"[{serial_number}] [OP] 当前 table 中有 {count} 个 tr")
+        
+        # 如果有子标题，需要进一步检查tr内p标签内容
+        if trending_part1 and count > 0:
+            log_print(f"[{serial_number}] [OP] 检测到子标题 '{trending_part1}'，检查tr内p标签内容...")
+            matched_count = 0
+            for tr in tr_list:
+                try:
+                    # 获取tr内所有p标签
+                    p_tags = tr.find_elements(By.TAG_NAME, "p")
+                    # 检查是否有p标签内容包含子标题
+                    for p in p_tags:
+                        p_text = p.text.strip()
+                        if trending_part1 in p_text:
+                            matched_count += 1
+                            log_print(f"[{serial_number}] [OP] ✓ 找到匹配的订单，p标签内容: {p_text}")
+                            break
+                except:
+                    continue
+            
+            log_print(f"[{serial_number}] [OP] 有子标题情况下，匹配的tr数量: {matched_count}")
+            return matched_count
+        
         return count
         
     except Exception as e:
@@ -1407,7 +1430,8 @@ def wait_for_opinion_order_success(driver, initial_count, serial_number, timeout
     
     while time.time() - start_time < timeout:
         try:
-            current_count = get_opinion_table_row_count(driver, serial_number)
+            # 订单确认不需要子标题判断，因为新订单的tr肯定会增加
+            current_count = get_opinion_table_row_count(driver, serial_number, need_click_open_orders=False)
             
             if current_count > initial_count:
                 log_print(f"[{serial_number}] [OP] ✓✓✓ 订单挂单成功！行数从 {initial_count} 增加到 {current_count}")
@@ -2161,13 +2185,14 @@ def wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
     return False
 
 
-def check_position_count(driver, browser_id):
+def check_position_count(driver, browser_id, trending_part1=''):
     """
     检查 Position 标签页中是否有仓位
     
     Args:
         driver: Selenium WebDriver对象
         browser_id: 浏览器ID
+        trending_part1: 子标题名称，如果有，需要检查tr内p标签内容
         
     Returns:
         int: tr数量，失败返回-1
@@ -2225,6 +2250,28 @@ def check_position_count(driver, browser_id):
         
         count = len(tr_list)
         log_print(f"[{browser_id}] Position 中有 {count} 个仓位")
+        
+        # 如果有子标题，需要进一步检查tr内p标签内容
+        if trending_part1 and count > 0:
+            log_print(f"[{browser_id}] 检测到子标题 '{trending_part1}'，检查tr内p标签内容...")
+            matched_count = 0
+            for tr in tr_list:
+                try:
+                    # 获取tr内所有p标签
+                    p_tags = tr.find_elements(By.TAG_NAME, "p")
+                    # 检查是否有p标签内容包含子标题
+                    for p in p_tags:
+                        p_text = p.text.strip()
+                        if trending_part1 in p_text:
+                            matched_count += 1
+                            log_print(f"[{browser_id}] ✓ 找到匹配的仓位，p标签内容: {p_text}")
+                            break
+                except:
+                    continue
+            
+            log_print(f"[{browser_id}] 有子标题情况下，匹配的仓位数量: {matched_count}")
+            return matched_count
+        
         return count
         
     except Exception as e:
@@ -2334,13 +2381,13 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             log_print(f"[{browser_id}] 步骤6.2: 检查 Buy 类型的仓位和挂单限制...")
             
             # 检查 Position
-            position_count = check_position_count(driver, browser_id)
+            position_count = check_position_count(driver, browser_id, trending_part1)
             if position_count > 0:
                 return False, f"{browser_id}已有仓位"
             
             # 检查 Open Orders（提前检查）
             log_print(f"[{browser_id}] 步骤6.3: 提前检查 Open Orders...")
-            initial_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True)
+            initial_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
             
             if initial_count < 0:
                 log_print(f"[{browser_id}] ⚠ 无法获取初始行数，将继续执行...")
@@ -2352,7 +2399,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         else:
             # Sell 类型不受限制，但仍需获取初始订单数量
             log_print(f"[{browser_id}] 步骤6.2: Sell 类型不受限制，获取初始订单数量...")
-            initial_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True)
+            initial_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
             
             if initial_count < 0:
                 log_print(f"[{browser_id}] ⚠ 无法获取初始行数，将继续执行...")
@@ -3687,7 +3734,7 @@ def click_higher_price_button(driver, browser_id):
         log_print(f"[{browser_id}] ✗ 点击价格按钮失败: {str(e)}")
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
-        return False
+        return False, None
 
 
 def get_orderbook_data_with_subtopic_simple(driver, browser_id):
@@ -3929,6 +3976,60 @@ def get_orderbook_data_without_subtopic(driver, browser_id):
         return ""
 
 
+def execute_type3_data_collection(driver, browser_id, target_url, trending_part1):
+    """
+    执行Type 3数据收集流程（从步骤5开始，可重试）
+    
+    Args:
+        driver: Selenium WebDriver对象
+        browser_id: 浏览器ID
+        target_url: 目标URL
+        trending_part1: 子主题（如果有）
+        
+    Returns:
+        tuple: (success, button_prefix, orderbook_data, error_msg)
+    """
+    try:
+        # 5. 等待 Position 按钮出现
+        log_print(f"[{browser_id}] 步骤5: 等待 Position 按钮出现...")
+        if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
+            return False, None, "", "Position按钮未出现，页面加载可能失败"
+        
+        # 6. 如果有子主题，点击子主题按钮
+        if trending_part1:
+            log_print(f"[{browser_id}] 步骤6a: 点击子主题按钮...")
+            if not click_subtopic_button_for_type3(driver, browser_id, trending_part1):
+                return False, None, "", "点击子主题按钮失败"
+            time.sleep(2)
+        
+        # 7. 点击价格较高的按钮
+        log_print(f"[{browser_id}] 步骤7: 点击价格较高的按钮...")
+        button_success, button_prefix = click_higher_price_button(driver, browser_id)
+        if not button_success:
+            return False, None, "", "价格解析失败"
+        
+        time.sleep(3)
+        
+        # 8. 根据是否有子主题，收集不同的数据
+        if trending_part1:
+            log_print(f"[{browser_id}] 步骤8: 收集订单簿数据（有子主题）...")
+            orderbook_data = get_orderbook_data_with_subtopic(driver, browser_id, trending_part1, False)
+        else:
+            log_print(f"[{browser_id}] 步骤8: 收集订单簿数据（无子主题）...")
+            orderbook_data = get_orderbook_data_without_subtopic(driver, browser_id)
+        
+        if not orderbook_data:
+            return False, None, "", "订单簿数据收集失败"
+        
+        return True, button_prefix, orderbook_data, ""
+        
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ 数据收集流程异常: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        return False, None, "", f"执行异常: {str(e)}"
+
+
 def process_type3_mission(task_data):
     """
     处理 Type 3 任务 - 获取订单簿数据
@@ -4013,37 +4114,31 @@ def process_type3_mission(task_data):
         else:
             log_print(f"[{browser_id}] ✓ 当前页面已是目标页面，无需重新加载")
         
-        # 5. 等待 Position 按钮出现
-        log_print(f"[{browser_id}] 步骤5: 等待 Position 按钮出现...")
-        if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
-            return False, "Position按钮未出现，页面加载可能失败", orderbook_data
+        # 执行数据收集流程（带重试机制）
+        max_retries = 2
+        button_prefix = None
         
-        # 6. 如果有子主题，点击子主题按钮
-        if trending_part1:
-            log_print(f"[{browser_id}] 步骤6a: 点击子主题按钮...")
-            if not click_subtopic_button_for_type3(driver, browser_id, trending_part1):
-                return False, "点击子主题按钮失败", orderbook_data
-            time.sleep(2)
-        
-        # 7. 点击价格较高的按钮
-        log_print(f"[{browser_id}] 步骤7: 点击价格较高的按钮...")
-        button_success, button_prefix = click_higher_price_button(driver, browser_id)
-        if not button_success:
-            log_print(f"[{browser_id}] ⚠ 点击价格按钮失败，继续执行...")
-            button_prefix = None
-        else:
-            time.sleep(3)
-        
-        # 8. 根据是否有子主题，收集不同的数据
-        if trending_part1:
-            log_print(f"[{browser_id}] 步骤8: 收集订单簿数据（有子主题）...")
-            orderbook_data = get_orderbook_data_with_subtopic(driver, browser_id,trending_part1, False)
-        else:
-            log_print(f"[{browser_id}] 步骤8: 收集订单簿数据（无子主题）...")
-            orderbook_data = get_orderbook_data_without_subtopic(driver, browser_id)
-        
-        if not orderbook_data:
-            return False, "订单簿数据收集失败", orderbook_data
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                log_print(f"[{browser_id}] ⚠ 第 {attempt} 次重试，重新加载页面...")
+                driver.refresh()
+                time.sleep(3)
+            
+            log_print(f"[{browser_id}] 开始数据收集流程（尝试 {attempt + 1}/{max_retries + 1}）...")
+            success, button_prefix, orderbook_data, error_msg = execute_type3_data_collection(
+                driver, browser_id, target_url, trending_part1
+            )
+            
+            if success:
+                log_print(f"[{browser_id}] ✓ 数据收集成功")
+                break
+            else:
+                log_print(f"[{browser_id}] ✗ 数据收集失败: {error_msg}")
+                if attempt < max_retries:
+                    log_print(f"[{browser_id}] 准备重试...")
+                else:
+                    log_print(f"[{browser_id}] ✗✗✗ 已达到最大重试次数，任务失败")
+                    return False, f"数据收集失败（重试{max_retries}次后）: {error_msg}", orderbook_data
         
         # 在订单簿数据前面加上按钮前缀
         if button_prefix:

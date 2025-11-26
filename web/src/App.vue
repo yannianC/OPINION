@@ -141,25 +141,75 @@
                           {{ getHedgeStatusText(config.currentHedge) }}
                         </span>
                       </div>
-                      <div class="hedge-details">
-                        <div class="hedge-detail-row">
-                          <span>YES: {{ config.currentHedge.yesNumber }}</span>
-                          <span :class="getTaskStatusClass(config.currentHedge.yesStatus)">
-                            {{ getStatusText(config.currentHedge.yesStatus) }}
-                          </span>
+                      
+                      <!-- 任务一 -->
+                      <div class="hedge-task-section">
+                        <div class="task-title">
+                          任务一 - {{ config.currentHedge.firstSide }}
+                          <span class="task-amount">x{{ config.currentHedge.share }}</span>
                         </div>
-                        <div class="hedge-detail-row">
-                          <span>NO: {{ config.currentHedge.noNumber }}</span>
-                          <span :class="getTaskStatusClass(config.currentHedge.noStatus)">
-                            {{ getStatusText(config.currentHedge.noStatus) }}
-                          </span>
-                        </div>
-                        <div class="hedge-detail-row">
-                          <span>数量: {{ config.currentHedge.share }}</span>
-                          <span>价格: {{ config.currentHedge.price }}</span>
+                        <div class="hedge-task-details-grid">
+                          <div class="hedge-detail-row">
+                            <span>任务ID:</span>
+                            <span :class="getTaskStatusClass(
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.yesStatus 
+                                : config.currentHedge.noStatus
+                            )">
+                              {{ 
+                                config.currentHedge.firstSide === 'YES' 
+                                  ? (config.currentHedge.yesTaskId || '待提交') 
+                                  : (config.currentHedge.noTaskId || '待提交') 
+                              }}
+                            </span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>浏览器:</span>
+                            <span>{{ 
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.yesNumber 
+                                : config.currentHedge.noNumber 
+                            }}</span>
+                          </div>
                         </div>
                       </div>
-                      <div class="hedge-time">{{ formatTime(config.currentHedge.startTime) }}</div>
+                      
+                      <!-- 任务二 -->
+                      <div class="hedge-task-section">
+                        <div class="task-title">
+                          任务二 - {{ config.currentHedge.firstSide === 'YES' ? 'NO' : 'YES' }}
+                          <span class="task-amount">x{{ config.currentHedge.share }}</span>
+                        </div>
+                        <div class="hedge-task-details-grid">
+                          <div class="hedge-detail-row">
+                            <span>任务ID:</span>
+                            <span :class="getTaskStatusClass(
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.noStatus 
+                                : config.currentHedge.yesStatus
+                            )">
+                              {{ 
+                                config.currentHedge.firstSide === 'YES' 
+                                  ? (config.currentHedge.noTaskId || '待提交') 
+                                  : (config.currentHedge.yesTaskId || '待提交') 
+                              }}
+                            </span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>浏览器:</span>
+                            <span>{{ 
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.noNumber 
+                                : config.currentHedge.yesNumber 
+                            }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div class="hedge-summary">
+                        <span>{{ config.currentHedge.isClose ? '卖出' : '买入' }} @ {{ config.currentHedge.price }}¢</span>
+                        <span>{{ formatTime(config.currentHedge.startTime) }}</span>
+                      </div>
                     </div>
                     <div v-else class="no-data">暂无对冲</div>
                   </div>
@@ -1057,17 +1107,67 @@ const fetchMissionList = async () => {
       const type3Missions = allMissions.filter(item => item.mission.type === 3)
       updateType3TasksInConfigs(type3Missions)
       
-      // 更新对冲任务状态
+      // 更新对冲任务状态（使用新接口）
       for (const config of activeConfigs.value) {
-        if (config.currentHedge) {
-          const yesTask = allMissions.find(item => item.mission.id === config.currentHedge.yesTaskId)
-          const noTask = allMissions.find(item => item.mission.id === config.currentHedge.noTaskId)
+        if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
+          const hedgeRecord = config.currentHedge
           
-          if (yesTask) {
-            config.currentHedge.yesStatus = yesTask.mission.status
+          // 通过新接口获取任务状态
+          if (hedgeRecord.yesTaskId) {
+            const yesTaskData = await fetchMissionStatus(hedgeRecord.yesTaskId)
+            if (yesTaskData) {
+              const oldStatus = hedgeRecord.yesStatus
+              hedgeRecord.yesStatus = yesTaskData.status
+              if (oldStatus !== yesTaskData.status) {
+                console.log(`[fetchMissionList] YES任务 ${hedgeRecord.yesTaskId} 状态变化: ${oldStatus} -> ${yesTaskData.status}`)
+              }
+            }
           }
-          if (noTask) {
-            config.currentHedge.noStatus = noTask.mission.status
+          
+          if (hedgeRecord.noTaskId) {
+            const noTaskData = await fetchMissionStatus(hedgeRecord.noTaskId)
+            if (noTaskData) {
+              const oldStatus = hedgeRecord.noStatus
+              hedgeRecord.noStatus = noTaskData.status
+              if (oldStatus !== noTaskData.status) {
+                console.log(`[fetchMissionList] NO任务 ${hedgeRecord.noTaskId} 状态变化: ${oldStatus} -> ${noTaskData.status}`)
+              }
+            }
+          }
+          
+          // 检查对冲任务状态并触发完成逻辑
+          const firstSide = hedgeRecord.firstSide
+          const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
+          const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
+          
+          console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} - 第一个任务(${firstSide})状态: ${firstStatus}, 第二个任务已提交: ${hedgeRecord.secondTaskSubmitted}`)
+          
+          // 检查第一个任务是否失败
+          if (firstStatus === 3) {
+            console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
+            hedgeRecord.finalStatus = 'failed'
+            finishHedge(config, hedgeRecord)
+          }
+          // 第一个任务成功，提交第二个任务
+          else if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
+            console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
+            hedgeRecord.secondTaskSubmitted = true
+            submitSecondHedgeTask(config, hedgeRecord)
+          }
+          // 第二个任务已提交，检查第二个任务状态
+          else if (hedgeRecord.secondTaskSubmitted) {
+            // 检查第二个任务是否失败
+            if (secondStatus === 3) {
+              console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
+              hedgeRecord.finalStatus = 'failed'
+              finishHedge(config, hedgeRecord)
+            }
+            // 两个任务都成功
+            else if (firstStatus === 2 && secondStatus === 2) {
+              console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 两个任务都成功`)
+              hedgeRecord.finalStatus = 'success'
+              finishHedge(config, hedgeRecord)
+            }
           }
         }
       }
@@ -1251,7 +1351,14 @@ const submitSingleTask = async (taskData) => {
     )
     
     if (response.data && response.data.data) {
-      return response.data.data
+      const data = response.data.data
+      // 如果返回的是对象，直接返回；如果是数字ID，包装成对象
+      if (typeof data === 'object') {
+        return data
+      } else {
+        // 如果只返回ID，包装成对象格式
+        return { id: data, status: 9 }
+      }
     }
     return null
   } catch (error) {
@@ -1966,6 +2073,11 @@ const loadMonitorBrowserIds = () => {
  */
 const getHedgeStatusText = (hedge) => {
   if (!hedge) return ''
+  // 优先使用 finalStatus（新版本）
+  if (hedge.finalStatus === 'success') return '全部成功'
+  if (hedge.finalStatus === 'failed') return '失败'
+  if (hedge.finalStatus === 'running') return '进行中'
+  // 兼容旧版本（没有 finalStatus 字段的记录）
   if (hedge.yesStatus === 2 && hedge.noStatus === 2) return '全部成功'
   if (hedge.yesStatus === 3 || hedge.noStatus === 3) return '部分失败'
   if (hedge.yesStatus === 9 || hedge.noStatus === 9) return '进行中'
@@ -1977,6 +2089,11 @@ const getHedgeStatusText = (hedge) => {
  */
 const getHedgeStatusClass = (hedge) => {
   if (!hedge) return ''
+  // 优先使用 finalStatus（新版本）
+  if (hedge.finalStatus === 'success') return 'hedge-success'
+  if (hedge.finalStatus === 'failed') return 'hedge-failed'
+  if (hedge.finalStatus === 'running') return 'hedge-running'
+  // 兼容旧版本（没有 finalStatus 字段的记录）
   if (hedge.yesStatus === 2 && hedge.noStatus === 2) return 'hedge-success'
   if (hedge.yesStatus === 3 || hedge.noStatus === 3) return 'hedge-failed'
   if (hedge.yesStatus === 9 || hedge.noStatus === 9) return 'hedge-running'
@@ -2111,7 +2228,7 @@ const executeHedgeTask = async (config, hedgeData) => {
       exchangeName: 'OP',
       side: 1,
       psSide: firstPsSide,
-      amt: hedgeData.share,
+      amt: hedgeData.share * 100,
       price: hedgeData.currentPrice
     }
     
@@ -2126,7 +2243,9 @@ const executeHedgeTask = async (config, hedgeData) => {
     )
     
     if (response.data && response.data.data) {
-      const taskId = response.data.data
+      const taskData = response.data.data
+      // 如果返回的是对象，提取id字段；如果是数字，直接使用
+      const taskId = typeof taskData === 'object' ? taskData.id : taskData
       console.log(`第一个对冲任务提交成功，任务ID: ${taskId}`)
       
       if (firstSide === 'YES') {
@@ -2143,6 +2262,23 @@ const executeHedgeTask = async (config, hedgeData) => {
     console.error('提交第一个对冲任务失败:', error)
     hedgeRecord.finalStatus = 'failed'
     finishHedge(config, hedgeRecord)
+  }
+}
+
+/**
+ * 获取单个任务状态
+ */
+const fetchMissionStatus = async (taskId) => {
+  try {
+    const response = await axios.get(`https://sg.bicoin.com.cn/99l/mission/status?id=${taskId}`)
+    if (response.data && response.data.code === 0 && response.data.data) {
+      // 返回 mission 对象，而不是整个 data
+      return response.data.data.mission
+    }
+    return null
+  } catch (error) {
+    console.error(`获取任务 ${taskId} 状态失败:`, error)
+    return null
   }
 }
 
@@ -2168,19 +2304,38 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
       return
     }
     
-    const yesTask = missionList.value.find(item => item.mission.id === hedgeRecord.yesTaskId)
-    const noTask = missionList.value.find(item => item.mission.id === hedgeRecord.noTaskId)
+    // 通过新接口获取任务状态
+    if (hedgeRecord.yesTaskId) {
+      const yesTaskData = await fetchMissionStatus(hedgeRecord.yesTaskId)
+      if (yesTaskData) {
+        const oldStatus = hedgeRecord.yesStatus
+        hedgeRecord.yesStatus = yesTaskData.status
+        if (oldStatus !== yesTaskData.status) {
+          console.log(`[monitorHedgeStatus] YES任务 ${hedgeRecord.yesTaskId} 状态变化: ${oldStatus} -> ${yesTaskData.status}`)
+        }
+      }
+    }
     
-    if (yesTask) hedgeRecord.yesStatus = yesTask.mission.status
-    if (noTask) hedgeRecord.noStatus = noTask.mission.status
+    if (hedgeRecord.noTaskId) {
+      const noTaskData = await fetchMissionStatus(hedgeRecord.noTaskId)
+      if (noTaskData) {
+        const oldStatus = hedgeRecord.noStatus
+        hedgeRecord.noStatus = noTaskData.status
+        if (oldStatus !== noTaskData.status) {
+          console.log(`[monitorHedgeStatus] NO任务 ${hedgeRecord.noTaskId} 状态变化: ${oldStatus} -> ${noTaskData.status}`)
+        }
+      }
+    }
     
     const firstSide = hedgeRecord.firstSide
     const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
     const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
     
+    console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} - 第一个任务(${firstSide})状态: ${firstStatus}, 第二个任务已提交: ${hedgeRecord.secondTaskSubmitted}`)
+    
     // 检查第一个任务是否失败
     if (firstStatus === 3) {
-      console.log(`对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
+      console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
       hedgeRecord.finalStatus = 'failed'
       finishHedge(config, hedgeRecord)
       return
@@ -2188,7 +2343,7 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
     
     // 第一个任务成功，提交第二个任务
     if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
-      console.log(`对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
+      console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
       hedgeRecord.secondTaskSubmitted = true
       await submitSecondHedgeTask(config, hedgeRecord)
     }
@@ -2197,7 +2352,7 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
     if (hedgeRecord.secondTaskSubmitted) {
       // 检查第二个任务是否失败
       if (secondStatus === 3) {
-        console.log(`对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
+        console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
         hedgeRecord.finalStatus = 'failed'
         finishHedge(config, hedgeRecord)
         return
@@ -2205,7 +2360,7 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
       
       // 两个任务都成功
       if (firstStatus === 2 && secondStatus === 2) {
-        console.log(`对冲 ${hedgeRecord.id} 两个任务都成功`)
+        console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 两个任务都成功`)
         hedgeRecord.finalStatus = 'success'
         finishHedge(config, hedgeRecord)
         return
@@ -2229,6 +2384,10 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
   try {
     const groupNo = browserToGroupMap.value[secondBrowser] || '1'
     
+    // 任务二的价格 = 100 - 任务一的价格
+    const secondPrice = (100 - parseFloat(hedgeRecord.price)).toFixed(1)
+    console.log(`任务二价格计算: 100 - ${hedgeRecord.price} = ${secondPrice}`)
+    
     const taskData = {
       groupNo: groupNo,
       numberList: parseInt(secondBrowser),
@@ -2238,7 +2397,7 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       side: 1,
       psSide: secondPsSide,
       amt: hedgeRecord.share,
-      price: hedgeRecord.price
+      price: parseFloat(secondPrice)
     }
     
     const response = await axios.post(
@@ -2252,7 +2411,9 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     )
     
     if (response.data && response.data.data) {
-      const taskId = response.data.data
+      const taskData = response.data.data
+      // 如果返回的是对象，提取id字段；如果是数字，直接使用
+      const taskId = typeof taskData === 'object' ? taskData.id : taskData
       console.log(`第二个对冲任务提交成功，任务ID: ${taskId}`)
       
       if (secondSide === 'YES') {
@@ -2262,9 +2423,15 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
         hedgeRecord.noTaskId = taskId
         hedgeRecord.noStatus = 9
       }
+    } else {
+      console.error('提交第二个对冲任务失败: 无任务ID返回')
+      hedgeRecord.finalStatus = 'failed'
+      finishHedge(config, hedgeRecord)
     }
   } catch (error) {
     console.error('提交第二个对冲任务失败:', error)
+    hedgeRecord.finalStatus = 'failed'
+    finishHedge(config, hedgeRecord)
   }
 }
 
@@ -2278,11 +2445,15 @@ const finishHedge = (config, hedgeRecord) => {
   const endTime = new Date(hedgeRecord.endTime)
   hedgeRecord.duration = Math.round((endTime - startTime) / 1000 / 60)
   
+  // 保存日志到本地
   saveHedgeLog(hedgeRecord)
-  config.currentHedge = null
+  
+  // 解除暂停状态，允许新的对冲任务
   pausedType3Tasks.value.delete(config.id)
   
-  console.log(`对冲 ${hedgeRecord.id} 已结束`)
+  console.log(`对冲 ${hedgeRecord.id} 已结束，状态: ${hedgeRecord.finalStatus}，日志已保存`)
+  
+  // 注意：不清除 config.currentHedge，保留显示直到有新任务
 }
 
 /**
@@ -2377,16 +2548,21 @@ const cleanHedgeAmount = async () => {
 const executeAutoHedgeTasks = async () => {
   console.log('执行自动对冲任务...')
   
-  // 检查是否可以执行对冲
-  if (hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0) {
-    console.log('对冲数量已满或总数量为0，跳过执行')
-    return
+  // 检查是否可以下发新的对冲任务
+  const canStartNewHedge = !(hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0)
+  if (!canStartNewHedge) {
+    console.log('对冲数量已满或总数量为0，不下发新对冲任务')
   }
   
   for (const config of activeConfigs.value) {
     // 如果该主题正在执行对冲，跳过
     if (pausedType3Tasks.value.has(config.id)) {
       console.log(`配置 ${config.id} 正在执行对冲，跳过`)
+      continue
+    }
+    
+    // 只有在可以开始新对冲时才执行
+    if (!canStartNewHedge) {
       continue
     }
     
@@ -3109,6 +3285,55 @@ onUnmounted(() => {
   font-size: 0.7rem;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 0.5rem;
+}
+
+/* 对冲任务分段显示 */
+.hedge-task-section {
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  border-left: 3px solid rgba(255, 255, 255, 0.3);
+}
+
+.hedge-task-section .task-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.hedge-task-section .task-amount {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: normal;
+}
+
+.hedge-task-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.hedge-task-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.hedge-summary {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.8);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
 }
 
 .task-pending {
