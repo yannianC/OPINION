@@ -1,0 +1,15 @@
+# OPINION 交易脚本依赖库
+
+# OPINION CLOB SDK
+opinion_clob_sdk>=0.2.8
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# Web3 相关 (SDK自带，但列出以供参考)
+web3>=6.0.0
+eth-account>=0.10.0
+
+# 网络请求
+requests>=2.31.0
+

@@ -1,0 +1,18 @@
+# OPINION API 配置示例
+# 将此文件内容复制到 .env 文件中并填入你的实际配置
+
+OPINION_HOST=https://proxy.opinion.trade:8443
+OPINION_API_KEY=your_api_key_here
+
+# 区块链配置 (BNB Chain)
+CHAIN_ID=56
+RPC_URL=https://bsc-dataseed.binance.org
+
+# 钱包配置
+PRIVATE_KEY=0x1234567890abcdef...
+MULTI_SIG_ADDRESS=0xYourWalletAddress...
+
+# 智能合约地址
+CONDITIONAL_TOKEN_ADDR=0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+MULTISEND_ADDR=0x998739BFdAAdde7C933B942a68053933098f9EDa
+

@@ -1,0 +1,3865 @@
+<template>
+  <div class="app">
+    <header class="top-header">
+      <h1>任务管理系统</h1>
+      <div class="header-actions">
+        <button class="btn-header" @click="showAddConfigDialog">添加配置</button>
+        <button class="btn-header" @click="showEditConfigDialog">修改配置</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="container">
+        <!-- 自动对冲功能 -->
+        <section class="section auto-hedge-section">
+          <h2>自动对冲</h2>
+          <div class="auto-hedge-controls">
+            <div class="hedge-amount-info">
+              <span class="amount-label">累计对冲数量:</span>
+              <span class="amount-value">{{ hedgeStatus.amtSum || 0 }}</span>
+            </div>
+            
+            <div class="hedge-amount-input">
+              <span class="amount-label">总数量:</span>
+              <input 
+                v-model.number="hedgeStatus.amt" 
+                type="number" 
+                class="amount-input" 
+                min="0"
+                placeholder="输入总数量"
+              />
+              <button class="btn btn-secondary btn-sm" @click="updateHedgeAmount">
+                更新对冲数量
+              </button>
+              <button class="btn btn-warning btn-sm" @click="cleanHedgeAmount">
+                清空当前已开
+              </button>
+            </div>
+            
+            <!-- 开仓/平仓开关 -->
+            <div class="hedge-mode-switch">
+              <span class="mode-label">模式:</span>
+              <label class="switch-label">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.isClose" 
+                  class="switch-checkbox"
+                  :disabled="autoHedgeRunning"
+                />
+                <span class="switch-slider"></span>
+                <span class="switch-text">{{ hedgeMode.isClose ? '平仓' : '开仓' }}</span>
+              </label>
+            </div>
+            
+            <!-- 时间过滤输入框 -->
+            <div class="hedge-time-filter">
+              <span class="filter-label">最近</span>
+              <input 
+                v-model.number="hedgeMode.timePassMin" 
+                type="number" 
+                class="time-input" 
+                min="0"
+                placeholder="60"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+              <span class="filter-label">分钟内有过任意操作的，不参与</span>
+            </div>
+            
+            <button 
+              :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
+              @click="toggleAutoHedge"
+            >
+              {{ autoHedgeRunning ? '停止自动分配' : '开始自动分配' }}
+            </button>
+            <span v-if="autoHedgeRunning" class="status-badge status-running">运行中</span>
+          </div>
+          
+          <div class="trending-list">
+            <div v-if="activeConfigs.length === 0" class="empty-message">
+              暂无启用的主题配置
+            </div>
+            <div v-else class="trending-items">
+              <div 
+                v-for="config in activeConfigs" 
+                :key="config.id" 
+                class="trending-item"
+              >
+                <div class="trending-header">
+                  <div class="trending-name-row">
+                    <span class="trending-name">
+                      {{ config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending }}
+                    </span>
+                    <button class="btn-log btn-sm" @click="showHedgeLog(config)">
+                      📋 日志
+                    </button>
+                    <input 
+                      v-model="config.monitorBrowserId" 
+                      type="text" 
+                      class="monitor-input" 
+                      placeholder="监听深度浏览器ID"
+                      :disabled="autoHedgeRunning"
+                      @blur="saveMonitorBrowserIds"
+                    />
+                  </div>
+                </div>
+                
+                <!-- Type 3 任务和对冲信息显示区域 -->
+                <div class="task-hedge-container">
+                  <!-- 左侧：Type 3 任务信息 -->
+                  <div class="type3-task-section">
+                    <div class="section-title">Type 3 任务</div>
+                    <div v-if="config.type3Task" class="type3-task-info">
+                      <div class="task-status-row">
+                        <span class="task-label">任务 #{{ config.type3Task.id }}</span>
+                        <span class="task-browser">浏览器: {{ config.type3Task.numberList }}</span>
+                        <span 
+                          class="task-status-badge" 
+                          :class="getStatusClass(config.type3Task.status)"
+                        >
+                          {{ getStatusText(config.type3Task.status) }}
+                        </span>
+                      </div>
+                      <div class="task-time">{{ formatTime(config.type3Task.updateTime) }}</div>
+                      <div v-if="config.type3Task.msg" class="task-msg">
+                        <span class="msg-content">{{ config.type3Task.msg }}</span>
+                      </div>
+                    </div>
+                    <div v-else class="no-data">暂无数据</div>
+                  </div>
+                  
+                  <!-- 右侧：对冲信息 -->
+                  <div class="hedge-info-section">
+                    <div class="section-title">对冲信息</div>
+                    <div v-if="config.currentHedge" class="hedge-info">
+                      <div class="hedge-status-row">
+                        <span class="hedge-label">对冲 #{{ config.currentHedge.id }}</span>
+                        <span 
+                          class="hedge-status-badge"
+                          :class="getHedgeStatusClass(config.currentHedge)"
+                        >
+                          {{ getHedgeStatusText(config.currentHedge) }}
+                        </span>
+                      </div>
+                      <div class="hedge-details">
+                        <div class="hedge-detail-row">
+                          <span>YES: {{ config.currentHedge.yesNumber }}</span>
+                          <span :class="getTaskStatusClass(config.currentHedge.yesStatus)">
+                            {{ getStatusText(config.currentHedge.yesStatus) }}
+                          </span>
+                        </div>
+                        <div class="hedge-detail-row">
+                          <span>NO: {{ config.currentHedge.noNumber }}</span>
+                          <span :class="getTaskStatusClass(config.currentHedge.noStatus)">
+                            {{ getStatusText(config.currentHedge.noStatus) }}
+                          </span>
+                        </div>
+                        <div class="hedge-detail-row">
+                          <span>数量: {{ config.currentHedge.share }}</span>
+                          <span>价格: {{ config.currentHedge.price }}</span>
+                        </div>
+                      </div>
+                      <div class="hedge-time">{{ formatTime(config.currentHedge.startTime) }}</div>
+                    </div>
+                    <div v-else class="no-data">暂无对冲</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 添加任务和对冲 -->
+        <div class="form-sections">
+        <!-- 添加任务表单 -->
+        <section class="section">
+          <h2>添加任务</h2>
+          <div v-if="isLoadingConfig" class="loading-message">
+            ⏳ 正在加载配置...
+          </div>
+          <form v-else @submit.prevent="handleSubmit" class="task-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="numberList">浏览器编号 *</label>
+                <input
+                  id="numberList"
+                  v-model="formData.numberList"
+                  type="text"
+                  placeholder="请输入浏览器编号"
+                  required
+                  @blur="updateGroupNoFromBrowser"
+                />
+              </div>
+
+              <div class="form-group">
+                <label>组号</label>
+                <div class="group-no-display">{{ formData.groupNo || '请先输入浏览器编号' }}</div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="type">类型 *</label>
+                <select id="type" v-model="formData.type" required>
+                  <option value="1">下单</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="trendingId">Trending *</label>
+                <select 
+                  id="trendingId" 
+                  v-model="formData.trendingId" 
+                  required
+                  :disabled="isLoadingConfig"
+                >
+                  <option value="" disabled>{{ isLoadingConfig ? '加载中...' : '请选择Trending' }}</option>
+                  <option 
+                    v-for="config in configList" 
+                    :key="config.id" 
+                    :value="String(config.id)"
+                  >
+                    {{ config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="exchangeName">交易所 *</label>
+                <select 
+                  id="exchangeName" 
+                  v-model="formData.exchangeName" 
+                  required
+                  :disabled="isLoadingConfig"
+                >
+                  <option value="" disabled>{{ isLoadingConfig ? '加载中...' : '请选择交易所' }}</option>
+                  <option 
+                    v-for="exchange in exchangeList" 
+                    :key="exchange" 
+                    :value="exchange"
+                  >
+                    {{ exchange }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="side">买卖方向 *</label>
+                <select id="side" v-model="formData.side" required>
+                  <option value="1">买入</option>
+                  <option value="2">卖出</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="psSide">预测方向 *</label>
+                <select id="psSide" v-model="formData.psSide" required>
+                  <option value="1">Yes</option>
+                  <option value="2">No</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <!-- 占位，保持布局对齐 -->
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="amt">数量 *</label>
+                <input
+                  id="amt"
+                  v-model.number="formData.amt"
+                  type="number"
+                  step="0.01"
+                  placeholder="请输入数量"
+                  required
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="price">价格（选填，不填则为市价）</label>
+                <input
+                  id="price"
+                  v-model.number="formData.price"
+                  type="number"
+                  step="0.000001"
+                  placeholder="请输入价格"
+                />
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
+                <span v-if="isSubmitting">提交中...</span>
+                <span v-else>添加任务</span>
+              </button>
+              <button type="button" class="btn btn-secondary" @click="resetForm">
+                重置
+              </button>
+            </div>
+          </form>
+        </section>
+
+          <!-- 对冲块 -->
+          <section class="section">
+            <div class="section-header">
+              <div class="hedge-title-wrapper">
+                <div v-if="hedgeTaskStatus.yesTaskId || hedgeTaskStatus.noTaskId" class="hedge-status-display">
+                  <span v-if="hedgeTaskStatus.yesTaskId" class="hedge-task-status" :class="getStatusClass(hedgeTaskStatus.yesStatus)">
+                    Yes任务#{{ hedgeTaskStatus.yesTaskId }}: {{ getStatusText(hedgeTaskStatus.yesStatus) }}
+                  </span>
+                  <span v-if="hedgeTaskStatus.noTaskId" class="hedge-task-status" :class="getStatusClass(hedgeTaskStatus.noStatus)">
+                    No任务#{{ hedgeTaskStatus.noTaskId }}: {{ getStatusText(hedgeTaskStatus.noStatus) }}
+                  </span>
+                </div>
+                <h2>对冲</h2>
+              </div>
+              <button type="button" class="btn-secondary" @click="scrollToHedgeHistory">对冲记录</button>
+            </div>
+            <form @submit.prevent="handleHedgeSubmit" class="hedge-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="hedgeEventLink">事件链接 *</label>
+                  <select 
+                    id="hedgeEventLink" 
+                    v-model="hedgeData.eventLink" 
+                    required
+                    :disabled="isLoadingConfig"
+                  >
+                    <option value="" disabled>{{ isLoadingConfig ? '加载中...' : '请选择事件' }}</option>
+                    <option 
+                      v-for="config in configList" 
+                      :key="config.id" 
+                      :value="String(config.id)"
+                    >
+                      {{ config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending }}
+                    </option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="yesPrice">yes的价格 *</label>
+                  <input
+                    id="yesPrice"
+                    v-model.number="hedgeData.yesPrice"
+                    type="number"
+                    step="0.000001"
+                    placeholder="请输入yes的价格"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label>买卖方向 *</label>
+                  <div class="radio-group">
+                    <label class="radio-label">
+                      <input type="radio" v-model="hedgeData.direction" value="buy" />
+                      <span>买入</span>
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" v-model="hedgeData.direction" value="sell" />
+                      <span>卖出</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>先挂 *</label>
+                  <div class="radio-group">
+                    <label class="radio-label">
+                      <input type="radio" v-model="hedgeData.firstOrder" value="yes" />
+                      <span>{{ hedgeData.direction === 'buy' ? '买' : '卖' }}yes</span>
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" v-model="hedgeData.firstOrder" value="no" />
+                      <span>{{ hedgeData.direction === 'buy' ? '买' : '卖' }}no</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="yesBrowser">{{ hedgeData.direction === 'buy' ? '买' : '卖' }}yes的浏览器 *</label>
+                  <input
+                    id="yesBrowser"
+                    v-model="hedgeData.yesBrowser"
+                    type="text"
+                    :placeholder="'请输入' + (hedgeData.direction === 'buy' ? '买' : '卖') + 'yes的浏览器编号'"
+                    required
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="noBrowser">{{ hedgeData.direction === 'buy' ? '买' : '卖' }}no的浏览器 *</label>
+                  <input
+                    id="noBrowser"
+                    v-model="hedgeData.noBrowser"
+                    type="text"
+                    :placeholder="'请输入' + (hedgeData.direction === 'buy' ? '买' : '卖') + 'no的浏览器编号'"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="hedgeAmount">数量 *</label>
+                  <input
+                    id="hedgeAmount"
+                    v-model.number="hedgeData.amount"
+                    type="number"
+                    step="0.01"
+                    placeholder="请输入数量（不超过最大可开单量）"
+                    required
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label>事件间隔 *</label>
+                  <div class="radio-group">
+                    <label class="radio-label">
+                      <input type="radio" v-model="hedgeData.intervalType" value="success" />
+                      <span>挂单成功再挂另外一边</span>
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" v-model="hedgeData.intervalType" value="delay" />
+                      <span>延时</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="hedgeData.intervalType === 'delay'" class="form-group">
+                <label for="delayMs">延时(ms) *</label>
+                <input
+                  id="delayMs"
+                  v-model.number="hedgeData.delayMs"
+                  type="number"
+                  placeholder="请输入延时毫秒数"
+                  :required="hedgeData.intervalType === 'delay'"
+                />
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" :disabled="isSubmittingHedge">
+                  <span v-if="isSubmittingHedge">提交中...</span>
+                  <span v-else>提交对冲</span>
+                </button>
+                <button type="button" class="btn btn-secondary" @click="resetHedgeForm">
+                  重置
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+
+        <!-- 任务列表 -->
+        <section class="section">
+          <div class="section-header">
+            <h2>任务列表</h2>
+            <div class="refresh-controls">
+              <span class="auto-refresh-status">自动刷新: 每10秒</span>
+            <button class="btn-refresh" @click="fetchMissionList" :disabled="isLoadingList">
+              <span v-if="isLoadingList">刷新中...</span>
+              <span v-else>🔄 刷新</span>
+            </button>
+            </div>
+          </div>
+          
+          <div v-if="isLoadingList && missionList.length === 0" class="empty">
+            加载中...
+          </div>
+          <div v-else-if="missionList.length === 0" class="empty">
+            暂无任务记录
+          </div>
+          <div v-else class="mission-list">
+            <div 
+              v-for="item in missionList" 
+              :key="item.mission.id" 
+              class="mission-card"
+            >
+              <div class="mission-header">
+                <div class="mission-title">
+                  <span class="mission-id">任务 #{{ item.mission.id }}</span>
+                  <span class="mission-status" :class="getStatusClass(item.mission.status)">
+                    {{ getStatusText(item.mission.status) }}
+                  </span>
+                </div>
+                <div class="mission-time">
+                  {{ formatTime(item.mission.createTime) }}
+                </div>
+              </div>
+
+              <div class="mission-body">
+                <div class="info-grid">
+                  <div class="info-item">
+                    <span class="label">组号:</span>
+                    <span class="value">{{ item.mission.groupNo }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">类型:</span>
+                    <span class="value">{{ getTypeText(item.mission.type) }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">交易所:</span>
+                    <span class="value">{{ item.mission.exchangeName }}</span>
+                  </div>
+                  <div class="info-item" v-if="item.mission.trendingId">
+                    <span class="label">Trending ID:</span>
+                    <span class="value">{{ item.mission.trendingId }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">方向:</span>
+                    <span class="value">{{ getSideText(item.mission.side) }}</span>
+                  </div>
+                  <div class="info-item" v-if="item.mission.psSide">
+                    <span class="label">预测:</span>
+                    <span class="value">{{ getPsSideText(item.mission.psSide) }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">数量:</span>
+                    <span class="value">{{ item.mission.amt }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">价格:</span>
+                    <span class="value">{{ item.mission.price || '市价' }}</span>
+                  </div>
+                  <div class="info-item" v-if="item.mission.succCount !== null">
+                    <span class="label">成功数:</span>
+                    <span class="value">{{ item.mission.succCount }}</span>
+                  </div>
+                  <div class="info-item" v-if="item.mission.numberList">
+                    <span class="label">浏览器编号:</span>
+                    <span class="value">{{ item.mission.numberList }}</span>
+                  </div>
+                </div>
+
+                <div v-if="item.exchangeConfig" class="exchange-info">
+                  <div class="trending-title">{{ item.exchangeConfig.trending }}</div>
+                  <div class="url-links">
+                    <a 
+                      v-if="item.exchangeConfig.opUrl" 
+                      :href="item.exchangeConfig.opUrl" 
+                      target="_blank"
+                      class="link-btn"
+                    >
+                      Opinion Trade
+                    </a>
+                    <a 
+                      v-if="item.exchangeConfig.polyUrl" 
+                      :href="item.exchangeConfig.polyUrl" 
+                      target="_blank"
+                      class="link-btn"
+                    >
+                      Polymarket
+                    </a>
+                  </div>
+                </div>
+
+                <div v-if="item.mission.msg" class="mission-msg">
+                  <span class="label">消息:</span>
+                  <span class="value">{{ item.mission.msg }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 对冲记录列表 -->
+        <section class="section" ref="hedgeHistorySection">
+          <div class="section-header">
+            <h2>对冲记录</h2>
+            <button class="btn-refresh" @click="fetchHedgeHistory" :disabled="isLoadingHedgeHistory">
+              <span v-if="isLoadingHedgeHistory">刷新中...</span>
+              <span v-else>🔄 刷新</span>
+            </button>
+            </div>
+          
+          <div v-if="isLoadingHedgeHistory && hedgeHistoryList.length === 0" class="empty">
+            加载中...
+          </div>
+          <div v-else-if="hedgeHistoryList.length === 0" class="empty">
+            暂无对冲记录
+          </div>
+          <div v-else class="mission-list">
+            <div 
+              v-for="item in hedgeHistoryList" 
+              :key="item.id" 
+              class="mission-card"
+            >
+              <div class="mission-header">
+                <div class="mission-title">
+                  <span class="mission-id">对冲记录 #{{ item.id }}</span>
+                </div>
+                <div class="mission-time">
+                  {{ formatTime(item.createTime) }}
+                </div>
+              </div>
+
+              <div class="mission-body">
+                <div class="info-grid">
+                  <div class="info-item">
+                    <span class="label">事件链接:</span>
+                    <span class="value">{{ getTrendingById(item.trendingId) }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">价格:</span>
+                    <span class="value">{{ item.price }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">优先类型:</span>
+                    <span class="value">{{ item.priorityType === 1 ? '先买yes' : '先买no' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">Yes浏览器:</span>
+                    <span class="value">{{ item.yesNumber }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">No浏览器:</span>
+                    <span class="value">{{ item.noNumber }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">数量:</span>
+                    <span class="value">{{ item.amount }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="label">类型:</span>
+                    <span class="value">{{ item.type === 1 ? '挂单成功再挂另一边' : '延迟' }}</span>
+                  </div>
+                  <div class="info-item" v-if="item.type === 2">
+                    <span class="label">延迟:</span>
+                    <span class="value">{{ item.delayMs }}ms</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- Toast 提示 -->
+    <div v-if="toast.show" class="toast" :class="'toast-' + toast.type">
+      {{ toast.message }}
+    </div>
+
+    <!-- 添加配置弹窗 -->
+    <div v-if="showAddConfig" class="modal-overlay" @click="closeAddConfigDialog">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>添加配置</h3>
+          <button class="modal-close" @click="closeAddConfigDialog">×</button>
+        </div>
+        <form @submit.prevent="submitAddConfig" class="modal-form">
+          <div class="form-group">
+            <label>Trending *   主标题###子标题</label>
+            <input v-model="newConfig.trending" type="text" required placeholder="请输入 Trending" />
+          </div>
+          <!-- <div class="form-group">
+            <label>子主题</label>
+            <input v-model="newConfig.trendingPart1" type="text" placeholder="请输入子主题（选填）" />
+          </div> -->
+          <div class="form-group">
+            <label>Opinion Trade URL *</label>
+            <input v-model="newConfig.opUrl" type="text" required placeholder="https://app.opinion.trade/detail?topicId=..." />
+          </div>
+          <div class="form-group">
+            <label>Polymarket URL *</label>
+            <input v-model="newConfig.polyUrl" type="text" required placeholder="https://polymarket.com/event/..." />
+          </div>
+          <div class="form-group">
+            <label>OP Topic ID *</label>
+            <input v-model="newConfig.opTopicId" type="text" required placeholder="请输入 Topic ID" />
+          </div>
+          <div class="form-group">
+            <label>权重 *</label>
+            <input v-model.number="newConfig.weight" type="number" required placeholder="请输入权重（数字）" min="0" />
+          </div>
+          <div class="modal-actions">
+            <button type="submit" class="btn btn-primary" :disabled="isSubmittingConfig">
+              <span v-if="isSubmittingConfig">提交中...</span>
+              <span v-else>提交</span>
+            </button>
+            <button type="button" class="btn btn-secondary" @click="closeAddConfigDialog">取消</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 修改配置弹窗 -->
+    <div v-if="showEditConfig" class="modal-overlay" @click="closeEditConfigDialog">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>修改配置</h3>
+          <button class="modal-close" @click="closeEditConfigDialog">×</button>
+        </div>
+        <div class="config-list">
+          <div v-if="editConfigList.length === 0" class="empty">暂无配置</div>
+          <div v-else class="config-items">
+            <div v-for="(config, index) in editConfigList" :key="index" class="config-item">
+              <div class="config-item-header">
+                <span class="config-index">{{ index + 1 }}</span>
+                <label class="switch-label">
+                  <input 
+                    type="checkbox" 
+                    v-model="config.enabled" 
+                    class="switch-checkbox"
+                  />
+                  <span class="switch-slider"></span>
+                  <span class="switch-text">{{ config.enabled ? '启用' : '禁用' }}</span>
+                </label>
+                <!-- <button type="button" class="btn-remove" @click="removeConfigItem(index)">删除</button> -->
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Trending *</label>
+                  <input v-model="config.trending" type="text" required />
+                </div>
+                <div class="form-group">
+                  <label>子主题</label>
+                  <input v-model="config.trendingPart1" type="text" placeholder="选填" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>OP Topic ID *</label>
+                <input v-model="config.opTopicId" type="text" required />
+              </div>
+              <div class="form-group">
+                <label>Opinion Trade URL *</label>
+                <input v-model="config.opUrl" type="text" required />
+              </div>
+              <div class="form-group">
+                <label>Polymarket URL *</label>
+                <input v-model="config.polyUrl" type="text" required />
+              </div>
+              <div class="form-group">
+                <label>权重 *</label>
+                <input v-model.number="config.weight" type="number" required placeholder="请输入权重" min="0" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" @click="submitEditConfig" :disabled="isSubmittingConfig">
+            <span v-if="isSubmittingConfig">保存中...</span>
+            <span v-else>保存全部</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeEditConfigDialog">取消</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 对冲日志弹窗 -->
+    <div v-if="showHedgeLogDialog" class="modal-overlay" @click="closeHedgeLogDialog">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>对冲日志 - {{ currentLogConfig?.trending }}</h3>
+          <button class="modal-close" @click="closeHedgeLogDialog">×</button>
+        </div>
+        <div class="hedge-log-content">
+          <div v-if="hedgeLogs.length === 0" class="empty">暂无对冲记录</div>
+          <div v-else class="hedge-log-list">
+            <div 
+              v-for="(log, index) in hedgeLogs" 
+              :key="index" 
+              class="hedge-log-item"
+            >
+              <div class="log-header">
+                <span class="log-id">对冲 #{{ log.id }}</span>
+                <span 
+                  class="log-status-badge"
+                  :class="getHedgeLogStatusClass(log)"
+                >
+                  {{ getHedgeLogStatusText(log) }}
+                </span>
+                <span class="log-time">{{ formatTime(log.startTime) }}</span>
+              </div>
+              <div class="log-details">
+                <div class="log-row">
+                  <span class="log-label">模式:</span>
+                  <span>{{ log.isClose ? '平仓' : '开仓' }}</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">价格:</span>
+                  <span>{{ log.price }}</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">数量:</span>
+                  <span>{{ log.share }}</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">先挂:</span>
+                  <span>{{ log.firstSide }}</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">YES浏览器:</span>
+                  <span>{{ log.yesNumber }} - {{ getStatusText(log.yesStatus) }}</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">NO浏览器:</span>
+                  <span>{{ log.noNumber }} - {{ getStatusText(log.noStatus) }}</span>
+                </div>
+                <div v-if="log.endTime" class="log-row">
+                  <span class="log-label">结束时间:</span>
+                  <span>{{ formatTime(log.endTime) }}</span>
+                </div>
+                <div v-if="log.duration" class="log-row">
+                  <span class="log-label">耗时:</span>
+                  <span>{{ log.duration }}分钟</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="closeHedgeLogDialog">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import axios from 'axios'
+
+const isConnected = ref(false)
+const isSubmitting = ref(false)
+const isSubmittingHedge = ref(false)
+const isSubmittingConfig = ref(false)
+const isLoadingList = ref(false)
+const isLoadingConfig = ref(true)
+const isLoadingHedgeHistory = ref(false)
+const missionList = ref([])
+const hedgeHistoryList = ref([])
+const hedgeHistorySection = ref(null)
+
+// 自动刷新配置
+const autoRefresh = reactive({
+  enabled: true,  // 默认启用自动刷新
+  interval: 10  // 默认10秒
+})
+
+// 配置管理弹窗
+const showAddConfig = ref(false)
+const showEditConfig = ref(false)
+const editConfigList = ref([])
+
+// 新配置数据
+const newConfig = reactive({
+  trending: '',
+  trendingPart1: '',
+  opUrl: '',
+  polyUrl: '',
+  opTopicId: '',
+  weight: 0
+})
+
+// 对冲状态显示
+// 对冲任务状态（重命名，避免与对冲数量状态冲突）
+const hedgeTaskStatus = reactive({
+  yesTaskId: null,
+  yesStatus: null,
+  noTaskId: null,
+  noStatus: null
+})
+
+// Toast提示
+const toast = reactive({
+  show: false,
+  message: '',
+  type: 'info'  // info, success, warning, error
+})
+
+// 配置数据
+const exchangeList = ref([])
+const configList = ref([])
+const accountConfigList = ref([])
+const browserToGroupMap = ref({})
+
+// 自动对冲相关
+const autoHedgeRunning = ref(false)
+const autoHedgeInterval = ref(null)
+const activeConfigs = ref([])  // 启用的配置列表
+const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
+
+// 对冲状态（重命名以避免与下面的 hedgeStatus 冲突）
+const hedgeStatus = reactive({
+  amtSum: 0,  // 累计对冲数量
+  amt: 0      // 总数量
+})
+
+// 对冲模式
+const hedgeMode = reactive({
+  isClose: false,  // false: 开仓, true: 平仓
+  timePassMin: 60   // 最近xx分钟内有过任意操作的，不参与
+})
+
+// 对冲日志相关
+const showHedgeLogDialog = ref(false)
+const currentLogConfig = ref(null)
+const hedgeLogs = ref([])
+
+// 本地存储的对冲记录
+const LOCAL_STORAGE_KEY = 'hedge_logs'
+const HEDGE_SETTINGS_KEY = 'hedge_settings'
+const MONITOR_BROWSER_KEY = 'monitor_browser_ids'
+
+// 对冲任务暂停状态（按 trendingId 记录）
+const pausedType3Tasks = ref(new Set())
+
+/**
+ * 表单数据
+ */
+const formData = reactive({
+  groupNo: '',
+  numberList: '',
+  type: '1',
+  trendingId: '',
+  exchangeName: '',
+  side: '1',
+  psSide: '1',
+  amt: null,
+  price: null
+})
+
+/**
+ * 对冲表单数据
+ */
+const hedgeData = reactive({
+  eventLink: '',
+  yesPrice: null,
+  direction: 'buy',  // buy=买入, sell=卖出
+  firstOrder: 'yes',
+  yesBrowser: '',
+  noBrowser: '',
+  amount: null,
+  intervalType: 'success',
+  delayMs: null
+})
+
+/**
+ * 获取账户配置（浏览器编号和组号的映射关系）
+ */
+const fetchAccountConfig = async () => {
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+    
+    if (response.data && response.data.data) {
+      accountConfigList.value = response.data.data
+      
+      // 建立浏览器编号到组号的映射
+      const mapping = {}
+      response.data.data.forEach(item => {
+        if (item.fingerprintNo && item.computeGroup) {
+          mapping[item.fingerprintNo] = item.computeGroup
+        }
+      })
+      browserToGroupMap.value = mapping
+      
+      console.log(`账户配置加载成功，共 ${response.data.data.length} 条记录`)
+      console.log('浏览器编号到组号映射:', mapping)
+    } else {
+      console.warn('获取账户配置失败: 无数据')
+    }
+  } catch (error) {
+    console.error('获取账户配置失败:', error)
+  }
+}
+
+/**
+ * 根据浏览器编号更新组号
+ */
+const updateGroupNoFromBrowser = () => {
+  const browserNo = formData.numberList.trim()
+  if (browserNo && browserToGroupMap.value[browserNo]) {
+    formData.groupNo = browserToGroupMap.value[browserNo]
+    console.log(`浏览器编号 ${browserNo} 对应组号: ${formData.groupNo}`)
+  } else if (browserNo) {
+    formData.groupNo = ''
+    console.warn(`浏览器编号 ${browserNo} 未找到对应的组号`)
+  }
+}
+
+/**
+ * 获取交易所和Trending配置
+ */
+const fetchExchangeConfig = async () => {
+  isLoadingConfig.value = true
+  
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    
+    if (response.data && response.data.code === 0) {
+      const data = response.data.data
+      
+      // 设置交易所列表
+      exchangeList.value = data.exchangeList || []
+      
+      // 设置配置列表，将 isOpen 映射为 enabled
+      configList.value = (data.configList || []).map(config => ({
+        ...config,
+        enabled: config.isOpen === 1  // isOpen 1->true, 0->false
+      }))
+      
+      // 设置默认值
+      if (exchangeList.value.length > 0 && !formData.exchangeName) {
+        formData.exchangeName = exchangeList.value[0]
+      }
+      
+      if (configList.value.length > 0 && !formData.trendingId) {
+        formData.trendingId = String(configList.value[0].id)
+      }
+      
+      if (configList.value.length > 0 && !hedgeData.eventLink) {
+        hedgeData.eventLink = String(configList.value[0].id)
+      }
+      
+      console.log(`配置加载成功：${exchangeList.value.length} 个交易所，${configList.value.length} 个Trending`)
+      
+      // 更新活动配置列表
+      updateActiveConfigs()
+    } else {
+      console.warn(`获取配置失败: ${response.data?.msg || '未知错误'}`)
+    }
+  } catch (error) {
+    console.error('获取配置失败:', error)
+  } finally {
+    isLoadingConfig.value = false
+  }
+}
+
+/**
+ * 获取任务列表
+ */
+const fetchMissionList = async () => {
+  isLoadingList.value = true
+  
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list')
+    
+    if (response.data && response.data.code === 0) {
+      const allMissions = response.data.data.list || []
+      
+      // 过滤掉 type=3 的任务，只显示 type=1 和 type=2 的任务
+      missionList.value = allMissions.filter(item => item.mission.type !== 3)
+      
+      // 单独处理 type=3 的任务，更新到 activeConfigs 中
+      const type3Missions = allMissions.filter(item => item.mission.type === 3)
+      updateType3TasksInConfigs(type3Missions)
+      
+      // 更新对冲任务状态
+      for (const config of activeConfigs.value) {
+        if (config.currentHedge) {
+          const yesTask = allMissions.find(item => item.mission.id === config.currentHedge.yesTaskId)
+          const noTask = allMissions.find(item => item.mission.id === config.currentHedge.noTaskId)
+          
+          if (yesTask) {
+            config.currentHedge.yesStatus = yesTask.mission.status
+          }
+          if (noTask) {
+            config.currentHedge.noStatus = noTask.mission.status
+          }
+        }
+      }
+      
+      console.log(`任务列表已刷新，共 ${missionList.value.length} 条记录（已过滤 type=3）`)
+    } else {
+      console.warn(`获取任务列表失败: ${response.data?.msg || '未知错误'}`)
+    }
+  } catch (error) {
+    console.error('获取任务列表失败:', error)
+  } finally {
+    isLoadingList.value = false
+  }
+}
+
+/**
+ * 提交表单
+ */
+const handleSubmit = async () => {
+  // 检查组号是否已设置
+  if (!formData.groupNo) {
+    alert('无法获取组号，请确认浏览器编号是否正确')
+    return
+  }
+  
+  isSubmitting.value = true
+  
+  try {
+    // 构建提交数据
+    const submitData = {
+      groupNo: formData.groupNo,
+      numberList: parseInt(formData.numberList),
+      type: parseInt(formData.type),
+      trendingId: parseInt(formData.trendingId),
+      exchangeName: formData.exchangeName,
+      side: parseInt(formData.side),
+      psSide: parseInt(formData.psSide),
+      amt: parseFloat(formData.amt)
+    }
+    
+    // 如果填写了价格，则添加价格字段
+    if (formData.price !== null && formData.price !== '') {
+      submitData.price = parseFloat(formData.price)
+    }
+    
+    console.log('正在提交任务...', submitData)
+    
+    // 发送请求
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/add',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('任务添加成功！响应:', response.data)
+      alert('任务添加成功！')
+      // 清空表单（仅清空需要重新输入的字段）
+      formData.numberList = ''
+      formData.amt = null
+      formData.price = null
+      // exchangeName, trendingId, side, psSide 保持上次选择的值，方便批量添加
+      
+      // 刷新任务列表
+      setTimeout(() => {
+        fetchMissionList()
+      }, 500)
+    }
+  } catch (error) {
+    console.error('提交失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    alert(`任务添加失败: ${errorMsg}`)
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+/**
+ * 显示Toast提示
+ */
+const showToast = (message, type = 'info') => {
+  toast.message = message
+  toast.type = type
+  toast.show = true
+  
+  setTimeout(() => {
+    toast.show = false
+  }, 3000)
+}
+
+/**
+ * 根据trending ID获取trending名称
+ */
+const getTrendingById = (id) => {
+  const config = configList.value.find(c => c.id === id)
+  if (!config) return `ID: ${id}`
+  return config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending
+}
+
+/**
+ * 滚动到对冲记录
+ */
+const scrollToHedgeHistory = () => {
+  hedgeHistorySection.value?.scrollIntoView({ behavior: 'smooth' })
+}
+
+/**
+ * 获取对冲记录列表
+ */
+const fetchHedgeHistory = async () => {
+  isLoadingHedgeHistory.value = true
+  
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/hedgeHist')
+    
+    if (response.data && response.data.code === 0) {
+      hedgeHistoryList.value = response.data.data || []
+      console.log(`对冲记录已加载，共 ${hedgeHistoryList.value.length} 条记录`)
+    } else {
+      console.warn(`获取对冲记录失败: ${response.data?.msg || '未知错误'}`)
+    }
+  } catch (error) {
+    console.error('获取对冲记录失败:', error)
+  } finally {
+    isLoadingHedgeHistory.value = false
+  }
+}
+
+/**
+ * 提交对冲记录到服务器
+ */
+const submitHedgeHistory = async (hedgeRecord) => {
+  try {
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/hedgeHist',
+      hedgeRecord,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('对冲记录提交成功:', response.data)
+      fetchHedgeHistory()  // 刷新对冲记录列表
+    }
+  } catch (error) {
+    console.error('对冲记录提交失败:', error)
+  }
+}
+
+/**
+ * 检查对冲历史中是否存在相同浏览器的记录
+ */
+const checkDuplicateHedge = (trendingId, yesBrowser, noBrowser) => {
+  return hedgeHistoryList.value.some(item => 
+    item.trendingId === trendingId && 
+    (item.yesNumber === yesBrowser || item.yesNumber === noBrowser || 
+     item.noNumber === yesBrowser || item.noNumber === noBrowser)
+  )
+}
+
+/**
+ * 提交单个任务
+ */
+const submitSingleTask = async (taskData) => {
+  try {
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/add',
+      taskData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.data) {
+      return response.data.data
+    }
+    return null
+  } catch (error) {
+    console.error('任务提交失败:', error)
+    throw error
+  }
+}
+
+/**
+ * 轮询任务状态
+ */
+const pollTaskStatus = async (taskId, callback) => {
+  const maxAttempts = 60  // 最多轮询60次 (10分钟)
+  let attempts = 0
+  
+  const poll = async () => {
+    if (attempts >= maxAttempts) {
+      callback('timeout', null)
+      return
+    }
+    
+    attempts++
+    
+    try {
+      const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list')
+      
+      if (response.data && response.data.code === 0) {
+        const missions = response.data.data.list || []
+        const task = missions.find(m => m.mission.id === taskId)
+        
+        if (task) {
+          const status = task.mission.status
+          
+          // 更新状态显示
+          callback('update', status)
+          
+          // 2=成功, 3=失败
+          if (status === 2 || status === 3) {
+            callback('complete', status)
+            return
+          }
+        }
+      }
+    } catch (error) {
+      console.error('轮询任务状态失败:', error)
+    }
+    
+    // 10秒后再次轮询
+    setTimeout(poll, 10000)
+  }
+  
+  poll()
+}
+
+/**
+ * 提交对冲表单
+ */
+const handleHedgeSubmit = async () => {
+  // 检查是否是卖出方向，需要验证对冲记录
+  if (hedgeData.direction === 'sell') {
+    const hasDuplicate = checkDuplicateHedge(
+      parseInt(hedgeData.eventLink),
+      hedgeData.yesBrowser,
+      hedgeData.noBrowser
+    )
+    
+    if (hasDuplicate) {
+      if (!confirm('存在相同浏览器编号的对冲事件，是否继续？')) {
+        return
+      }
+    }
+  }
+  
+  isSubmittingHedge.value = true
+  
+  // 重置对冲状态显示
+  hedgeTaskStatus.yesTaskId = null
+  hedgeTaskStatus.yesStatus = null
+  hedgeTaskStatus.noTaskId = null
+  hedgeTaskStatus.noStatus = null
+  
+  try {
+    showToast('开始提交对冲任务...', 'info')
+    
+    // 确定第一个任务和第二个任务的参数
+    const side = hedgeData.direction === 'buy' ? 1 : 2  // 1=买入, 2=卖出
+    const firstTaskPsSide = hedgeData.firstOrder === 'yes' ? 1 : 2
+    const firstTaskBrowser = hedgeData.firstOrder === 'yes' ? hedgeData.yesBrowser : hedgeData.noBrowser
+    const secondTaskPsSide = hedgeData.firstOrder === 'yes' ? 2 : 1
+    const secondTaskBrowser = hedgeData.firstOrder === 'yes' ? hedgeData.noBrowser : hedgeData.yesBrowser
+    
+    const yesPrice = parseFloat(hedgeData.yesPrice)
+    const noPrice = 100 - yesPrice
+    const firstTaskPrice = hedgeData.firstOrder === 'yes' ? yesPrice : noPrice
+    
+    // 提交第一个任务
+    const firstTaskData = {
+      groupNo: browserToGroupMap.value[firstTaskBrowser] || '1',
+      numberList: parseInt(firstTaskBrowser),
+      type: 1,
+      trendingId: parseInt(hedgeData.eventLink),
+      exchangeName: 'OP',
+      side: side,
+      psSide: firstTaskPsSide,
+      amt: parseFloat(hedgeData.amount),
+      price: firstTaskPrice
+    }
+    
+    console.log('提交第一个任务:', firstTaskData)
+    const firstTask = await submitSingleTask(firstTaskData)
+    
+    if (!firstTask || !firstTask.id) {
+      throw new Error('第一个任务提交失败')
+    }
+    
+    // 更新状态显示
+    if (hedgeData.firstOrder === 'yes') {
+      hedgeTaskStatus.yesTaskId = firstTask.id
+      hedgeTaskStatus.yesStatus = firstTask.status
+    } else {
+      hedgeTaskStatus.noTaskId = firstTask.id
+      hedgeTaskStatus.noStatus = firstTask.status
+    }
+    
+    showToast(`第一个任务已提交 (ID: ${firstTask.id})`, 'success')
+    
+    // 根据间隔类型决定何时提交第二个任务
+    if (hedgeData.intervalType === 'success') {
+      // 挂单成功再挂另一边
+      showToast('等待第一个任务完成...', 'info')
+      
+      pollTaskStatus(firstTask.id, async (event, status) => {
+        if (event === 'update') {
+          // 更新状态显示
+          if (hedgeData.firstOrder === 'yes') {
+            hedgeTaskStatus.yesStatus = status
+          } else {
+            hedgeTaskStatus.noStatus = status
+          }
+        } else if (event === 'complete') {
+          if (status === 2) {
+            // 任务成功，提交第二个任务
+            showToast('第一个任务成功，提交第二个任务...', 'success')
+            await submitSecondTask(side, secondTaskPsSide, secondTaskBrowser, noPrice)
+          } else if (status === 3) {
+            // 任务失败，取消第二个任务
+            showToast('第一个任务失败，取消对冲', 'error')
+            clearHedgeStatusAfterDelay()
+          }
+        } else if (event === 'timeout') {
+          showToast('等待超时，取消对冲', 'warning')
+          clearHedgeStatusAfterDelay()
+        }
+      })
+    } else {
+      // 延时提交
+      const delayMs = parseInt(hedgeData.delayMs) || 0
+      showToast(`延时 ${delayMs}ms 后提交第二个任务...`, 'info')
+      
+      // 同时监听第一个任务状态
+      pollTaskStatus(firstTask.id, (event, status) => {
+        if (event === 'update' || event === 'complete') {
+          if (hedgeData.firstOrder === 'yes') {
+            hedgeTaskStatus.yesStatus = status
+          } else {
+            hedgeTaskStatus.noStatus = status
+          }
+        }
+      })
+      
+      setTimeout(async () => {
+        await submitSecondTask(side, secondTaskPsSide, secondTaskBrowser, noPrice)
+      }, delayMs)
+    }
+    
+  } catch (error) {
+    console.error('对冲任务提交失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    showToast(`对冲任务失败: ${errorMsg}`, 'error')
+  } finally {
+    isSubmittingHedge.value = false
+  }
+}
+
+/**
+ * 提交第二个任务
+ */
+const submitSecondTask = async (side, psSide, browser, price) => {
+  try {
+    const secondTaskData = {
+      groupNo: browserToGroupMap.value[browser] || '1',
+      numberList: parseInt(browser),
+      type: 1,
+      trendingId: parseInt(hedgeData.eventLink),
+      exchangeName: 'OP',
+      side: side,
+      psSide: psSide,
+      amt: parseFloat(hedgeData.amount),
+      price: price
+    }
+    
+    console.log('提交第二个任务:', secondTaskData)
+    const secondTask = await submitSingleTask(secondTaskData)
+    
+    if (!secondTask || !secondTask.id) {
+      throw new Error('第二个任务提交失败')
+    }
+    
+    // 更新状态显示
+    if (hedgeData.firstOrder === 'yes') {
+      hedgeTaskStatus.noTaskId = secondTask.id
+      hedgeTaskStatus.noStatus = secondTask.status
+    } else {
+      hedgeTaskStatus.yesTaskId = secondTask.id
+      hedgeTaskStatus.yesStatus = secondTask.status
+    }
+    
+    showToast(`第二个任务已提交 (ID: ${secondTask.id})`, 'success')
+    
+    // 监听第二个任务状态
+    pollTaskStatus(secondTask.id, async (event, status) => {
+      if (event === 'update' || event === 'complete') {
+        if (hedgeData.firstOrder === 'yes') {
+          hedgeTaskStatus.noStatus = status
+        } else {
+          hedgeTaskStatus.yesStatus = status
+        }
+        
+        // 如果两个任务都成功了，提交对冲记录
+        if (event === 'complete' && status === 2 && 
+            hedgeTaskStatus.yesStatus === 2 && hedgeTaskStatus.noStatus === 2) {
+          showToast('对冲成功！', 'success')
+          
+          // 提交对冲记录
+          const hedgeRecord = {
+            trendingId: parseInt(hedgeData.eventLink),
+            price: parseFloat(hedgeData.yesPrice),
+            priorityType: hedgeData.firstOrder === 'yes' ? 1 : 2,
+            yesNumber: hedgeData.yesBrowser,
+            noNumber: hedgeData.noBrowser,
+            amount: parseFloat(hedgeData.amount),
+            type: hedgeData.intervalType === 'success' ? 1 : 2,
+            delayMs: hedgeData.intervalType === 'delay' ? parseInt(hedgeData.delayMs) : null
+          }
+          
+          await submitHedgeHistory(hedgeRecord)
+          clearHedgeStatusAfterDelay()
+        } else if (event === 'complete' && status === 3) {
+          showToast('第二个任务失败', 'error')
+          clearHedgeStatusAfterDelay()
+        }
+      }
+    })
+    
+  } catch (error) {
+    console.error('第二个任务提交失败:', error)
+    showToast(`第二个任务失败: ${error.message}`, 'error')
+    clearHedgeStatusAfterDelay()
+  }
+}
+
+/**
+ * 延迟清除对冲状态显示
+ */
+const clearHedgeStatusAfterDelay = () => {
+  setTimeout(() => {
+    hedgeTaskStatus.yesTaskId = null
+    hedgeTaskStatus.yesStatus = null
+    hedgeTaskStatus.noTaskId = null
+    hedgeTaskStatus.noStatus = null
+  }, 120000)  // 2分钟后清除
+}
+
+/**
+ * 重置表单
+ */
+const resetForm = () => {
+  formData.groupNo = ''
+  formData.numberList = ''
+  formData.type = '1'
+  // 重置为第一个选项
+  formData.trendingId = configList.value.length > 0 ? String(configList.value[0].id) : ''
+  formData.exchangeName = exchangeList.value.length > 0 ? exchangeList.value[0] : ''
+  formData.side = '1'
+  formData.psSide = '1'
+  formData.amt = null
+  formData.price = null
+  console.log('表单已重置')
+}
+
+/**
+ * 重置对冲表单（不清空输入内容，只在手动重置时清空）
+ */
+const resetHedgeForm = () => {
+  hedgeData.eventLink = configList.value.length > 0 ? String(configList.value[0].id) : ''
+  hedgeData.yesPrice = null
+  hedgeData.direction = 'buy'
+  hedgeData.firstOrder = 'yes'
+  hedgeData.yesBrowser = ''
+  hedgeData.noBrowser = ''
+  hedgeData.amount = null
+  hedgeData.intervalType = 'success'
+  hedgeData.delayMs = null
+  console.log('对冲表单已重置')
+}
+
+/**
+ * 显示添加配置弹窗
+ */
+const showAddConfigDialog = () => {
+  // 重置表单
+  newConfig.trending = ''
+  newConfig.trendingPart1 = ''
+  newConfig.opUrl = ''
+  newConfig.polyUrl = ''
+  newConfig.opTopicId = ''
+  newConfig.weight = 0
+  showAddConfig.value = true
+}
+
+/**
+ * 关闭添加配置弹窗
+ */
+const closeAddConfigDialog = () => {
+  showAddConfig.value = false
+}
+
+/**
+ * 提交添加配置
+ */
+const submitAddConfig = async () => {
+  isSubmittingConfig.value = true
+  
+  try {
+    const submitData = {
+      list: [{
+        trending: newConfig.trending,
+        trendingPart1: newConfig.trendingPart1 || null,
+        opUrl: newConfig.opUrl,
+        polyUrl: newConfig.polyUrl,
+        opTopicId: newConfig.opTopicId,
+        weight: newConfig.weight || 0,
+        isOpen: 1  // 新增配置默认开启
+      }]
+    }
+    
+    console.log('提交添加配置:', submitData)
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('配置添加成功:', response.data)
+      alert('配置添加成功！')
+      closeAddConfigDialog()
+      // 重新加载配置
+      updateActiveConfigs()
+      fetchExchangeConfig()
+    }
+  } catch (error) {
+    console.error('配置添加失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    alert(`配置添加失败: ${errorMsg}`)
+  } finally {
+    isSubmittingConfig.value = false
+  }
+}
+
+/**
+ * 显示修改配置弹窗
+ */
+const showEditConfigDialog = () => {
+  // 深拷贝当前配置列表，并确保 enabled 字段正确映射
+  editConfigList.value = JSON.parse(JSON.stringify(configList.value)).map(config => ({
+    ...config,
+    enabled: config.isOpen === 1 || config.enabled === true,
+    weight: config.weight || 0
+  }))
+  showEditConfig.value = true
+}
+
+/**
+ * 关闭修改配置弹窗
+ */
+const closeEditConfigDialog = () => {
+  showEditConfig.value = false
+}
+
+/**
+ * 删除配置项
+ */
+const removeConfigItem = (index) => {
+  if (confirm('确定要删除这个配置吗？')) {
+    editConfigList.value.splice(index, 1)
+  }
+}
+
+/**
+ * 提交修改配置
+ */
+const submitEditConfig = async () => {
+  isSubmittingConfig.value = true
+  
+  try {
+    const submitData = {
+      list: editConfigList.value.map(config => ({
+        id: config.id,  // 带上id表示更新
+        trending: config.trending,
+        trendingPart1: config.trendingPart1 || null,
+        opUrl: config.opUrl,
+        polyUrl: config.polyUrl,
+        opTopicId: config.opTopicId,
+        weight: config.weight || 0,
+        isOpen: config.enabled ? 1 : 0  // enabled 映射为 isOpen (true->1, false->0)
+      }))
+    }
+    
+    console.log('提交修改配置:', submitData)
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('配置更新成功:', response.data)
+      alert('配置更新成功！')
+      closeEditConfigDialog()
+      // 重新加载配置
+      fetchExchangeConfig()
+      // 更新活动配置列表
+      updateActiveConfigs()
+    }
+  } catch (error) {
+    console.error('配置更新失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    alert(`配置更新失败: ${errorMsg}`)
+  } finally {
+    isSubmittingConfig.value = false
+  }
+}
+
+/**
+ * 更新活动配置列表（启用的配置）
+ */
+const updateActiveConfigs = () => {
+  activeConfigs.value = configList.value
+    .filter(config => config.isOpen === 1 || config.enabled === true)
+    .map(config => ({
+      ...config,
+      monitorBrowserId: config.monitorBrowserId || '',
+      orderbookData: config.orderbookData || '',
+      weight: config.weight || 0,
+      type3Task: config.type3Task || null,
+      currentHedge: config.currentHedge || null
+    }))
+  
+  // 加载本地保存的监听浏览器ID
+  loadMonitorBrowserIds()
+}
+
+/**
+ * 更新配置中的 type=3 任务信息
+ */
+const updateType3TasksInConfigs = (type3Missions) => {
+  for (const config of activeConfigs.value) {
+    // 查找与当前配置 trendingId 匹配的 type=3 任务
+    // 只显示 status=2（成功）或 status=3（失败）的任务
+    const matchedTasks = type3Missions.filter(item => 
+      item.mission.trendingId === config.id &&
+      (item.mission.status === 2 || item.mission.status === 3)
+    )
+    
+    if (matchedTasks.length > 0) {
+      // 按更新时间排序，获取最新的任务
+      const latestTask = matchedTasks.sort((a, b) => {
+        const timeA = new Date(a.mission.updateTime).getTime()
+        const timeB = new Date(b.mission.updateTime).getTime()
+        return timeB - timeA  // 降序排序，最新的在前
+      })[0]
+      
+      config.type3Task = {
+        id: latestTask.mission.id,
+        status: latestTask.mission.status,
+        msg: latestTask.mission.msg,
+        createTime: latestTask.mission.createTime,
+        updateTime: latestTask.mission.updateTime,
+        numberList: latestTask.mission.numberList
+      }
+    } else {
+      // 如果没有符合条件的任务，清除显示
+      config.type3Task = null
+    }
+  }
+}
+
+/**
+ * 切换自动对冲状态
+ */
+const toggleAutoHedge = () => {
+  if (autoHedgeRunning.value) {
+    stopAutoHedge()
+  } else {
+    startAutoHedge()
+  }
+}
+
+/**
+ * 开始自动对冲
+ */
+const startAutoHedge = () => {
+  if (activeConfigs.value.length === 0) {
+    alert('没有启用的主题配置')
+    return
+  }
+  
+  const hasMonitor = activeConfigs.value.some(c => c.monitorBrowserId)
+  if (!hasMonitor) {
+    alert('请至少为一个主题配置监听深度浏览器ID')
+    return
+  }
+  
+  autoHedgeRunning.value = true
+  console.log('开始自动对冲')
+  
+  // 立即执行一次
+  executeAutoHedgeTasks()
+  
+  // 每30秒执行一次
+  autoHedgeInterval.value = setInterval(() => {
+    executeAutoHedgeTasks()
+  }, 30000)
+}
+
+/**
+ * 停止自动对冲
+ */
+const stopAutoHedge = () => {
+  autoHedgeRunning.value = false
+  if (autoHedgeInterval.value) {
+    clearInterval(autoHedgeInterval.value)
+    autoHedgeInterval.value = null
+  }
+  console.log('停止自动对冲')
+}
+
+/**
+ * 解析 type=3 任务的 msg，提取价格
+ */
+const parseType3Message = (msg, hasSubtopic) => {
+  try {
+    const parts = msg.split(';')
+    if (parts.length < 3) return null
+    
+    const firstSide = parts[0]
+    const group1 = parts[1]
+    const group2 = parts[2]
+    
+    const group1Values = group1.split(',')
+    const group2Values = group2.split(',')
+    
+    let price1Str, price2Str
+    
+    if (hasSubtopic) {
+      price1Str = group1Values[group1Values.length - 1].trim()
+      price2Str = group2Values[0].trim()
+    } else {
+      price1Str = group1Values[0].trim()
+      price2Str = group2Values[0].trim()
+    }
+    
+    const price1 = parseFloat(price1Str.replace(' ¢', '').replace('¢', '').trim())
+    const price2 = parseFloat(price2Str.replace(' ¢', '').replace('¢', '').trim())
+    
+    if (isNaN(price1) || isNaN(price2)) return null
+    console.info(`${price1} ---- ${price2}`);
+    return {
+      firstSide,
+      price1,
+      price2,
+      diff: Math.abs(price1 - price2),
+      maxPrice: Math.max(price1, price2)
+    }
+  } catch (e) {
+    console.error('解析 msg 失败:', e)
+    return null
+  }
+}
+
+/**
+ * 检查 type=3 任务是否符合对冲条件
+ */
+const checkHedgeCondition = (task) => {
+  if (!task || !autoHedgeRunning.value) return false
+  
+  if (task.status !== 2) return false
+  
+  const updateTime = new Date(task.updateTime)
+  const now = new Date()
+  const timeDiff = (now - updateTime) / 1000
+  
+  if (timeDiff >= 120) return false
+  
+  return true
+}
+
+/**
+ * 显示对冲日志
+ */
+const showHedgeLog = (config) => {
+  currentLogConfig.value = config
+  hedgeLogs.value = loadHedgeLogs(config.id)
+  showHedgeLogDialog.value = true
+}
+
+/**
+ * 关闭对冲日志
+ */
+const closeHedgeLogDialog = () => {
+  showHedgeLogDialog.value = false
+  currentLogConfig.value = null
+  hedgeLogs.value = []
+}
+
+/**
+ * 加载对冲记录
+ */
+const loadHedgeLogs = (trendingId) => {
+  try {
+    const logs = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]')
+    return logs.filter(log => log.trendingId === trendingId).reverse()
+  } catch (e) {
+    console.error('加载对冲日志失败:', e)
+    return []
+  }
+}
+
+/**
+ * 保存对冲设置到本地
+ */
+const saveHedgeSettings = () => {
+  try {
+    localStorage.setItem(HEDGE_SETTINGS_KEY, JSON.stringify({
+      timePassMin: hedgeMode.timePassMin
+    }))
+  } catch (e) {
+    console.error('保存对冲设置失败:', e)
+  }
+}
+
+/**
+ * 加载对冲设置
+ */
+const loadHedgeSettings = () => {
+  try {
+    const settings = JSON.parse(localStorage.getItem(HEDGE_SETTINGS_KEY) || '{}')
+    if (settings.timePassMin !== undefined) {
+      hedgeMode.timePassMin = settings.timePassMin
+    }
+  } catch (e) {
+    console.error('加载对冲设置失败:', e)
+  }
+}
+
+/**
+ * 保存监听浏览器ID
+ */
+const saveMonitorBrowserIds = () => {
+  try {
+    const monitorData = {}
+    activeConfigs.value.forEach(config => {
+      if (config.monitorBrowserId) {
+        monitorData[config.id] = config.monitorBrowserId
+      }
+    })
+    localStorage.setItem(MONITOR_BROWSER_KEY, JSON.stringify(monitorData))
+  } catch (e) {
+    console.error('保存监听浏览器ID失败:', e)
+  }
+}
+
+/**
+ * 加载监听浏览器ID
+ */
+const loadMonitorBrowserIds = () => {
+  try {
+    const monitorData = JSON.parse(localStorage.getItem(MONITOR_BROWSER_KEY) || '{}')
+    activeConfigs.value.forEach(config => {
+      if (monitorData[config.id]) {
+        config.monitorBrowserId = monitorData[config.id]
+      }
+    })
+  } catch (e) {
+    console.error('加载监听浏览器ID失败:', e)
+  }
+}
+
+/**
+ * 获取对冲状态文本
+ */
+const getHedgeStatusText = (hedge) => {
+  if (!hedge) return ''
+  if (hedge.yesStatus === 2 && hedge.noStatus === 2) return '全部成功'
+  if (hedge.yesStatus === 3 || hedge.noStatus === 3) return '部分失败'
+  if (hedge.yesStatus === 9 || hedge.noStatus === 9) return '进行中'
+  return '未知'
+}
+
+/**
+ * 获取对冲状态样式类
+ */
+const getHedgeStatusClass = (hedge) => {
+  if (!hedge) return ''
+  if (hedge.yesStatus === 2 && hedge.noStatus === 2) return 'hedge-success'
+  if (hedge.yesStatus === 3 || hedge.noStatus === 3) return 'hedge-failed'
+  if (hedge.yesStatus === 9 || hedge.noStatus === 9) return 'hedge-running'
+  return ''
+}
+
+/**
+ * 获取任务状态样式类
+ */
+const getTaskStatusClass = (status) => {
+  const classMap = {
+    0: 'task-pending',
+    2: 'task-success',
+    3: 'task-failed',
+    9: 'task-running'
+  }
+  return classMap[status] || ''
+}
+
+/**
+ * 获取对冲日志状态文本
+ */
+const getHedgeLogStatusText = (log) => {
+  return getHedgeStatusText(log)
+}
+
+/**
+ * 获取对冲日志状态样式类
+ */
+const getHedgeLogStatusClass = (log) => {
+  return getHedgeStatusClass(log)
+}
+
+/**
+ * 监控并执行对冲
+ */
+const monitorAndExecuteHedge = async (config) => {
+  const task = config.type3Task
+  if (!task) return
+  
+  if (!checkHedgeCondition(task)) return
+  
+  const hasSubtopic = config.trending.includes('###')
+  const priceInfo = parseType3Message(task.msg, hasSubtopic)
+  
+  if (!priceInfo) {
+    console.log('价格解析失败:', task.msg)
+    return
+  }
+  
+  if (priceInfo.diff <= 0.15) {
+    console.log(`差值不足 (${priceInfo.diff.toFixed(2)})，无法对冲`)
+    return
+  }
+  
+  const orderPrice = (priceInfo.maxPrice - 0.1).toFixed(1)
+  console.log(`配置 ${config.id} 符合对冲条件，订单价格: ${orderPrice}`)
+  
+  try {
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedge',
+      {
+        trendingId: config.id,
+        isClose: hedgeMode.isClose,
+        currentPrice: orderPrice,
+        timePassMin: hedgeMode.timePassMin
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.data) {
+      const hedgeData = response.data.data
+      console.log('获取对冲双方成功:', hedgeData)
+      
+      await executeHedgeTask(config, {
+        ...hedgeData,
+        currentPrice: orderPrice,
+        firstSide: priceInfo.firstSide
+      })
+    }
+  } catch (error) {
+    console.error('获取对冲双方失败:', error)
+  }
+}
+
+/**
+ * 执行对冲任务
+ */
+const executeHedgeTask = async (config, hedgeData) => {
+  const hedgeRecord = {
+    id: Date.now(),
+    trendingId: config.id,
+    trendingName: config.trending,
+    yesNumber: hedgeData.yesNumber,
+    noNumber: hedgeData.noNumber,
+    share: hedgeData.share * 100,
+    price: hedgeData.currentPrice,
+    firstSide: hedgeData.firstSide,
+    isClose: hedgeMode.isClose,
+    yesTaskId: null,
+    noTaskId: null,
+    yesStatus: null,
+    noStatus: null,
+    startTime: new Date().toISOString(),
+    endTime: null,
+    duration: null,
+    secondTaskSubmitted: false,
+    finalStatus: 'running'  // running, success, failed
+  }
+  
+  config.currentHedge = hedgeRecord
+  pausedType3Tasks.value.add(config.id)
+  
+  console.log(`开始对冲 ${config.id}:`, hedgeRecord)
+  
+  const firstSide = hedgeData.firstSide
+  const firstBrowser = firstSide === 'YES' ? hedgeData.yesNumber : hedgeData.noNumber
+  const firstPsSide = firstSide === 'YES' ? 1 : 2
+  
+  try {
+    const groupNo = browserToGroupMap.value[firstBrowser] || '1'
+    
+    const taskData = {
+      groupNo: groupNo,
+      numberList: parseInt(firstBrowser),
+      type: 1,
+      trendingId: config.id,
+      exchangeName: 'OP',
+      side: 1,
+      psSide: firstPsSide,
+      amt: hedgeData.share,
+      price: hedgeData.currentPrice
+    }
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/add',
+      taskData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.data) {
+      const taskId = response.data.data
+      console.log(`第一个对冲任务提交成功，任务ID: ${taskId}`)
+      
+      if (firstSide === 'YES') {
+        hedgeRecord.yesTaskId = taskId
+        hedgeRecord.yesStatus = 9
+      } else {
+        hedgeRecord.noTaskId = taskId
+        hedgeRecord.noStatus = 9
+      }
+      
+      monitorHedgeStatus(config, hedgeRecord)
+    }
+  } catch (error) {
+    console.error('提交第一个对冲任务失败:', error)
+    hedgeRecord.finalStatus = 'failed'
+    finishHedge(config, hedgeRecord)
+  }
+}
+
+/**
+ * 监控对冲状态
+ */
+const monitorHedgeStatus = (config, hedgeRecord) => {
+  const startTime = new Date(hedgeRecord.startTime)
+  
+  const checkStatus = async () => {
+    // 检查是否已完成
+    if (hedgeRecord.finalStatus !== 'running') {
+      return
+    }
+    
+    const now = new Date()
+    const elapsed = (now - startTime) / 1000 / 60
+    
+    if (elapsed >= 20) {
+      console.log(`对冲 ${hedgeRecord.id} 超时`)
+      hedgeRecord.finalStatus = 'failed'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+    
+    const yesTask = missionList.value.find(item => item.mission.id === hedgeRecord.yesTaskId)
+    const noTask = missionList.value.find(item => item.mission.id === hedgeRecord.noTaskId)
+    
+    if (yesTask) hedgeRecord.yesStatus = yesTask.mission.status
+    if (noTask) hedgeRecord.noStatus = noTask.mission.status
+    
+    const firstSide = hedgeRecord.firstSide
+    const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
+    const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
+    
+    // 检查第一个任务是否失败
+    if (firstStatus === 3) {
+      console.log(`对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
+      hedgeRecord.finalStatus = 'failed'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+    
+    // 第一个任务成功，提交第二个任务
+    if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
+      console.log(`对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
+      hedgeRecord.secondTaskSubmitted = true
+      await submitSecondHedgeTask(config, hedgeRecord)
+    }
+    
+    // 第二个任务已提交，检查第二个任务状态
+    if (hedgeRecord.secondTaskSubmitted) {
+      // 检查第二个任务是否失败
+      if (secondStatus === 3) {
+        console.log(`对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
+        hedgeRecord.finalStatus = 'failed'
+        finishHedge(config, hedgeRecord)
+        return
+      }
+      
+      // 两个任务都成功
+      if (firstStatus === 2 && secondStatus === 2) {
+        console.log(`对冲 ${hedgeRecord.id} 两个任务都成功`)
+        hedgeRecord.finalStatus = 'success'
+        finishHedge(config, hedgeRecord)
+        return
+      }
+    }
+    
+    setTimeout(checkStatus, 5000)
+  }
+  
+  checkStatus()
+}
+
+/**
+ * 提交第二个对冲任务
+ */
+const submitSecondHedgeTask = async (config, hedgeRecord) => {
+  const secondSide = hedgeRecord.firstSide === 'YES' ? 'NO' : 'YES'
+  const secondBrowser = secondSide === 'YES' ? hedgeRecord.yesNumber : hedgeRecord.noNumber
+  const secondPsSide = secondSide === 'YES' ? 1 : 2
+  
+  try {
+    const groupNo = browserToGroupMap.value[secondBrowser] || '1'
+    
+    const taskData = {
+      groupNo: groupNo,
+      numberList: parseInt(secondBrowser),
+      type: 1,
+      trendingId: config.id,
+      exchangeName: 'OP',
+      side: 1,
+      psSide: secondPsSide,
+      amt: hedgeRecord.share,
+      price: hedgeRecord.price
+    }
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/add',
+      taskData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.data) {
+      const taskId = response.data.data
+      console.log(`第二个对冲任务提交成功，任务ID: ${taskId}`)
+      
+      if (secondSide === 'YES') {
+        hedgeRecord.yesTaskId = taskId
+        hedgeRecord.yesStatus = 9
+      } else {
+        hedgeRecord.noTaskId = taskId
+        hedgeRecord.noStatus = 9
+      }
+    }
+  } catch (error) {
+    console.error('提交第二个对冲任务失败:', error)
+  }
+}
+
+/**
+ * 完成对冲
+ */
+const finishHedge = (config, hedgeRecord) => {
+  hedgeRecord.endTime = new Date().toISOString()
+  
+  const startTime = new Date(hedgeRecord.startTime)
+  const endTime = new Date(hedgeRecord.endTime)
+  hedgeRecord.duration = Math.round((endTime - startTime) / 1000 / 60)
+  
+  saveHedgeLog(hedgeRecord)
+  config.currentHedge = null
+  pausedType3Tasks.value.delete(config.id)
+  
+  console.log(`对冲 ${hedgeRecord.id} 已结束`)
+}
+
+/**
+ * 保存对冲记录到本地存储
+ */
+const saveHedgeLog = (hedgeRecord) => {
+  try {
+    const logs = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]')
+    logs.push(hedgeRecord)
+    
+    if (logs.length > 500) {
+      logs.splice(0, logs.length - 500)
+    }
+    
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(logs))
+  } catch (e) {
+    console.error('保存对冲日志失败:', e)
+  }
+}
+
+/**
+ * 获取对冲状态
+ */
+const fetchHedgeStatus = async () => {
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/hedge/status')
+    
+    if (response.data && response.data.data) {
+      const data = response.data.data
+      hedgeStatus.amtSum = data.amtSum || 0
+      hedgeStatus.amt = data.amt || 0
+      console.log('对冲状态已更新:', hedgeStatus)
+    }
+  } catch (error) {
+    console.error('获取对冲状态失败:', error)
+  }
+}
+
+/**
+ * 更新对冲数量
+ */
+const updateHedgeAmount = async () => {
+  try {
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/updateHedge',
+      { amt: hedgeStatus.amt },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('对冲数量更新成功')
+      showToast('对冲数量更新成功')
+      // 更新状态
+      fetchHedgeStatus()
+    }
+  } catch (error) {
+    console.error('更新对冲数量失败:', error)
+    showToast('更新对冲数量失败', 'error')
+  }
+}
+
+/**
+ * 清空当前已开
+ */
+const cleanHedgeAmount = async () => {
+  if (!confirm('确定要清空当前已开的对冲数量吗？')) {
+    return
+  }
+  
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/hedge/cleanAmt')
+    
+    if (response.data) {
+      console.log('清空成功')
+      showToast('清空成功')
+      // 更新状态
+      fetchHedgeStatus()
+    }
+  } catch (error) {
+    console.error('清空失败:', error)
+    showToast('清空失败', 'error')
+  }
+}
+
+/**
+ * 执行自动对冲任务
+ */
+const executeAutoHedgeTasks = async () => {
+  console.log('执行自动对冲任务...')
+  
+  // 检查是否可以执行对冲
+  if (hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0) {
+    console.log('对冲数量已满或总数量为0，跳过执行')
+    return
+  }
+  
+  for (const config of activeConfigs.value) {
+    // 如果该主题正在执行对冲，跳过
+    if (pausedType3Tasks.value.has(config.id)) {
+      console.log(`配置 ${config.id} 正在执行对冲，跳过`)
+      continue
+    }
+    
+    // 先尝试监控并执行对冲
+    await monitorAndExecuteHedge(config)
+    
+    // 如果没有监听浏览器ID，跳过
+    if (!config.monitorBrowserId) {
+      continue
+    }
+    
+    try {
+      // 提交 type=3 任务
+      const taskData = {
+        groupNo: browserToGroupMap.value[config.monitorBrowserId],
+        numberList: config.monitorBrowserId,
+        type: 3,
+        trendingId: String(config.id),
+        exchangeName: 'OP'
+      }
+      
+      console.log('提交 type=3 任务:', taskData)
+      
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/add',
+        taskData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (response.data && response.data.data) {
+        const taskId = response.data.data
+        console.log(`type=3 任务提交成功，任务ID: ${taskId}`)
+      }
+    } catch (error) {
+      console.error('提交任务失败:', error)
+    }
+  }
+}
+
+/**
+ * 获取状态文本
+ */
+const getStatusText = (status) => {
+  const statusMap = {
+    0: '待处理',
+    1: '处理中',
+    2: '成功',
+    3: '失败',
+    9: '进行中'
+  }
+  return statusMap[status] || `状态${status}`
+}
+
+/**
+ * 获取状态样式类
+ */
+const getStatusClass = (status) => {
+  const classMap = {
+    0: 'status-pending',
+    1: 'status-running',
+    2: 'status-completed',
+    3: 'status-failed',
+    9: 'status-running'
+  }
+  return classMap[status] || 'status-unknown'
+}
+
+/**
+ * 获取类型文本
+ */
+const getTypeText = (type) => {
+  const typeMap = {
+    1: '下单'
+  }
+  return typeMap[type] || `类型${type}`
+}
+
+/**
+ * 获取方向文本
+ */
+const getSideText = (side) => {
+  if (side === null || side === undefined) return '-'
+  const sideMap = {
+    1: '买入',
+    2: '卖出'
+  }
+  return sideMap[side] || `方向${side}`
+}
+
+/**
+ * 获取预测方向文本
+ */
+const getPsSideText = (psSide) => {
+  if (psSide === null || psSide === undefined) return '-'
+  const psSideMap = {
+    1: 'Yes',
+    2: 'No'
+  }
+  return psSideMap[psSide] || `${psSide}`
+}
+
+/**
+ * 格式化时间
+ */
+const formatTime = (timeStr) => {
+  if (!timeStr) return '-'
+  const date = new Date(timeStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+// 定时刷新
+let refreshInterval = null
+
+/**
+ * 启动自动刷新定时器
+ */
+const startAutoRefresh = () => {
+  // 清除旧的定时器
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
+  
+  // 如果启用了自动刷新，创建新的定时器
+  if (autoRefresh.enabled && autoRefresh.interval > 0) {
+    const intervalMs = autoRefresh.interval * 1000
+    refreshInterval = setInterval(() => {
+      fetchMissionList()
+    }, intervalMs)
+    console.log(`自动刷新已启动，间隔: ${autoRefresh.interval}秒`)
+  }
+}
+
+/**
+ * 切换自动刷新
+ */
+const toggleAutoRefresh = () => {
+  if (autoRefresh.enabled) {
+    startAutoRefresh()
+  } else {
+    // 关闭自动刷新
+    if (refreshInterval) {
+      clearInterval(refreshInterval)
+      refreshInterval = null
+    }
+    console.log('自动刷新已关闭')
+  }
+}
+
+/**
+ * 重置自动刷新（间隔时间改变时）
+ */
+const resetAutoRefresh = () => {
+  if (autoRefresh.enabled) {
+    startAutoRefresh()
+  }
+}
+
+onMounted(() => {
+  isConnected.value = true
+  console.log('任务管理系统已启动')
+  
+  // 加载对冲设置
+  loadHedgeSettings()
+  
+  // 加载账户配置（浏览器编号和组号映射）
+  fetchAccountConfig()
+  
+  // 加载配置
+  fetchExchangeConfig()
+  
+  // 初始加载任务列表
+  fetchMissionList()
+  
+  // 初始加载对冲记录
+  fetchHedgeHistory()
+  
+  // 启动自动刷新（默认启用，10秒间隔）
+  startAutoRefresh()
+  
+  // 获取对冲状态
+  fetchHedgeStatus()
+  
+  // 启动对冲状态定时刷新（每30秒）
+  hedgeStatusInterval.value = setInterval(() => {
+    fetchHedgeStatus()
+  }, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+  }
+  if (autoHedgeInterval.value) {
+    clearInterval(autoHedgeInterval.value)
+  }
+  if (hedgeStatusInterval.value) {
+    clearInterval(hedgeStatusInterval.value)
+  }
+})
+</script>
+
+<style scoped>
+.app {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.top-header {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 1.5rem 2rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.top-header h1 {
+  font-size: 1.8rem;
+  color: #333;
+  font-weight: 600;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn-header {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-family: inherit;
+}
+
+.btn-header:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.header {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 1.5rem 2rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header h1 {
+  font-size: 1.8rem;
+  color: #333;
+  font-weight: 600;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ccc;
+  transition: background 0.3s;
+}
+
+.status-dot.active {
+  background: #4caf50;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+}
+
+.main {
+  padding: 2rem;
+}
+
+.container {
+  max-width: 1600px;
+  margin: 0 auto;
+  display: grid;
+  gap: 2rem;
+}
+
+.form-sections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 1024px) {
+  .form-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
+.section {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.auto-hedge-section {
+  margin-bottom: 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.auto-hedge-section h2 {
+  color: white;
+  margin-bottom: 1rem;
+}
+
+.auto-hedge-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.hedge-amount-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.hedge-amount-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.amount-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.amount-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.amount-input {
+  width: 150px;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 1rem;
+}
+
+.btn-sm {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.875rem;
+}
+
+.btn-running {
+  background: #dc3545;
+}
+
+.btn-running:hover {
+  background: #c82333;
+}
+
+.btn-warning {
+  background: #ffc107;
+  color: #333;
+}
+
+.btn-warning:hover {
+  background: #e0a800;
+}
+
+.trending-list {
+  margin-top: 1rem;
+}
+
+.trending-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.trending-item {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1rem;
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.trending-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.trending-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.monitor-input {
+  flex: 1;
+  max-width: 250px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 0.875rem;
+}
+
+.monitor-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.monitor-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.monitor-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.orderbook-result {
+  font-size: 0.875rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.result-label {
+  color: rgba(255, 255, 255, 0.8);
+  margin-right: 0.5rem;
+}
+
+.result-data {
+  font-family: monospace;
+}
+
+.type3-task-info {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  border-left: 3px solid rgba(255, 255, 255, 0.5);
+}
+
+.task-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.task-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.task-browser {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.task-status-badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.task-status-badge.status-completed {
+  background: #28a745;
+  color: white;
+}
+
+.task-status-badge.status-failed {
+  background: #dc3545;
+  color: white;
+}
+
+.task-status-badge.status-running {
+  background: #ffc107;
+  color: #333;
+}
+
+.task-status-badge.status-pending {
+  background: #6c757d;
+  color: white;
+}
+
+.task-time {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: auto;
+}
+
+.task-msg {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.9);
+  word-break: break-all;
+}
+
+.msg-label {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  margin-right: 0.5rem;
+}
+
+.msg-content {
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
+.empty-message {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 1rem;
+}
+
+/* 对冲模式开关 */
+.hedge-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.mode-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* 时间过滤输入框 */
+.hedge-time-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.filter-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.875rem;
+}
+
+.time-input {
+  width: 80px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.time-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.3);
+}
+
+.time-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Trending 头部布局 */
+.trending-header {
+  margin-bottom: 1rem;
+}
+
+.trending-name-row {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0;
+}
+
+.btn-log {
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 255, 255, 0.3);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.btn-log:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* Type 3 任务和对冲信息容器 */
+.task-hedge-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.type3-task-section,
+.hedge-info-section {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.no-data {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.875rem;
+  padding: 1rem 0;
+}
+
+/* 对冲信息样式 */
+.hedge-info {
+  font-size: 0.875rem;
+}
+
+.hedge-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.hedge-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.hedge-status-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.hedge-success {
+  background: #28a745;
+  color: white;
+}
+
+.hedge-failed {
+  background: #dc3545;
+  color: white;
+}
+
+.hedge-running {
+  background: #ffc107;
+  color: #333;
+}
+
+.hedge-details {
+  margin: 0.5rem 0;
+}
+
+.hedge-detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+}
+
+.hedge-time {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 0.5rem;
+}
+
+.task-pending {
+  color: #6c757d;
+}
+
+.task-success {
+  color: #28a745;
+}
+
+.task-failed {
+  color: #dc3545;
+}
+
+.task-running {
+  color: #ffc107;
+}
+
+/* 对冲日志弹窗样式 */
+.hedge-log-content {
+  max-height: 600px;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.hedge-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.hedge-log-item {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem;
+  border-left: 4px solid #667eea;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.log-id {
+  font-weight: 600;
+  color: #333;
+}
+
+.log-status-badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.log-time {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.log-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.log-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.875rem;
+}
+
+.log-label {
+  font-weight: 500;
+  color: #6c757d;
+}
+
+.auto-refresh-status {
+  color: #667eea;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #667eea;
+}
+
+.section-header h2 {
+  margin: 0;
+}
+
+.refresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.auto-refresh-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #333;
+  user-select: none;
+}
+
+.auto-refresh-label input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.refresh-interval {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.interval-input {
+  width: 70px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  text-align: center;
+  transition: all 0.3s;
+}
+
+.interval-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.interval-input:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.interval-unit {
+  font-size: 0.9rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.section h2 {
+  font-size: 1.3rem;
+  color: #333;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #667eea;
+}
+
+.btn-refresh {
+  padding: 0.5rem 1rem;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.3s;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  background: #5568d3;
+  transform: translateY(-1px);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.empty {
+  text-align: center;
+  color: #999;
+  padding: 2rem;
+  font-size: 0.9rem;
+}
+
+.loading-message {
+  text-align: center;
+  padding: 2rem;
+  color: #667eea;
+  font-size: 1rem;
+}
+
+/* 表单样式 */
+.task-form,
+.hedge-form {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-weight: 500;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.form-group input,
+.form-group select {
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  transition: all 0.3s;
+  font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group input::placeholder {
+  color: #999;
+}
+
+.group-no-display {
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  background-color: #f5f5f5;
+  color: #333;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+}
+
+.form-group select:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.btn {
+  padding: 0.875rem 2rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-family: inherit;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+/* 单选框样式 */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.radio-label input[type="radio"] {
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+}
+
+.radio-label span {
+  user-select: none;
+}
+
+/* 任务列表样式 */
+.mission-list {
+  display: grid;
+  gap: 1.5rem;
+  max-height: 900px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.mission-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mission-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.mission-list::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.mission-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.mission-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: all 0.3s;
+  background: #fafafa;
+}
+
+.mission-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.mission-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.mission-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.mission-id {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.mission-status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-running {
+  background: #d1ecf1;
+  color: #0c5460;
+}
+
+.status-completed {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-failed {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-cancelled {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-unknown {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.mission-time {
+  font-size: 0.85rem;
+  color: #999;
+}
+
+.mission-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.info-item .label {
+  font-weight: 500;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.info-item .value {
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.exchange-info {
+  background: white;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
+.trending-title {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.url-links {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.link-btn {
+  padding: 0.4rem 0.8rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  transition: all 0.3s;
+}
+
+.link-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
+.mission-msg {
+  background: #fff3cd;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid #ffc107;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.mission-msg .label {
+  font-weight: 500;
+  color: #856404;
+}
+
+.mission-msg .value {
+  color: #856404;
+  flex: 1;
+}
+
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  padding: 0;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-content.large {
+  max-width: 900px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #333;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.3s;
+}
+
+.modal-close:hover {
+  color: #333;
+}
+
+.modal-form {
+  padding: 2rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #e0e0e0;
+  justify-content: flex-end;
+}
+
+.config-list {
+  padding: 2rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.config-items {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.config-item {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  background: #fafafa;
+}
+
+.config-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.config-index {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #667eea;
+}
+
+.switch-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch-checkbox {
+  display: none;
+}
+
+.switch-slider {
+  position: relative;
+  width: 44px;
+  height: 22px;
+  background: #ccc;
+  border-radius: 22px;
+  transition: background 0.3s;
+}
+
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 2px;
+  top: 2px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.3s;
+}
+
+.switch-checkbox:checked + .switch-slider {
+  background: #667eea;
+}
+
+.switch-checkbox:checked + .switch-slider::before {
+  transform: translateX(22px);
+}
+
+.switch-text {
+  font-size: 0.875rem;
+  color: #333;
+}
+
+.btn-remove {
+  padding: 0.4rem 0.8rem;
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.3s;
+}
+
+.btn-remove:hover {
+  background: #c82333;
+}
+
+/* 对冲标题和状态 */
+.hedge-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.hedge-status-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hedge-task-status {
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Toast 提示 */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.toast-info {
+  background: #17a2b8;
+}
+
+.toast-success {
+  background: #28a745;
+}
+
+.toast-warning {
+  background: #ffc107;
+  color: #333;
+}
+
+.toast-error {
+  background: #dc3545;
+}
+</style>
+

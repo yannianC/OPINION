@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>浏览器IP查询</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 10px;
+            color: #555;
+            font-weight: bold;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #forceChangeBtn:hover:not(:disabled) {
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.4);
+        }
+
+        .results {
+            margin-top: 30px;
+        }
+
+        .results h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+
+        .result-list {
+            list-style: none;
+        }
+
+        .result-item {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .result-item.success {
+            border-left-color: #28a745;
+        }
+
+        .result-item.error {
+            border-left-color: #dc3545;
+        }
+
+        .browser-id {
+            font-weight: bold;
+            color: #667eea;
+            margin-right: 10px;
+        }
+
+        .ip-address {
+            color: #28a745;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+
+        .error-message {
+            color: #dc3545;
+        }
+
+        .main-badge {
+            display: inline-block;
+            background: #ffc107;
+            color: #333;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #667eea;
+            margin-top: 20px;
+            font-size: 16px;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .summary {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .summary span {
+            font-weight: bold;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 浏览器IP查询系统</h1>
+        
+        <div class="input-group">
+            <label for="browserIds">浏览器编号：</label>
+            <input 
+                type="text" 
+                id="browserIds" 
+                placeholder="请输入浏览器编号，多个编号用逗号分隔，例如：1,2,3"
+            >
+            <div class="hint">提示：可以输入单个编号或用逗号分隔的多个编号</div>
+        </div>
+
+        <button id="queryBtn" onclick="queryBrowserIPs()">🔍 查询IP</button>
+        
+        <button id="forceChangeBtn" onclick="forceChangeIPs()" style="margin-top: 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">🔄 无上限分配</button>
+
+        <div id="loadingDiv" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>正在查询中，请稍候...</p>
+        </div>
+        
+        <div id="forceLoadingDiv" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>正在分配IP中，请稍候...</p>
+        </div>
+
+        <div id="resultsDiv" class="results" style="display: none;">
+            <h2>📊 查询结果</h2>
+            <div id="summaryDiv" class="summary"></div>
+            <ul id="resultList" class="result-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 查询浏览器IP地址
+         * 从输入框获取浏览器编号，调用接口查询IP地址
+         */
+        async function queryBrowserIPs() {
+            const input = document.getElementById('browserIds').value.trim();
+            
+            if (!input) {
+                alert('请输入浏览器编号');
+                return;
+            }
+
+            // 解析输入的浏览器编号
+            const browserIds = input.split(',')
+                .map(id => id.trim())
+                .filter(id => id !== '');
+
+            if (browserIds.length === 0) {
+                alert('请输入有效的浏览器编号');
+                return;
+            }
+
+            // 显示加载状态
+            const queryBtn = document.getElementById('queryBtn');
+            const loadingDiv = document.getElementById('loadingDiv');
+            const resultsDiv = document.getElementById('resultsDiv');
+            
+            queryBtn.disabled = true;
+            loadingDiv.style.display = 'block';
+            resultsDiv.style.display = 'none';
+
+            // 查询所有浏览器的IP
+            const results = [];
+            for (const browserId of browserIds) {
+                const result = await querySingleBrowserIP(browserId);
+                results.push(result);
+            }
+
+            // 显示结果
+            displayResults(results);
+
+            // 恢复状态
+            queryBtn.disabled = false;
+            loadingDiv.style.display = 'none';
+            resultsDiv.style.display = 'block';
+        }
+
+        /**
+         * 查询单个浏览器的IP地址
+         * @param {string} browserId - 浏览器编号
+         * @returns {Object} 查询结果
+         */
+        async function querySingleBrowserIP(browserId) {
+            const url = "https://sg.bicoin.com.cn/99l/bro/getIp";
+            const payload = { number: browserId };
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.code === 0) {
+                    const ipData = data.data || {};
+                    return {
+                        browserId: browserId,
+                        success: true,
+                        ip: ipData.ip || '未获取到IP',
+                        isMain: ipData.isMain || 0,
+                        rawData: ipData
+                    };
+                } else {
+                    return {
+                        browserId: browserId,
+                        success: false,
+                        error: data.msg || `错误代码: ${data.code}`
+                    };
+                }
+            } catch (error) {
+                return {
+                    browserId: browserId,
+                    success: false,
+                    error: error.message
+                };
+            }
+        }
+
+        /**
+         * 显示查询结果
+         * @param {Array} results - 查询结果数组
+         */
+        function displayResults(results) {
+            const summaryDiv = document.getElementById('summaryDiv');
+            const resultList = document.getElementById('resultList');
+            
+            // 清空之前的结果
+            resultList.innerHTML = '';
+
+            // 统计成功和失败数量
+            const successCount = results.filter(r => r.success).length;
+            const failCount = results.length - successCount;
+
+            // 显示摘要
+            summaryDiv.innerHTML = `
+                共查询 <span>${results.length}</span> 个浏览器，
+                成功 <span style="color: #28a745;">${successCount}</span> 个，
+                失败 <span style="color: #dc3545;">${failCount}</span> 个
+            `;
+
+            // 显示详细结果
+            results.forEach(result => {
+                const li = document.createElement('li');
+                li.className = `result-item ${result.success ? 'success' : 'error'}`;
+
+                if (result.success) {
+                    li.innerHTML = `
+                        <span class="browser-id">浏览器编号: ${result.browserId}</span>
+                        <br>
+                        IP地址: <span class="ip-address">${result.ip}</span>
+                        ${result.isMain === 1 ? '<span class="main-badge">主账号</span>' : ''}
+                    `;
+                } else {
+                    li.innerHTML = `
+                        <span class="browser-id">浏览器编号: ${result.browserId}</span>
+                        <br>
+                        <span class="error-message">❌ 查询失败: ${result.error}</span>
+                    `;
+                }
+
+                resultList.appendChild(li);
+            });
+        }
+
+        /**
+         * 无上限分配IP
+         * 从输入框获取浏览器编号，调用接口进行IP分配
+         */
+        async function forceChangeIPs() {
+            const input = document.getElementById('browserIds').value.trim();
+            
+            if (!input) {
+                alert('请输入浏览器编号');
+                return;
+            }
+
+            // 解析输入的浏览器编号
+            const browserIds = input.split(',')
+                .map(id => id.trim())
+                .filter(id => id !== '');
+
+            if (browserIds.length === 0) {
+                alert('请输入有效的浏览器编号');
+                return;
+            }
+
+            // 显示加载状态
+            const forceChangeBtn = document.getElementById('forceChangeBtn');
+            const queryBtn = document.getElementById('queryBtn');
+            const forceLoadingDiv = document.getElementById('forceLoadingDiv');
+            const resultsDiv = document.getElementById('resultsDiv');
+            
+            forceChangeBtn.disabled = true;
+            queryBtn.disabled = true;
+            forceLoadingDiv.style.display = 'block';
+            resultsDiv.style.display = 'none';
+
+            // 分配所有浏览器的IP
+            const results = [];
+            for (const browserId of browserIds) {
+                const result = await forceChangeSingleBrowserIP(browserId);
+                results.push(result);
+            }
+
+            // 显示结果
+            displayForceChangeResults(results);
+
+            // 恢复状态
+            forceChangeBtn.disabled = false;
+            queryBtn.disabled = false;
+            forceLoadingDiv.style.display = 'none';
+            resultsDiv.style.display = 'block';
+        }
+
+        /**
+         * 对单个浏览器进行无上限IP分配
+         * @param {string} browserId - 浏览器编号
+         * @returns {Object} 分配结果
+         */
+        async function forceChangeSingleBrowserIP(browserId) {
+            const url = "https://sg.bicoin.com.cn/99l/bro/forceChangeIp";
+            const payload = { number: browserId };
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.code === 0) {
+                    const ipData = data.data || {};
+                    return {
+                        browserId: browserId,
+                        success: true,
+                        ip: ipData.ip || '未获取到IP',
+                        isMain: ipData.isMain || 0,
+                        message: data.msg || '分配成功',
+                        rawData: ipData
+                    };
+                } else {
+                    return {
+                        browserId: browserId,
+                        success: false,
+                        error: data.msg || `错误代码: ${data.code}`
+                    };
+                }
+            } catch (error) {
+                return {
+                    browserId: browserId,
+                    success: false,
+                    error: error.message
+                };
+            }
+        }
+
+        /**
+         * 显示无上限分配结果
+         * @param {Array} results - 分配结果数组
+         */
+        function displayForceChangeResults(results) {
+            const summaryDiv = document.getElementById('summaryDiv');
+            const resultList = document.getElementById('resultList');
+            
+            // 清空之前的结果
+            resultList.innerHTML = '';
+
+            // 统计成功和失败数量
+            const successCount = results.filter(r => r.success).length;
+            const failCount = results.length - successCount;
+
+            // 显示摘要
+            summaryDiv.innerHTML = `
+                <strong>🔄 无上限分配结果</strong><br>
+                共操作 <span>${results.length}</span> 个浏览器，
+                成功 <span style="color: #28a745;">${successCount}</span> 个，
+                失败 <span style="color: #dc3545;">${failCount}</span> 个
+            `;
+
+            // 显示详细结果
+            results.forEach(result => {
+                const li = document.createElement('li');
+                li.className = `result-item ${result.success ? 'success' : 'error'}`;
+
+                if (result.success) {
+                    li.innerHTML = `
+                        <span class="browser-id">浏览器编号: ${result.browserId}</span>
+                        <br>
+                        新IP地址: <span class="ip-address">${result.ip}</span>
+                        ${result.isMain === 1 ? '<span class="main-badge">主账号</span>' : ''}
+                        ${result.message ? `<br><small style="color: #666;">提示: ${result.message}</small>` : ''}
+                    `;
+                } else {
+                    li.innerHTML = `
+                        <span class="browser-id">浏览器编号: ${result.browserId}</span>
+                        <br>
+                        <span class="error-message">❌ 分配失败: ${result.error}</span>
+                    `;
+                }
+
+                resultList.appendChild(li);
+            });
+        }
+
+        // 支持回车键查询
+        document.getElementById('browserIds').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                queryBrowserIPs();
+            }
+        });
+    </script>
+</body>
+</html>
+
