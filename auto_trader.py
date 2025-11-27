@@ -2743,6 +2743,136 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         return []
 
 
+def click_opinion_transactions_and_get_data(driver, serial_number):
+    """
+    点击 Opinion Trade Transactions 按钮并获取数据
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        
+    Returns:
+        list: 交易记录列表，每条记录为字典 {"title": 主题, "direction": 买卖方向, "option": 选项, "amount": 数量, "value": 金额, "price": 价格, "time": 时间}
+    """
+    try:
+        log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Transactions 按钮...")
+        
+        transactions_clicked = False
+        start_time = time.time()
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                
+                for button in buttons:
+                    if button.text.strip() == "Transactions":
+                        button.click()
+                        log_print(f"[{serial_number}] [OP] ✓ 已点击 Transactions 按钮")
+                        transactions_clicked = True
+                        break
+                
+                if transactions_clicked:
+                    break
+                
+                time.sleep(0.5)
+            except:
+                time.sleep(0.5)
+        
+        if not transactions_clicked:
+            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Transactions 按钮")
+            return []
+        
+        time.sleep(3)
+        
+        try:
+            # 先找到 ID 以 content-transactions 结尾的 div
+            log_print(f"[{serial_number}] [OP] 查找 Transactions 内容区域...")
+            transactions_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-transactions']")
+            log_print(f"[{serial_number}] [OP] ✓ 找到 Transactions 内容区域 (ID: {transactions_div.get_attribute('id')})")
+            
+            # 再找这个 div 下的 tbody
+            tbody = transactions_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            
+            log_print(f"[{serial_number}] [OP] ✓ Transactions tbody 中找到 {len(tr_list)} 个 tr 标签")
+            
+            transactions = []
+            current_title = None
+            
+            for tr_idx, tr in enumerate(tr_list, 1):
+                try:
+                    p_tags = tr.find_elements(By.TAG_NAME, "p")
+                    p_count = len(p_tags)
+                    
+                    # 如果只有一个 p 标签，说明这是主题标题
+                    if p_count == 1:
+                        current_title = p_tags[0].text.strip()
+                        log_print(f"[{serial_number}] [OP] TR {tr_idx}: 主题标题 = {current_title}")
+                    # 如果有多个 p 标签，说明这是交易记录
+                    elif p_count >= 8:
+                        if not current_title:
+                            log_print(f"[{serial_number}] [OP] ⚠ TR {tr_idx}: 没有主题标题，跳过")
+                            continue
+                        
+                        # 第1个p: 买卖方向
+                        direction = p_tags[0].text.strip()
+                        
+                        # 第2个p: 选项，可能包含子标题
+                        option_text = p_tags[1].text.strip()
+                        
+                        # 检查是否有子标题（包含 " - "）
+                        final_title = current_title
+                        final_option = option_text
+                        
+                        if " - " in option_text:
+                            parts = option_text.split(" - ")
+                            if len(parts) >= 2:
+                                sub_title = parts[0].strip()
+                                final_option = parts[1].strip()
+                                # 将子标题连接到主标题
+                                final_title = f"{current_title}###{sub_title}"
+                        
+                        # 第3个p: 数量
+                        amount = p_tags[2].text.strip()
+                        
+                        # 第4个p: 金额
+                        value = p_tags[3].text.strip()
+                        
+                        # 第5个p: 价格
+                        price = p_tags[4].text.strip()
+                        
+                        # 第8个p: 时间
+                        trade_time = p_tags[7].text.strip()
+                        
+                        transaction = {
+                            "title": final_title,
+                            "direction": direction,
+                            "option": final_option,
+                            "amount": amount,
+                            "value": value,
+                            "price": price,
+                            "time": trade_time
+                        }
+                        
+                        transactions.append(transaction)
+                        log_print(f"[{serial_number}] [OP] TR {tr_idx}: 交易记录 = {direction} {final_option} {amount} @ {price}")
+                    
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 处理 TR {tr_idx} 时出错: {str(e)}")
+                    continue
+            
+            log_print(f"[{serial_number}] [OP] ✓ 共收集到 {len(transactions)} 条交易记录")
+            return transactions
+            
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 获取 Transactions tbody 失败: {str(e)}")
+            return []
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [OP] ✗ 点击 Transactions 按钮失败: {str(e)}")
+        return []
+
+
 # ============================================================================
 # Type 2 任务 - 数据处理和格式化函数
 # ============================================================================
@@ -3545,6 +3675,26 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         
         account_config['e'] = exchange_name  # 平台名称
         
+        # 6. 格式化 transactions 数据（使用 ||| 作为字段分隔符）
+        transactions = collected_data.get('transactions', [])
+        transactions_str_list = []
+        log_print(f"[{browser_id}] 开始格式化 {len(transactions)} 条交易记录...")
+        for idx, trans in enumerate(transactions, 1):
+            title = trans['title']
+            direction = trans['direction']
+            option = trans['option']
+            amount = trans['amount']
+            value = trans['value']
+            price = trans['price']
+            trans_time = trans['time']
+            formatted_trans = f"{title}|||{direction}|||{option}|||{amount}|||{value}|||{price}|||{trans_time}"
+            transactions_str_list.append(formatted_trans)
+            log_print(f"[{browser_id}]   交易 {idx}: {formatted_trans}")
+        transactions_str = ";".join(transactions_str_list)
+        log_print(f"[{browser_id}] ✓ 交易记录格式化完成")
+        
+        account_config['g'] = transactions_str  # 交易记录
+        
         log_print(f"[{browser_id}] 步骤2: 更新数据字段...")
         log_print(f"[{browser_id}]   a (positions): {position_str[:100]}...")
         log_print(f"[{browser_id}]   b (open_orders): {open_orders_str[:100]}...")
@@ -3552,6 +3702,15 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         log_print(f"[{browser_id}]   c (portfolio): {portfolio}")
         log_print(f"[{browser_id}]   d (timestamp): {'已更新' if data_collected_success else '保持不变'}")
         log_print(f"[{browser_id}]   e (platform): {exchange_name}")
+        log_print(f"[{browser_id}]   g (transactions): {len(transactions)} 条交易记录")
+        
+        # 打印 g 字段的详细信息
+        log_print(f"[{browser_id}] ==================== g 字段详细信息 ====================")
+        log_print(f"[{browser_id}] g 字段类型: {type(transactions_str)}")
+        log_print(f"[{browser_id}] g 字段长度: {len(transactions_str)} 字符")
+        log_print(f"[{browser_id}] g 字段内容:")
+        log_print(f"[{browser_id}] {transactions_str}")
+        log_print(f"[{browser_id}] =========================================================")
         
         # 7. 上传更新
         log_print(f"[{browser_id}] 步骤3: 上传更新到服务器...")
@@ -4211,6 +4370,9 @@ def collect_position_data(driver, browser_id, exchange_name):
             log_print(f"[{browser_id}] 点击 Open Orders 并获取数据...")
             open_orders_data = click_opinion_open_orders_and_get_data(driver, browser_id)
             
+            log_print(f"[{browser_id}] 点击 Transactions 并获取数据...")
+            transactions_data = click_opinion_transactions_and_get_data(driver, browser_id)
+            
             # 处理数据为标准格式
             log_print(f"[{browser_id}] 处理数据为标准格式...")
             processed_positions = process_op_position_data(position_data)
@@ -4218,6 +4380,7 @@ def collect_position_data(driver, browser_id, exchange_name):
             
             collected_data['positions'] = processed_positions
             collected_data['open_orders'] = processed_open_orders
+            collected_data['transactions'] = transactions_data
             
             # 打印收集到的数据
             log_print(f"\n[{browser_id}] ========== 收集到的数据 (OP) ==========")
@@ -4386,6 +4549,9 @@ def process_type2_mission(task_data):
             log_print(f"[{browser_id}] 步骤8: 点击 Open Orders 并获取数据...")
             open_orders_data = click_opinion_open_orders_and_get_data(driver, browser_id)
             
+            log_print(f"[{browser_id}] 步骤9: 点击 Transactions 并获取数据...")
+            transactions_data = click_opinion_transactions_and_get_data(driver, browser_id)
+            
             # 打印原始数据
             log_print(f"\n[{browser_id}] ========== 原始数据 ==========")
             log_print(f"[{browser_id}] Portfolio (原始): {collected_data.get('portfolio', 'N/A')}")
@@ -4394,6 +4560,8 @@ def process_type2_mission(task_data):
             log_print(f"[{browser_id}]   {position_data}")
             log_print(f"[{browser_id}] Open Orders 原始数据 ({len(open_orders_data)} 项):")
             log_print(f"[{browser_id}]   {open_orders_data}")
+            log_print(f"[{browser_id}] Transactions 原始数据 ({len(transactions_data)} 项):")
+            log_print(f"[{browser_id}]   {transactions_data}")
             log_print(f"[{browser_id}] ==========================================\n")
             
             # 整理原始数据，准备传到服务器
@@ -4401,17 +4569,19 @@ def process_type2_mission(task_data):
                 'portfolio': collected_data.get('portfolio', ''),
                 'balance': collected_data.get('balance', ''),
                 'position': position_data,
-                'open_orders': open_orders_data
+                'open_orders': open_orders_data,
+                'transactions': transactions_data
             }
             log_print(f"[{browser_id}] 收集到的原始数据: {raw_data_for_server}")
             
             # 处理数据为标准格式
-            log_print(f"[{browser_id}] 步骤9: 处理数据为标准格式...")
+            log_print(f"[{browser_id}] 步骤10: 处理数据为标准格式...")
             processed_positions = process_op_position_data(position_data)
             processed_open_orders = process_op_open_orders_data(open_orders_data)
             
             collected_data['positions'] = processed_positions
             collected_data['open_orders'] = processed_open_orders
+            collected_data['transactions'] = transactions_data
             
             # 打印收集到的数据
             log_print(f"\n[{browser_id}] ========== 收集到的数据 (OP) ==========")

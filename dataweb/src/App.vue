@@ -8,6 +8,44 @@
       <el-button type="primary" @click="addRows(10)">增加十行</el-button>
       <el-button type="success" @click="saveAll" :loading="saving">保存所有数据</el-button>
       <el-button type="info" @click="loadData" :loading="loading">刷新列表</el-button>
+      
+      <!-- 自动刷新控制 -->
+      <div class="auto-refresh-control">
+        <el-checkbox v-model="autoRefresh.enabled" @change="toggleAutoRefresh">
+          自动刷新
+        </el-checkbox>
+        <el-input 
+          v-model.number="autoRefresh.interval" 
+          type="number"
+          size="small"
+          style="width: 80px"
+          min="10"
+          @blur="resetAutoRefresh"
+        />
+        <span>秒</span>
+      </div>
+      
+      <el-button type="warning" @click="refreshAllPositions" :loading="refreshingAll">
+        刷新全部仓位
+      </el-button>
+    </div>
+    
+    <!-- 批量添加区域 -->
+    <div class="batch-add-container">
+      <div class="batch-add-row">
+        <label>批量添加:</label>
+        <el-input 
+          v-model="batchAddInput" 
+          placeholder="格式: 1,4001;2,4002;3,4003,4004,4005"
+          clearable
+          size="small"
+          style="width: 500px"
+        />
+        <el-button type="primary" size="small" @click="batchAddAccounts">
+          确认添加
+        </el-button>
+        <span class="batch-add-tip">（电脑组,浏览器ID;电脑组,浏览器ID...）</span>
+      </div>
     </div>
 
     <!-- 筛选区域 -->
@@ -159,7 +197,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="250" align="center" fixed="right">
+      <el-table-column label="操作" width="350" align="center" fixed="right">
         <template #default="scope">
           <el-button 
             type="primary" 
@@ -168,6 +206,14 @@
             :loading="scope.row.refreshing"
           >
             刷新仓位
+          </el-button>
+          <el-button 
+            type="info" 
+            size="small"
+            @click="showTransactions(scope.row)"
+            :disabled="!scope.row.g"
+          >
+            交易记录
           </el-button>
           <el-button 
             type="danger" 
@@ -180,11 +226,56 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 交易记录弹窗 -->
+    <el-dialog 
+      v-model="transactionDialogVisible" 
+      title="交易记录" 
+      width="90%"
+      :close-on-click-modal="false"
+    >
+      <div v-if="currentTransactions.length === 0" class="empty-message">
+        暂无交易记录
+      </div>
+      <el-table 
+        v-else
+        :data="currentTransactions" 
+        border 
+        style="width: 100%"
+        :max-height="500"
+      >
+        <el-table-column prop="index" label="序号" width="70" align="center" />
+        <el-table-column prop="title" label="主题" min-width="250" />
+        <el-table-column prop="direction" label="方向" width="80" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.direction === 'Buy' ? 'success' : 'danger'" size="small">
+              {{ scope.row.direction === 'Buy' ? '买入' : '卖出' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="option" label="选项" width="100" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.option === 'YES' ? 'success' : 'warning'" size="small">
+              {{ scope.row.option }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="amount" label="数量" width="120" align="center" />
+        <el-table-column prop="value" label="金额" width="120" align="center" />
+        <el-table-column prop="price" label="价格" width="120" align="center" />
+        <el-table-column prop="time" label="时间" min-width="180" align="center" />
+      </el-table>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="transactionDialogVisible = false">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Clock } from '@element-plus/icons-vue'
 import axios from 'axios'
@@ -200,7 +291,33 @@ const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
 const tableData = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const refreshingAll = ref(false)
 let nextId = 1
+
+/**
+ * 交易记录弹窗相关
+ */
+const transactionDialogVisible = ref(false)
+const currentTransactions = ref([])
+
+/**
+ * 自动刷新相关
+ */
+const autoRefresh = ref({
+  enabled: true,  // 默认开启
+  interval: 60
+})
+let autoRefreshTimer = null
+
+/**
+ * 批量添加相关
+ */
+const batchAddInput = ref('')
+
+/**
+ * 本地新增的行（未保存到服务器的）
+ */
+const localNewRows = ref(new Set())
 
 /**
  * 筛选条件
@@ -447,31 +564,123 @@ const parseOpenOrders = (ordersStr) => {
   }
 }
 
+/**
+ * 解析交易记录数据字符串
+ * 格式: "标题1|||方向1|||选项1|||数量1|||金额1|||价格1|||时间1;标题2|||方向2|||选项2|||数量2|||金额2|||价格2|||时间2"
+ */
+const parseTransactions = (transStr) => {
+  if (!transStr) return []
+  try {
+    const transactions = []
+    const items = transStr.split(';')
+    for (const item of items) {
+      if (item.includes('|||')) {
+        const parts = item.split('|||')
+        if (parts.length >= 7) {
+          transactions.push({
+            title: parts[0].trim(),
+            direction: parts[1].trim(),
+            option: parts[2].trim(),
+            amount: parts[3].trim(),
+            value: parts[4].trim(),
+            price: parts[5].trim(),
+            time: parts[6].trim()
+          })
+        }
+      }
+    }
+    return transactions
+  } catch {
+    return []
+  }
+}
 
 /**
- * 加载数据列表
+ * 显示交易记录弹窗
  */
-const loadData = async () => {
-  loading.value = true
+const showTransactions = (row) => {
+  if (!row.g) {
+    ElMessage.warning('该账户暂无交易记录')
+    return
+  }
+  
+  const transactions = parseTransactions(row.g)
+  currentTransactions.value = transactions.map((trans, index) => ({
+    index: index + 1,
+    ...trans
+  }))
+  
+  transactionDialogVisible.value = true
+}
+
+
+/**
+ * 加载数据列表（支持静默刷新）
+ */
+const loadData = async (silent = false) => {
+  if (!silent) {
+    loading.value = true
+  }
+  
   try {
     const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`)
     
     if (response.data && response.data.data) {
-      tableData.value = response.data.data.map((item, index) => ({
-        ...item,
-        index: index + 1,
-        platform: item.e || item.platform || 'OP',
-        refreshing: false
-      }))
+      const serverData = response.data.data
       
+      // 保存本地新增的行（没有 id 的）
+      const localRows = tableData.value.filter(row => !row.id)
+      
+      // 创建一个 map 存储服务器数据，key 为 fingerprintNo
+      const serverDataMap = new Map()
+      serverData.forEach(item => {
+        if (item.fingerprintNo) {
+          serverDataMap.set(String(item.fingerprintNo), item)
+        }
+      })
+      
+      // 更新已存在的行
+      const updatedData = []
+      
+      // 首先添加所有服务器数据
+      serverData.forEach(item => {
+        updatedData.push({
+          ...item,
+          platform: item.e || item.platform || 'OP',
+          refreshing: false
+        })
+      })
+      
+      // 然后添加本地新增的行（如果服务器没有相同的 fingerprintNo）
+      localRows.forEach(localRow => {
+        if (!localRow.fingerprintNo || !serverDataMap.has(String(localRow.fingerprintNo))) {
+          updatedData.push(localRow)
+        }
+      })
+      
+      // 重新计算序号
+      updatedData.forEach((item, index) => {
+        item.index = index + 1
+      })
+      
+      tableData.value = updatedData
       nextId = Math.max(...tableData.value.map(item => item.id || 0)) + 1
-      ElMessage.success('数据加载成功')
+      
+      if (!silent) {
+        ElMessage.success('数据加载成功')
+      } else {
+        console.log('数据静默刷新成功')
+      }
     }
   } catch (error) {
     console.error('加载数据失败:', error)
-    ElMessage.error('加载数据失败: ' + (error.message || '网络错误'))
+    if (!silent) {
+      ElMessage.error('加载数据失败: ' + (error.message || '网络错误'))
+    }
   } finally {
-    loading.value = false
+    if (!silent) {
+      loading.value = false
+    }
   }
 }
 
@@ -692,8 +901,8 @@ const refreshPosition = async (row) => {
       throw new Error('任务提交失败')
     }
     
-    // 2. 等待一段时间让任务执行（根据平台不同，OP约20秒，Polymarket约30秒）
-    const waitTime = row.platform === 'OP' ? 25000 : 35000
+    // 2. 等待一段时间让任务执行
+    const waitTime = 60000  // 统一等待 60 秒
     ElMessage.info(`预计需要 ${waitTime / 1000} 秒，请稍候...`)
     
     await new Promise(resolve => setTimeout(resolve, waitTime))
@@ -752,10 +961,284 @@ const deleteAccount = async (row) => {
 }
 
 /**
+ * 切换自动刷新
+ */
+const toggleAutoRefresh = () => {
+  if (autoRefresh.value.enabled) {
+    startAutoRefresh()
+    ElMessage.success(`自动刷新已启动，间隔 ${autoRefresh.value.interval} 秒`)
+  } else {
+    stopAutoRefresh()
+    ElMessage.info('自动刷新已关闭')
+  }
+}
+
+/**
+ * 启动自动刷新
+ */
+const startAutoRefresh = () => {
+  stopAutoRefresh()  // 先清除旧的定时器
+  
+  if (autoRefresh.value.enabled && autoRefresh.value.interval > 0) {
+    autoRefreshTimer = setInterval(() => {
+      console.log('自动刷新数据...')
+      loadData(true)  // 静默刷新
+    }, autoRefresh.value.interval * 1000)
+  }
+}
+
+/**
+ * 停止自动刷新
+ */
+const stopAutoRefresh = () => {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+/**
+ * 重置自动刷新（间隔改变时）
+ */
+const resetAutoRefresh = () => {
+  if (autoRefresh.value.enabled) {
+    startAutoRefresh()
+    ElMessage.success(`自动刷新间隔已更新为 ${autoRefresh.value.interval} 秒`)
+  }
+}
+
+/**
+ * 刷新全部仓位
+ */
+const refreshAllPositions = async () => {
+  // 获取所有有浏览器编号和电脑组的行
+  const validRows = tableData.value.filter(row => 
+    row.fingerprintNo && row.computeGroup && row.platform
+  )
+  
+  if (validRows.length === 0) {
+    ElMessage.warning('没有可刷新的账户')
+    return
+  }
+  
+  refreshingAll.value = true
+  ElMessage.info(`开始刷新 ${validRows.length} 个账户的仓位数据，请稍候...`)
+  
+  let successCount = 0
+  let failCount = 0
+  
+  try {
+    // 提交所有 type=2 任务
+    const taskPromises = validRows.map(async (row) => {
+      try {
+        const taskData = {
+          groupNo: row.computeGroup,
+          numberList: parseInt(row.fingerprintNo),
+          type: 2,
+          exchangeName: row.platform === 'OP' ? 'OP' : 'Ploy'
+        }
+        
+        await axios.post(
+          `${API_BASE_URL}/mission/add`,
+          taskData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+        successCount++
+      } catch (error) {
+        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
+        failCount++
+      }
+    })
+    
+    await Promise.all(taskPromises)
+    
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    
+    // 等待 70 秒后自动刷新列表
+    ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
+    setTimeout(async () => {
+      await loadData(true)  // 静默刷新
+      ElMessage.success('数据已自动更新')
+    }, 70000)
+    
+  } catch (error) {
+    console.error('刷新全部仓位失败:', error)
+    ElMessage.error('刷新全部仓位失败: ' + (error.message || '网络错误'))
+  } finally {
+    refreshingAll.value = false
+  }
+}
+
+/**
+ * 批量添加账户
+ */
+const batchAddAccounts = async () => {
+  if (!batchAddInput.value || !batchAddInput.value.trim()) {
+    ElMessage.warning('请输入要添加的数据')
+    return
+  }
+  
+  try {
+    const input = batchAddInput.value.trim()
+    const groups = input.split(';').map(g => g.trim()).filter(g => g)
+    
+    if (groups.length === 0) {
+      ElMessage.warning('输入格式错误')
+      return
+    }
+    
+    const accountsToAdd = []
+    
+    for (const group of groups) {
+      const parts = group.split(',').map(p => p.trim()).filter(p => p)
+      
+      if (parts.length < 2) {
+        ElMessage.warning(`格式错误: ${group}，至少需要电脑组和一个浏览器ID`)
+        continue
+      }
+      
+      const computeGroup = parts[0]
+      const browserIds = parts.slice(1)
+      
+      // 为每个浏览器ID创建账户配置
+      for (const browserId of browserIds) {
+        accountsToAdd.push({
+          computeGroup: computeGroup,
+          fingerprintNo: browserId,
+          platform: 'OP',
+          balance: 0,
+          a: '',
+          b: '',
+          c: '0',
+          d: '',
+          e: 'OP',
+          f: null,
+          g: null,
+          no: null,
+          addr: '',
+          groupId: null,
+          needDepositQty: 0,
+          realSendBnbQty: null,
+          sendBnbQty: null,
+          receiveBnbQty: null,
+          sendUsdtQty: null,
+          receiveUsdtQty: null,
+          searchUsdtQty: null,
+          depositUsdtQty: null,
+          currentUsdtQty: null,
+          feeBackAddr: null,
+          inviteCode: null,
+          opUser: '',
+          canOpenWorth: null,
+          canOpenBtcQty: null,
+          canOpenEthQty: null,
+          useAster: null,
+          totalBuyAster: null,
+          remainingAster: 0,
+          tradeIntegral: '0',
+          positionIntegral: '0',
+          btc: 0,
+          eth: 0,
+          useAccount: null,
+          reason: null,
+          groupNo: null,
+          available: 0,
+          catchTime: null,
+          sol: 0,
+          bnb: null,
+          isTrans: false,
+          positionMulti: '0',
+          netPositionMulti: '0',
+          positionWorth: null,
+          weekVolume: 0,
+          h: null,
+          i: null,
+          j: null,
+          k: null,
+          l: null,
+          m: null,
+          n: null,
+          o: null,
+          p: null,
+          q: null,
+          r: null,
+          s: null,
+          t: null,
+          u: null,
+          v: null,
+          w: '',
+          x: '0',
+          y: null,
+          z: '',
+          predictBalance: null,
+          predictPositionMulti: null,
+          predictNetPositionMulti: null,
+          proxyDelay: null,
+          proxyIp: null,
+          isWarn: 0
+        })
+      }
+    }
+    
+    if (accountsToAdd.length === 0) {
+      ElMessage.warning('没有有效的账户数据')
+      return
+    }
+    
+    ElMessage.info(`开始添加 ${accountsToAdd.length} 个账户...`)
+    
+    // 逐个添加账户
+    let successCount = 0
+    let failCount = 0
+    
+    for (const account of accountsToAdd) {
+      try {
+        await axios.post(`${API_BASE_URL}/boost/addAccountConfig`, account)
+        successCount++
+        console.log(`账户 ${account.fingerprintNo} 添加成功`)
+      } catch (error) {
+        failCount++
+        console.error(`账户 ${account.fingerprintNo} 添加失败:`, error)
+      }
+    }
+    
+    ElMessage.success(`成功添加 ${successCount} 个账户${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    
+    // 清空输入框
+    batchAddInput.value = ''
+    
+    // 重新加载数据
+    await loadData()
+    
+  } catch (error) {
+    console.error('批量添加失败:', error)
+    ElMessage.error('批量添加失败: ' + (error.message || '网络错误'))
+  }
+}
+
+/**
  * 组件挂载时加载数据
  */
 onMounted(() => {
   loadData()
+  
+  // 如果自动刷新已启用，启动定时器
+  if (autoRefresh.value.enabled) {
+    startAutoRefresh()
+  }
+})
+
+/**
+ * 组件卸载时清理定时器
+ */
+onUnmounted(() => {
+  stopAutoRefresh()
 })
 </script>
 
@@ -777,6 +1260,49 @@ onMounted(() => {
   margin-bottom: 15px;
   display: flex;
   gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.auto-refresh-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-left: 2px solid #ddd;
+  border-right: 2px solid #ddd;
+}
+
+.auto-refresh-control span {
+  font-size: 14px;
+  color: #606266;
+}
+
+.batch-add-container {
+  margin-bottom: 15px;
+  padding: 12px 15px;
+  background-color: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.batch-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-add-row label {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.batch-add-tip {
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
 }
 
 .filter-container {
@@ -880,6 +1406,20 @@ onMounted(() => {
 
 .position-list::-webkit-scrollbar-thumb:hover {
   background-color: #bbb;
+}
+
+/* 弹窗内的空消息 */
+.empty-message {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+  font-size: 14px;
+}
+
+/* 对话框底部 */
+.dialog-footer {
+  display: flex;
+  justify-content: center;
 }
 </style>
 

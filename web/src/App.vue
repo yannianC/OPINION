@@ -12,7 +12,18 @@
       <div class="container">
         <!-- 自动对冲功能 -->
         <section class="section auto-hedge-section">
-          <h2>自动对冲</h2>
+          <div class="section-header-with-filter">
+            <h2>自动对冲</h2>
+            <div class="trending-filter">
+              <label>筛选主题:</label>
+              <input 
+                v-model="autoHedgeFilter" 
+                type="text" 
+                class="filter-input" 
+                placeholder="输入 Trending 关键词筛选"
+              />
+            </div>
+          </div>
           <div class="auto-hedge-controls">
             <div class="hedge-amount-info">
               <span class="amount-label">累计对冲数量:</span>
@@ -66,6 +77,44 @@
               <span class="filter-label">分钟内有过任意操作的，不参与</span>
             </div>
             
+            <!-- 事件间隔设置 -->
+            <div class="hedge-interval-setting">
+              <span class="filter-label">事件间隔:</span>
+              <div class="radio-group-inline">
+                <label class="radio-label-inline">
+                  <input 
+                    type="radio" 
+                    v-model="hedgeMode.intervalType" 
+                    value="success"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                  />
+                  <span>挂单成功再挂另一边</span>
+                </label>
+                <label class="radio-label-inline">
+                  <input 
+                    type="radio" 
+                    v-model="hedgeMode.intervalType" 
+                    value="delay"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                  />
+                  <span>延时</span>
+                </label>
+              </div>
+              <input 
+                v-if="hedgeMode.intervalType === 'delay'"
+                v-model.number="hedgeMode.intervalDelay" 
+                type="number" 
+                class="delay-input" 
+                min="0"
+                placeholder="1000"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+              <span v-if="hedgeMode.intervalType === 'delay'" class="filter-label">ms</span>
+            </div>
+            
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -76,12 +125,12 @@
           </div>
           
           <div class="trending-list">
-            <div v-if="activeConfigs.length === 0" class="empty-message">
-              暂无启用的主题配置
+            <div v-if="filteredActiveConfigs.length === 0" class="empty-message">
+              {{ activeConfigs.length === 0 ? '暂无启用的主题配置' : '没有匹配的主题' }}
             </div>
             <div v-else class="trending-items">
               <div 
-                v-for="config in activeConfigs" 
+                v-for="config in filteredActiveConfigs" 
                 :key="config.id" 
                 class="trending-item"
               >
@@ -734,6 +783,20 @@
             <label>权重 *</label>
             <input v-model.number="newConfig.weight" type="number" required placeholder="请输入权重（数字）" min="0" />
           </div>
+          <div class="form-group">
+            <label class="switch-label-row">
+              <span class="label-text">是否开启</span>
+              <label class="switch-label">
+                <input 
+                  type="checkbox" 
+                  v-model="newConfig.enabled" 
+                  class="switch-checkbox"
+                />
+                <span class="switch-slider"></span>
+                <span class="switch-text">{{ newConfig.enabled ? '启用' : '禁用' }}</span>
+              </label>
+            </label>
+          </div>
           <div class="modal-actions">
             <button type="submit" class="btn btn-primary" :disabled="isSubmittingConfig">
               <span v-if="isSubmittingConfig">提交中...</span>
@@ -752,10 +815,24 @@
           <h3>修改配置</h3>
           <button class="modal-close" @click="closeEditConfigDialog">×</button>
         </div>
+        <div class="config-filter-toolbar">
+          <div class="trending-filter">
+            <label>筛选主题:</label>
+            <input 
+              v-model="editConfigFilter" 
+              type="text" 
+              class="filter-input" 
+              placeholder="输入 Trending 关键词筛选"
+            />
+          </div>
+          <button type="button" class="btn btn-danger btn-sm" @click="disableAllConfigs">
+            全部禁用
+          </button>
+        </div>
         <div class="config-list">
-          <div v-if="editConfigList.length === 0" class="empty">暂无配置</div>
+          <div v-if="filteredEditConfigList.length === 0" class="empty">{{ editConfigList.length === 0 ? '暂无配置' : '没有匹配的配置' }}</div>
           <div v-else class="config-items">
-            <div v-for="(config, index) in editConfigList" :key="index" class="config-item">
+            <div v-for="(config, index) in filteredEditConfigList" :key="index" class="config-item">
               <div class="config-item-header">
                 <span class="config-index">{{ index + 1 }}</span>
                 <label class="switch-label">
@@ -879,7 +956,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 
 const isConnected = ref(false)
@@ -904,6 +981,10 @@ const showAddConfig = ref(false)
 const showEditConfig = ref(false)
 const editConfigList = ref([])
 
+// 配置筛选
+const autoHedgeFilter = ref('')  // 自动对冲功能块的筛选
+const editConfigFilter = ref('')  // 修改配置弹窗的筛选
+
 // 新配置数据
 const newConfig = reactive({
   trending: '',
@@ -911,7 +992,8 @@ const newConfig = reactive({
   opUrl: '',
   polyUrl: '',
   opTopicId: '',
-  weight: 0
+  weight: 0,
+  enabled: true  // 默认启用
 })
 
 // 对冲状态显示
@@ -951,7 +1033,9 @@ const hedgeStatus = reactive({
 // 对冲模式
 const hedgeMode = reactive({
   isClose: false,  // false: 开仓, true: 平仓
-  timePassMin: 60   // 最近xx分钟内有过任意操作的，不参与
+  timePassMin: 60,  // 最近xx分钟内有过任意操作的，不参与
+  intervalType: 'success',  // 'success': 挂单成功再挂另一边, 'delay': 延时
+  intervalDelay: 1000  // 延时的毫秒数
 })
 
 // 对冲日志相关
@@ -1676,6 +1760,7 @@ const showAddConfigDialog = () => {
   newConfig.polyUrl = ''
   newConfig.opTopicId = ''
   newConfig.weight = 0
+  newConfig.enabled = true  // 默认启用
   showAddConfig.value = true
 }
 
@@ -1701,7 +1786,7 @@ const submitAddConfig = async () => {
         polyUrl: newConfig.polyUrl,
         opTopicId: newConfig.opTopicId,
         weight: newConfig.weight || 0,
-        isOpen: 1  // 新增配置默认开启
+        isOpen: newConfig.enabled ? 1 : 0  // 根据开关设置
       }]
     }
     
@@ -1752,6 +1837,20 @@ const showEditConfigDialog = () => {
  */
 const closeEditConfigDialog = () => {
   showEditConfig.value = false
+  // 关闭时清空筛选
+  editConfigFilter.value = ''
+}
+
+/**
+ * 全部禁用配置
+ */
+const disableAllConfigs = () => {
+  if (confirm('确定要禁用所有配置吗？')) {
+    editConfigList.value.forEach(config => {
+      config.enabled = false
+    })
+    alert('已将所有配置设置为禁用状态，请点击"保存全部"以生效')
+  }
 }
 
 /**
@@ -1812,6 +1911,36 @@ const submitEditConfig = async () => {
     isSubmittingConfig.value = false
   }
 }
+
+/**
+ * 筛选后的活动配置列表（用于自动对冲功能块显示）
+ */
+const filteredActiveConfigs = computed(() => {
+  if (!autoHedgeFilter.value || !autoHedgeFilter.value.trim()) {
+    return activeConfigs.value
+  }
+  
+  const keyword = autoHedgeFilter.value.trim().toLowerCase()
+  return activeConfigs.value.filter(config => {
+    const trending = (config.trending || '').toLowerCase()
+    return trending.includes(keyword)
+  })
+})
+
+/**
+ * 筛选后的编辑配置列表（用于修改配置弹窗显示）
+ */
+const filteredEditConfigList = computed(() => {
+  if (!editConfigFilter.value || !editConfigFilter.value.trim()) {
+    return editConfigList.value
+  }
+  
+  const keyword = editConfigFilter.value.trim().toLowerCase()
+  return editConfigList.value.filter(config => {
+    const trending = (config.trending || '').toLowerCase()
+    return trending.includes(keyword)
+  })
+})
 
 /**
  * 更新活动配置列表（启用的配置）
@@ -1952,7 +2081,7 @@ const parseType3Message = (msg, hasSubtopic) => {
       price1,
       price2,
       diff: Math.abs(price1 - price2),
-      maxPrice: Math.max(price1, price2)
+      minPrice: Math.min(price1, price2)
     }
   } catch (e) {
     console.error('解析 msg 失败:', e)
@@ -2014,7 +2143,9 @@ const loadHedgeLogs = (trendingId) => {
 const saveHedgeSettings = () => {
   try {
     localStorage.setItem(HEDGE_SETTINGS_KEY, JSON.stringify({
-      timePassMin: hedgeMode.timePassMin
+      timePassMin: hedgeMode.timePassMin,
+      intervalType: hedgeMode.intervalType,
+      intervalDelay: hedgeMode.intervalDelay
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -2029,6 +2160,12 @@ const loadHedgeSettings = () => {
     const settings = JSON.parse(localStorage.getItem(HEDGE_SETTINGS_KEY) || '{}')
     if (settings.timePassMin !== undefined) {
       hedgeMode.timePassMin = settings.timePassMin
+    }
+    if (settings.intervalType !== undefined) {
+      hedgeMode.intervalType = settings.intervalType
+    }
+    if (settings.intervalDelay !== undefined) {
+      hedgeMode.intervalDelay = settings.intervalDelay
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -2149,7 +2286,7 @@ const monitorAndExecuteHedge = async (config) => {
     return
   }
   
-  const orderPrice = (priceInfo.maxPrice - 0.1).toFixed(1)
+  const orderPrice = (priceInfo.minPrice + 0.1).toFixed(1)
   console.log(`配置 ${config.id} 符合对冲条件，订单价格: ${orderPrice}`)
   
   try {
@@ -2256,6 +2393,19 @@ const executeHedgeTask = async (config, hedgeData) => {
         hedgeRecord.noStatus = 9
       }
       
+      // 根据事件间隔类型决定何时提交第二个任务
+      if (hedgeMode.intervalType === 'delay') {
+        // 延时模式：等待指定时间后直接提交第二个任务
+        console.log(`[延时模式] 等待 ${hedgeMode.intervalDelay}ms 后提交第二个任务`)
+        setTimeout(async () => {
+          if (hedgeRecord.finalStatus === 'running' && !hedgeRecord.secondTaskSubmitted) {
+            console.log(`[延时模式] 延时结束，提交第二个任务`)
+            hedgeRecord.secondTaskSubmitted = true
+            await submitSecondHedgeTask(config, hedgeRecord)
+          }
+        }, hedgeMode.intervalDelay)
+      }
+      
       monitorHedgeStatus(config, hedgeRecord)
     }
   } catch (error) {
@@ -2341,9 +2491,9 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
       return
     }
     
-    // 第一个任务成功，提交第二个任务
-    if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
-      console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
+    // 第一个任务成功，提交第二个任务（仅在挂单成功模式下）
+    if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted && hedgeMode.intervalType === 'success') {
+      console.log(`[挂单成功模式] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
       hedgeRecord.secondTaskSubmitted = true
       await submitSecondHedgeTask(config, hedgeRecord)
     }
@@ -2898,6 +3048,48 @@ onUnmounted(() => {
   margin-bottom: 1rem;
 }
 
+.section-header-with-filter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.section-header-with-filter h2 {
+  margin: 0;
+}
+
+.trending-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trending-filter label {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.trending-filter .filter-input {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  font-size: 14px;
+  width: 250px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+}
+
+.trending-filter .filter-input:focus {
+  outline: none;
+  border-color: white;
+  background: white;
+}
+
 .auto-hedge-controls {
   display: flex;
   align-items: center;
@@ -3170,6 +3362,67 @@ onUnmounted(() => {
 }
 
 .time-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 事件间隔设置 */
+.hedge-interval-setting {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.radio-group-inline {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.radio-label-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.875rem;
+}
+
+.radio-label-inline input[type="radio"] {
+  cursor: pointer;
+}
+
+.radio-label-inline input[type="radio"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.radio-label-inline span {
+  font-weight: 500;
+}
+
+.delay-input {
+  width: 100px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.delay-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.3);
+}
+
+.delay-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -3931,6 +4184,40 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 
+.config-filter-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.config-filter-toolbar .trending-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.config-filter-toolbar .trending-filter label {
+  font-size: 14px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.config-filter-toolbar .filter-input {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 250px;
+}
+
+.config-filter-toolbar .filter-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
 .config-list {
   padding: 2rem;
   max-height: 60vh;
@@ -3960,6 +4247,20 @@ onUnmounted(() => {
   font-size: 1.1rem;
   font-weight: 600;
   color: #667eea;
+}
+
+.switch-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+}
+
+.switch-label-row .label-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
 }
 
 .switch-label {
