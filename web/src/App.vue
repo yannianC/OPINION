@@ -397,6 +397,10 @@
                 <span v-if="isSubmitting">提交中...</span>
                 <span v-else>添加任务</span>
               </button>
+              <button type="button" class="btn btn-info" @click="submitOrderbookTask" :disabled="isSubmittingOrderbook">
+                <span v-if="isSubmittingOrderbook">提交中...</span>
+                <span v-else>📊 获取订单薄</span>
+              </button>
               <button type="button" class="btn btn-secondary" @click="resetForm">
                 重置
               </button>
@@ -963,6 +967,7 @@ const isConnected = ref(false)
 const isSubmitting = ref(false)
 const isSubmittingHedge = ref(false)
 const isSubmittingConfig = ref(false)
+const isSubmittingOrderbook = ref(false)
 const isLoadingList = ref(false)
 const isLoadingConfig = ref(true)
 const isLoadingHedgeHistory = ref(false)
@@ -1179,7 +1184,11 @@ const fetchMissionList = async () => {
   isLoadingList.value = true
   
   try {
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
+      params: {
+        limit: 200
+      }
+    })
     
     if (response.data && response.data.code === 0) {
       const allMissions = response.data.data.list || []
@@ -1334,6 +1343,75 @@ const handleSubmit = async () => {
 }
 
 /**
+ * 提交获取订单薄任务（type=3）
+ */
+const submitOrderbookTask = async () => {
+  // 验证必填字段
+  if (!formData.numberList) {
+    alert('请输入浏览器编号')
+    return
+  }
+  
+  if (!formData.trendingId) {
+    alert('请选择 Trending')
+    return
+  }
+  
+  if (!formData.exchangeName) {
+    alert('请选择交易所')
+    return
+  }
+  
+  // 检查组号是否已设置
+  if (!formData.groupNo) {
+    alert('无法获取组号，请确认浏览器编号是否正确')
+    return
+  }
+  
+  isSubmittingOrderbook.value = true
+  
+  try {
+    // 构建 type=3 任务数据
+    const submitData = {
+      groupNo: formData.groupNo,
+      numberList: parseInt(formData.numberList),
+      type: 3,  // type=3 表示获取订单薄任务
+      trendingId: parseInt(formData.trendingId),
+      exchangeName: formData.exchangeName
+    }
+    
+    console.log('正在提交订单薄任务...', submitData)
+    
+    // 发送请求
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/add',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('订单薄任务添加成功！响应:', response.data)
+      alert('订单薄任务添加成功！')
+      
+      // 刷新任务列表
+      setTimeout(() => {
+        fetchMissionList()
+      }, 500)
+    }
+  } catch (error) {
+    console.error('提交订单薄任务失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    alert(`订单薄任务添加失败: ${errorMsg}`)
+  } finally {
+    isSubmittingOrderbook.value = false
+  }
+}
+
+/**
  * 显示Toast提示
  */
 const showToast = (message, type = 'info') => {
@@ -1467,7 +1545,11 @@ const pollTaskStatus = async (taskId, callback) => {
     attempts++
     
     try {
-      const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list')
+      const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
+        params: {
+          limit: 200
+        }
+      })
       
       if (response.data && response.data.code === 0) {
         const missions = response.data.data.list || []
@@ -3895,6 +3977,16 @@ onUnmounted(() => {
 
 .btn-secondary:hover {
   background: #e0e0e0;
+}
+
+.btn-info {
+  background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+  color: white;
+}
+
+.btn-info:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(23, 162, 184, 0.4);
 }
 
 /* 单选框样式 */

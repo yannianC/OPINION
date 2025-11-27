@@ -63,7 +63,7 @@ def get_browser_password(browser_id):
 
 
 # 电脑组
-COMPUTER_GROUP = "1"
+COMPUTER_GROUP = "0"
 
 # 密码配置
 PASSWORD_MAP = {
@@ -1398,23 +1398,29 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         return False
 
 
-def wait_for_opinion_order_success(driver, initial_count, serial_number, timeout=60):
+def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', timeout=600):
     """
-    等待 Opinion Trade 订单成功
+    等待 Opinion Trade 订单成功（交替检查 Open Orders 和 Position）
     
     Args:
         driver: Selenium WebDriver对象
-        initial_count: 初始行数
+        initial_open_orders_count: 初始 Open Orders 行数
+        initial_position_count: 初始 Position 行数
+        trade_type: 交易类型（Buy/Sell）
         serial_number: 浏览器序列号
-        timeout: 超时时间
+        trending_part1: 子标题（用于筛选）
+        timeout: 超时时间（默认10分钟）
         
     Returns:
         bool: 成功返回True
     """
-    log_print(f"[{serial_number}] [OP] 开始监测订单状态，初始行数: {initial_count}")
+    log_print(f"[{serial_number}] [OP] 开始监测订单状态...")
+    log_print(f"[{serial_number}] [OP] 交易类型: {trade_type}")
+    log_print(f"[{serial_number}] [OP] 初始 Open Orders 数量: {initial_open_orders_count}")
+    log_print(f"[{serial_number}] [OP] 初始 Position 数量: {initial_position_count}")
     
     start_time = time.time()
-    check_interval = 5
+    check_interval = 60  # 每隔1分钟检查一次
     
     # 切换回主页面
     try:
@@ -1428,20 +1434,75 @@ def wait_for_opinion_order_success(driver, initial_count, serial_number, timeout
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ⚠ 切换回主页面失败: {str(e)}")
     
+    # 交替检查标志：True=检查Open Orders，False=检查Position
+    # 第一次先检查 Open Orders
+    check_open_orders = True
+    
     while time.time() - start_time < timeout:
         try:
-            # 订单确认不需要子标题判断，因为新订单的tr肯定会增加
-            current_count = get_opinion_table_row_count(driver, serial_number, need_click_open_orders=False)
+            elapsed = int(time.time() - start_time)
+            log_print(f"[{serial_number}] [OP] ========== 第 {elapsed // 60 + 1} 次检查（已用时 {elapsed}秒）==========")
             
-            if current_count > initial_count:
-                log_print(f"[{serial_number}] [OP] ✓✓✓ 订单挂单成功！行数从 {initial_count} 增加到 {current_count}")
-                return True
+            if check_open_orders:
+                # 检查 Open Orders
+                log_print(f"[{serial_number}] [OP] 检查 Open Orders...")
+                current_open_orders_count = get_opinion_table_row_count(
+                    driver, 
+                    serial_number, 
+                    need_click_open_orders=True, 
+                    trending_part1=trending_part1
+                )
+                
+                if current_open_orders_count < 0:
+                    log_print(f"[{serial_number}] [OP] ⚠ 无法获取 Open Orders 数量")
+                else:
+                    log_print(f"[{serial_number}] [OP] 当前 Open Orders 数量: {current_open_orders_count} (初始: {initial_open_orders_count})")
+                    
+                    if trade_type == "Buy":
+                        # Buy 类型：挂单数量增加即成功
+                        if current_open_orders_count > initial_open_orders_count:
+                            log_print(f"[{serial_number}] [OP] ✓✓✓ Buy 订单成功！Open Orders 从 {initial_open_orders_count} 增加到 {current_open_orders_count}")
+                            return True
+                    else:  # Sell
+                        # Sell 类型：挂单数量增加即成功
+                        if current_open_orders_count > initial_open_orders_count:
+                            log_print(f"[{serial_number}] [OP] ✓✓✓ Sell 订单成功！Open Orders 从 {initial_open_orders_count} 增加到 {current_open_orders_count}")
+                            return True
+                
+                # 下次检查 Position
+                check_open_orders = False
+                
+            else:
+                # 检查 Position
+                log_print(f"[{serial_number}] [OP] 检查 Position...")
+                current_position_count = check_position_count(driver, serial_number, trending_part1)
+                
+                if current_position_count < 0:
+                    log_print(f"[{serial_number}] [OP] ⚠ 无法获取 Position 数量")
+                else:
+                    log_print(f"[{serial_number}] [OP] 当前 Position 数量: {current_position_count} (初始: {initial_position_count})")
+                    
+                    if trade_type == "Buy":
+                        # Buy 类型：仓位数量增加即成功
+                        if current_position_count > initial_position_count:
+                            log_print(f"[{serial_number}] [OP] ✓✓✓ Buy 订单成功！Position 从 {initial_position_count} 增加到 {current_position_count}")
+                            return True
+                    else:  # Sell
+                        # Sell 类型：仓位数量减少即成功
+                        if current_position_count < initial_position_count:
+                            log_print(f"[{serial_number}] [OP] ✓✓✓ Sell 订单成功！Position 从 {initial_position_count} 减少到 {current_position_count}")
+                            return True
+                
+                # 下次检查 Open Orders
+                check_open_orders = True
             
-            log_print(f"[{serial_number}] [OP] 当前行数: {current_count}，等待增加...")
+            log_print(f"[{serial_number}] [OP] 等待 {check_interval} 秒后继续检查...")
             time.sleep(check_interval)
             
         except Exception as e:
             log_print(f"[{serial_number}] [OP] ⚠ 检查订单状态时出错: {str(e)}")
+            import traceback
+            log_print(f"[{serial_number}] [OP] 错误详情:\n{traceback.format_exc()}")
             time.sleep(check_interval)
     
     log_print(f"[{serial_number}] [OP] ✗ 等待订单超时（{timeout}秒）")
@@ -2312,6 +2373,7 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
             p_tags = accordion_div.find_elements(By.TAG_NAME, "p")
             
             for p in p_tags:
+                log_print(f"[{browser_id}] ✓ 找到 p 标签: {p.text.strip()}")
                 if p.text.strip() == trending_part1:
                     log_print(f"[{browser_id}] ✓ 找到匹配的 p 标签: {trending_part1}")
                     
@@ -2376,69 +2438,142 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
                 log_print(f"[{browser_id}] ⚠ 点击子主题失败，继续执行...")
         
-        # 6.2 对于 Buy 类型，检查是否已有仓位和挂单
+        # 6.2 检查仓位和挂单，记录初始数量
+        log_print(f"[{browser_id}] 步骤6.2: 检查并记录初始仓位和挂单数量...")
+        
+        # 检查 Position 数量
+        initial_position_count = check_position_count(driver, browser_id, trending_part1)
+        if initial_position_count < 0:
+            log_print(f"[{browser_id}] ⚠ 无法获取 Position 数量，设为 0")
+            initial_position_count = 0
+        
+        log_print(f"[{browser_id}] 初始 Position 数量: {initial_position_count}")
+        
+        # Buy 类型：如果已有仓位则不能下单
+        if trade_type == "Buy" and initial_position_count > 0:
+            return False, f"{browser_id}已有仓位"
+        
+        # 检查 Open Orders 数量
+        log_print(f"[{browser_id}] 步骤6.3: 检查 Open Orders...")
+        initial_open_orders_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
+        
+        if initial_open_orders_count < 0:
+            log_print(f"[{browser_id}] ⚠ 无法获取 Open Orders 数量，设为 0")
+            initial_open_orders_count = 0
+        
+        log_print(f"[{browser_id}] 初始 Open Orders 数量: {initial_open_orders_count}")
+        
+        # Buy 类型：如果已有挂单则不能下单
+        if trade_type == "Buy" and initial_open_orders_count > 0:
+            return False, f"{browser_id}已有挂单"
+        
         if trade_type == "Buy":
-            log_print(f"[{browser_id}] 步骤6.2: 检查 Buy 类型的仓位和挂单限制...")
-            
-            # 检查 Position
-            position_count = check_position_count(driver, browser_id, trending_part1)
-            if position_count > 0:
-                return False, f"{browser_id}已有仓位"
-            
-            # 检查 Open Orders（提前检查）
-            log_print(f"[{browser_id}] 步骤6.3: 提前检查 Open Orders...")
-            initial_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
-            
-            if initial_count < 0:
-                log_print(f"[{browser_id}] ⚠ 无法获取初始行数，将继续执行...")
-                initial_count = 0
-            elif initial_count > 0:
-                return False, f"{browser_id}已有挂单"
-            
             log_print(f"[{browser_id}] ✓ Buy 类型检查通过：无仓位，无挂单")
         else:
-            # Sell 类型不受限制，但仍需获取初始订单数量
-            log_print(f"[{browser_id}] 步骤6.2: Sell 类型不受限制，获取初始订单数量...")
-            initial_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
-            
-            if initial_count < 0:
-                log_print(f"[{browser_id}] ⚠ 无法获取初始行数，将继续执行...")
-                initial_count = 0
+            log_print(f"[{browser_id}] ✓ Sell 类型：已记录初始数量")
         
-        # 7. 点击买卖类型按钮
-        log_print(f"[{browser_id}] 步骤7: 选择买卖类型 {trade_type}...")
-        if not click_opinion_trade_type_button(trade_box, trade_type, browser_id):
-            return False, f"未找到{trade_type}按钮"
+        # 重试机制：第7-12步最多重试2次（总共3次尝试）
+        max_retry_attempts = 2
+        retry_count = 0
         
-        # 8. 选择价格类型
-        log_print(f"[{browser_id}] 步骤8: 选择价格类型 {price_type}...")
-        if not select_opinion_price_type(trade_box, price_type, browser_id):
-            return False, f"选择价格类型{price_type}失败"
+        while retry_count <= max_retry_attempts:
+            try:
+                if retry_count > 0:
+                    log_print(f"[{browser_id}] ⚠ 第{retry_count}次重试，刷新页面...")
+                    driver.refresh()
+                    
+                    # 重新等待页面加载
+                    log_print(f"[{browser_id}] 等待页面重新加载...")
+                    trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
+                    if not trade_box:
+                        log_print(f"[{browser_id}] ✗ 页面重新加载失败")
+                        retry_count += 1
+                        continue
+                    
+                    # 重新检查并连接钱包
+                    log_print(f"[{browser_id}] 重新检查并连接钱包...")
+                    connect_wallet_if_needed(driver, browser_id)
+                    
+                    # 重新等待Position按钮出现
+                    log_print(f"[{browser_id}] 重新等待Position按钮...")
+                    if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
+                        log_print(f"[{browser_id}] ✗ Position按钮未出现")
+                        retry_count += 1
+                        continue
+                    
+                    # 如果有 trendingPart1，重新点击子主题
+                    if trending_part1:
+                        log_print(f"[{browser_id}] 重新点击子主题 {trending_part1}...")
+                        if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
+                            log_print(f"[{browser_id}] ⚠ 点击子主题失败，继续执行...")
+                
+                # 7. 点击买卖类型按钮
+                log_print(f"[{browser_id}] 步骤7: 选择买卖类型 {trade_type}...")
+                if not click_opinion_trade_type_button(trade_box, trade_type, browser_id):
+                    log_print(f"[{browser_id}] ✗ 未找到{trade_type}按钮")
+                    retry_count += 1
+                    continue
+                
+                # 8. 选择价格类型
+                log_print(f"[{browser_id}] 步骤8: 选择价格类型 {price_type}...")
+                if not select_opinion_price_type(trade_box, price_type, browser_id):
+                    log_print(f"[{browser_id}] ✗ 选择价格类型{price_type}失败")
+                    retry_count += 1
+                    continue
+                
+                # 9. 选择种类
+                log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
+                if not select_opinion_option_type(trade_box, option_type, browser_id):
+                    log_print(f"[{browser_id}] ✗ 选择种类{option_type}失败")
+                    retry_count += 1
+                    continue
+                
+                # 10. 点击 Amount 标签
+                log_print(f"[{browser_id}] 步骤10: 点击 Amount 标签...")
+                click_opinion_amount_tab(trade_box, browser_id)
+                
+                # 11. 填入价格和数量
+                log_print(f"[{browser_id}] 步骤11: 填入价格和数量（模式：{price_type}）...")
+                # Market模式传None，Limit模式传price
+                fill_price = None if price_type == "Market" else price
+                if not fill_opinion_price_and_amount(trade_box, fill_price, amount, browser_id):
+                    log_print(f"[{browser_id}] ✗ 填入价格/数量失败")
+                    retry_count += 1
+                    continue
+                
+                # 12. 提交订单
+                log_print(f"[{browser_id}] 步骤12: 提交订单...")
+                if not submit_opinion_order(driver, trade_box, trade_type, option_type, browser_id, browser_id):
+                    log_print(f"[{browser_id}] ✗ 提交订单失败")
+                    retry_count += 1
+                    continue
+                
+                # 如果所有步骤都成功，跳出循环
+                log_print(f"[{browser_id}] ✓ 步骤7-12执行成功")
+                break
+                
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ 步骤7-12执行异常: {str(e)}")
+                retry_count += 1
+                if retry_count > max_retry_attempts:
+                    return False, f"执行异常: {str(e)}"
+                continue
         
-        # 9. 选择种类
-        log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
-        if not select_opinion_option_type(trade_box, option_type, browser_id):
-            return False, f"选择种类{option_type}失败"
+        # 检查是否所有重试都失败了
+        if retry_count > max_retry_attempts:
+            return False, f"执行步骤7-12失败，已重试{max_retry_attempts}次"
         
-        # 10. 点击 Amount 标签
-        log_print(f"[{browser_id}] 步骤10: 点击 Amount 标签...")
-        click_opinion_amount_tab(trade_box, browser_id)
-        
-        # 11. 填入价格和数量
-        log_print(f"[{browser_id}] 步骤11: 填入价格和数量（模式：{price_type}）...")
-        # Market模式传None，Limit模式传price
-        fill_price = None if price_type == "Market" else price
-        if not fill_opinion_price_and_amount(trade_box, fill_price, amount, browser_id):
-            return False, "填入价格/数量失败"
-        
-        # 12. 提交订单
-        log_print(f"[{browser_id}] 步骤12: 提交订单...")
-        if not submit_opinion_order(driver, trade_box, trade_type, option_type, browser_id, browser_id):
-            return False, "提交订单失败"
-        
-        # 13. 等待订单成功
-        log_print(f"[{browser_id}] 步骤13: 等待订单确认...")
-        if not wait_for_opinion_order_success(driver, initial_count, browser_id, timeout=600):
+        # 13. 等待订单成功（交替检查 Open Orders 和 Position）
+        log_print(f"[{browser_id}] 步骤13: 等待订单确认（交替检查 Open Orders 和 Position）...")
+        if not wait_for_opinion_order_success(
+            driver, 
+            initial_open_orders_count, 
+            initial_position_count, 
+            trade_type,
+            browser_id, 
+            trending_part1,
+            timeout=600
+        ):
             return False, "订单确认超时"
         
         log_print(f"[{browser_id}] ========== Opinion Trade 任务完成 ==========\n")
@@ -2804,21 +2939,41 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                     p_tags = tr.find_elements(By.TAG_NAME, "p")
                     p_count = len(p_tags)
                     
+                    # 打印所有 p 标签内容
+                    log_print(f"[{serial_number}] [OP] TR {tr_idx}: 共 {p_count} 个 p 标签")
+                    for p_idx, p_tag in enumerate(p_tags, 1):
+                        p_content = p_tag.text.strip()
+                        # log_print(f"[{serial_number}] [OP]   P{p_idx}: {p_content}")
+                    
                     # 如果只有一个 p 标签，说明这是主题标题
                     if p_count == 1:
                         current_title = p_tags[0].text.strip()
                         log_print(f"[{serial_number}] [OP] TR {tr_idx}: 主题标题 = {current_title}")
-                    # 如果有多个 p 标签，说明这是交易记录
-                    elif p_count >= 8:
+                    # 如果有多个 p 标签，说明这是交易记录（实际有10个p标签）
+                    elif p_count >= 9:
                         if not current_title:
                             log_print(f"[{serial_number}] [OP] ⚠ TR {tr_idx}: 没有主题标题，跳过")
                             continue
                         
-                        # 第1个p: 买卖方向
+                        # P1: 买卖方向 (索引0)
                         direction = p_tags[0].text.strip()
                         
-                        # 第2个p: 选项，可能包含子标题
+                        # P2: 选项 (索引1)，可能包含子标题
                         option_text = p_tags[1].text.strip()
+                        
+                        # P3: 数量/shares (索引2)
+                        amount = p_tags[2].text.strip()
+                        
+                        # P4: 金额/amount (索引3)
+                        value = p_tags[3].text.strip()
+                        
+                        # P5: 价格/price (索引4)
+                        price = p_tags[4].text.strip()
+                        
+                        # P9: 时间/time (索引8)
+                        trade_time = p_tags[8].text.strip()
+                        
+                        # log_print(f"[{serial_number}] [OP] TR {tr_idx}: 提取数据 - 方向={direction}, 选项={option_text}, 数量={amount}, 金额={value}, 价格={price}, 时间={trade_time}")
                         
                         # 检查是否有子标题（包含 " - "）
                         final_title = current_title
@@ -2831,18 +2986,7 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                                 final_option = parts[1].strip()
                                 # 将子标题连接到主标题
                                 final_title = f"{current_title}###{sub_title}"
-                        
-                        # 第3个p: 数量
-                        amount = p_tags[2].text.strip()
-                        
-                        # 第4个p: 金额
-                        value = p_tags[3].text.strip()
-                        
-                        # 第5个p: 价格
-                        price = p_tags[4].text.strip()
-                        
-                        # 第8个p: 时间
-                        trade_time = p_tags[7].text.strip()
+                                log_print(f"[{serial_number}] [OP] TR {tr_idx}: 检测到子标题 - 主题={final_title}, 选项={final_option}")
                         
                         transaction = {
                             "title": final_title,
@@ -2855,7 +2999,7 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                         }
                         
                         transactions.append(transaction)
-                        log_print(f"[{serial_number}] [OP] TR {tr_idx}: 交易记录 = {direction} {final_option} {amount} @ {price}")
+                     
                     
                 except Exception as e:
                     log_print(f"[{serial_number}] [OP] ⚠ 处理 TR {tr_idx} 时出错: {str(e)}")
@@ -3675,25 +3819,96 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         
         account_config['e'] = exchange_name  # 平台名称
         
-        # 6. 格式化 transactions 数据（使用 ||| 作为字段分隔符）
+        # 6. 格式化 transactions 数据并上传到新接口
         transactions = collected_data.get('transactions', [])
-        transactions_str_list = []
         log_print(f"[{browser_id}] 开始格式化 {len(transactions)} 条交易记录...")
-        for idx, trans in enumerate(transactions, 1):
-            title = trans['title']
-            direction = trans['direction']
-            option = trans['option']
-            amount = trans['amount']
-            value = trans['value']
-            price = trans['price']
-            trans_time = trans['time']
-            formatted_trans = f"{title}|||{direction}|||{option}|||{amount}|||{value}|||{price}|||{trans_time}"
-            transactions_str_list.append(formatted_trans)
-            log_print(f"[{browser_id}]   交易 {idx}: {formatted_trans}")
-        transactions_str = ";".join(transactions_str_list)
-        log_print(f"[{browser_id}] ✓ 交易记录格式化完成")
         
-        account_config['g'] = transactions_str  # 交易记录
+        if transactions:
+            # 将时间字符串转换为时间戳的函数
+            def parse_time_to_timestamp(time_str):
+                """
+                将时间字符串转换为时间戳（毫秒）
+                格式: Nov 26, 2025 19:38:42
+                """
+                try:
+                    from datetime import datetime
+                    # 解析时间字符串
+                    dt = datetime.strptime(time_str, "%b %d, %Y %H:%M:%S")
+                    # 转换为时间戳（毫秒）
+                    timestamp = int(dt.timestamp() * 1000)
+                    return timestamp
+                except Exception as e:
+                    log_print(f"[{browser_id}] ⚠ 时间解析失败 '{time_str}': {str(e)}")
+                    return 0
+            
+            # 清理金额和价格字段，只保留数字和小数点
+            def clean_number_string(value_str):
+                """
+                去除字符串中的货币符号，只保留数字和小数点
+                例如: "$1.49" -> "1.49", "1.5 ¢" -> "1.5"
+                """
+                if not value_str:
+                    return "0"
+                
+                # 去除所有非数字、非小数点、非负号的字符
+                import re
+                cleaned = re.sub(r'[^\d\.\-]', '', value_str)
+                
+                # 如果清理后为空，返回 "0"
+                if not cleaned or cleaned == '.':
+                    return "0"
+                
+                return cleaned
+            
+            # 格式化为新接口所需的格式
+            transactions_list = []
+            for idx, trans in enumerate(transactions, 1):
+                # 清理 shares, amount 和 price，去除符号
+                cleaned_shares = clean_number_string(trans['amount'])
+                cleaned_amount = clean_number_string(trans['value'])
+                cleaned_price = clean_number_string(trans['price'])
+                
+                transaction_data = {
+                    "trending": trans['title'],
+                    "side": trans['direction'],
+                    "outCome": trans['option'],
+                    "shares": cleaned_shares,    # 原 amount 字段映射到 shares (去除逗号)
+                    "amount": cleaned_amount,    # 原 value 字段映射到 amount (去除符号)
+                    "price": cleaned_price,      # price (去除符号)
+                    "time": parse_time_to_timestamp(trans['time'])
+                }
+                transactions_list.append(transaction_data)
+                log_print(f"[{browser_id}]   交易 {idx}: {trans['title']} | {trans['direction']} | {trans['option']} | shares={cleaned_shares} (原:{trans['amount']}) | amount={cleaned_amount} (原:{trans['value']}) | price={cleaned_price} (原:{trans['price']}) | time={transaction_data['time']}")
+            
+            log_print(f"[{browser_id}] ✓ 交易记录格式化完成，共 {len(transactions_list)} 条")
+            
+            # 上传交易记录到新接口
+            try:
+                insert_order_url = f"{SERVER_BASE_URL}/boost/insertOrderHist"
+                order_data = {
+                    "number": str(browser_id),
+                    "list": transactions_list
+                }
+                
+                # 打印 order_data 的字符串格式
+                import json
+                order_data_str = json.dumps(order_data, ensure_ascii=False, indent=2)
+                log_print(f"[{browser_id}] ==================== order_data 详细内容 ====================")
+                log_print(f"[{browser_id}] {order_data_str}")
+                log_print(f"[{browser_id}] =================================================================")
+                
+                log_print(f"[{browser_id}] 开始上传交易记录到 /boost/insertOrderHist...")
+                order_response = requests.post(insert_order_url, json=order_data, timeout=15)
+                
+                if order_response.status_code == 200:
+                    log_print(f"[{browser_id}] ✓ 交易记录上传成功")
+                    log_print(f"[{browser_id}] 服务器响应: {order_response.json()}")
+                else:
+                    log_print(f"[{browser_id}] ⚠ 交易记录上传失败: HTTP {order_response.status_code}")
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ 交易记录上传异常: {str(e)}")
+        else:
+            log_print(f"[{browser_id}] 无交易记录需要上传")
         
         log_print(f"[{browser_id}] 步骤2: 更新数据字段...")
         log_print(f"[{browser_id}]   a (positions): {position_str[:100]}...")
@@ -3702,15 +3917,7 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         log_print(f"[{browser_id}]   c (portfolio): {portfolio}")
         log_print(f"[{browser_id}]   d (timestamp): {'已更新' if data_collected_success else '保持不变'}")
         log_print(f"[{browser_id}]   e (platform): {exchange_name}")
-        log_print(f"[{browser_id}]   g (transactions): {len(transactions)} 条交易记录")
-        
-        # 打印 g 字段的详细信息
-        log_print(f"[{browser_id}] ==================== g 字段详细信息 ====================")
-        log_print(f"[{browser_id}] g 字段类型: {type(transactions_str)}")
-        log_print(f"[{browser_id}] g 字段长度: {len(transactions_str)} 字符")
-        log_print(f"[{browser_id}] g 字段内容:")
-        log_print(f"[{browser_id}] {transactions_str}")
-        log_print(f"[{browser_id}] =========================================================")
+        log_print(f"[{browser_id}]   transactions: {len(transactions)} 条交易记录已上传到 insertOrderHist 接口")
         
         # 7. 上传更新
         log_print(f"[{browser_id}] 步骤3: 上传更新到服务器...")
@@ -4022,6 +4229,8 @@ def get_orderbook_data_with_subtopic(driver, browser_id, trending_part1, needCli
                     
                     # 获取两个 div 的数据
                     results = []
+                    total_p_count = 0  # 统计收集到的总 p 标签数量
+                    
                     for idx, orderbook_div in enumerate(orderbook_divs[:2], 1):
                         log_print(f"[{browser_id}] 处理第 {idx} 个订单簿 div...")
                         
@@ -4033,12 +4242,36 @@ def get_orderbook_data_with_subtopic(driver, browser_id, trending_part1, needCli
                         
                         first_child_div = child_divs[0]
                         
-                        # 获取所有 p 标签内容，去除逗号
+                        # 获取所有 p 标签内容（包括所有嵌套层级），去除逗号
                         p_tags = first_child_div.find_elements(By.TAG_NAME, "p")
                         p_contents = [p.text.strip().replace(',', '') for p in p_tags if p.text.strip()]
                         
                         log_print(f"[{browser_id}] 第 {idx} 个订单簿收集到 {len(p_contents)} 个 p 标签")
+                        total_p_count += len(p_contents)
                         results.append(",".join(p_contents))
+                    
+                    # 检查是否收集到数据
+                    if total_p_count == 0:
+                        log_print(f"[{browser_id}] ⚠ 未收集到任何订单簿数据（0个p标签）")
+                        # 检查是否已经重试过
+                        if not hasattr(get_orderbook_data_with_subtopic, f'_retried_{browser_id}'):
+                            log_print(f"[{browser_id}] 刷新页面并重试一次...")
+                            setattr(get_orderbook_data_with_subtopic, f'_retried_{browser_id}', True)
+                            
+                            # 刷新页面
+                            driver.refresh()
+                            time.sleep(3)
+                            
+                            # 清除重试标志（在递归调用完成后）
+                            try:
+                                result = get_orderbook_data_with_subtopic(driver, browser_id, trending_part1, needClick)
+                                return result
+                            finally:
+                                # 清除重试标志
+                                delattr(get_orderbook_data_with_subtopic, f'_retried_{browser_id}')
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 已重试过一次，仍未收集到数据")
+                            return ""
                     
                     # 用分号连接两个订单簿的数据
                     result_str = ";".join(results)
@@ -4255,7 +4488,7 @@ def process_type3_mission(task_data):
         log_print(f"[{browser_id}] 等待4秒...")
         time.sleep(4)
         
-        # 4. 检查当前页面是否已是目标页面
+        # 4. 检查当前页面并刷新
         log_print(f"[{browser_id}] 步骤4: 检查当前页面URL...")
         current_url = driver.current_url
         log_print(f"[{browser_id}] 当前URL: {current_url}")
@@ -4271,7 +4504,9 @@ def process_type3_mission(task_data):
             driver.get(target_url)
             time.sleep(2)
         else:
-            log_print(f"[{browser_id}] ✓ 当前页面已是目标页面，无需重新加载")
+            log_print(f"[{browser_id}] ✓ 当前页面已是目标页面，刷新页面...")
+            driver.refresh()
+            time.sleep(2)
         
         # 执行数据收集流程（带重试机制）
         max_retries = 2
@@ -4807,17 +5042,36 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 task_browser_id = None
                 task_exchange_name = None
             
-            # Type 1任务成功后收集持仓数据
+            # 立即记录任务结果（不等待数据收集）
+            log_print(f"[{browser_id}] Type 1 任务{'成功' if success else '失败'}，立即记录结果...")
+            with active_tasks_lock:
+                if mission_id in active_tasks:
+                    active_tasks[mission_id]['results'][browser_id] = {
+                        'success': success,
+                        'reason': failure_reason if not success else ''
+                    }
+                    active_tasks[mission_id]['completed'] += 1
+            log_print(f"[{browser_id}] ✓ Type 1 任务结果已记录")
+            
+            # Type 1任务完成后收集持仓数据（不影响任务结果）
             if success and driver and task_browser_id and task_exchange_name:
                 try:
-                    log_print(f"[{browser_id}] Type 1 任务成功，开始额外收集持仓数据...")
+                    log_print(f"[{browser_id}] 开始额外收集持仓数据（不影响任务结果）...")
                     collect_position_data(driver, task_browser_id, task_exchange_name)
+                    log_print(f"[{browser_id}] ✓ 额外持仓数据收集完成")
                 except Exception as e:
                     log_print(f"[{browser_id}] ⚠ 额外数据收集异常: {str(e)}，但不影响任务")
                 finally:
+                    log_print(f"[{browser_id}] 关闭浏览器...")
                     close_adspower_browser(task_browser_id)
-            elif not success and driver and task_browser_id:
-                close_adspower_browser(task_browser_id)
+            elif not success:
+                # 任务失败，直接关闭浏览器
+                if driver and task_browser_id:
+                    log_print(f"[{browser_id}] 任务失败，关闭浏览器...")
+                    close_adspower_browser(task_browser_id)
+            
+            # Type 1 任务结果已经在上面记录了，跳过后面的统一记录
+            return
             
         elif mission_type == 2:
             # Type 2: 数据获取任务
@@ -4843,6 +5097,9 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     log_print(f"[{browser_id}] ✗ Type 3 结果提交异常: {str(e)}")
             else:
                 submit_mission_result(mission_id, 0, 1, {browser_id: failure_reason}, status=3)
+            
+            # Type 3 任务结果已经提交了，跳过后面的统一记录
+            return
             
         else:
             log_print(f"[{browser_id}] ⚠ 不支持的任务类型: {mission_type}")
