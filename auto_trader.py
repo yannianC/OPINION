@@ -84,6 +84,10 @@ global_thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 active_tasks_lock = threading.Lock()
 active_tasks = {}  # {mission_id: {'futures': [], 'results': {}, 'total': 0, 'completed': 0}}
 
+# 正在执行 type=3 任务的浏览器ID集合
+active_type3_browsers = set()
+active_type3_browsers_lock = threading.Lock()
+
 # AdsPower配置
 ADSPOWER_BASE_URL = "http://127.0.0.1:50325"
 ADSPOWER_API_KEY = "506664c47e5e174036720d305c7b9732"
@@ -5079,24 +5083,63 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             
         elif mission_type == 3:
             # Type 3: 订单簿数据获取任务
-            success, failure_reason, orderbook_data = process_type3_mission(task_data)
+            # 初始化变量（放在最前面，确保即使前面发生异常也能访问）
+            success = False
+            failure_reason = "未执行"
+            type3_completed_updated = False  # 标记是否已更新计数
             
-            # Type 3任务直接提交结果
-            if success:
-                payload = {
-                    "id": mission_id,
-                    "status": 2,
-                    "msg": orderbook_data
-                }
-                url = f"{SERVER_BASE_URL}/mission/saveResult"
+            try:
+                # 将浏览器ID加入正在执行的集合
+                with active_type3_browsers_lock:
+                    active_type3_browsers.add(browser_id)
+                    log_print(f"[{browser_id}] Type 3 任务开始，浏览器已标记为繁忙")
+                
                 try:
-                    response = requests.post(url, json=payload, timeout=10)
-                    if response.status_code == 200:
-                        log_print(f"[{browser_id}] ✓ Type 3 结果提交成功")
-                except Exception as e:
-                    log_print(f"[{browser_id}] ✗ Type 3 结果提交异常: {str(e)}")
-            else:
-                submit_mission_result(mission_id, 0, 1, {browser_id: failure_reason}, status=3)
+                    success, failure_reason, orderbook_data = process_type3_mission(task_data)
+                    
+                    # Type 3任务直接提交结果
+                    if success:
+                        payload = {
+                            "id": mission_id,
+                            "status": 2,
+                            "msg": orderbook_data
+                        }
+                        url = f"{SERVER_BASE_URL}/mission/saveResult"
+                        try:
+                            response = requests.post(url, json=payload, timeout=10)
+                            if response.status_code == 200:
+                                log_print(f"[{browser_id}] ✓ Type 3 结果提交成功")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] ✗ Type 3 结果提交异常: {str(e)}")
+                    else:
+                        submit_mission_result(mission_id, 0, 1, {browser_id: failure_reason}, status=3)
+                finally:
+                    # 无论成功还是失败，都从集合中移除浏览器ID
+                    with active_type3_browsers_lock:
+                        active_type3_browsers.discard(browser_id)
+                        log_print(f"[{browser_id}] Type 3 任务完成，浏览器标记已清除")
+                    
+                    # 更新任务完成计数，以便任务可以从 active_tasks 中清理
+                    with active_tasks_lock:
+                        if mission_id in active_tasks:
+                            active_tasks[mission_id]['results'][browser_id] = {
+                                'success': success,
+                                'reason': failure_reason if not success else ''
+                            }
+                            active_tasks[mission_id]['completed'] += 1
+                            type3_completed_updated = True
+                            log_print(f"[{browser_id}] ✓ Type 3 任务计数已更新 (completed: {active_tasks[mission_id]['completed']}/{active_tasks[mission_id]['total']})")
+            finally:
+                # 如果内层 finally 没有更新计数（比如在加入浏览器集合时就异常了），这里补充更新
+                if not type3_completed_updated:
+                    with active_tasks_lock:
+                        if mission_id in active_tasks:
+                            active_tasks[mission_id]['results'][browser_id] = {
+                                'success': False,
+                                'reason': failure_reason
+                            }
+                            active_tasks[mission_id]['completed'] += 1
+                            log_print(f"[{browser_id}] ✓ Type 3 任务计数已补充更新（外层finally）")
             
             # Type 3 任务结果已经提交了，跳过后面的统一记录
             return
@@ -5120,14 +5163,24 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
         
-        # 记录失败
-        with active_tasks_lock:
-            if mission_id in active_tasks:
-                active_tasks[mission_id]['results'][browser_id] = {
-                    'success': False,
-                    'reason': f"执行异常: {str(e)}"
-                }
-                active_tasks[mission_id]['completed'] += 1
+        # 如果是 type=3 任务发生异常，确保清除浏览器标记
+        if mission_type == 3:
+            with active_type3_browsers_lock:
+                if browser_id in active_type3_browsers:
+                    active_type3_browsers.discard(browser_id)
+                    log_print(f"[{browser_id}] Type 3 任务异常，清除浏览器标记")
+        
+        # 记录失败（Type 1 和 Type 3 已经在各自的逻辑中更新了计数，这里只处理 Type 2 和其他类型）
+        if mission_type not in [1, 3]:
+            with active_tasks_lock:
+                if mission_id in active_tasks:
+                    active_tasks[mission_id]['results'][browser_id] = {
+                        'success': False,
+                        'reason': f"执行异常: {str(e)}"
+                    }
+                    active_tasks[mission_id]['completed'] += 1
+        else:
+            log_print(f"[{browser_id}] Type {mission_type} 任务异常，计数已在其他地方更新")
 
 
 # ============================================================================
@@ -5158,29 +5211,57 @@ def main():
             # 2. 获取线程池状态
             active_count, pending_count = get_thread_pool_status()
             
-            # 3. 如果线程池还有空闲，尝试获取新任务
-            if pending_count < MAX_WORKERS:
-                log_print(f"[系统] 线程池状态: 活跃任务 {active_count} 个, 待处理 {pending_count}/{MAX_WORKERS}")
+            # 3. 尝试获取新任务
+            log_print(f"[系统] 线程池状态: 活跃任务 {active_count} 个, 待处理 {pending_count}/{MAX_WORKERS}")
+            
+            # 线程池是否已满
+            pool_is_full = pending_count >= MAX_WORKERS
+            
+            if pool_is_full:
+                log_print(f"[系统] 线程池已满 ({pending_count}/{MAX_WORKERS})")
+            else:
                 log_print(f"[系统] 线程池有空闲，尝试获取新任务...")
+            
+            # 从服务器获取任务
+            task_data = get_mission_from_server()
+            
+            if task_data:
+                mission = task_data.get("mission", {})
+                mission_id = mission.get("id")
+                mission_type = mission.get("type")
+                exchange_name = mission.get("exchangeName", "")
+                browser_id = str(mission.get("numberList", ""))
                 
-                # 从服务器获取任务
-                task_data = get_mission_from_server()
+                log_print(f"[系统] 获取到任务 {mission_id}，类型: {mission_type}，交易所: {exchange_name}，浏览器: {browser_id}")
                 
-                if task_data:
-                    mission = task_data.get("mission", {})
-                    mission_id = mission.get("id")
-                    mission_type = mission.get("type")
-                    exchange_name = mission.get("exchangeName", "")
-                    browser_id = str(mission.get("numberList", ""))
+                # 如果是 type=3 任务，检查该浏览器是否已经在执行 type=3 任务
+                if mission_type == 3:
+                    with active_type3_browsers_lock:
+                        browser_is_busy = browser_id in active_type3_browsers
                     
-                    log_print(f"[系统] 获取到任务 {mission_id}，类型: {mission_type}，交易所: {exchange_name}，浏览器: {browser_id}")
-                    
+                    if browser_is_busy:
+                        log_print(f"[系统] ⚠ 浏览器 {browser_id} 已有 Type=3 任务正在执行，跳过任务 {mission_id}")
+                        # 提交失败结果
+                        submit_mission_result(mission_id, 0, 1, {browser_id: "该浏览器已有Type=3任务正在执行"}, status=3)
+                        log_print(f"[系统] ✓ Type=3 任务 {mission_id} 已标记为失败")
+                        continue  # 跳过后续处理，继续下一次循环
+                
+                # 如果是 type=3 任务且线程池已有5个或更多任务，直接跳过
+                if mission_type == 3 and pending_count >= 5:
+                    log_print(f"[系统] ⚠ 线程池已有 {pending_count} 个任务，跳过 Type=3 任务 {mission_id}")
+                    # 提交失败结果
+                    submit_mission_result(mission_id, 0, 1, {browser_id: "线程池繁忙，Type=3任务被跳过"}, status=3)
+                    log_print(f"[系统] ✓ Type=3 任务 {mission_id} 已标记为失败")
+                # 如果线程池已满（不管什么类型），等待下一次循环
+                elif pool_is_full:
+                    log_print(f"[系统] 线程池已满，Type={mission_type} 任务将在下次循环处理")
+                # 线程池有空闲，提交任务
+                else:
                     # 提交到线程池
                     submit_mission_to_pool(task_data)
-                else:
-                    log_print(f"[系统] 暂无新任务")
             else:
-                log_print(f"[系统] 线程池已满 ({pending_count}/{MAX_WORKERS})，等待任务完成...")
+                if not pool_is_full:
+                    log_print(f"[系统] 暂无新任务")
             
             # 短暂等待后继续
             time.sleep(3)

@@ -671,6 +671,17 @@
                   <span class="label">消息:</span>
                   <span class="value">{{ item.mission.msg }}</span>
                 </div>
+                
+                <!-- 重试按钮 - 仅失败任务显示 -->
+                <div v-if="item.mission.status === 3" class="mission-actions">
+                  <button 
+                    class="btn-retry" 
+                    @click="retryMission(item)"
+                    :disabled="isRetrying"
+                  >
+                    {{ isRetrying ? '重试中...' : '🔄 重试' }}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -968,6 +979,7 @@ const isSubmitting = ref(false)
 const isSubmittingHedge = ref(false)
 const isSubmittingConfig = ref(false)
 const isSubmittingOrderbook = ref(false)
+const isRetrying = ref(false)
 const isLoadingList = ref(false)
 const isLoadingConfig = ref(true)
 const isLoadingHedgeHistory = ref(false)
@@ -2110,10 +2122,10 @@ const startAutoHedge = () => {
   // 立即执行一次
   executeAutoHedgeTasks()
   
-  // 每30秒执行一次
+  // 每1分钟执行一次
   autoHedgeInterval.value = setInterval(() => {
     executeAutoHedgeTasks()
-  }, 30000)
+  }, 60000)
 }
 
 /**
@@ -2352,6 +2364,12 @@ const getHedgeLogStatusClass = (log) => {
 const monitorAndExecuteHedge = async (config) => {
   const task = config.type3Task
   if (!task) return
+  
+  // 检查是否已经有正在进行中的对冲任务
+  if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
+    console.log(`配置 ${config.id} (${config.trending}) 已有对冲任务正在进行中，跳过新的calReadyToHedge请求`)
+    return
+  }
   
   if (!checkHedgeCondition(task)) return
   
@@ -2864,6 +2882,72 @@ const getStatusClass = (status) => {
     9: 'status-running'
   }
   return classMap[status] || 'status-unknown'
+}
+
+/**
+ * 重试失败的任务
+ */
+const retryMission = async (item) => {
+  if (isRetrying.value) {
+    return
+  }
+  
+  const mission = item.mission
+  
+  // 确认是否重试
+  if (!confirm(`确认重试任务 #${mission.id}？`)) {
+    return
+  }
+  
+  isRetrying.value = true
+  
+  try {
+    // 构建重试任务数据
+    const submitData = {
+      groupNo: mission.groupNo,
+      numberList: parseInt(mission.numberList),
+      type: parseInt(mission.type),
+      trendingId: parseInt(mission.trendingId),
+      exchangeName: mission.exchangeName,
+      side: parseInt(mission.side),
+      psSide: parseInt(mission.psSide),
+      amt: parseFloat(mission.amt)
+    }
+    
+    // 如果有价格，则添加价格字段
+    if (mission.price !== null && mission.price !== undefined && mission.price !== '') {
+      submitData.price = parseFloat(mission.price)
+    }
+    
+    console.log('正在重试任务...', submitData)
+    
+    // 发送请求
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/add',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('任务重试成功！响应:', response.data)
+      alert('任务重试成功！')
+      
+      // 刷新任务列表
+      setTimeout(() => {
+        fetchMissionList()
+      }, 500)
+    }
+  } catch (error) {
+    console.error('重试失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    alert(`任务重试失败: ${errorMsg}`)
+  } finally {
+    isRetrying.value = false
+  }
 }
 
 /**
@@ -4197,6 +4281,38 @@ onUnmounted(() => {
 .mission-msg .value {
   color: #856404;
   flex: 1;
+}
+
+/* 任务操作按钮区域 */
+.mission-actions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-retry {
+  padding: 0.5rem 1.2rem;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.3s;
+  font-weight: 500;
+}
+
+.btn-retry:hover:not(:disabled) {
+  background: #218838;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+}
+
+.btn-retry:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 弹窗样式 */
