@@ -84,9 +84,68 @@
             <el-option label="Ploy" value="Ploy" />
           </el-select>
         </div>
+        <div class="filter-item">
+          <label>仓位搜索:</label>
+          <el-input 
+            v-model="filters.positionSearch" 
+            placeholder="搜索持有仓位或挂单名称"
+            clearable
+            size="small"
+            style="width: 250px"
+          />
+        </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
       </div>
+    </div>
+
+    <!-- 总计信息 -->
+    <div class="summary-container" :class="{ 'collapsed': summaryCollapsed }">
+      <div class="summary-header">
+        <h3 class="summary-title">📊 数据总计</h3>
+        <el-button 
+          :icon="summaryCollapsed ? ArrowDown : ArrowUp" 
+          circle 
+          size="small"
+          @click="summaryCollapsed = !summaryCollapsed"
+          class="collapse-btn"
+        >
+        </el-button>
+      </div>
+      
+      <transition name="summary-collapse">
+        <div v-show="!summaryCollapsed" class="summary-content">
+          <div class="summary-item">
+            <span class="summary-label">余额总计:</span>
+            <span class="summary-value">{{ summaryData.totalBalance }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Portfolio总计:</span>
+            <span class="summary-value">{{ summaryData.totalPortfolio }}</span>
+          </div>
+          <div class="summary-item summary-positions">
+            <span class="summary-label">持有仓位总计:</span>
+            <div class="summary-positions-list">
+              <div v-if="summaryData.positionSummary.length === 0" class="empty-summary">
+                无持仓
+              </div>
+              <div 
+                v-for="(pos, idx) in summaryData.positionSummary" 
+                :key="idx" 
+                class="summary-position-item"
+              >
+                <span class="position-title-summary">{{ pos.title }}</span>
+                <el-tag 
+                  :type="parseFloat(pos.amount) >= 0 ? 'success' : 'danger'" 
+                  size="small"
+                >
+                  {{ pos.amount }}
+                </el-tag>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
     </div>
 
     <!-- 数据表格 -->
@@ -277,7 +336,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Clock } from '@element-plus/icons-vue'
+import { Clock, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 /**
@@ -292,6 +351,7 @@ const tableData = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const refreshingAll = ref(false)
+const summaryCollapsed = ref(false)  // 总计区域折叠状态
 let nextId = 1
 
 /**
@@ -325,13 +385,15 @@ const localNewRows = ref(new Set())
 const filters = ref({
   computeGroup: '',
   fingerprintNo: '',
-  platform: ''
+  platform: '',
+  positionSearch: ''  // 新增：仓位搜索
 })
 
 const activeFilters = ref({
   computeGroup: [],
   fingerprintNo: [],
-  platform: ''
+  platform: '',
+  positionSearch: ''  // 新增：仓位搜索
 })
 
 /**
@@ -369,7 +431,8 @@ const applyFilters = () => {
   activeFilters.value = {
     computeGroup: parseInputValues(filters.value.computeGroup),
     fingerprintNo: parseInputValues(filters.value.fingerprintNo),
-    platform: filters.value.platform
+    platform: filters.value.platform,
+    positionSearch: filters.value.positionSearch.trim()
   }
   ElMessage.success('筛选已应用')
 }
@@ -381,12 +444,14 @@ const clearFilters = () => {
   filters.value = {
     computeGroup: '',
     fingerprintNo: '',
-    platform: ''
+    platform: '',
+    positionSearch: ''
   }
   activeFilters.value = {
     computeGroup: [],
     fingerprintNo: [],
-    platform: ''
+    platform: '',
+    positionSearch: ''
   }
   ElMessage.info('筛选已清除')
 }
@@ -416,7 +481,73 @@ const filteredTableData = computed(() => {
     result = result.filter(row => row.platform === activeFilters.value.platform)
   }
   
+  // 仓位搜索筛选
+  if (activeFilters.value.positionSearch) {
+    const searchTerm = activeFilters.value.positionSearch.toLowerCase()
+    result = result.filter(row => {
+      // 检查持有仓位 (a)
+      if (row.a && row.a.toLowerCase().includes(searchTerm)) {
+        return true
+      }
+      // 检查挂单仓位 (b)
+      if (row.b && row.b.toLowerCase().includes(searchTerm)) {
+        return true
+      }
+      return false
+    })
+  }
+  
   return result
+})
+
+/**
+ * 计算总计数据
+ */
+const summaryData = computed(() => {
+  const filtered = filteredTableData.value
+  
+  // 计算余额总计
+  const totalBalance = filtered.reduce((sum, row) => {
+    const balance = parseFloat(row.balance) || 0
+    return sum + balance
+  }, 0)
+  
+  // 计算Portfolio总计
+  const totalPortfolio = filtered.reduce((sum, row) => {
+    const portfolio = parseFloat(row.c) || 0
+    return sum + portfolio
+  }, 0)
+  
+  // 计算持有仓位总计（按标题分组）
+  const positionMap = new Map()
+  
+  filtered.forEach(row => {
+    if (!row.a) return
+    
+    const positions = parsePositions(row.a)
+    positions.forEach(pos => {
+      const title = pos.title
+      const amount = parseFloat(pos.amount) || 0
+      
+      if (positionMap.has(title)) {
+        positionMap.set(title, positionMap.get(title) + amount)
+      } else {
+        positionMap.set(title, amount)
+      }
+    })
+  })
+  
+  // 过滤掉数量为0的，转换为数组并排序
+  const positionSummary = Array.from(positionMap.entries())
+    .filter(([title, amount]) => Math.abs(amount) > 0.01) // 过滤接近0的数量
+    .map(([title, amount]) => ({ title, amount: amount.toFixed(2) }))
+    .sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount))) // 按绝对值降序
+  
+  return {
+    totalBalance: totalBalance.toFixed(2),
+    totalPortfolio: totalPortfolio.toFixed(2),
+    positionSummary
+  }
 })
 
 /**
@@ -1331,6 +1462,139 @@ onUnmounted(() => {
   color: #606266;
   white-space: nowrap;
   font-weight: 500;
+}
+
+/* 总计信息容器 */
+.summary-container {
+  margin-bottom: 20px;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transition: all 0.3s ease;
+}
+
+.summary-container.collapsed {
+  padding: 15px 20px;
+}
+
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.summary-container.collapsed .summary-header {
+  margin-bottom: 0;
+}
+
+.summary-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.collapse-btn {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border: none !important;
+  color: #fff !important;
+  transition: all 0.3s ease;
+}
+
+.collapse-btn:hover {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  transform: scale(1.1);
+}
+
+.summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* 折叠过渡动画 */
+.summary-collapse-enter-active,
+.summary-collapse-leave-active {
+  transition: all 0.3s ease;
+  max-height: 2000px;
+  overflow: hidden;
+}
+
+.summary-collapse-enter-from,
+.summary-collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  background-color: rgba(255, 255, 255, 0.15);
+  padding: 12px 15px;
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+}
+
+.summary-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.summary-positions {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.summary-positions-list {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.empty-summary {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.summary-position-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  transition: all 0.3s;
+}
+
+.summary-position-item:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+  transform: translateX(5px);
+}
+
+.position-title-summary {
+  font-size: 13px;
+  color: #fff;
+  font-weight: 500;
+  flex: 1;
+  line-height: 1.4;
 }
 
 .position-list {

@@ -220,6 +220,34 @@
                                 : config.currentHedge.noNumber 
                             }}</span>
                           </div>
+                          <div class="hedge-detail-row">
+                            <span>电脑组:</span>
+                            <span>{{ 
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.yesGroupNo 
+                                : config.currentHedge.noGroupNo 
+                            }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>买/卖:</span>
+                            <span>{{ config.currentHedge.side === 1 ? '买入' : '卖出' }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>方向:</span>
+                            <span>{{ config.currentHedge.firstSide }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>价格:</span>
+                            <span>{{ 
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.yesPrice 
+                                : config.currentHedge.noPrice 
+                            }}¢</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>数量:</span>
+                            <span>{{ config.currentHedge.share }}</span>
+                          </div>
                         </div>
                       </div>
                       
@@ -251,6 +279,34 @@
                                 ? config.currentHedge.noNumber 
                                 : config.currentHedge.yesNumber 
                             }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>电脑组:</span>
+                            <span>{{ 
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.noGroupNo 
+                                : config.currentHedge.yesGroupNo 
+                            }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>买/卖:</span>
+                            <span>{{ config.currentHedge.side === 1 ? '买入' : '卖出' }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>方向:</span>
+                            <span>{{ config.currentHedge.firstSide === 'YES' ? 'NO' : 'YES' }}</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>价格:</span>
+                            <span>{{ 
+                              config.currentHedge.firstSide === 'YES' 
+                                ? config.currentHedge.noPrice 
+                                : config.currentHedge.yesPrice 
+                            }}¢</span>
+                          </div>
+                          <div class="hedge-detail-row">
+                            <span>数量:</span>
+                            <span>{{ config.currentHedge.share }}</span>
                           </div>
                         </div>
                       </div>
@@ -2048,7 +2104,9 @@ const updateActiveConfigs = () => {
       orderbookData: config.orderbookData || '',
       weight: config.weight || 0,
       type3Task: config.type3Task || null,
-      currentHedge: config.currentHedge || null
+      currentHedge: config.currentHedge || null,
+      pendingType3TaskId: config.pendingType3TaskId || null,  // 正在进行的type=3任务ID
+      pendingType3TaskStartTime: config.pendingType3TaskStartTime || null  // 任务提交时间
     }))
   
   // 加载本地保存的监听浏览器ID
@@ -2082,6 +2140,13 @@ const updateType3TasksInConfigs = (type3Missions) => {
         createTime: latestTask.mission.createTime,
         updateTime: latestTask.mission.updateTime,
         numberList: latestTask.mission.numberList
+      }
+      
+      // 如果这个任务ID正是当前正在等待的任务，且任务已完成，清除pending标记
+      if (config.pendingType3TaskId === latestTask.mission.id) {
+        console.log(`配置 ${config.id} - 正在等待的任务 ${latestTask.mission.id} 已完成，清除pending标记`)
+        config.pendingType3TaskId = null
+        config.pendingType3TaskStartTime = null
       }
     } else {
       // 如果没有符合条件的任务，清除显示
@@ -2122,10 +2187,10 @@ const startAutoHedge = () => {
   // 立即执行一次
   executeAutoHedgeTasks()
   
-  // 每1分钟执行一次
+  // 每10秒检查一次任务状态
   autoHedgeInterval.value = setInterval(() => {
     executeAutoHedgeTasks()
-  }, 60000)
+  }, 10000)
 }
 
 /**
@@ -2137,6 +2202,16 @@ const stopAutoHedge = () => {
     clearInterval(autoHedgeInterval.value)
     autoHedgeInterval.value = null
   }
+  
+  // 清除所有配置的pending标记
+  for (const config of activeConfigs.value) {
+    if (config.pendingType3TaskId) {
+      console.log(`配置 ${config.id} - 清除pending任务标记`)
+      config.pendingType3TaskId = null
+      config.pendingType3TaskStartTime = null
+    }
+  }
+  
   console.log('停止自动对冲')
 }
 
@@ -2424,15 +2499,34 @@ const monitorAndExecuteHedge = async (config) => {
  * 执行对冲任务
  */
 const executeHedgeTask = async (config, hedgeData) => {
+  const firstSide = hedgeData.firstSide
+  const firstBrowser = firstSide === 'YES' ? hedgeData.yesNumber : hedgeData.noNumber
+  const secondBrowser = firstSide === 'YES' ? hedgeData.noNumber : hedgeData.yesNumber
+  const firstPsSide = firstSide === 'YES' ? 1 : 2
+  const secondPsSide = firstSide === 'YES' ? 2 : 1
+  
+  // 获取电脑组ID
+  const yesGroupNo = browserToGroupMap.value[hedgeData.yesNumber] || '1'
+  const noGroupNo = browserToGroupMap.value[hedgeData.noNumber] || '1'
+  
+  // 计算价格（一方是 currentPrice，另一方是 100 - currentPrice）
+  const yesPrice = firstSide === 'YES' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
+  const noPrice = firstSide === 'NO' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
+  
   const hedgeRecord = {
     id: Date.now(),
     trendingId: config.id,
     trendingName: config.trending,
     yesNumber: hedgeData.yesNumber,
     noNumber: hedgeData.noNumber,
+    yesGroupNo: yesGroupNo,
+    noGroupNo: noGroupNo,
     share: hedgeData.share * 100,
     price: hedgeData.currentPrice,
+    yesPrice: yesPrice,
+    noPrice: noPrice,
     firstSide: hedgeData.firstSide,
+    side: 1,  // 固定为1（买入）
     isClose: hedgeMode.isClose,
     yesTaskId: null,
     noTaskId: null,
@@ -2449,10 +2543,6 @@ const executeHedgeTask = async (config, hedgeData) => {
   pausedType3Tasks.value.add(config.id)
   
   console.log(`开始对冲 ${config.id}:`, hedgeRecord)
-  
-  const firstSide = hedgeData.firstSide
-  const firstBrowser = firstSide === 'YES' ? hedgeData.yesNumber : hedgeData.noNumber
-  const firstPsSide = firstSide === 'YES' ? 1 : 2
   
   try {
     const groupNo = browserToGroupMap.value[firstBrowser] || '1'
@@ -2824,34 +2914,97 @@ const executeAutoHedgeTasks = async () => {
       continue
     }
     
-    try {
-      // 提交 type=3 任务
-      const taskData = {
-        groupNo: browserToGroupMap.value[config.monitorBrowserId],
-        numberList: config.monitorBrowserId,
-        type: 3,
-        trendingId: String(config.id),
-        exchangeName: 'OP'
-      }
+    // 检查是否有正在进行的 type=3 任务
+    if (config.pendingType3TaskId) {
+      const taskId = config.pendingType3TaskId
+      const startTime = config.pendingType3TaskStartTime
+      const now = Date.now()
+      const elapsed = (now - startTime) / 1000 / 60  // 转换为分钟
       
-      console.log('提交 type=3 任务:', taskData)
-      
-      const response = await axios.post(
-        'https://sg.bicoin.com.cn/99l/mission/add',
-        taskData,
-        {
-          headers: {
-            'Content-Type': 'application/json'
+      // 获取任务状态
+      try {
+        const taskData = await fetchMissionStatus(taskId)
+        
+        if (taskData) {
+          const status = taskData.status
+          console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 状态: ${status}, 已用时: ${elapsed.toFixed(1)}分钟`)
+          
+          // 任务已完成（成功或失败）
+          if (status === 2 || status === 3) {
+            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 已完成，清除标记`)
+            config.pendingType3TaskId = null
+            config.pendingType3TaskStartTime = null
+            // 继续执行，会在下面提交新任务
+          }
+          // 任务超时（超过3分钟）
+          else if (elapsed >= 3) {
+            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 超时（${elapsed.toFixed(1)}分钟），清除标记`)
+            config.pendingType3TaskId = null
+            config.pendingType3TaskStartTime = null
+            // 继续执行，会在下面提交新任务
+          }
+          // 任务还在进行中
+          else {
+            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 还在进行中，跳过`)
+            continue  // 跳过，不提交新任务
+          }
+        } else {
+          // 无法获取任务状态，检查超时
+          if (elapsed >= 3) {
+            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 无法获取状态且超时，清除标记`)
+            config.pendingType3TaskId = null
+            config.pendingType3TaskStartTime = null
+          } else {
+            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 无法获取状态，继续等待`)
+            continue
           }
         }
-      )
-      
-      if (response.data && response.data.data) {
-        const taskId = response.data.data
-        console.log(`type=3 任务提交成功，任务ID: ${taskId}`)
+      } catch (error) {
+        console.error(`获取任务 ${taskId} 状态失败:`, error)
+        // 检查超时
+        if (elapsed >= 3) {
+          console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 获取状态失败且超时，清除标记`)
+          config.pendingType3TaskId = null
+          config.pendingType3TaskStartTime = null
+        } else {
+          continue
+        }
       }
-    } catch (error) {
-      console.error('提交任务失败:', error)
+    }
+    
+    // 如果没有正在进行的任务（或任务已完成/超时），提交新的 type=3 任务
+    if (!config.pendingType3TaskId) {
+      try {
+        // 提交 type=3 任务
+        const taskData = {
+          groupNo: browserToGroupMap.value[config.monitorBrowserId],
+          numberList: config.monitorBrowserId,
+          type: 3,
+          trendingId: String(config.id),
+          exchangeName: 'OP'
+        }
+        
+        console.log(`配置 ${config.id} - 提交新的 type=3 任务:`, taskData)
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/add',
+          taskData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data && response.data.data) {
+          const taskId = response.data.data
+          config.pendingType3TaskId = taskId
+          config.pendingType3TaskStartTime = Date.now()
+          console.log(`配置 ${config.id} - type=3 任务提交成功，任务ID: ${taskId}`)
+        }
+      } catch (error) {
+        console.error(`配置 ${config.id} - 提交任务失败:`, error)
+      }
     }
   }
 }

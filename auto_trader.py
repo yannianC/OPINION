@@ -4396,7 +4396,7 @@ def execute_type3_data_collection(driver, browser_id, target_url, trending_part1
             log_print(f"[{browser_id}] 步骤6a: 点击子主题按钮...")
             if not click_subtopic_button_for_type3(driver, browser_id, trending_part1):
                 return False, None, "", "点击子主题按钮失败"
-            time.sleep(2)
+            time.sleep(8)
         
         # 7. 点击价格较高的按钮
         log_print(f"[{browser_id}] 步骤7: 点击价格较高的按钮...")
