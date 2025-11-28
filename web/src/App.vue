@@ -122,6 +122,14 @@
               {{ autoHedgeRunning ? '停止自动分配' : '开始自动分配' }}
             </button>
             <span v-if="autoHedgeRunning" class="status-badge status-running">运行中</span>
+            
+            <button 
+              class="btn btn-info btn-sm" 
+              @click="showAllHedgeLogs"
+              title="查看所有对冲日志"
+            >
+              📊 总日志
+            </button>
           </div>
           
           <div class="trending-list">
@@ -1023,6 +1031,70 @@
         </div>
       </div>
     </div>
+
+    <!-- 总日志弹窗 -->
+    <div v-if="showAllHedgeLogsDialog" class="modal-overlay" @click="closeAllHedgeLogsDialog">
+      <div class="modal-content extra-large" @click.stop>
+        <div class="modal-header">
+          <h3>所有对冲日志 (共 {{ allHedgeLogs.length }} 条)</h3>
+          <button class="modal-close" @click="closeAllHedgeLogsDialog">×</button>
+        </div>
+        <div class="all-hedge-log-content">
+          <div v-if="allHedgeLogs.length === 0" class="empty">暂无对冲记录</div>
+          <div v-else class="all-hedge-log-list">
+            <div 
+              v-for="(log, index) in allHedgeLogs" 
+              :key="index" 
+              class="compact-hedge-log-item"
+              :class="getHedgeLogStatusClass(log)"
+            >
+              <div class="compact-log-main">
+                <span class="compact-log-id">#{{ allHedgeLogs.length - index }}</span>
+                <span class="compact-log-trending">{{ log.trendingName }}</span>
+                <span 
+                  class="compact-status-badge"
+                  :class="getHedgeLogStatusClass(log)"
+                >
+                  {{ getHedgeLogStatusText(log) }}
+                </span>
+                <span class="compact-log-mode">{{ log.isClose ? '平仓' : '开仓' }}</span>
+                <span class="compact-log-info">
+                  价格:{{ log.price }} | 数量:{{ log.share }} | 先挂:{{ log.firstSide }}
+                </span>
+                <span class="compact-log-time">{{ formatCompactTime(log.startTime) }}</span>
+                <span v-if="log.duration" class="compact-log-duration">{{ log.duration }}分</span>
+              </div>
+              <div class="compact-log-details">
+                <div class="compact-task-row">
+                  <span class="task-label">YES:</span>
+                  <span class="task-info">
+                    <span class="task-group">组{{ log.yesGroupNo || '-' }}</span> | 
+                    浏览器{{ log.yesNumber }} | 
+                    任务{{ log.yesTaskId || '-' }} | 
+                    <span :class="getTaskStatusClass(log.yesStatus)">{{ getStatusText(log.yesStatus) }}</span>
+                    <span v-if="log.yesTaskMsg" class="task-msg">| {{ log.yesTaskMsg }}</span>
+                  </span>
+                </div>
+                <div class="compact-task-row">
+                  <span class="task-label">NO:</span>
+                  <span class="task-info">
+                    <span class="task-group">组{{ log.noGroupNo || '-' }}</span> | 
+                    浏览器{{ log.noNumber }} | 
+                    任务{{ log.noTaskId || '-' }} | 
+                    <span :class="getTaskStatusClass(log.noStatus)">{{ getStatusText(log.noStatus) }}</span>
+                    <span v-if="log.noTaskMsg" class="task-msg">| {{ log.noTaskMsg }}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-warning" @click="clearAllHedgeLogs">清空所有日志</button>
+          <button type="button" class="btn btn-secondary" @click="closeAllHedgeLogsDialog">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1115,6 +1187,8 @@ const hedgeMode = reactive({
 const showHedgeLogDialog = ref(false)
 const currentLogConfig = ref(null)
 const hedgeLogs = ref([])
+const showAllHedgeLogsDialog = ref(false)  // 总日志弹窗
+const allHedgeLogs = ref([])  // 所有对冲日志
 
 // 本地存储的对冲记录
 const LOCAL_STORAGE_KEY = 'hedge_logs'
@@ -2307,6 +2381,95 @@ const loadHedgeLogs = (trendingId) => {
 }
 
 /**
+ * 显示所有对冲日志
+ */
+const showAllHedgeLogs = async () => {
+  try {
+    const logs = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]')
+    
+    // 为每个日志获取任务的最终状态和msg
+    const logsWithDetails = await Promise.all(logs.map(async (log) => {
+      const enrichedLog = { ...log }
+      
+      // 获取YES任务详情
+      if (log.yesTaskId) {
+        try {
+          const yesTaskData = await fetchMissionStatus(log.yesTaskId)
+          if (yesTaskData) {
+            enrichedLog.yesStatus = yesTaskData.status
+            enrichedLog.yesTaskMsg = yesTaskData.msg || ''
+          }
+        } catch (e) {
+          console.error(`获取YES任务 ${log.yesTaskId} 详情失败:`, e)
+        }
+      }
+      
+      // 获取NO任务详情
+      if (log.noTaskId) {
+        try {
+          const noTaskData = await fetchMissionStatus(log.noTaskId)
+          if (noTaskData) {
+            enrichedLog.noStatus = noTaskData.status
+            enrichedLog.noTaskMsg = noTaskData.msg || ''
+          }
+        } catch (e) {
+          console.error(`获取NO任务 ${log.noTaskId} 详情失败:`, e)
+        }
+      }
+      
+      return enrichedLog
+    }))
+    
+    allHedgeLogs.value = logsWithDetails.reverse()  // 最新的在前面
+    showAllHedgeLogsDialog.value = true
+  } catch (e) {
+    console.error('加载所有对冲日志失败:', e)
+    alert('加载日志失败')
+  }
+}
+
+/**
+ * 关闭所有对冲日志弹窗
+ */
+const closeAllHedgeLogsDialog = () => {
+  showAllHedgeLogsDialog.value = false
+  allHedgeLogs.value = []
+}
+
+/**
+ * 清空所有对冲日志
+ */
+const clearAllHedgeLogs = () => {
+  if (confirm('确认要清空所有对冲日志吗？此操作不可恢复！')) {
+    try {
+      localStorage.removeItem(LOCAL_STORAGE_KEY)
+      allHedgeLogs.value = []
+      alert('已清空所有对冲日志')
+    } catch (e) {
+      console.error('清空日志失败:', e)
+      alert('清空日志失败')
+    }
+  }
+}
+
+/**
+ * 格式化时间（紧凑版）
+ */
+const formatCompactTime = (timeStr) => {
+  if (!timeStr) return '-'
+  try {
+    const date = new Date(timeStr)
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    const day = date.getDate().toString().padStart(2, '0')
+    const hours = date.getHours().toString().padStart(2, '0')
+    const minutes = date.getMinutes().toString().padStart(2, '0')
+    return `${month}-${day} ${hours}:${minutes}`
+  } catch (e) {
+    return timeStr
+  }
+}
+
+/**
  * 保存对冲设置到本地
  */
 const saveHedgeSettings = () => {
@@ -2442,8 +2605,20 @@ const monitorAndExecuteHedge = async (config) => {
   
   // 检查是否已经有正在进行中的对冲任务
   if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-    console.log(`配置 ${config.id} (${config.trending}) 已有对冲任务正在进行中，跳过新的calReadyToHedge请求`)
-    return
+    const startTime = new Date(config.currentHedge.startTime)
+    const now = new Date()
+    const elapsed = (now - startTime) / 1000 / 60  // 转换为分钟
+    
+    // 检查是否超过20分钟超时
+    if (elapsed >= 20) {
+      console.log(`配置 ${config.id} (${config.trending}) 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
+      config.currentHedge.finalStatus = 'timeout'
+      finishHedge(config, config.currentHedge)
+      // 继续执行新的对冲
+    } else {
+      console.log(`配置 ${config.id} (${config.trending}) 已有对冲任务正在进行中（${elapsed.toFixed(1)}/20分钟），跳过新的对冲请求`)
+      return
+    }
   }
   
   if (!checkHedgeCondition(task)) return
@@ -2572,7 +2747,18 @@ const executeHedgeTask = async (config, hedgeData) => {
     if (response.data && response.data.data) {
       const taskData = response.data.data
       // 如果返回的是对象，提取id字段；如果是数字，直接使用
-      const taskId = typeof taskData === 'object' ? taskData.id : taskData
+      let taskId = typeof taskData === 'object' ? taskData.id : taskData
+      
+      // 确保taskId是有效的数字或字符串
+      if (taskId === undefined || taskId === null) {
+        console.error('提交第一个对冲任务失败: 无效的任务ID', taskData)
+        hedgeRecord.finalStatus = 'failed'
+        finishHedge(config, hedgeRecord)
+        return
+      }
+      
+      // 转换为字符串以避免传递对象
+      taskId = String(taskId)
       console.log(`第一个对冲任务提交成功，任务ID: ${taskId}`)
       
       if (firstSide === 'YES') {
@@ -2609,6 +2795,12 @@ const executeHedgeTask = async (config, hedgeData) => {
  * 获取单个任务状态
  */
 const fetchMissionStatus = async (taskId) => {
+  // 验证taskId是否有效
+  if (taskId === undefined || taskId === null || taskId === '' || typeof taskId === 'object') {
+    console.error(`获取任务状态失败: 无效的任务ID`, taskId)
+    return null
+  }
+  
   try {
     const response = await axios.get(`https://sg.bicoin.com.cn/99l/mission/status?id=${taskId}`)
     if (response.data && response.data.code === 0 && response.data.data) {
@@ -2637,9 +2829,10 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
     const now = new Date()
     const elapsed = (now - startTime) / 1000 / 60
     
+    // 检查20分钟超时
     if (elapsed >= 20) {
-      console.log(`对冲 ${hedgeRecord.id} 超时`)
-      hedgeRecord.finalStatus = 'failed'
+      console.log(`对冲 ${hedgeRecord.id} 超时（${elapsed.toFixed(1)}分钟）- YES任务状态: ${hedgeRecord.yesStatus}, NO任务状态: ${hedgeRecord.noStatus}`)
+      hedgeRecord.finalStatus = 'timeout'
       finishHedge(config, hedgeRecord)
       return
     }
@@ -2675,10 +2868,23 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
     
     // 检查第一个任务是否失败
     if (firstStatus === 3) {
-      console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
-      hedgeRecord.finalStatus = 'failed'
-      finishHedge(config, hedgeRecord)
-      return
+      console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务一失败，等待任务二完成或超时`)
+      // 不立即停止，等待第二个任务也完成（如果已提交）
+      if (hedgeRecord.secondTaskSubmitted) {
+        // 如果第二个任务也已完成（成功或失败），则结束对冲
+        if (secondStatus === 2 || secondStatus === 3) {
+          console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 两个任务都已完成（任务一失败，任务二状态: ${secondStatus}）`)
+          hedgeRecord.finalStatus = 'failed'
+          finishHedge(config, hedgeRecord)
+          return
+        }
+      } else {
+        // 第二个任务还未提交，且第一个任务失败，直接结束
+        console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务一失败且任务二未提交，立即停止`)
+        hedgeRecord.finalStatus = 'failed'
+        finishHedge(config, hedgeRecord)
+        return
+      }
     }
     
     // 第一个任务成功，提交第二个任务（仅在挂单成功模式下）
@@ -2692,10 +2898,14 @@ const monitorHedgeStatus = (config, hedgeRecord) => {
     if (hedgeRecord.secondTaskSubmitted) {
       // 检查第二个任务是否失败
       if (secondStatus === 3) {
-        console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
-        hedgeRecord.finalStatus = 'failed'
-        finishHedge(config, hedgeRecord)
-        return
+        console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务二失败`)
+        // 检查第一个任务是否也已完成
+        if (firstStatus === 2 || firstStatus === 3) {
+          console.log(`[monitorHedgeStatus] 对冲 ${hedgeRecord.id} 两个任务都已完成（任务一状态: ${firstStatus}，任务二失败）`)
+          hedgeRecord.finalStatus = 'failed'
+          finishHedge(config, hedgeRecord)
+          return
+        }
       }
       
       // 两个任务都成功
@@ -2757,7 +2967,18 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     if (response.data && response.data.data) {
       const taskData = response.data.data
       // 如果返回的是对象，提取id字段；如果是数字，直接使用
-      const taskId = typeof taskData === 'object' ? taskData.id : taskData
+      let taskId = typeof taskData === 'object' ? taskData.id : taskData
+      
+      // 确保taskId是有效的数字或字符串
+      if (taskId === undefined || taskId === null) {
+        console.error('提交第二个对冲任务失败: 无效的任务ID', taskData)
+        hedgeRecord.finalStatus = 'failed'
+        finishHedge(config, hedgeRecord)
+        return
+      }
+      
+      // 转换为字符串以避免传递对象
+      taskId = String(taskId)
       console.log(`第二个对冲任务提交成功，任务ID: ${taskId}`)
       
       if (secondSide === 'YES') {
@@ -2783,6 +3004,12 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
  * 完成对冲
  */
 const finishHedge = (config, hedgeRecord) => {
+  // 防止重复调用
+  if (hedgeRecord.endTime) {
+    console.log(`对冲 ${hedgeRecord.id} 已经完成，跳过重复处理`)
+    return
+  }
+  
   hedgeRecord.endTime = new Date().toISOString()
   
   const startTime = new Date(hedgeRecord.startTime)
@@ -2795,9 +3022,11 @@ const finishHedge = (config, hedgeRecord) => {
   // 解除暂停状态，允许新的对冲任务
   pausedType3Tasks.value.delete(config.id)
   
-  console.log(`对冲 ${hedgeRecord.id} 已结束，状态: ${hedgeRecord.finalStatus}，日志已保存`)
+  console.log(`对冲 ${hedgeRecord.id} 已结束，状态: ${hedgeRecord.finalStatus}，用时: ${hedgeRecord.duration}分钟，YES状态: ${hedgeRecord.yesStatus}, NO状态: ${hedgeRecord.noStatus}，日志已保存`)
   
-  // 注意：不清除 config.currentHedge，保留显示直到有新任务
+  // 清除当前对冲记录，允许新的对冲任务开始
+  // 注意：清除后下次循环就可以开始新的对冲了
+  config.currentHedge = null
 }
 
 /**
@@ -2899,10 +3128,28 @@ const executeAutoHedgeTasks = async () => {
   }
   
   for (const config of activeConfigs.value) {
-    // 如果该主题正在执行对冲，跳过
+    // 检查该主题是否正在执行对冲
     if (pausedType3Tasks.value.has(config.id)) {
-      console.log(`配置 ${config.id} 正在执行对冲，跳过`)
-      continue
+      // 检查是否超时
+      if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
+        const startTime = new Date(config.currentHedge.startTime)
+        const now = new Date()
+        const elapsed = (now - startTime) / 1000 / 60
+        
+        if (elapsed >= 20) {
+          console.log(`配置 ${config.id} 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
+          config.currentHedge.finalStatus = 'timeout'
+          finishHedge(config, config.currentHedge)
+          // 继续执行，可以开始新的对冲
+        } else {
+          console.log(`配置 ${config.id} 正在执行对冲（${elapsed.toFixed(1)}/20分钟），跳过`)
+          continue
+        }
+      } else {
+        // pausedType3Tasks中有但currentHedge不在运行中，清理状态
+        console.log(`配置 ${config.id} pausedType3Tasks状态不一致，清理`)
+        pausedType3Tasks.value.delete(config.id)
+      }
     }
     
     // 只有在可以开始新对冲时才执行
@@ -3001,10 +3248,20 @@ const executeAutoHedgeTasks = async () => {
         )
         
         if (response.data && response.data.data) {
-          const taskId = response.data.data
-          config.pendingType3TaskId = taskId
-          config.pendingType3TaskStartTime = Date.now()
-          console.log(`配置 ${config.id} - type=3 任务提交成功，任务ID: ${taskId}`)
+          const taskData = response.data.data
+          // 如果返回的是对象，提取id字段；如果是数字，直接使用
+          let taskId = typeof taskData === 'object' ? taskData.id : taskData
+          
+          // 确保taskId是有效的数字或字符串
+          if (taskId === undefined || taskId === null) {
+            console.error(`配置 ${config.id} - type=3 任务提交失败: 无效的任务ID`, taskData)
+          } else {
+            // 转换为字符串或数字以避免传递对象
+            taskId = typeof taskId === 'number' ? taskId : String(taskId)
+            config.pendingType3TaskId = taskId
+            config.pendingType3TaskStartTime = Date.now()
+            console.log(`配置 ${config.id} - type=3 任务提交成功，任务ID: ${taskId}`)
+          }
         }
       } catch (error) {
         console.error(`配置 ${config.id} - 提交任务失败:`, error)
@@ -3991,6 +4248,165 @@ onUnmounted(() => {
   color: #6c757d;
 }
 
+/* 总日志弹窗样式 */
+.all-hedge-log-content {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.all-hedge-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.compact-hedge-log-item {
+  background: #f8f9fa;
+  border-radius: 6px;
+  padding: 0.75rem;
+  border-left: 4px solid #667eea;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.compact-hedge-log-item:hover {
+  background: #e9ecef;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.compact-hedge-log-item.log-status-success {
+  border-left-color: #28a745;
+}
+
+.compact-hedge-log-item.log-status-failed {
+  border-left-color: #dc3545;
+}
+
+.compact-hedge-log-item.log-status-timeout {
+  border-left-color: #ffc107;
+}
+
+.compact-log-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.compact-log-id {
+  font-weight: 700;
+  color: #495057;
+  min-width: 40px;
+}
+
+.compact-log-trending {
+  font-weight: 600;
+  color: #212529;
+  flex: 1;
+  min-width: 150px;
+}
+
+.compact-status-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compact-log-mode {
+  padding: 0.15rem 0.5rem;
+  background: #e9ecef;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.compact-log-info {
+  color: #6c757d;
+  font-size: 0.8rem;
+}
+
+.compact-log-time {
+  color: #6c757d;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.compact-log-duration {
+  color: #667eea;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compact-log-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-left: 1rem;
+  border-left: 2px solid #dee2e6;
+}
+
+.compact-task-row {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.task-label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 35px;
+}
+
+.task-info {
+  color: #6c757d;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.task-group {
+  font-weight: 600;
+  color: #667eea;
+  background: #e7eaf7;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.task-msg {
+  color: #dc3545;
+  font-style: italic;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-success {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.task-failed {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+.task-running {
+  color: #ffc107;
+  font-weight: 600;
+}
+
+.task-unknown {
+  color: #6c757d;
+}
+
 .auto-refresh-status {
   color: #667eea;
   font-weight: 500;
@@ -4500,6 +4916,11 @@ onUnmounted(() => {
 
 .modal-content.large {
   max-width: 900px;
+}
+
+.modal-content.extra-large {
+  max-width: 1200px;
+  max-height: 90vh;
 }
 
 .modal-header {
