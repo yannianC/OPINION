@@ -78,14 +78,63 @@ PWD = "Ok123456"
 # 服务器API配置
 SERVER_BASE_URL = "https://sg.bicoin.com.cn/99l"
 
+
+def get_mission_status(mission_id):
+    """
+    获取任务状态
+    
+    Args:
+        mission_id: 任务ID
+        
+    Returns:
+        int: 任务状态码，失败返回None
+    """
+    try:
+        url = f"{SERVER_BASE_URL}/mission/status"
+        response = requests.get(url, params={"id": mission_id}, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('code') == 0 and data.get('data') and data['data'].get('mission'):
+                return data['data']['mission'].get('status')
+        return None
+    except Exception as e:
+        log_print(f"[系统] 获取任务状态失败: {str(e)}")
+        return None
+
+
+def save_mission_result(mission_id, status, msg=""):
+    """
+    保存任务结果（仅更新状态）
+    
+    Args:
+        mission_id: 任务ID
+        status: 任务状态
+        msg: 附加消息
+        
+    Returns:
+        bool: 成功返回True
+    """
+    try:
+        url = f"{SERVER_BASE_URL}/mission/saveResult"
+        payload = {
+            "id": mission_id,
+            "status": status,
+            "msg": msg
+        }
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        log_print(f"[系统] 保存任务结果失败: {str(e)}")
+        return False
+
 # 全局线程池配置
 MAX_WORKERS = 6
 global_thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 active_tasks_lock = threading.Lock()
 active_tasks = {}  # {mission_id: {'futures': [], 'results': {}, 'total': 0, 'completed': 0}}
 
-# 正在执行 type=3 任务的浏览器ID集合
-active_type3_browsers = set()
+# 正在执行 type=3 任务的浏览器ID映射 {browser_id: mission_id}
+active_type3_browsers = {}
 active_type3_browsers_lock = threading.Lock()
 
 # AdsPower配置
@@ -1334,7 +1383,7 @@ def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=Fa
         return -1
 
 
-def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_number, browser_id):
+def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_number, browser_id, task_data=None):
     """
     提交 Opinion Trade 订单
     
@@ -1345,9 +1394,13 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         option_type: 种类
         serial_number: 浏览器序列号
         browser_id: 浏览器ID
+        task_data: 任务数据（用于type=5的同步机制）
         
     Returns:
-        bool: 成功返回True
+        tuple: (success, should_retry)
+            - (True, True): 成功
+            - (False, True): 失败，可以重试
+            - (False, False): 失败，不应重试（如type=5点击取消）
     """
     try:
         log_print(f"[{serial_number}] [OP] 查找提交订单按钮...")
@@ -1384,22 +1437,131 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
                         
                         if len(buttons) >= 2:
-                            buttons[1].click()
-                            log_print(f"[{serial_number}] [OP] ✓ 已点击 OKX 确认按钮")
-                            return True
+                            # Type 5 任务需要同步机制
+                            mission = task_data.get('mission', {}) if task_data else {}
+                            mission_type = mission.get('type')
+                            log_print(f"[{serial_number}] [OP] 检测到任务类型: {mission_type}")
+                            
+                            if task_data and mission_type == 5:
+                                log_print(f"[{serial_number}] [OP] Type 5 任务，启动同步机制...")
+                                
+                                mission_id = mission.get('id')
+                                tp1 = mission.get('tp1')  # 任务一的ID
+                                
+                                if not tp1:
+                                    # 任务一：先通知准备就绪，等待任务二准备就绪
+                                    log_print(f"[{serial_number}] [OP] 任务一: 设置状态为5（准备就绪）...")
+                                    save_result_success = save_mission_result(mission_id, 5)
+                                    if not save_result_success:
+                                        log_print(f"[{serial_number}] [OP] ✗ 任务一设置状态5失败")
+                                        return False, True  # 失败，可重试
+                                    
+                                    log_print(f"[{serial_number}] [OP] 任务一: 等待任务二准备就绪（状态6）...")
+                                    # 轮询等待状态变为6
+                                    max_wait_time = 600  # 最多等待10分钟
+                                    start_time = time.time()
+                                    while True:
+                                        if time.time() - start_time > max_wait_time:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务一等待任务二超时，点击取消按钮")
+                                            buttons[0].click()  # 点击取消按钮
+                                            return False, False  # 失败，不可重试
+                                        
+                                        status = get_mission_status(mission_id)
+                                        if status == 6:
+                                            log_print(f"[{serial_number}] [OP] ✓ 任务二已准备就绪（状态6）")
+                                            break
+                                        elif status == 3:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务状态变为失败，点击取消按钮")
+                                            buttons[0].click()  # 点击取消按钮
+                                            return False, False  # 失败，不可重试
+                                        
+                                        time.sleep(10)
+                                    
+                                    # 点击确认按钮
+                                    log_print(f"[{serial_number}] [OP] 任务一: 点击OKX确认按钮...")
+                                    buttons[1].click()
+                                    log_print(f"[{serial_number}] [OP] ✓ 任务一已点击 OKX 确认按钮")
+                                    
+                                    # 更改状态为7（任务一已确认）
+                                    log_print(f"[{serial_number}] [OP] 任务一: 设置状态为7（已确认）...")
+                                    save_result_success = save_mission_result(mission_id, 7)
+                                    if not save_result_success:
+                                        log_print(f"[{serial_number}] [OP] ⚠ 任务一设置状态7失败，但已点击确认")
+                                    
+                                    return True, True  # 成功
+                                    
+                                else:
+                                    # 任务二：等待任务一准备就绪，然后通知任务一可以执行
+                                    log_print(f"[{serial_number}] [OP] 任务二: 等待任务一准备就绪（状态5）...")
+                                    # 轮询等待任务一状态为5
+                                    max_wait_time = 600  # 最多等待10分钟
+                                    start_time = time.time()
+                                    while True:
+                                        if time.time() - start_time > max_wait_time:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务二等待任务一超时")
+                                            return False, True  # 失败，可重试
+                                        
+                                        tp1_status = get_mission_status(tp1)
+                                        if tp1_status == 5:
+                                            log_print(f"[{serial_number}] [OP] ✓ 任务一已准备就绪（状态5）")
+                                            break
+                                        elif tp1_status == 3:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务一失败，任务二也失败")
+                                            return False, True  # 失败，可重试
+                                        
+                                        time.sleep(10)
+                                    
+                                    # 更改任务一状态为6（任务二也准备就绪）
+                                    log_print(f"[{serial_number}] [OP] 任务二: 设置任务一状态为6（任务二就绪）...")
+                                    save_result_success = save_mission_result(tp1, 6)
+                                    if not save_result_success:
+                                        log_print(f"[{serial_number}] [OP] ✗ 任务二设置任务一状态6失败")
+                                        return False, True  # 失败，可重试
+                                    
+                                    # 等待任务一点击确认（状态7）
+                                    log_print(f"[{serial_number}] [OP] 任务二: 等待任务一点击确认（状态7）...")
+                                    start_time = time.time()
+                                    while True:
+                                        if time.time() - start_time > max_wait_time:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务二等待任务一确认超时，点击取消按钮")
+                                            buttons[0].click()  # 点击取消按钮
+                                            return False, False  # 失败，不可重试
+                                        
+                                        tp1_status = get_mission_status(tp1)
+                                        if tp1_status == 7:
+                                            time.sleep(5)
+                                            log_print(f"[{serial_number}] [OP] ✓ 任务一已点击确认（状态7）")
+                                            break
+                                        elif tp1_status == 3:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务一失败，任务二也失败，点击取消按钮")
+                                            buttons[0].click()  # 点击取消按钮
+                                            return False, False  # 失败，不可重试
+                                        
+                                        time.sleep(10)
+                                    
+                                    # 点击确认按钮
+                                    log_print(f"[{serial_number}] [OP] 任务二: 点击OKX确认按钮...")
+                                    buttons[1].click()
+                                    log_print(f"[{serial_number}] [OP] ✓ 任务二已点击 OKX 确认按钮")
+                                    return True, True  # 成功
+                            else:
+                                # 普通任务（Type 1），直接点击确认
+                                buttons[1].click()
+                                log_print(f"[{serial_number}] [OP] ✓ 已点击 OKX 确认按钮")
+                                return True, True  # 成功
                         else:
                             log_print(f"[{serial_number}] [OP] ⚠ OKX 按钮数量不足: {len(buttons)}")
-                            return False
+                            return False, True  # 失败，可重试
                 
                 log_print(f"[{serial_number}] [OP] ⚠ 未找到 OKX 页面")
-                return False
+                return False, True  # 失败，可重试
         
         log_print(f"[{serial_number}] [OP] ✗ 未找到提交订单按钮")
-        return False
+        return False, True  # 失败，可重试
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 提交订单失败: {str(e)}")
-        return False
+        return False, True  # 失败，可重试
 
 
 def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', timeout=600):
@@ -2022,7 +2184,7 @@ def process_trading_mission(task_data, keep_browser_open=False):
         
         # 根据交易所类型选择不同的处理流程
         if exchange_type == "OP":
-            success, failure_reason = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1)
+            success, failure_reason = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data)
         else:
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser)
         
@@ -2401,13 +2563,14 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
         return False
 
 
-def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1=''):
+def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None):
     """
     处理 Opinion Trade 交易流程
     
     Args:
         is_new_browser: 是否是新启动的浏览器
         trending_part1: 子主题名称（如果有）
+        task_data: 任务数据（用于type=5的同步机制）
     
     Returns:
         tuple: (success, failure_reason)
@@ -2547,8 +2710,13 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 
                 # 12. 提交订单
                 log_print(f"[{browser_id}] 步骤12: 提交订单...")
-                if not submit_opinion_order(driver, trade_box, trade_type, option_type, browser_id, browser_id):
+                submit_success, should_retry = submit_opinion_order(driver, trade_box, trade_type, option_type, browser_id, browser_id, task_data)
+                if not submit_success:
                     log_print(f"[{browser_id}] ✗ 提交订单失败")
+                    if not should_retry:
+                        # type=5点击取消按钮，不应重试
+                        log_print(f"[{browser_id}] ✗ Type 5 任务已取消，不进行重试")
+                        return False, "Type 5 任务已取消"
                     retry_count += 1
                     continue
                 
@@ -2671,87 +2839,110 @@ def process_polymarket_trade(driver, browser_id, trade_type, price_type, option_
 
 def get_opinion_portfolio_value(driver, serial_number):
     """
-    获取 Opinion Trade Portfolio 的值
+    获取 Opinion Trade Portfolio 的值（在180秒内多次尝试）
     
     Args:
         driver: Selenium WebDriver对象
         serial_number: 浏览器序列号
         
     Returns:
-        str: Portfolio的值，失败返回None
+        tuple: (Portfolio值, 是否需要刷新重试)
+            - 如果正常获取数据: (value, False)
+            - 如果超时未获取到: (None, True)
     """
     try:
         log_print(f"[{serial_number}] [OP] 查找 Portfolio 值...")
         
-        p_tags = driver.find_elements(By.TAG_NAME, "p")
+        # 在180秒内多次尝试查找
+        max_retry_time = 180
+        retry_start_time = time.time()
         
-        for p in p_tags:
-            if p.text.strip() == "Portfolio":
-                log_print(f"[{serial_number}] [OP] ✓ 找到 Portfolio 标签")
+        while time.time() - retry_start_time < max_retry_time:
+            try:
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
                 
-                parent = p.find_element(By.XPATH, "..")
-                child_p_tags = parent.find_elements(By.TAG_NAME, "p")
+                for p in p_tags:
+                    if p.text.strip() == "Portfolio":
+                        parent = p.find_element(By.XPATH, "..")
+                        child_p_tags = parent.find_elements(By.TAG_NAME, "p")
+                        
+                        if len(child_p_tags) >= 2:
+                            portfolio_value = child_p_tags[1].text.strip()
+                            if portfolio_value:  # 确保值不为空
+                                log_print(f"[{serial_number}] [OP] ✓ Portfolio 值: {portfolio_value}")
+                                return portfolio_value, False
                 
-                if len(child_p_tags) >= 2:
-                    portfolio_value = child_p_tags[1].text.strip()
-                    log_print(f"[{serial_number}] [OP] ✓ Portfolio 值: {portfolio_value}")
-                    return portfolio_value
-                else:
-                    log_print(f"[{serial_number}] [OP] ⚠ Portfolio 父节点的子节点数量不足")
-                    return None
+                # 如果没找到或值为空，等待5秒后重试
+                elapsed = int(time.time() - retry_start_time)
+                log_print(f"[{serial_number}] [OP] ⚠ Portfolio 值未找到或为空，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
+                time.sleep(5)
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 查找 Portfolio 值异常: {str(e)}，等待5秒后重试...")
+                time.sleep(5)
         
-        log_print(f"[{serial_number}] [OP] ✗ 未找到 Portfolio 标签")
-        return None
+        log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Portfolio 值，需要刷新重试")
+        return None, True
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 获取 Portfolio 值失败: {str(e)}")
-        return None
+        return None, False
 
 
 def get_opinion_balance_value(driver, serial_number):
     """
-    获取 Opinion Trade Balance 的值
+    获取 Opinion Trade Balance 的值（在180秒内多次尝试）
     
     Args:
         driver: Selenium WebDriver对象
         serial_number: 浏览器序列号
         
     Returns:
-        str: Balance的值，失败返回None
+        tuple: (Balance值, 是否需要刷新重试)
+            - 如果正常获取数据: (value, False)
+            - 如果超时未获取到: (None, True)
     """
     try:
         log_print(f"[{serial_number}] [OP] 查找 Balance 值...")
         
-        p_tags = driver.find_elements(By.TAG_NAME, "p")
+        # 在180秒内多次尝试查找
+        max_retry_time = 180
+        retry_start_time = time.time()
         
-        for p in p_tags:
-            if p.text.strip() == "Balance":
-                log_print(f"[{serial_number}] [OP] ✓ 找到 Balance 标签")
+        while time.time() - retry_start_time < max_retry_time:
+            try:
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
                 
-                parent = p.find_element(By.XPATH, "..")
-                children = parent.find_elements(By.XPATH, "./*")
+                for p in p_tags:
+                    if p.text.strip() == "Balance":
+                        parent = p.find_element(By.XPATH, "..")
+                        children = parent.find_elements(By.XPATH, "./*")
+                        
+                        if len(children) >= 2:
+                            second_child = children[1]
+                            p_in_second_child = second_child.find_elements(By.TAG_NAME, "p")
+                            
+                            if p_in_second_child:
+                                balance_value = p_in_second_child[0].text.strip()
+                                if balance_value:  # 确保值不为空
+                                    log_print(f"[{serial_number}] [OP] ✓ Balance 值: {balance_value}")
+                                    return balance_value, False
                 
-                if len(children) >= 2:
-                    second_child = children[1]
-                    p_in_second_child = second_child.find_elements(By.TAG_NAME, "p")
-                    
-                    if p_in_second_child:
-                        balance_value = p_in_second_child[0].text.strip()
-                        log_print(f"[{serial_number}] [OP] ✓ Balance 值: {balance_value}")
-                        return balance_value
-                    else:
-                        log_print(f"[{serial_number}] [OP] ⚠ 第二个子节点中没有找到 p 标签")
-                        return None
-                else:
-                    log_print(f"[{serial_number}] [OP] ⚠ Balance 父节点的子节点数量不足")
-                    return None
+                # 如果没找到或值为空，等待5秒后重试
+                elapsed = int(time.time() - retry_start_time)
+                log_print(f"[{serial_number}] [OP] ⚠ Balance 值未找到或为空，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
+                time.sleep(5)
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 查找 Balance 值异常: {str(e)}，等待5秒后重试...")
+                time.sleep(5)
         
-        log_print(f"[{serial_number}] [OP] ✗ 未找到 Balance 标签")
-        return None
+        log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Balance 值，需要刷新重试")
+        return None, True
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 获取 Balance 值失败: {str(e)}")
-        return None
+        return None, False
 
 
 def click_opinion_position_and_get_data(driver, serial_number):
@@ -2763,7 +2954,9 @@ def click_opinion_position_and_get_data(driver, serial_number):
         serial_number: 浏览器序列号
         
     Returns:
-        list: p标签内容列表
+        tuple: (p标签内容列表, 是否需要刷新重试)
+            - 如果正常获取数据或找到"No data yet": (data, False)
+            - 如果超时且没有"No data yet": ([], True)
     """
     try:
         log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Position 按钮...")
@@ -2791,7 +2984,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
         
         if not position_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Position 按钮")
-            return []
+            return [], False
         
         time.sleep(3)
         
@@ -2801,21 +2994,46 @@ def click_opinion_position_and_get_data(driver, serial_number):
             position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
             log_print(f"[{serial_number}] [OP] ✓ 找到 Position 内容区域 (ID: {position_div.get_attribute('id')})")
             
-            # 再找这个 div 下的 tbody
-            tbody = position_div.find_element(By.TAG_NAME, "tbody")
-            p_tags = tbody.find_elements(By.TAG_NAME, "p")
-            p_contents = [p.text.strip() for p in p_tags if p.text.strip()]
+            # 在180秒内多次查找p标签，如果数量为0则等待5秒后重试
+            max_retry_time = 180
+            retry_start_time = time.time()
+            p_contents = []
             
-            log_print(f"[{serial_number}] [OP] ✓ Position tbody 中找到 {len(p_contents)} 个 p 标签")
-            return p_contents
+            while time.time() - retry_start_time < max_retry_time:
+                try:
+                    # 先检查是否有"No data yet"
+                    all_p_tags_in_div = position_div.find_elements(By.TAG_NAME, "p")
+                    for p in all_p_tags_in_div:
+                        if "No data yet" in p.text:
+                            log_print(f"[{serial_number}] [OP] ✓ Position 发现 'No data yet'，无数据")
+                            return [], False
+                    
+                    # 再找这个 div 下的 tbody
+                    tbody = position_div.find_element(By.TAG_NAME, "tbody")
+                    p_tags = tbody.find_elements(By.TAG_NAME, "p")
+                    p_contents = [p.text.strip() for p in p_tags if p.text.strip()]
+                    
+                    if len(p_contents) > 0:
+                        log_print(f"[{serial_number}] [OP] ✓ Position tbody 中找到 {len(p_contents)} 个 p 标签")
+                        return p_contents, False
+                    else:
+                        elapsed = int(time.time() - retry_start_time)
+                        log_print(f"[{serial_number}] [OP] ⚠ Position p标签数量为0，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
+                        time.sleep(5)
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Position p标签异常: {str(e)}，等待5秒后重试...")
+                    time.sleep(5)
+            
+            log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Position 数据且无'No data yet'，需要刷新重试")
+            return [], True
             
         except Exception as e:
             log_print(f"[{serial_number}] [OP] ⚠ 获取 Position tbody 失败: {str(e)}")
-            return []
+            return [], False
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 点击 Position 按钮失败: {str(e)}")
-        return []
+        return [], False
 
 
 def click_opinion_open_orders_and_get_data(driver, serial_number):
@@ -2827,7 +3045,9 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         serial_number: 浏览器序列号
         
     Returns:
-        list: p标签内容列表
+        tuple: (p标签内容列表, 是否需要刷新重试)
+            - 如果正常获取数据或找到"No data yet": (data, False)
+            - 如果超时且没有"No data yet": ([], True)
     """
     try:
         log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Open Orders 按钮...")
@@ -2855,7 +3075,7 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         
         if not open_orders_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮")
-            return []
+            return [], False
         
         time.sleep(5)
         
@@ -2865,21 +3085,46 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
             open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
             log_print(f"[{serial_number}] [OP] ✓ 找到 Open Orders 内容区域 (ID: {open_orders_div.get_attribute('id')})")
             
-            # 再找这个 div 下的 tbody
-            tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-            p_tags = tbody.find_elements(By.TAG_NAME, "p")
-            p_contents = [p.text.strip() for p in p_tags if p.text.strip()]
+            # 在180秒内多次查找p标签，如果数量为0则等待5秒后重试
+            max_retry_time = 180
+            retry_start_time = time.time()
+            p_contents = []
             
-            log_print(f"[{serial_number}] [OP] ✓ Open Orders tbody 中找到 {len(p_contents)} 个 p 标签")
-            return p_contents
+            while time.time() - retry_start_time < max_retry_time:
+                try:
+                    # 先检查是否有"No data yet"
+                    all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
+                    for p in all_p_tags_in_div:
+                        if "No data yet" in p.text:
+                            log_print(f"[{serial_number}] [OP] ✓ Open Orders 发现 'No data yet'，无数据")
+                            return [], False
+                    
+                    # 再找这个 div 下的 tbody
+                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                    p_tags = tbody.find_elements(By.TAG_NAME, "p")
+                    p_contents = [p.text.strip() for p in p_tags if p.text.strip()]
+                    
+                    if len(p_contents) > 0:
+                        log_print(f"[{serial_number}] [OP] ✓ Open Orders tbody 中找到 {len(p_contents)} 个 p 标签")
+                        return p_contents, False
+                    else:
+                        elapsed = int(time.time() - retry_start_time)
+                        log_print(f"[{serial_number}] [OP] ⚠ Open Orders p标签数量为0，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
+                        time.sleep(5)
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Open Orders p标签异常: {str(e)}，等待5秒后重试...")
+                    time.sleep(5)
+            
+            log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Open Orders 数据且无'No data yet'，需要刷新重试")
+            return [], True
             
         except Exception as e:
             log_print(f"[{serial_number}] [OP] ⚠ 获取 Open Orders tbody 失败: {str(e)}")
-            return []
+            return [], False
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 点击 Open Orders 按钮失败: {str(e)}")
-        return []
+        return [], False
 
 
 def click_opinion_transactions_and_get_data(driver, serial_number):
@@ -2891,7 +3136,9 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
         serial_number: 浏览器序列号
         
     Returns:
-        list: 交易记录列表，每条记录为字典 {"title": 主题, "direction": 买卖方向, "option": 选项, "amount": 数量, "value": 金额, "price": 价格, "time": 时间}
+        tuple: (交易记录列表, 是否需要刷新重试)
+            - 如果正常获取数据或找到"No data yet": (data, False)
+            - 如果超时且没有"No data yet": ([], True)
     """
     try:
         log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Transactions 按钮...")
@@ -2919,7 +3166,7 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
         
         if not transactions_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Transactions 按钮")
-            return []
+            return [], False
         
         time.sleep(3)
         
@@ -2929,11 +3176,38 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
             transactions_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-transactions']")
             log_print(f"[{serial_number}] [OP] ✓ 找到 Transactions 内容区域 (ID: {transactions_div.get_attribute('id')})")
             
-            # 再找这个 div 下的 tbody
-            tbody = transactions_div.find_element(By.TAG_NAME, "tbody")
-            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            # 在180秒内多次查找tr标签，如果数量为0则等待5秒后重试
+            max_retry_time = 180
+            retry_start_time = time.time()
+            tr_list = []
             
-            log_print(f"[{serial_number}] [OP] ✓ Transactions tbody 中找到 {len(tr_list)} 个 tr 标签")
+            while time.time() - retry_start_time < max_retry_time:
+                try:
+                    # 先检查是否有"No data yet"
+                    all_p_tags_in_div = transactions_div.find_elements(By.TAG_NAME, "p")
+                    for p in all_p_tags_in_div:
+                        if "No data yet" in p.text:
+                            log_print(f"[{serial_number}] [OP] ✓ Transactions 发现 'No data yet'，无数据")
+                            return [], False
+                    
+                    # 再找这个 div 下的 tbody
+                    tbody = transactions_div.find_element(By.TAG_NAME, "tbody")
+                    tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                    
+                    if len(tr_list) > 0:
+                        log_print(f"[{serial_number}] [OP] ✓ Transactions tbody 中找到 {len(tr_list)} 个 tr 标签")
+                        break
+                    else:
+                        elapsed = int(time.time() - retry_start_time)
+                        log_print(f"[{serial_number}] [OP] ⚠ Transactions tr标签数量为0，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
+                        time.sleep(5)
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Transactions tr标签异常: {str(e)}，等待5秒后重试...")
+                    time.sleep(5)
+            
+            if len(tr_list) == 0:
+                log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Transactions 数据且无'No data yet'，需要刷新重试")
+                return [], True
             
             transactions = []
             current_title = None
@@ -3010,15 +3284,15 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                     continue
             
             log_print(f"[{serial_number}] [OP] ✓ 共收集到 {len(transactions)} 条交易记录")
-            return transactions
+            return transactions, False
             
         except Exception as e:
             log_print(f"[{serial_number}] [OP] ⚠ 获取 Transactions tbody 失败: {str(e)}")
-            return []
+            return [], False
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 点击 Transactions 按钮失败: {str(e)}")
-        return []
+        return [], False
 
 
 # ============================================================================
@@ -3040,7 +3314,7 @@ def process_op_position_data(position_data):
     i = 0
     
     while i < len(position_data):
-        # 判断当前项是否是 YES/NO
+        # 判断当前项是否是 YES/NO（单独的选项，使用上一个标题）
         if position_data[i] in ["YES", "NO"]:
             # 这是一行数据的开始（没有标题，使用上一个标题）
             if i + 5 < len(position_data):
@@ -3069,8 +3343,43 @@ def process_op_position_data(position_data):
                 i += 6  # 跳过这一行的其他数据（6项）
             else:
                 i += 1
+        # 判断是否是带子标题的选项（如 "50+ bps decrease - YES"），没有新的主标题
+        elif " - " in position_data[i] and (position_data[i].endswith(" - YES") or position_data[i].endswith(" - NO")) and i + 5 < len(position_data):
+            # 这是同一标题下的另一个选项（带子标题）
+            option_str = position_data[i]
+            amount_str = position_data[i + 1]
+            avg_price = position_data[i + 3] if i + 3 < len(position_data) else ""  # 平均价格
+            
+            # 解析子标题和选项
+            parts = option_str.split(" - ")
+            if len(parts) >= 2 and current_title:
+                sub_title = parts[0].strip()
+                final_option = parts[1].strip()
+                final_title = f"{current_title}###" + sub_title
+                
+                # 忽略 <0.01 的数量
+                if amount_str != "<0.01":
+                    try:
+                        amount = float(amount_str.replace(',', ''))
+                        # YES为正数，NO为负数
+                        if final_option == "NO":
+                            amount = -amount
+                        
+                        # 使用 title+option 作为key来存储数据
+                        key = (final_title, final_option)
+                        if key in processed:
+                            processed[key]["amount"] += amount
+                            processed[key]["avg_price"] = avg_price  # 更新为最新的平均价格
+                        else:
+                            processed[key] = {"amount": amount, "avg_price": avg_price}
+                    except:
+                        pass
+                
+                i += 6  # 跳过这一行的其他数据（6项）
+            else:
+                i += 1
         else:
-            # 这是新的标题
+            # 这是新的标题行
             if i + 6 < len(position_data):
                 current_title = position_data[i]
                 option = position_data[i + 1]
@@ -4593,24 +4902,119 @@ def collect_position_data(driver, browser_id, exchange_name):
             log_print(f"[{browser_id}] 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
             
-            # 获取数据
-            log_print(f"[{browser_id}] 获取 Portfolio 值...")
-            portfolio_value = get_opinion_portfolio_value(driver, browser_id)
-            collected_data['portfolio'] = portfolio_value
+            # 获取数据（带重试机制）
+            max_data_collection_retries = 3
+            retry_attempt = 0
+            position_data = []
+            open_orders_data = []
+            transactions_data = []
             
-            log_print(f"[{browser_id}] 获取 Balance 值...")
-            balance_value = get_opinion_balance_value(driver, browser_id)
-            collected_data['balance'] = balance_value
-            
-            log_print(f"[{browser_id}] 点击 Position 并获取数据...")
-            position_data = click_opinion_position_and_get_data(driver, browser_id)
-            collected_data['position'] = position_data
-            
-            log_print(f"[{browser_id}] 点击 Open Orders 并获取数据...")
-            open_orders_data = click_opinion_open_orders_and_get_data(driver, browser_id)
-            
-            log_print(f"[{browser_id}] 点击 Transactions 并获取数据...")
-            transactions_data = click_opinion_transactions_and_get_data(driver, browser_id)
+            while retry_attempt < max_data_collection_retries:
+                try:
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Portfolio 值...")
+                    portfolio_value, need_retry_portfolio = get_opinion_portfolio_value(driver, browser_id)
+                    collected_data['portfolio'] = portfolio_value
+                    
+                    if need_retry_portfolio:
+                        log_print(f"[{browser_id}] ⚠ Portfolio 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Portfolio 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Balance 值...")
+                    balance_value, need_retry_balance = get_opinion_balance_value(driver, browser_id)
+                    collected_data['balance'] = balance_value
+                    
+                    if need_retry_balance:
+                        log_print(f"[{browser_id}] ⚠ Balance 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并获取数据...")
+                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
+                    collected_data['position'] = position_data
+                    
+                    if need_retry_position:
+                        log_print(f"[{browser_id}] ⚠ Position 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Open Orders 并获取数据...")
+                    open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
+                    
+                    if need_retry_orders:
+                        log_print(f"[{browser_id}] ⚠ Open Orders 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Open Orders 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Transactions 并获取数据...")
+                    transactions_data, need_retry_transactions = click_opinion_transactions_and_get_data(driver, browser_id)
+                    
+                    if need_retry_transactions:
+                        log_print(f"[{browser_id}] ⚠ Transactions 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
+                            break
+                    
+                    # 全部成功，跳出重试循环
+                    log_print(f"[{browser_id}] ✓ 所有数据获取成功")
+                    break
+                    
+                except Exception as e:
+                    log_print(f"[{browser_id}] ✗ 数据获取异常: {str(e)}")
+                    retry_attempt += 1
+                    if retry_attempt < max_data_collection_retries:
+                        log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                        driver.refresh()
+                        time.sleep(5)
+                        connect_wallet_if_needed(driver, browser_id)
+                        time.sleep(2)
+                    else:
+                        log_print(f"[{browser_id}] ✗ 已达到最大重试次数")
+                        break
             
             # 处理数据为标准格式
             log_print(f"[{browser_id}] 处理数据为标准格式...")
@@ -4772,24 +5176,124 @@ def process_type2_mission(task_data):
             log_print(f"[{browser_id}] 步骤4.1: 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
             
-            # 获取数据
-            log_print(f"[{browser_id}] 步骤5: 获取 Portfolio 值...")
-            portfolio_value = get_opinion_portfolio_value(driver, browser_id)
-            collected_data['portfolio'] = portfolio_value
+            # 获取数据（步骤5-9带重试机制）
+            max_data_collection_retries = 3
+            retry_attempt = 0
+            position_data = []
+            open_orders_data = []
+            transactions_data = []
             
-            log_print(f"[{browser_id}] 步骤6: 获取 Balance 值...")
-            balance_value = get_opinion_balance_value(driver, browser_id)
-            collected_data['balance'] = balance_value
-            
-            log_print(f"[{browser_id}] 步骤7: 点击 Position 并获取数据...")
-            position_data = click_opinion_position_and_get_data(driver, browser_id)
-            collected_data['position'] = position_data
-            
-            log_print(f"[{browser_id}] 步骤8: 点击 Open Orders 并获取数据...")
-            open_orders_data = click_opinion_open_orders_and_get_data(driver, browser_id)
-            
-            log_print(f"[{browser_id}] 步骤9: 点击 Transactions 并获取数据...")
-            transactions_data = click_opinion_transactions_and_get_data(driver, browser_id)
+            while retry_attempt < max_data_collection_retries:
+                try:
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤5: 获取 Portfolio 值...")
+                    portfolio_value, need_retry_portfolio = get_opinion_portfolio_value(driver, browser_id)
+                    collected_data['portfolio'] = portfolio_value
+                    
+                    if need_retry_portfolio:
+                        log_print(f"[{browser_id}] ⚠ Portfolio 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            # 重新连接钱包
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Portfolio 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤6: 获取 Balance 值...")
+                    balance_value, need_retry_balance = get_opinion_balance_value(driver, browser_id)
+                    collected_data['balance'] = balance_value
+                    
+                    if need_retry_balance:
+                        log_print(f"[{browser_id}] ⚠ Balance 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            # 重新连接钱包
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并获取数据...")
+                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
+                    collected_data['position'] = position_data
+                    
+                    if need_retry_position:
+                        log_print(f"[{browser_id}] ⚠ Position 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            # 重新连接钱包
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤8: 点击 Open Orders 并获取数据...")
+                    open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
+                    
+                    if need_retry_orders:
+                        log_print(f"[{browser_id}] ⚠ Open Orders 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            # 重新连接钱包
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Open Orders 数据获取失败")
+                            break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤9: 点击 Transactions 并获取数据...")
+                    transactions_data, need_retry_transactions = click_opinion_transactions_and_get_data(driver, browser_id)
+                    
+                    if need_retry_transactions:
+                        log_print(f"[{browser_id}] ⚠ Transactions 数据获取超时，需要刷新页面重试")
+                        retry_attempt += 1
+                        if retry_attempt < max_data_collection_retries:
+                            log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.refresh()
+                            time.sleep(5)
+                            # 重新连接钱包
+                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(2)
+                            continue
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
+                            break
+                    
+                    # 全部成功，跳出重试循环
+                    log_print(f"[{browser_id}] ✓ 所有数据获取成功")
+                    break
+                    
+                except Exception as e:
+                    log_print(f"[{browser_id}] ✗ 数据获取异常: {str(e)}")
+                    retry_attempt += 1
+                    if retry_attempt < max_data_collection_retries:
+                        log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                        driver.refresh()
+                        time.sleep(5)
+                        connect_wallet_if_needed(driver, browser_id)
+                        time.sleep(2)
+                    else:
+                        log_print(f"[{browser_id}] ✗ 已达到最大重试次数")
+                        break
             
             # 打印原始数据
             log_print(f"\n[{browser_id}] ========== 原始数据 ==========")
@@ -5034,8 +5538,9 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             update_browser_timestamp(browser_id)
         
         # 根据任务类型执行
-        if mission_type == 1:
-            # Type 1: 交易任务
+        if mission_type == 1 or mission_type == 5:
+            # Type 1: 普通交易任务
+            # Type 5: 自动对冲交易任务（带同步机制）
             result = process_trading_mission(task_data, keep_browser_open=True)
             
             if len(result) == 5:
@@ -5047,7 +5552,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 task_exchange_name = None
             
             # 立即记录任务结果（不等待数据收集）
-            log_print(f"[{browser_id}] Type 1 任务{'成功' if success else '失败'}，立即记录结果...")
+            log_print(f"[{browser_id}] Type {mission_type} 任务{'成功' if success else '失败'}，立即记录结果...")
             with active_tasks_lock:
                 if mission_id in active_tasks:
                     active_tasks[mission_id]['results'][browser_id] = {
@@ -5055,9 +5560,9 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                         'reason': failure_reason if not success else ''
                     }
                     active_tasks[mission_id]['completed'] += 1
-            log_print(f"[{browser_id}] ✓ Type 1 任务结果已记录")
+            log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已记录")
             
-            # Type 1任务完成后收集持仓数据（不影响任务结果）
+            # Type 1/5任务完成后收集持仓数据（不影响任务结果）
             if success and driver and task_browser_id and task_exchange_name:
                 try:
                     log_print(f"[{browser_id}] 开始额外收集持仓数据（不影响任务结果）...")
@@ -5074,7 +5579,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     log_print(f"[{browser_id}] 任务失败，关闭浏览器...")
                     close_adspower_browser(task_browser_id)
             
-            # Type 1 任务结果已经在上面记录了，跳过后面的统一记录
+            # Type 1/5 任务结果已经在上面记录了，跳过后面的统一记录
             return
             
         elif mission_type == 2:
@@ -5089,10 +5594,10 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             type3_completed_updated = False  # 标记是否已更新计数
             
             try:
-                # 将浏览器ID加入正在执行的集合
+                # 将浏览器ID和任务ID加入正在执行的映射
                 with active_type3_browsers_lock:
-                    active_type3_browsers.add(browser_id)
-                    log_print(f"[{browser_id}] Type 3 任务开始，浏览器已标记为繁忙")
+                    active_type3_browsers[browser_id] = mission_id
+                    log_print(f"[{browser_id}] Type 3 任务 {mission_id} 开始，浏览器已标记为繁忙")
                 
                 try:
                     success, failure_reason, orderbook_data = process_type3_mission(task_data)
@@ -5114,10 +5619,10 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     else:
                         submit_mission_result(mission_id, 0, 1, {browser_id: failure_reason}, status=3)
                 finally:
-                    # 无论成功还是失败，都从集合中移除浏览器ID
+                    # 无论成功还是失败，都从映射中移除浏览器ID
                     with active_type3_browsers_lock:
-                        active_type3_browsers.discard(browser_id)
-                        log_print(f"[{browser_id}] Type 3 任务完成，浏览器标记已清除")
+                        active_type3_browsers.pop(browser_id, None)
+                        log_print(f"[{browser_id}] Type 3 任务 {mission_id} 完成，浏览器标记已清除")
                     
                     # 更新任务完成计数，以便任务可以从 active_tasks 中清理
                     with active_tasks_lock:
@@ -5130,6 +5635,12 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                             type3_completed_updated = True
                             log_print(f"[{browser_id}] ✓ Type 3 任务计数已更新 (completed: {active_tasks[mission_id]['completed']}/{active_tasks[mission_id]['total']})")
             finally:
+                # 确保浏览器标记被清除（双重保险）
+                with active_type3_browsers_lock:
+                    if browser_id in active_type3_browsers:
+                        active_type3_browsers.pop(browser_id, None)
+                        log_print(f"[{browser_id}] Type 3 任务 {mission_id} 外层finally：确保浏览器标记已清除")
+                
                 # 如果内层 finally 没有更新计数（比如在加入浏览器集合时就异常了），这里补充更新
                 if not type3_completed_updated:
                     with active_tasks_lock:
@@ -5167,8 +5678,8 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
         if mission_type == 3:
             with active_type3_browsers_lock:
                 if browser_id in active_type3_browsers:
-                    active_type3_browsers.discard(browser_id)
-                    log_print(f"[{browser_id}] Type 3 任务异常，清除浏览器标记")
+                    active_type3_browsers.pop(browser_id, None)
+                    log_print(f"[{browser_id}] Type 3 任务 {mission_id} 异常，清除浏览器标记")
         
         # 记录失败（Type 1 和 Type 3 已经在各自的逻辑中更新了计数，这里只处理 Type 2 和其他类型）
         if mission_type not in [1, 3]:
@@ -5236,8 +5747,21 @@ def main():
                 
                 # 如果是 type=3 任务，检查该浏览器是否已经在执行 type=3 任务
                 if mission_type == 3:
+                    browser_is_busy = False
                     with active_type3_browsers_lock:
-                        browser_is_busy = browser_id in active_type3_browsers
+                        if browser_id in active_type3_browsers:
+                            old_mission_id = active_type3_browsers[browser_id]
+                            # 检查旧任务是否真的还在运行
+                            with active_tasks_lock:
+                                if old_mission_id in active_tasks:
+                                    # 旧任务还在运行，浏览器确实繁忙
+                                    browser_is_busy = True
+                                    log_print(f"[系统] 浏览器 {browser_id} 正在执行 Type=3 任务 {old_mission_id}")
+                                else:
+                                    # 旧任务已完成但标记未清除（幽灵标记），自动清理
+                                    log_print(f"[系统] ⚠ 检测到幽灵标记：浏览器 {browser_id} 的旧任务 {old_mission_id} 已完成但标记未清除，自动清理")
+                                    active_type3_browsers.pop(browser_id, None)
+                                    browser_is_busy = False
                     
                     if browser_is_busy:
                         log_print(f"[系统] ⚠ 浏览器 {browser_id} 已有 Type=3 任务正在执行，跳过任务 {mission_id}")

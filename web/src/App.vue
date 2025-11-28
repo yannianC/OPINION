@@ -2550,7 +2550,7 @@ const executeHedgeTask = async (config, hedgeData) => {
     const taskData = {
       groupNo: groupNo,
       numberList: parseInt(firstBrowser),
-      type: 1,
+      type: 5,  // 自动对冲使用 type=5
       trendingId: config.id,
       exchangeName: 'OP',
       side: 1,
@@ -2728,16 +2728,20 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     const secondPrice = (100 - parseFloat(hedgeRecord.price)).toFixed(1)
     console.log(`任务二价格计算: 100 - ${hedgeRecord.price} = ${secondPrice}`)
     
+    // 获取第一个任务的ID
+    const firstTaskId = hedgeRecord.firstSide === 'YES' ? hedgeRecord.yesTaskId : hedgeRecord.noTaskId
+    
     const taskData = {
       groupNo: groupNo,
       numberList: parseInt(secondBrowser),
-      type: 1,
+      type: 5,  // 自动对冲使用 type=5
       trendingId: config.id,
       exchangeName: 'OP',
       side: 1,
       psSide: secondPsSide,
       amt: hedgeRecord.share,
-      price: parseFloat(secondPrice)
+      price: parseFloat(secondPrice),
+      tp1: firstTaskId  // 任务二需要传递任务一的ID
     }
     
     const response = await axios.post(

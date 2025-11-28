@@ -1,0 +1,102 @@
+{
+  "ZEC": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 13:56:56",
+    "last_price": 476.36
+  },
+  "NEAR": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "BONK": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 13:59:01",
+    "last_price": 9.76e-06
+  },
+  "W": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 14:00:05",
+    "last_price": 0.0454
+  },
+  "ETC": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "IO": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "PIXEL": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "SUSHI": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "RONIN": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 15:06:49",
+    "last_price": 0.1767
+  },
+  "EGLD": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "FORM": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "ZEN": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "PENGU": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "ZK": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "RESOLV": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 14:07:03",
+    "last_price": 0.0889
+  },
+  "AT": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 14:15:34",
+    "last_price": 0.212
+  },
+  "RARE": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 15:04:47",
+    "last_price": 0.0255
+  },
+  "EDEN": {
+    "state": "NORMAL",
+    "last_trigger_ts": null,
+    "last_price": null
+  },
+  "OG": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 14:35:29",
+    "last_price": 11.828
+  },
+  "DYDX": {
+    "state": "OVERBOUGHT",
+    "last_trigger_ts": "2025-11-28 14:50:28",
+    "last_price": 0.2505
+  }
+}

@@ -34,6 +34,12 @@ TG_BOT_TOKEN = "6343055800:AAEEhBUrIg0qkI2CG8mTHtZT0qRjHc1i2JI"   # <- fill your
 TG_CHAT_ID = "6387103286"     # <- fill your chat id (e.g. -100...)
 SEND_PHOTO = True    # B mode uses image push
 
+# 代理配置
+PROXIES = {
+    'http': 'http://127.0.0.1:7890',
+    'https': 'http://127.0.0.1:7890'
+}
+
 SYMBOL_BASE = "USDT"
 TOP_N = 200
 MAIN_TF = "15m"
@@ -104,12 +110,15 @@ db_conn, db_cur = init_db(DB_FILE)
 TG_API_BASE = f"https://api.telegram.org/bot{TG_BOT_TOKEN}" if TG_BOT_TOKEN else None
 
 def send_tg_text(text):
+    """
+    发送Telegram文本消息（使用代理）
+    """
     if not TG_API_BASE or not TG_CHAT_ID:
         print("[TG] not configured. Message would be:\n", text)
         return None
     try:
         payload = {"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}
-        r = requests.post(f"{TG_API_BASE}/sendMessage", data=payload, timeout=20)
+        r = requests.post(f"{TG_API_BASE}/sendMessage", data=payload, timeout=20, proxies=PROXIES)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -117,6 +126,9 @@ def send_tg_text(text):
         return None
 
 def send_tg_photo(pfile, caption=""):
+    """
+    发送Telegram图片消息（使用代理）
+    """
     if not TG_API_BASE or not TG_CHAT_ID:
         print("[TG] not configured. Photo would be:", pfile)
         return None
@@ -127,7 +139,7 @@ def send_tg_photo(pfile, caption=""):
         with open(pfile, "rb") as f:
             files = {"photo": f}
             data = {"chat_id": TG_CHAT_ID, "caption": caption, "parse_mode": "HTML"}
-            r = requests.post(f"{TG_API_BASE}/sendPhoto", files=files, data=data, timeout=40)
+            r = requests.post(f"{TG_API_BASE}/sendPhoto", files=files, data=data, timeout=40, proxies=PROXIES)
             r.raise_for_status()
             return r.json()
     except Exception as e:
@@ -374,7 +386,13 @@ def plot_signal_chart(symbol, df, step_series, signals, tpsl, outpath):
 # Fetch top N symbols robustly
 # -------------------------
 def fetch_top_n_binance(n=TOP_N, exchange=None):
-    ex = exchange or ccxt.binance({"enableRateLimit": True})
+    """
+    获取币安交易量前N的交易对（使用代理）
+    """
+    ex = exchange or ccxt.binance({
+        "enableRateLimit": True,
+        "proxies": PROXIES
+    })
     try:
         tickers = ex.fetch_tickers()
     except Exception as e:
@@ -752,7 +770,13 @@ def wait_until_next_15m_utc8():
 # Main runner
 # -------------------------
 def main():
-    exchange = ccxt.binance({"enableRateLimit": True})
+    """
+    主函数：监控币安USDT交易对的RSI信号（使用代理）
+    """
+    exchange = ccxt.binance({
+        "enableRateLimit": True,
+        "proxies": PROXIES
+    })
     # startup: fetch top N and run full scan immediately
     try:
         symbols = fetch_top_n_binance(TOP_N, exchange=exchange)

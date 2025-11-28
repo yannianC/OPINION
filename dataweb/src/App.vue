@@ -48,6 +48,36 @@
       </div>
     </div>
 
+    <!-- 仓位时间配置区域 -->
+    <div class="position-time-config-container">
+      <div class="config-row">
+        <label>忽略仓位时间的浏览器:</label>
+        <el-input 
+          v-model="positionTimeConfig.ignoredBrowsers" 
+          placeholder="浏览器编号，逗号分隔，如: 4001,4002,4003"
+          clearable
+          size="small"
+          style="width: 700px"
+        />
+        <el-button type="primary" size="small" @click="saveIgnoredBrowsers">
+          确定并保存
+        </el-button>
+      </div>
+      <div class="config-row">
+        <el-checkbox v-model="positionTimeConfig.autoUpdate" @change="toggleAutoUpdate">
+          自动更新打开时间大于最近
+        </el-checkbox>
+        <el-input 
+          v-model.number="positionTimeConfig.updateThresholdMinutes" 
+          type="number"
+          size="small"
+          style="width: 80px"
+          min="1"
+        />
+        <span>分钟的仓位</span>
+      </div>
+    </div>
+
     <!-- 筛选区域 -->
     <div class="filter-container">
       <div class="filter-row">
@@ -153,8 +183,8 @@
       :data="filteredTableData" 
       border 
       style="width: 100%"
-      :max-height="600"
       v-loading="loading"
+      :row-class-name="getRowClassName"
     >
       <el-table-column prop="index" label="序号" width="80" align="center" fixed />
       
@@ -247,11 +277,20 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="仓位抓取时间" width="150" align="center" fixed="right" sortable :sort-method="(a, b) => sortByNumber(a.d, b.d)">
+      <el-table-column label="仓位抓取时间(d)" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.d, b.d)">
         <template #default="scope">
           <div class="capture-time-cell">
             <el-icon><Clock /></el-icon>
             <span>{{ formatRelativeTime(scope.row.d) }}</span>
+          </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="打开时间(f)" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.f, b.f)">
+        <template #default="scope">
+          <div class="capture-time-cell">
+            <el-icon><Clock /></el-icon>
+            <span>{{ formatRelativeTime(scope.row.f) }}</span>
           </div>
         </template>
       </el-table-column>
@@ -397,6 +436,16 @@ const activeFilters = ref({
 })
 
 /**
+ * 仓位时间配置
+ */
+const positionTimeConfig = ref({
+  ignoredBrowsers: '',  // 忽略的浏览器编号
+  autoUpdate: false,  // 是否自动更新
+  updateThresholdMinutes: 30  // 更新阈值（分钟）
+})
+let autoUpdateTimer = null
+
+/**
  * 解析输入值（支持单个、逗号分隔、区间）
  * 例如: "1" 或 "1,2,3" 或 "1-3"
  */
@@ -496,6 +545,24 @@ const filteredTableData = computed(() => {
       return false
     })
   }
+  
+  // 排序：打开时间>仓位时间的置顶（排除忽略的浏览器）
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  result = result.sort((a, b) => {
+    const aIgnored = ignoredBrowsersSet.has(String(a.fingerprintNo))
+    const bIgnored = ignoredBrowsersSet.has(String(b.fingerprintNo))
+    
+    // 检查打开时间是否大于仓位时间
+    const aOpenTimeGreater = !aIgnored && shouldHighlightRow(a)
+    const bOpenTimeGreater = !bIgnored && shouldHighlightRow(b)
+    
+    // 打开时间>仓位时间的排在前面
+    if (aOpenTimeGreater && !bOpenTimeGreater) return -1
+    if (!aOpenTimeGreater && bOpenTimeGreater) return 1
+    
+    // 其他保持原顺序
+    return 0
+  })
   
   return result
 })
@@ -599,6 +666,128 @@ const formatRelativeTime = (timestamp) => {
   } catch {
     return '未知'
   }
+}
+
+/**
+ * 获取忽略的浏览器集合
+ */
+const getIgnoredBrowsersSet = () => {
+  const input = positionTimeConfig.value.ignoredBrowsers.trim()
+  if (!input) return new Set()
+  
+  const browsers = input.split(',').map(b => b.trim()).filter(b => b)
+  return new Set(browsers)
+}
+
+/**
+ * 判断行是否应该高亮（打开时间>仓位时间）
+ */
+const shouldHighlightRow = (row) => {
+  if (!row.f || !row.d) return false
+  
+  const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+  const positionTime = typeof row.d === 'string' ? parseInt(row.d) : row.d
+  
+  return openTime > positionTime
+}
+
+/**
+ * 获取行的CSS类名
+ */
+const getRowClassName = ({ row }) => {
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const isIgnored = ignoredBrowsersSet.has(String(row.fingerprintNo))
+  
+  if (!isIgnored && shouldHighlightRow(row)) {
+    return 'highlight-row'
+  }
+  return ''
+}
+
+/**
+ * 保存忽略的浏览器配置
+ */
+const saveIgnoredBrowsers = () => {
+  try {
+    localStorage.setItem('ignoredBrowsers', positionTimeConfig.value.ignoredBrowsers)
+    ElMessage.success('已保存忽略浏览器配置')
+  } catch (error) {
+    ElMessage.error('保存配置失败')
+    console.error('保存配置失败:', error)
+  }
+}
+
+/**
+ * 切换自动更新
+ */
+const toggleAutoUpdate = () => {
+  if (positionTimeConfig.value.autoUpdate) {
+    // 开启自动更新
+    performAutoUpdate()  // 立即执行一次
+    autoUpdateTimer = setInterval(performAutoUpdate, 20 * 60 * 1000)  // 每20分钟执行一次
+    ElMessage.success('已开启自动更新仓位')
+  } else {
+    // 关闭自动更新
+    if (autoUpdateTimer) {
+      clearInterval(autoUpdateTimer)
+      autoUpdateTimer = null
+    }
+    ElMessage.info('已关闭自动更新仓位')
+  }
+}
+
+/**
+ * 执行自动更新
+ */
+const performAutoUpdate = async () => {
+  console.log('[自动更新] 开始检查需要更新的仓位...')
+  
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const thresholdMinutes = positionTimeConfig.value.updateThresholdMinutes
+  const now = Date.now()
+  
+  const browsersToUpdate = []
+  
+  for (const row of tableData.value) {
+    // 跳过忽略的浏览器
+    if (ignoredBrowsersSet.has(String(row.fingerprintNo))) {
+      continue
+    }
+    
+    // 检查打开时间是否大于仓位时间
+    if (!shouldHighlightRow(row)) {
+      continue
+    }
+    
+    // 检查打开时间距离现在是否已经过去了阈值分钟数
+    const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+    const elapsedMinutes = (now - openTime) / 1000 / 60
+    
+    if (elapsedMinutes >= thresholdMinutes) {
+      browsersToUpdate.push(row)
+    }
+  }
+  
+  if (browsersToUpdate.length === 0) {
+    console.log('[自动更新] 没有需要更新的仓位')
+    return
+  }
+  
+  console.log(`[自动更新] 发现 ${browsersToUpdate.length} 个需要更新的浏览器`)
+  
+  // 依次更新每个浏览器的仓位
+  for (const row of browsersToUpdate) {
+    try {
+      console.log(`[自动更新] 正在更新浏览器 ${row.fingerprintNo}...`)
+      await refreshPosition(row)
+      await new Promise(resolve => setTimeout(resolve, 2000))  // 间隔2秒
+    } catch (error) {
+      console.error(`[自动更新] 更新浏览器 ${row.fingerprintNo} 失败:`, error)
+    }
+  }
+  
+  console.log('[自动更新] 完成')
+  ElMessage.success(`已自动更新 ${browsersToUpdate.length} 个浏览器的仓位`)
 }
 
 /**
@@ -1363,6 +1552,16 @@ onMounted(() => {
   if (autoRefresh.value.enabled) {
     startAutoRefresh()
   }
+  
+  // 加载忽略浏览器配置
+  try {
+    const savedIgnoredBrowsers = localStorage.getItem('ignoredBrowsers')
+    if (savedIgnoredBrowsers) {
+      positionTimeConfig.value.ignoredBrowsers = savedIgnoredBrowsers
+    }
+  } catch (error) {
+    console.error('加载忽略浏览器配置失败:', error)
+  }
 })
 
 /**
@@ -1370,6 +1569,12 @@ onMounted(() => {
  */
 onUnmounted(() => {
   stopAutoRefresh()
+  
+  // 清理自动更新定时器
+  if (autoUpdateTimer) {
+    clearInterval(autoUpdateTimer)
+    autoUpdateTimer = null
+  }
 })
 </script>
 
@@ -1434,6 +1639,37 @@ onUnmounted(() => {
   font-size: 12px;
   color: #999;
   font-style: italic;
+}
+
+.position-time-config-container {
+  margin-bottom: 15px;
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.position-time-config-container .config-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.position-time-config-container .config-row:last-child {
+  margin-bottom: 0;
+}
+
+.position-time-config-container label {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.position-time-config-container span {
+  font-size: 14px;
+  color: #606266;
 }
 
 .filter-container {
@@ -1684,6 +1920,15 @@ onUnmounted(() => {
 .dialog-footer {
   display: flex;
   justify-content: center;
+}
+
+/* 高亮行（打开时间>仓位时间） */
+:deep(.el-table__row.highlight-row) {
+  background-color: #fee !important;
+}
+
+:deep(.el-table__row.highlight-row:hover > td) {
+  background-color: #fdd !important;
 }
 </style>
 
