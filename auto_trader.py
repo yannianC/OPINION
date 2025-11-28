@@ -63,17 +63,24 @@ def get_browser_password(browser_id):
 
 
 # 电脑组
-COMPUTER_GROUP = "0"
+COMPUTER_GROUP = "7"
 
-# 密码配置
+# 密码配置（密码 -> 浏览器ID列表）
+# 格式：密码: "浏览器ID1,浏览器ID2,浏览器ID3,..."
+# 特殊值 "else" 表示其他所有未匹配的浏览器使用此密码
 PASSWORD_MAP = {
-    # 示例配置
-    # "your_password": "1,2,3,4,5",
-    # "another_password": "else",
+    # 示例 1：为特定浏览器配置不同密码
+    # "ywj000805*": "11,22,33,44,5566,77,88",
+    # "tnpxxx": "1,2,3,4,5,6",
+    # "another_password": "100,200,300",
+    
+    # 示例 2：所有浏览器使用同一个密码（此时 PWD 不会被使用）
+    # "your_password": "else",
 }
 
-# 默认密码
-PWD = "Ok123456"
+# 默认密码（仅当 PASSWORD_MAP 为空或没有 "else" 配置时使用）
+# 如果您使用了 PASSWORD_MAP = {"your_password": "else"}，则此值不会被使用
+PWD = "cx142359."
 
 # 服务器API配置
 SERVER_BASE_URL = "https://sg.bicoin.com.cn/99l"
@@ -1013,8 +1020,8 @@ def wait_for_opinion_trade_box(driver, serial_number, max_retries=3):
         WebElement: trade-box元素，失败返回None
     """
     for attempt in range(max_retries):
-            log_print(f"[{serial_number}] [OP] 等待页面加载完成... (尝试 {attempt + 1}/{max_retries})")
-            
+        log_print(f"[{serial_number}] [OP] 等待页面加载完成... (尝试 {attempt + 1}/{max_retries})")
+        
         # 在30秒内，每隔3秒查找一次
         timeout = 30
         interval = 3
@@ -1024,15 +1031,15 @@ def wait_for_opinion_trade_box(driver, serial_number, max_retries=3):
             try:
                 elapsed = int(time.time() - start_time)
                 log_print(f"[{serial_number}] [OP] 查找 trade-box... ({elapsed}s/{timeout}s)")
-            
-            # 查找 trade-box
-            trade_box = driver.find_element(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
-            
-            if trade_box:
+                
+                # 查找 trade-box
+                trade_box = driver.find_element(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                
+                if trade_box:
                     log_print(f"[{serial_number}] [OP] ✓ 页面加载成功，找到 trade-box (用时 {elapsed}s)")
-                return trade_box
-            
-        except Exception as e:
+                    return trade_box
+                
+            except Exception as e:
                 elapsed = int(time.time() - start_time)
                 log_print(f"[{serial_number}] [OP] ⚠ 未找到 trade-box ({elapsed}s/{timeout}s)")
             
@@ -1042,14 +1049,14 @@ def wait_for_opinion_trade_box(driver, serial_number, max_retries=3):
         
         # 30秒超时
         log_print(f"[{serial_number}] [OP] ✗ 30秒内未找到 trade-box")
-            
-            if attempt < max_retries - 1:
-                log_print(f"[{serial_number}] [OP] 刷新页面并重试...")
-                driver.refresh()
+        
+        if attempt < max_retries - 1:
+            log_print(f"[{serial_number}] [OP] 刷新页面并重试...")
+            driver.refresh()
             time.sleep(2)  # 刷新后等待2秒
-            else:
+        else:
             log_print(f"[{serial_number}] [OP] ✗ 页面加载失败，已达到最大重试次数 ({max_retries})")
-                return None
+            return None
     
     return None
 
@@ -1500,8 +1507,6 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     
                                     # 更改状态为7（任务一已确认）
                                     log_print(f"[{serial_number}] [OP] 任务一: 设置状态为7（已确认）...")
-                                    save_result_success = save_mission_result(mission_id, 7)
-                                    if not save_result_success:
                                     save_result_success = save_mission_result(mission_id, 7)
                                     if not save_result_success:
                                         log_print(f"[{serial_number}] [OP] ⚠ 任务一设置状态7失败，但已点击确认")
@@ -2877,17 +2882,17 @@ def get_opinion_portfolio_value(driver, serial_number):
         
         while time.time() - retry_start_time < max_retry_time:
             try:
-        p_tags = driver.find_elements(By.TAG_NAME, "p")
-        
-        for p in p_tags:
-            if p.text.strip() == "Portfolio":
-                parent = p.find_element(By.XPATH, "..")
-                child_p_tags = parent.find_elements(By.TAG_NAME, "p")
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
                 
-                if len(child_p_tags) >= 2:
-                    portfolio_value = child_p_tags[1].text.strip()
+                for p in p_tags:
+                    if p.text.strip() == "Portfolio":
+                        parent = p.find_element(By.XPATH, "..")
+                        child_p_tags = parent.find_elements(By.TAG_NAME, "p")
+                        
+                        if len(child_p_tags) >= 2:
+                            portfolio_value = child_p_tags[1].text.strip()
                             if portfolio_value:  # 确保值不为空
-                    log_print(f"[{serial_number}] [OP] ✓ Portfolio 值: {portfolio_value}")
+                                log_print(f"[{serial_number}] [OP] ✓ Portfolio 值: {portfolio_value}")
                                 return portfolio_value, False
                 
                 # 如果没找到或值为空，等待5秒后重试
@@ -2929,21 +2934,21 @@ def get_opinion_balance_value(driver, serial_number):
         
         while time.time() - retry_start_time < max_retry_time:
             try:
-        p_tags = driver.find_elements(By.TAG_NAME, "p")
-        
-        for p in p_tags:
-            if p.text.strip() == "Balance":
-                parent = p.find_element(By.XPATH, "..")
-                children = parent.find_elements(By.XPATH, "./*")
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
                 
-                if len(children) >= 2:
-                    second_child = children[1]
-                    p_in_second_child = second_child.find_elements(By.TAG_NAME, "p")
-                    
-                    if p_in_second_child:
-                        balance_value = p_in_second_child[0].text.strip()
+                for p in p_tags:
+                    if p.text.strip() == "Balance":
+                        parent = p.find_element(By.XPATH, "..")
+                        children = parent.find_elements(By.XPATH, "./*")
+                        
+                        if len(children) >= 2:
+                            second_child = children[1]
+                            p_in_second_child = second_child.find_elements(By.TAG_NAME, "p")
+                            
+                            if p_in_second_child:
+                                balance_value = p_in_second_child[0].text.strip()
                                 if balance_value:  # 确保值不为空
-                        log_print(f"[{serial_number}] [OP] ✓ Balance 值: {balance_value}")
+                                    log_print(f"[{serial_number}] [OP] ✓ Balance 值: {balance_value}")
                                     return balance_value, False
                 
                 # 如果没找到或值为空，等待5秒后重试
@@ -3257,33 +3262,11 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                         # P2: 选项 (索引1)，可能包含子标题
                         option_text = p_tags[1].text.strip()
                         
-                        # P3: 数量/shares (索引2) - 如果是"-"则等待5秒后重新获取
+                        # P3: 数量/shares (索引2)
                         amount = p_tags[2].text.strip()
-                        if amount == "-":
-                            log_print(f"[{serial_number}] [OP] TR {tr_idx}: 数量为'-'，等待5秒后重新获取...")
-                            time.sleep(5)
-                            # 重新查找tr下的所有p标签以获取最新值
-                            p_tags_refreshed = tr.find_elements(By.TAG_NAME, "p")
-                            if len(p_tags_refreshed) >= 3:
-                                amount = p_tags_refreshed[2].text.strip()
-                                log_print(f"[{serial_number}] [OP] TR {tr_idx}: 重新获取数量 = {amount}")
-                            if amount == "-":
-                                log_print(f"[{serial_number}] [OP] TR {tr_idx}: 数量仍为'-'，设置为'0'")
-                                amount = "0"
                         
-                        # P4: 金额/amount (索引3) - 如果是"-"则等待5秒后重新获取
+                        # P4: 金额/amount (索引3)
                         value = p_tags[3].text.strip()
-                        if value == "-":
-                            log_print(f"[{serial_number}] [OP] TR {tr_idx}: 金额为'-'，等待5秒后重新获取...")
-                            time.sleep(5)
-                            # 重新查找tr下的所有p标签以获取最新值
-                            p_tags_refreshed = tr.find_elements(By.TAG_NAME, "p")
-                            if len(p_tags_refreshed) >= 4:
-                                value = p_tags_refreshed[3].text.strip()
-                                log_print(f"[{serial_number}] [OP] TR {tr_idx}: 重新获取金额 = {value}")
-                            if value == "-":
-                                log_print(f"[{serial_number}] [OP] TR {tr_idx}: 金额仍为'-'，设置为'0'")
-                                value = "0"
                         
                         # P5: 价格/price (索引4)
                         price = p_tags[4].text.strip()
@@ -3410,7 +3393,7 @@ def process_op_position_data(position_data):
                         if key in processed:
                             processed[key]["amount"] += amount
                             processed[key]["avg_price"] = avg_price  # 更新为最新的平均价格
-        else:
+                        else:
                             processed[key] = {"amount": amount, "avg_price": avg_price}
                     except:
                         pass
