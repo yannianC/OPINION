@@ -179,7 +179,7 @@
                       </div>
                       <div class="task-time">{{ formatTime(config.type3Task.updateTime) }}</div>
                       <div v-if="config.type3Task.msg" class="task-msg">
-                        <span class="msg-content">{{ config.type3Task.msg }}</span>
+                        <span class="msg-content">{{ formatTaskMsg(config.type3Task.msg) }}</span>
                       </div>
                     </div>
                     <div v-else class="no-data">暂无数据</div>
@@ -733,7 +733,7 @@
 
                 <div v-if="item.mission.msg" class="mission-msg">
                   <span class="label">消息:</span>
-                  <span class="value">{{ item.mission.msg }}</span>
+                  <span class="value">{{ formatTaskMsg(item.mission.msg) }}</span>
                 </div>
                 
                 <!-- 重试按钮 - 仅失败任务显示 -->
@@ -907,6 +907,12 @@
           <button type="button" class="btn btn-danger btn-sm" @click="disableAllConfigs">
             全部禁用
           </button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="showAllConfigs">
+            全部显示
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="hideAllConfigs">
+            全部隐藏
+          </button>
         </div>
         <div class="config-list">
           <div v-if="filteredEditConfigList.length === 0" class="empty">{{ editConfigList.length === 0 ? '暂无配置' : '没有匹配的配置' }}</div>
@@ -922,6 +928,15 @@
                   />
                   <span class="switch-slider"></span>
                   <span class="switch-text">{{ config.enabled ? '启用' : '禁用' }}</span>
+                </label>
+                <label class="switch-label" style="margin-left: 15px;">
+                  <input 
+                    type="checkbox" 
+                    v-model="config.visible" 
+                    class="switch-checkbox"
+                  />
+                  <span class="switch-slider"></span>
+                  <span class="switch-text">{{ config.visible ? '显示' : '隐藏' }}</span>
                 </label>
                 <!-- <button type="button" class="btn-remove" @click="removeConfigItem(index)">删除</button> -->
               </div>
@@ -1043,13 +1058,13 @@
           <div v-if="allHedgeLogs.length === 0" class="empty">暂无对冲记录</div>
           <div v-else class="all-hedge-log-list">
             <div 
-              v-for="(log, index) in allHedgeLogs" 
+              v-for="(log, index) in paginatedAllHedgeLogs" 
               :key="index" 
               class="compact-hedge-log-item"
               :class="getHedgeLogStatusClass(log)"
             >
               <div class="compact-log-main">
-                <span class="compact-log-id">#{{ allHedgeLogs.length - index }}</span>
+                <span class="compact-log-id">#{{ allHedgeLogs.length - ((allHedgeLogsCurrentPage - 1) * allHedgeLogsPageSize + index) }}</span>
                 <span class="compact-log-trending">{{ log.trendingName }}</span>
                 <span 
                   class="compact-status-badge"
@@ -1072,7 +1087,7 @@
                     浏览器{{ log.yesNumber }} | 
                     任务{{ log.yesTaskId || '-' }} | 
                     <span :class="getTaskStatusClass(log.yesStatus)">{{ getStatusText(log.yesStatus) }}</span>
-                    <span v-if="log.yesTaskMsg" class="task-msg">| {{ log.yesTaskMsg }}</span>
+                    <span v-if="log.yesTaskMsg" class="task-msg">| {{ formatTaskMsg(log.yesTaskMsg) }}</span>
                   </span>
                 </div>
                 <div class="compact-task-row">
@@ -1082,12 +1097,32 @@
                     浏览器{{ log.noNumber }} | 
                     任务{{ log.noTaskId || '-' }} | 
                     <span :class="getTaskStatusClass(log.noStatus)">{{ getStatusText(log.noStatus) }}</span>
-                    <span v-if="log.noTaskMsg" class="task-msg">| {{ log.noTaskMsg }}</span>
+                    <span v-if="log.noTaskMsg" class="task-msg">| {{ formatTaskMsg(log.noTaskMsg) }}</span>
                   </span>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+        <div v-if="allHedgeLogs.length > 0" class="pagination">
+          <button 
+            class="btn btn-sm" 
+            @click="prevPage" 
+            :disabled="allHedgeLogsCurrentPage === 1"
+          >
+            上一页
+          </button>
+          <span class="pagination-info">
+            第 {{ allHedgeLogsCurrentPage }} / {{ allHedgeLogsTotalPages }} 页
+            (显示 {{ (allHedgeLogsCurrentPage - 1) * allHedgeLogsPageSize + 1 }}-{{ Math.min(allHedgeLogsCurrentPage * allHedgeLogsPageSize, allHedgeLogs.length) }} 条)
+          </span>
+          <button 
+            class="btn btn-sm" 
+            @click="nextPage" 
+            :disabled="allHedgeLogsCurrentPage === allHedgeLogsTotalPages"
+          >
+            下一页
+          </button>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-warning" @click="clearAllHedgeLogs">清空所有日志</button>
@@ -1189,11 +1224,14 @@ const currentLogConfig = ref(null)
 const hedgeLogs = ref([])
 const showAllHedgeLogsDialog = ref(false)  // 总日志弹窗
 const allHedgeLogs = ref([])  // 所有对冲日志
+const allHedgeLogsCurrentPage = ref(1)  // 总日志当前页
+const allHedgeLogsPageSize = ref(10)  // 总日志每页显示数量
 
 // 本地存储的对冲记录
 const LOCAL_STORAGE_KEY = 'hedge_logs'
 const HEDGE_SETTINGS_KEY = 'hedge_settings'
 const MONITOR_BROWSER_KEY = 'monitor_browser_ids'
+const CONFIG_VISIBLE_KEY = 'config_visible_status'  // 配置显示状态
 
 // 对冲任务暂停状态（按 trendingId 记录）
 const pausedType3Tasks = ref(new Set())
@@ -2048,11 +2086,14 @@ const submitAddConfig = async () => {
  */
 const showEditConfigDialog = () => {
   // 深拷贝当前配置列表，并确保 enabled 字段正确映射
-  editConfigList.value = JSON.parse(JSON.stringify(configList.value)).map(config => ({
+  const baseList = JSON.parse(JSON.stringify(configList.value)).map(config => ({
     ...config,
     enabled: config.isOpen === 1 || config.enabled === true,
     weight: config.weight || 0
   }))
+  
+  // 加载显示状态
+  editConfigList.value = loadConfigVisibleStatus(baseList)
   showEditConfig.value = true
 }
 
@@ -2078,6 +2119,30 @@ const disableAllConfigs = () => {
 }
 
 /**
+ * 全部显示配置
+ */
+const showAllConfigs = () => {
+  if (confirm('确定要将所有配置设置为显示吗？')) {
+    editConfigList.value.forEach(config => {
+      config.visible = true
+    })
+    alert('已将所有配置设置为显示状态，请点击"保存全部"以生效')
+  }
+}
+
+/**
+ * 全部隐藏配置
+ */
+const hideAllConfigs = () => {
+  if (confirm('确定要将所有配置设置为隐藏吗？')) {
+    editConfigList.value.forEach(config => {
+      config.visible = false
+    })
+    alert('已将所有配置设置为隐藏状态，请点击"保存全部"以生效')
+  }
+}
+
+/**
  * 删除配置项
  */
 const removeConfigItem = (index) => {
@@ -2093,6 +2158,9 @@ const submitEditConfig = async () => {
   isSubmittingConfig.value = true
   
   try {
+    // 保存显示状态到本地存储（不提交到服务器）
+    saveConfigVisibleStatus(editConfigList.value)
+    
     const submitData = {
       list: editConfigList.value.map(config => ({
         id: config.id,  // 带上id表示更新
@@ -2103,6 +2171,7 @@ const submitEditConfig = async () => {
         opTopicId: config.opTopicId,
         weight: config.weight || 0,
         isOpen: config.enabled ? 1 : 0  // enabled 映射为 isOpen (true->1, false->0)
+        // 注意：visible 字段不提交到服务器
       }))
     }
     
@@ -2167,11 +2236,31 @@ const filteredEditConfigList = computed(() => {
 })
 
 /**
+ * 总日志总页数
+ */
+const allHedgeLogsTotalPages = computed(() => {
+  return Math.ceil(allHedgeLogs.value.length / allHedgeLogsPageSize.value) || 1
+})
+
+/**
+ * 当前页的总日志数据
+ */
+const paginatedAllHedgeLogs = computed(() => {
+  const start = (allHedgeLogsCurrentPage.value - 1) * allHedgeLogsPageSize.value
+  const end = start + allHedgeLogsPageSize.value
+  return allHedgeLogs.value.slice(start, end)
+})
+
+/**
  * 更新活动配置列表（启用的配置）
  */
 const updateActiveConfigs = () => {
-  activeConfigs.value = configList.value
-    .filter(config => config.isOpen === 1 || config.enabled === true)
+  // 先加载显示状态
+  const configsWithVisible = loadConfigVisibleStatus(configList.value)
+  
+  activeConfigs.value = configsWithVisible
+    .filter(config => config.isOpen === 1 || config.enabled === true)  // 启用的配置
+    .filter(config => config.visible !== false)  // 显示开关打开的配置
     .map(config => ({
       ...config,
       monitorBrowserId: config.monitorBrowserId || '',
@@ -2387,45 +2476,57 @@ const showAllHedgeLogs = async () => {
   try {
     const logs = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]')
     
-    // 为每个日志获取任务的最终状态和msg
-    const logsWithDetails = await Promise.all(logs.map(async (log) => {
-      const enrichedLog = { ...log }
-      
-      // 获取YES任务详情
-      if (log.yesTaskId) {
-        try {
-          const yesTaskData = await fetchMissionStatus(log.yesTaskId)
-          if (yesTaskData) {
-            enrichedLog.yesStatus = yesTaskData.status
-            enrichedLog.yesTaskMsg = yesTaskData.msg || ''
-          }
-        } catch (e) {
-          console.error(`获取YES任务 ${log.yesTaskId} 详情失败:`, e)
-        }
-      }
-      
-      // 获取NO任务详情
-      if (log.noTaskId) {
-        try {
-          const noTaskData = await fetchMissionStatus(log.noTaskId)
-          if (noTaskData) {
-            enrichedLog.noStatus = noTaskData.status
-            enrichedLog.noTaskMsg = noTaskData.msg || ''
-          }
-        } catch (e) {
-          console.error(`获取NO任务 ${log.noTaskId} 详情失败:`, e)
-        }
-      }
-      
-      return enrichedLog
-    }))
-    
-    allHedgeLogs.value = logsWithDetails.reverse()  // 最新的在前面
+    // 先显示日志列表（不等待任务状态）
+    allHedgeLogs.value = [...logs].reverse()  // 最新的在前面
+    allHedgeLogsCurrentPage.value = 1  // 重置到第一页
     showAllHedgeLogsDialog.value = true
+    
+    // 只加载当前页的任务状态
+    loadCurrentPageTaskStatus()
   } catch (e) {
     console.error('加载所有对冲日志失败:', e)
     alert('加载日志失败')
   }
+}
+
+/**
+ * 加载当前页的任务状态
+ */
+const loadCurrentPageTaskStatus = async () => {
+  const start = (allHedgeLogsCurrentPage.value - 1) * allHedgeLogsPageSize.value
+  const end = start + allHedgeLogsPageSize.value
+  const currentPageLogs = allHedgeLogs.value.slice(start, end)
+  
+  // 异步获取当前页每个日志的任务状态并更新
+  currentPageLogs.forEach(async (log, pageIndex) => {
+    const actualIndex = start + pageIndex  // 在完整列表中的实际索引
+    
+    // 获取YES任务详情
+    if (log.yesTaskId) {
+      try {
+        const yesTaskData = await fetchMissionStatus(log.yesTaskId)
+        if (yesTaskData) {
+          allHedgeLogs.value[actualIndex].yesStatus = yesTaskData.status
+          allHedgeLogs.value[actualIndex].yesTaskMsg = yesTaskData.msg || ''
+        }
+      } catch (e) {
+        console.error(`获取YES任务 ${log.yesTaskId} 详情失败:`, e)
+      }
+    }
+    
+    // 获取NO任务详情
+    if (log.noTaskId) {
+      try {
+        const noTaskData = await fetchMissionStatus(log.noTaskId)
+        if (noTaskData) {
+          allHedgeLogs.value[actualIndex].noStatus = noTaskData.status
+          allHedgeLogs.value[actualIndex].noTaskMsg = noTaskData.msg || ''
+        }
+      } catch (e) {
+        console.error(`获取NO任务 ${log.noTaskId} 详情失败:`, e)
+      }
+    }
+  })
 }
 
 /**
@@ -2434,6 +2535,34 @@ const showAllHedgeLogs = async () => {
 const closeAllHedgeLogsDialog = () => {
   showAllHedgeLogsDialog.value = false
   allHedgeLogs.value = []
+  allHedgeLogsCurrentPage.value = 1
+}
+
+/**
+ * 跳转到指定页
+ */
+const goToPage = (page) => {
+  if (page < 1 || page > allHedgeLogsTotalPages.value) return
+  allHedgeLogsCurrentPage.value = page
+  loadCurrentPageTaskStatus()
+}
+
+/**
+ * 上一页
+ */
+const prevPage = () => {
+  if (allHedgeLogsCurrentPage.value > 1) {
+    goToPage(allHedgeLogsCurrentPage.value - 1)
+  }
+}
+
+/**
+ * 下一页
+ */
+const nextPage = () => {
+  if (allHedgeLogsCurrentPage.value < allHedgeLogsTotalPages.value) {
+    goToPage(allHedgeLogsCurrentPage.value + 1)
+  }
 }
 
 /**
@@ -2534,6 +2663,46 @@ const loadMonitorBrowserIds = () => {
     })
   } catch (e) {
     console.error('加载监听浏览器ID失败:', e)
+  }
+}
+
+/**
+ * 保存配置显示状态到本地存储
+ * @param {Array} configList - 配置列表
+ */
+const saveConfigVisibleStatus = (configList) => {
+  try {
+    const visibleData = {}
+    configList.forEach(config => {
+      if (config.id) {
+        visibleData[config.id] = config.visible !== false  // 默认为true
+      }
+    })
+    localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+    console.log('保存配置显示状态成功:', visibleData)
+  } catch (e) {
+    console.error('保存配置显示状态失败:', e)
+  }
+}
+
+/**
+ * 加载配置显示状态从本地存储
+ * @param {Array} configList - 配置列表
+ * @returns {Array} - 带有visible字段的配置列表
+ */
+const loadConfigVisibleStatus = (configList) => {
+  try {
+    const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+    return configList.map(config => ({
+      ...config,
+      visible: visibleData[config.id] !== false  // 默认为true
+    }))
+  } catch (e) {
+    console.error('加载配置显示状态失败:', e)
+    return configList.map(config => ({
+      ...config,
+      visible: true  // 失败时默认全部显示
+    }))
   }
 }
 
@@ -2639,14 +2808,19 @@ const monitorAndExecuteHedge = async (config) => {
   const orderPrice = (priceInfo.minPrice + 0.1).toFixed(1)
   console.log(`配置 ${config.id} 符合对冲条件，订单价格: ${orderPrice}`)
   
+  // 获取当前打开显示的所有主题ID
+  const trendingIds = activeConfigs.value.map(c => c.id).join(',')
+  console.log(`当前打开显示的主题: ${trendingIds}`)
+  
   try {
     const response = await axios.post(
-      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedge',
+      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV2',
       {
         trendingId: config.id,
         isClose: hedgeMode.isClose,
         currentPrice: orderPrice,
-        timePassMin: hedgeMode.timePassMin
+        timePassMin: hedgeMode.timePassMin,
+        trendingIds: trendingIds
       },
       {
         headers: {
@@ -2746,12 +2920,29 @@ const executeHedgeTask = async (config, hedgeData) => {
     
     if (response.data && response.data.data) {
       const taskData = response.data.data
-      // 如果返回的是对象，提取id字段；如果是数字，直接使用
-      let taskId = typeof taskData === 'object' ? taskData.id : taskData
+      // 确保从响应中正确提取id字段
+      let taskId = null
       
-      // 确保taskId是有效的数字或字符串
-      if (taskId === undefined || taskId === null) {
-        console.error('提交第一个对冲任务失败: 无效的任务ID', taskData)
+      if (typeof taskData === 'object' && taskData !== null) {
+        // 如果返回的是对象，提取id字段
+        taskId = taskData.id
+      } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+        // 如果直接返回的是数字或字符串ID
+        taskId = taskData
+      }
+      
+      // 确保taskId是有效的数字，且不是对象
+      if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+        console.error('提交第一个对冲任务失败: 无效的任务ID', { taskData, taskId })
+        hedgeRecord.finalStatus = 'failed'
+        finishHedge(config, hedgeRecord)
+        return
+      }
+      
+      // 转换为数字
+      taskId = Number(taskId)
+      if (isNaN(taskId)) {
+        console.error('提交第一个对冲任务失败: 任务ID不是有效数字', { taskData, taskId })
         hedgeRecord.finalStatus = 'failed'
         finishHedge(config, hedgeRecord)
         return
@@ -2797,19 +2988,28 @@ const executeHedgeTask = async (config, hedgeData) => {
 const fetchMissionStatus = async (taskId) => {
   // 验证taskId是否有效
   if (taskId === undefined || taskId === null || taskId === '' || typeof taskId === 'object') {
-    console.error(`获取任务状态失败: 无效的任务ID`, taskId)
+    console.error(`获取任务状态失败: 无效的任务ID`, { taskId, type: typeof taskId })
+    return null
+  }
+  
+  // 确保taskId是数字或字符串
+  const validTaskId = Number(taskId)
+  if (isNaN(validTaskId)) {
+    console.error(`获取任务状态失败: 任务ID不是有效数字`, { taskId, type: typeof taskId })
     return null
   }
   
   try {
-    const response = await axios.get(`https://sg.bicoin.com.cn/99l/mission/status?id=${taskId}`)
+    const url = `https://sg.bicoin.com.cn/99l/mission/status?id=${validTaskId}`
+    console.log(`正在获取任务状态: ${url}`)
+    const response = await axios.get(url)
     if (response.data && response.data.code === 0 && response.data.data) {
       // 返回 mission 对象，而不是整个 data
       return response.data.data.mission
     }
     return null
   } catch (error) {
-    console.error(`获取任务 ${taskId} 状态失败:`, error)
+    console.error(`获取任务 ${validTaskId} 状态失败:`, error)
     return null
   }
 }
@@ -2966,12 +3166,29 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     
     if (response.data && response.data.data) {
       const taskData = response.data.data
-      // 如果返回的是对象，提取id字段；如果是数字，直接使用
-      let taskId = typeof taskData === 'object' ? taskData.id : taskData
+      // 确保从响应中正确提取id字段
+      let taskId = null
       
-      // 确保taskId是有效的数字或字符串
-      if (taskId === undefined || taskId === null) {
-        console.error('提交第二个对冲任务失败: 无效的任务ID', taskData)
+      if (typeof taskData === 'object' && taskData !== null) {
+        // 如果返回的是对象，提取id字段
+        taskId = taskData.id
+      } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+        // 如果直接返回的是数字或字符串ID
+        taskId = taskData
+      }
+      
+      // 确保taskId是有效的数字，且不是对象
+      if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+        console.error('提交第二个对冲任务失败: 无效的任务ID', { taskData, taskId })
+        hedgeRecord.finalStatus = 'failed'
+        finishHedge(config, hedgeRecord)
+        return
+      }
+      
+      // 转换为数字
+      taskId = Number(taskId)
+      if (isNaN(taskId)) {
+        console.error('提交第二个对冲任务失败: 任务ID不是有效数字', { taskData, taskId })
         hedgeRecord.finalStatus = 'failed'
         finishHedge(config, hedgeRecord)
         return
@@ -3249,18 +3466,31 @@ const executeAutoHedgeTasks = async () => {
         
         if (response.data && response.data.data) {
           const taskData = response.data.data
-          // 如果返回的是对象，提取id字段；如果是数字，直接使用
-          let taskId = typeof taskData === 'object' ? taskData.id : taskData
+          // 确保从响应中正确提取id字段
+          let taskId = null
           
-          // 确保taskId是有效的数字或字符串
-          if (taskId === undefined || taskId === null) {
-            console.error(`配置 ${config.id} - type=3 任务提交失败: 无效的任务ID`, taskData)
+          if (typeof taskData === 'object' && taskData !== null) {
+            // 如果返回的是对象，提取id字段
+            taskId = taskData.id
+          } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+            // 如果直接返回的是数字或字符串ID
+            taskId = taskData
+          }
+          
+          // 确保taskId是有效的数字或字符串，且不是对象
+          if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+            console.error(`配置 ${config.id} - type=3 任务提交失败: 无效的任务ID`, { taskData, taskId })
           } else {
-            // 转换为字符串或数字以避免传递对象
-            taskId = typeof taskId === 'number' ? taskId : String(taskId)
-            config.pendingType3TaskId = taskId
-            config.pendingType3TaskStartTime = Date.now()
-            console.log(`配置 ${config.id} - type=3 任务提交成功，任务ID: ${taskId}`)
+            // 转换为数字（确保不会传递对象或字符串对象）
+            taskId = Number(taskId)
+            
+            if (isNaN(taskId)) {
+              console.error(`配置 ${config.id} - type=3 任务提交失败: 任务ID不是有效数字`, taskData)
+            } else {
+              config.pendingType3TaskId = taskId
+              config.pendingType3TaskStartTime = Date.now()
+              console.log(`配置 ${config.id} - type=3 任务提交成功，任务ID: ${taskId}`)
+            }
           }
         }
       } catch (error) {
@@ -3412,6 +3642,39 @@ const formatTime = (timeStr) => {
     minute: '2-digit',
     second: '2-digit'
   })
+}
+
+/**
+ * 格式化任务消息（支持JSON格式的Type 5消息）
+ */
+const formatTaskMsg = (msg) => {
+  if (!msg) return ''
+  
+  // 尝试解析JSON格式的Type 5消息
+  try {
+    const data = JSON.parse(msg)
+    
+    if (data.type === 'TYPE5_SUCCESS') {
+      // Type 5 成功：全部成交
+      let result = `✅ 全部成交 | 数量: ${data.filled_amount} | 价格: ${data.filled_price}`
+      if (data.transaction_fee) {
+        result += ` | 交易费: ${data.transaction_fee}`
+      }
+      return result
+    } else if (data.type === 'TYPE5_PARTIAL') {
+      // Type 5 部分成交：有挂单
+      let result = `⚠️ 部分成交 | 已成交数量: ${data.filled_amount} | 成交价格: ${data.filled_price} | 挂单价格: ${data.pending_price} | 进度: ${data.progress}`
+      if (data.transaction_fee) {
+        result += ` | 交易费: ${data.transaction_fee}`
+      }
+      return result
+    }
+  } catch (e) {
+    // 不是JSON格式，返回原始消息
+  }
+  
+  // 返回原始消息
+  return msg
 }
 
 // 定时刷新
@@ -4405,6 +4668,33 @@ onUnmounted(() => {
 
 .task-unknown {
   color: #6c757d;
+}
+
+/* 分页控件样式 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-top: 1px solid #dee2e6;
+  background: #f8f9fa;
+}
+
+.pagination-info {
+  font-size: 0.875rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.btn-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .auto-refresh-status {
