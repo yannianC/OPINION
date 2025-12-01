@@ -2903,7 +2903,7 @@ const executeHedgeTask = async (config, hedgeData) => {
       type: 5,  // 自动对冲使用 type=5
       trendingId: config.id,
       exchangeName: 'OP',
-      side: 1,
+      side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: firstPsSide,
       amt: hedgeData.share * 100,
       price: hedgeData.currentPrice
@@ -3148,7 +3148,7 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       type: 5,  // 自动对冲使用 type=5
       trendingId: config.id,
       exchangeName: 'OP',
-      side: 1,
+      side: hedgeRecord.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: secondPsSide,
       amt: hedgeRecord.share,
       price: parseFloat(secondPrice),
