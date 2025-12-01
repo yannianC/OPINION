@@ -805,22 +805,60 @@ const parsePositions = (posStr) => {
       if (item.includes('|||')) {
         const parts = item.split('|||')
         if (parts.length >= 4) {
+          let title = parts[0].trim()
+          let option = parts[1].trim()
+          let amount = parts[2].trim()
+          let avgPrice = parts[3].trim()
+          
+          // 特殊处理：First to 5k: Gold or ETH? 市场
+          if (title.includes('First to 5k') && (option === 'ETH' || option === 'GOLD')) {
+            const numAmount = parseFloat(amount)
+            if (!isNaN(numAmount)) {
+              if (option === 'GOLD') {
+                // GOLD改为正数
+                amount = Math.abs(numAmount).toFixed(2)
+              } else if (option === 'ETH') {
+                // ETH改为负数
+                amount = (-Math.abs(numAmount)).toFixed(2)
+              }
+            }
+          }
+          
           positions.push({
-            title: parts[0].trim(),
-            option: parts[1].trim(),
-            amount: parts[2].trim(),
-            avgPrice: parts[3].trim()
+            title: title,
+            option: option,
+            amount: amount,
+            avgPrice: avgPrice
           })
         }
       } else {
         // 兼容旧格式（逗号分隔符）
         const parts = item.split(',')
         if (parts.length >= 4) {
+          let title = parts[0].trim()
+          let option = parts[1].trim()
+          let amount = parts[2].trim()
+          let avgPrice = parts[3].trim()
+          
+          // 特殊处理：First to 5k: Gold or ETH? 市场
+          if (title.includes('First to 5k') && (option === 'ETH' || option === 'GOLD')) {
+            const numAmount = parseFloat(amount)
+            if (!isNaN(numAmount)) {
+              if (option === 'GOLD') {
+                // GOLD改为正数
+                amount = Math.abs(numAmount).toFixed(2)
+              } else if (option === 'ETH') {
+                // ETH改为负数
+                amount = (-Math.abs(numAmount)).toFixed(2)
+              }
+            }
+          }
+          
           positions.push({
-            title: parts[0].trim(),
-            option: parts[1].trim(),
-            amount: parts[2].trim(),
-            avgPrice: parts[3].trim()
+            title: title,
+            option: option,
+            amount: amount,
+            avgPrice: avgPrice
           })
         } else if (parts.length >= 3) {
           positions.push({

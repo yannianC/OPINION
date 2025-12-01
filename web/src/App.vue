@@ -1558,7 +1558,7 @@ const submitOrderbookTask = async () => {
       type: 3,  // type=3 表示获取订单薄任务
       trendingId: parseInt(formData.trendingId),
       exchangeName: formData.exchangeName,
-      side: 'Buy'  // 手动提交默认为Buy
+      side: 1  // 手动提交默认为Buy
     }
     
     console.log('正在提交订单薄任务...', submitData)
@@ -3451,7 +3451,7 @@ const executeAutoHedgeTasks = async () => {
           type: 3,
           trendingId: String(config.id),
           exchangeName: 'OP',
-          side: hedgeMode.isClose ? 'Sell' : 'Buy'  // 平仓时为Sell，开仓时为Buy
+          side: hedgeMode.isClose ? 2 : 1  // 平仓时为Sell，开仓时为Buy
         }
         
         console.log(`配置 ${config.id} - 提交新的 type=3 任务 (${taskData.side}):`, taskData)

@@ -5723,8 +5723,8 @@ def process_type3_mission(task_data):
     browser_id = mission.get("numberList", "")
     mission_id = mission.get("id", "")
     exchange_name = mission.get("exchangeName", "")
-    side = mission.get("side", "Buy")  # 获取方向参数，默认为Buy
-    
+    side1 = mission.get("side", 1)  # 获取方向参数，默认为Buy
+    side = "Buy" if side1 == 1 else "Sell"
     log_print(f"\n[{browser_id}] ========== 开始处理 Type 3 任务 ==========")
     log_print(f"[{browser_id}] 任务ID: {mission_id}")
     log_print(f"[{browser_id}] 交易所: {exchange_name}")
