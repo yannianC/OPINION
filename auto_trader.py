@@ -1513,10 +1513,11 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         task_data: 任务数据（用于type=5的同步机制）
         
     Returns:
-        tuple: (success, should_retry)
+        tuple: (success, should_retry_or_msg)
             - (True, True): 成功
             - (False, True): 失败，可以重试
             - (False, False): 失败，不应重试（如type=5点击取消）
+            - (False, "msg"): 失败，不应重试，并带有具体失败原因
     """
     try:
         log_print(f"[{serial_number}] [OP] 查找提交订单按钮...")
@@ -1565,6 +1566,14 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 tp1 = mission.get('tp1')  # 任务一的ID
                                 
                                 if not tp1:
+                                    # 任务一：先检查自己的状态，如果是3则直接取消
+                                    log_print(f"[{serial_number}] [OP] 任务一: 检查自己的状态...")
+                                    current_status = get_mission_status(mission_id)
+                                    if current_status == 3:
+                                        log_print(f"[{serial_number}] [OP] ✗ 任务一状态为3（任务二导致失败），点击取消按钮")
+                                        buttons[0].click()  # 点击取消按钮
+                                        return False, "任务二导致失败"
+                                    
                                     # 任务一：先通知准备就绪，等待任务二准备就绪
                                     log_print(f"[{serial_number}] [OP] 任务一: 设置状态为5（准备就绪）...")
                                     save_result_success = save_mission_result(mission_id, 5)
@@ -1589,9 +1598,9 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             log_print(f"[{serial_number}] [OP] ✓ 任务二已准备就绪（状态6）")
                                             break
                                         elif status == 3:
-                                            log_print(f"[{serial_number}] [OP] ✗ 任务状态变为失败，点击取消按钮")
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务一状态变为3（任务二失败），点击取消按钮")
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, False  # 失败，不可重试
+                                            return False, "任务二导致失败"
                                         
                                         time.sleep(10)
                                     
@@ -3640,6 +3649,10 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                         # type=5点击取消按钮，不应重试
                         log_print(f"[{browser_id}] ✗ Type 5 任务已取消，不进行重试")
                         return False, "Type 5 任务已取消"
+                    elif isinstance(should_retry, str):
+                        # should_retry是字符串，表示具体的失败原因
+                        log_print(f"[{browser_id}] ✗ Type 5 任务失败: {should_retry}")
+                        return False, should_retry
                     retry_count += 1
                     continue
                 
@@ -6625,6 +6638,20 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     }
                     active_tasks[mission_id]['completed'] += 1
             log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已记录")
+            
+            # Type 5任务特殊处理：任务二失败时通知任务一
+            if mission_type == 5 and not success:
+                tp1 = mission.get('tp1')
+                if tp1:
+                    # 这是任务二，失败了
+                    log_print(f"[{browser_id}] Type 5 任务二失败，检查任务一状态...")
+                    task1_status = get_mission_status(tp1)
+                    if task1_status is not None and task1_status != 3:
+                        # 任务一状态不是3，将其改为3
+                        log_print(f"[{browser_id}] 任务一当前状态: {task1_status}，将其改为状态3（任务二失败）")
+                        save_mission_result(tp1, 3, "任务二失败")
+                    else:
+                        log_print(f"[{browser_id}] 任务一状态已是3或无法获取，无需修改")
             
             # Type 1/5任务完成后收集持仓数据（不影响任务结果）
             if success and driver and task_browser_id and task_exchange_name:
