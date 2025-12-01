@@ -2871,7 +2871,7 @@ const executeHedgeTask = async (config, hedgeData) => {
     noNumber: hedgeData.noNumber,
     yesGroupNo: yesGroupNo,
     noGroupNo: noGroupNo,
-    share: hedgeData.share * 100,
+    share: hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100),  // 开仓*100，平仓用原数据
     price: hedgeData.currentPrice,
     yesPrice: yesPrice,
     noPrice: noPrice,
@@ -2905,7 +2905,7 @@ const executeHedgeTask = async (config, hedgeData) => {
       exchangeName: 'OP',
       side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: firstPsSide,
-      amt: hedgeData.share * 100,
+      amt: hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100),  // 开仓*100，平仓用原数据
       price: hedgeData.currentPrice
     }
     

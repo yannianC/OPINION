@@ -3639,10 +3639,12 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
                     return False, None
                 
+                tabs_content = tabs_content_divs[0]
+                log_print(f"[{browser_id}] ✓ 找到 tabs content div")
                 
                 # 9. 选择种类
                 log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
-                if not select_opinion_option_type(tabs_content_divs, option_type, browser_id):
+                if not select_opinion_option_type(tabs_content, option_type, browser_id):
                     log_print(f"[{browser_id}] ✗ 选择种类{option_type}失败")
                     retry_count += 1
                     continue
@@ -3652,20 +3654,20 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
                 # 10. 点击 Amount 标签
                 log_print(f"[{browser_id}] 步骤10: 点击 Amount 标签...")
-                click_opinion_amount_tab(tabs_content_divs, browser_id)
+                click_opinion_amount_tab(tabs_content, browser_id)
                 
                 # 11. 填入价格和数量
                 log_print(f"[{browser_id}] 步骤11: 填入价格和数量（模式：{price_type}）...")
                 # Market模式传None，Limit模式传price
                 fill_price = None if price_type == "Market" else price
-                if not fill_opinion_price_and_amount(tabs_content_divs, fill_price, amount, browser_id):
+                if not fill_opinion_price_and_amount(tabs_content, fill_price, amount, browser_id):
                     log_print(f"[{browser_id}] ✗ 填入价格/数量失败")
                     retry_count += 1
                     continue
                 
                 # 12. 提交订单
                 log_print(f"[{browser_id}] 步骤12: 提交订单...")
-                submit_success, should_retry = submit_opinion_order(driver, tabs_content_divs, trade_type, option_type, browser_id, browser_id, task_data)
+                submit_success, should_retry = submit_opinion_order(driver, tabs_content, trade_type, option_type, browser_id, browser_id, task_data)
                 if not submit_success:
                     log_print(f"[{browser_id}] ✗ 提交订单失败")
                     if not should_retry:
