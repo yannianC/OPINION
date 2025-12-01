@@ -111,7 +111,7 @@ def get_mission_status(mission_id):
 
 def save_mission_result(mission_id, status, msg=""):
     """
-    保存任务结果（仅更新状态）
+    保存任务结果（仅更新状态）- 带重试机制
     
     Args:
         mission_id: 任务ID
@@ -121,18 +121,40 @@ def save_mission_result(mission_id, status, msg=""):
     Returns:
         bool: 成功返回True
     """
-    try:
-        url = f"{SERVER_BASE_URL}/mission/saveResult"
-        payload = {
-            "id": mission_id,
-            "status": status,
-            "msg": msg
-        }
-        response = requests.post(url, json=payload, timeout=10)
-        return response.status_code == 200
-    except Exception as e:
-        log_print(f"[系统] 保存任务结果失败: {str(e)}")
-        return False
+    max_retries = 5
+    retry_delay = 3  # 秒
+    
+    for attempt in range(max_retries + 1):  # 第一次尝试 + 5次重试 = 总共6次
+        try:
+            if attempt > 0:
+                log_print(f"[系统] 保存任务结果重试第 {attempt} 次...")
+                time.sleep(retry_delay)
+            
+            url = f"{SERVER_BASE_URL}/mission/saveResult"
+            payload = {
+                "id": mission_id,
+                "status": status,
+                "msg": msg
+            }
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                if attempt > 0:
+                    log_print(f"[系统] ✓ 保存任务结果成功（第 {attempt + 1} 次尝试）")
+                return True
+            else:
+                log_print(f"[系统] ⚠ 保存任务结果失败，状态码: {response.status_code}")
+                
+        except Exception as e:
+            log_print(f"[系统] ⚠ 保存任务结果失败: {str(e)}")
+        
+        # 如果不是最后一次尝试，继续重试
+        if attempt < max_retries:
+            continue
+        else:
+            log_print(f"[系统] ✗✗✗ 保存任务结果失败，已重试 {max_retries} 次")
+    
+    return False
 
 # 全局线程池配置
 MAX_WORKERS = 6
@@ -1547,8 +1569,10 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     log_print(f"[{serial_number}] [OP] 任务一: 设置状态为5（准备就绪）...")
                                     save_result_success = save_mission_result(mission_id, 5)
                                     if not save_result_success:
-                                        log_print(f"[{serial_number}] [OP] ✗ 任务一设置状态5失败")
-                                        return False, True  # 失败，可重试
+                                        save_result_success = save_mission_result(mission_id, 5)
+                                        if not save_result_success:
+                                            log_print(f"[{serial_number}] [OP] ✗ 任务一设置状态5失败")
+                                            return False, True  # 失败，可重试
                                     
                                     log_print(f"[{serial_number}] [OP] 任务一: 等待任务二准备就绪（状态6）...")
                                     # 轮询等待状态变为6
@@ -1580,7 +1604,10 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     log_print(f"[{serial_number}] [OP] 任务一: 设置状态为7（已确认）...")
                                     save_result_success = save_mission_result(mission_id, 7)
                                     if not save_result_success:
-                                        log_print(f"[{serial_number}] [OP] ⚠ 任务一设置状态7失败，但已点击确认")
+                                        time.sleep(2)
+                                        save_result_success = save_mission_result(mission_id, 7)
+                                        if not save_result_success:
+                                            log_print(f"[{serial_number}] [OP] ⚠ 任务一设置状态7失败，但已点击确认")
                                     
                                     return True, True  # 成功
                                     
@@ -1767,7 +1794,83 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         return "-", is_task1  # 异常时，任务一算成功，任务二算失败
 
 
-def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data):
+def get_position_filled_amount(driver, serial_number, trending_part1):
+    """
+    获取Position中的已成交数量
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        trending_part1: 子标题（用于筛选）
+        
+    Returns:
+        str: 已成交数量，失败返回""
+    """
+    try:
+        # 点击Position按钮
+        log_print(f"[{serial_number}] 点击Position按钮...")
+        position_button = driver.find_element(By.XPATH, "//button[contains(@class, 'btn') and contains(text(), 'Position')]")
+        position_button.click()
+        time.sleep(2)
+        
+        # 查找tbody
+        tbody = driver.find_element(By.CSS_SELECTOR, "tbody")
+        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+        
+        if not tr_list:
+            log_print(f"[{serial_number}] ⚠ 没有Position数据")
+            return ""
+        
+        # 如果有子标题，需要找到匹配的行
+        if trending_part1:
+            log_print(f"[{serial_number}] 有子标题，查找匹配行: {trending_part1}")
+            for tr_idx, tr in enumerate(tr_list, 1):
+                try:
+                    tds = tr.find_elements(By.TAG_NAME, "td")
+                    if not tds:
+                        continue
+                    
+                    # 检查第一个td是否包含子标题
+                    first_td = tds[0]
+                    p_tags = first_td.find_elements(By.TAG_NAME, "p")
+                    
+                    if len(p_tags) == 2:
+                        # 有两个p标签，说明这是子标题行
+                        subtitle_text = p_tags[1].text.strip()
+                        if subtitle_text == trending_part1:
+                            # 找到匹配的行，获取第2个td的已成交数量
+                            if len(tds) > 1:
+                                td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                                filled_amount = td2_ps[0].text.strip() if td2_ps else ""
+                                log_print(f"[{serial_number}] ✓ 找到匹配行，已成交数量: {filled_amount}")
+                                return filled_amount
+                except Exception as e:
+                    log_print(f"[{serial_number}] ⚠ 解析Position行{tr_idx}失败: {str(e)}")
+                    continue
+            
+            log_print(f"[{serial_number}] ⚠ 未找到匹配的子标题行")
+            return ""
+        else:
+            # 无子标题，获取第一行数据
+            try:
+                first_tr = tr_list[0]
+                tds = first_tr.find_elements(By.TAG_NAME, "td")
+                if len(tds) > 1:
+                    td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                    filled_amount = td2_ps[0].text.strip() if td2_ps else ""
+                    log_print(f"[{serial_number}] ✓ 获取第一行已成交数量: {filled_amount}")
+                    return filled_amount
+            except Exception as e:
+                log_print(f"[{serial_number}] ⚠ 获取第一行数据失败: {str(e)}")
+                return ""
+        
+        return ""
+    except Exception as e:
+        log_print(f"[{serial_number}] ✗ 获取Position已成交数量失败: {str(e)}")
+        return ""
+
+
+def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type):
     """
     Type 5 任务专用：等待订单成功并收集数据
     
@@ -1777,6 +1880,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         serial_number: 浏览器序列号
         trending_part1: 子标题（用于筛选）
         task_data: 任务数据
+        trade_type: Buy 或 Sell
         
     Returns:
         tuple: (success, msg)
@@ -1791,6 +1895,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     target_mission_id = mission_id if is_task1 else tp1  # 需要操作的任务ID（始终是任务一）
     
     log_print(f"[{serial_number}] [{task_label}] Type 5 专用等待流程开始...")
+    log_print(f"[{serial_number}] [{task_label}] 交易类型: {trade_type}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Position 数量: {initial_position_count}")
     
     # 切换回主页面
@@ -1806,10 +1911,21 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         log_print(f"[{serial_number}] [{task_label}] ⚠ 切换回主页面失败: {str(e)}")
         return False, "切换页面失败"
     
-    # 第一阶段：在Position中检测tr是否增加（10分钟超时，每3分钟刷新）
-    log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position变化 ==========")
+    # 如果是Sell类型，获取初始已成交数量
+    initial_filled_amount = ""
+    if trade_type == "Sell":
+        log_print(f"[{serial_number}] [{task_label}] Sell类型，获取初始已成交数量...")
+        initial_filled_amount = get_position_filled_amount(driver, serial_number, trending_part1)
+        log_print(f"[{serial_number}] [{task_label}] 初始已成交数量: {initial_filled_amount}")
+    
+    # 第一阶段：检测Position变化（10分钟超时）
+    if trade_type == "Buy":
+        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
+    else:
+        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
+    
     phase1_timeout = 600  # 10分钟
-    check_interval = 60  # 每1分钟检查一次
+    check_interval = 20 if trade_type == "Sell" else 60  # Sell每20秒检查，Buy每60秒检查
     refresh_interval = 180  # 每3分钟刷新一次
     
     phase1_start_time = time.time()
@@ -1822,51 +1938,91 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             elapsed = int(time.time() - phase1_start_time)
             log_print(f"[{serial_number}] [{task_label}] 检查Position（已用时 {elapsed}秒）...")
             
-            # 检查是否需要刷新
-            if time.time() - last_refresh_time >= refresh_interval:
+            # 对于Buy类型，每3分钟刷新；Sell类型不刷新
+            if trade_type == "Buy" and time.time() - last_refresh_time >= refresh_interval:
                 log_print(f"[{serial_number}] [{task_label}] 3分钟无变化，刷新页面...")
                 driver.refresh()
                 time.sleep(5)
                 last_refresh_time = time.time()
             
-            # 检查Position数量
-            current_position_count = check_position_count(driver, serial_number, trending_part1)
-            
-            if current_position_count < 0:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取 Position 数量")
-            else:
-                log_print(f"[{serial_number}] [{task_label}] 当前 Position 数量: {current_position_count} (初始: {initial_position_count})")
+            if trade_type == "Buy":
+                # Buy类型：检查Position数量是否增加
+                current_position_count = check_position_count(driver, serial_number, trending_part1)
                 
-                if current_position_count > initial_position_count:
-                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Position增加！")
-                    position_changed = True
+                if current_position_count < 0:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取 Position 数量")
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] 当前 Position 数量: {current_position_count} (初始: {initial_position_count})")
                     
-                    # 更新任务一的状态
-                    current_status = get_mission_status(target_mission_id)
-                    log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
-                    
-                    if is_task1:
-                        # 任务一检测到变化
-                        if current_status == 9:
-                            # 任务一状态已经是9，改为10
-                            log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
-                            save_mission_result(target_mission_id, 10)
+                    if current_position_count > initial_position_count:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Position增加！")
+                        position_changed = True
+                        
+                        # 更新任务一的状态
+                        current_status = get_mission_status(target_mission_id)
+                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                        
+                        if is_task1:
+                            # 任务一检测到变化
+                            if current_status == 9:
+                                # 任务一状态已经是9，改为10
+                                log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
+                                save_mission_result(target_mission_id, 10)
+                            else:
+                                # 任务一检测到变化，改为8
+                                log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为8...")
+                                save_mission_result(target_mission_id, 8)
                         else:
-                            # 任务一检测到变化，改为8
-                            log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为8...")
-                            save_mission_result(target_mission_id, 8)
-                    else:
-                        # 任务二检测到变化
-                        if current_status == 8:
-                            # 任务一状态已经是8，改为10
-                            log_print(f"[{serial_number}] [{task_label}] 任务一状态为8，更改为10...")
-                            save_mission_result(target_mission_id, 10)
-                        else:
-                            # 任务二检测到变化，改为9
-                            log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
-                            save_mission_result(target_mission_id, 9)
+                            # 任务二检测到变化
+                            if current_status == 8:
+                                # 任务一状态已经是8，改为10
+                                log_print(f"[{serial_number}] [{task_label}] 任务一状态为8，更改为10...")
+                                save_mission_result(target_mission_id, 10)
+                            else:
+                                # 任务二检测到变化，改为9
+                                log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
+                                save_mission_result(target_mission_id, 9)
+                        
+                        break
+            else:
+                # Sell类型：检查已成交数量是否变化
+                current_filled_amount = get_position_filled_amount(driver, serial_number, trending_part1)
+                
+                if not current_filled_amount:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取已成交数量")
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] 当前已成交数量: {current_filled_amount} (初始: {initial_filled_amount})")
                     
-                    break
+                    if current_filled_amount != initial_filled_amount:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到已成交数量变化！")
+                        position_changed = True
+                        
+                        # 更新任务一的状态
+                        current_status = get_mission_status(target_mission_id)
+                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                        
+                        if is_task1:
+                            # 任务一检测到变化
+                            if current_status == 9:
+                                # 任务一状态已经是9，改为10
+                                log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
+                                save_mission_result(target_mission_id, 10)
+                            else:
+                                # 任务一检测到变化，改为8
+                                log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为8...")
+                                save_mission_result(target_mission_id, 8)
+                        else:
+                            # 任务二检测到变化
+                            if current_status == 8:
+                                # 任务一状态已经是8，改为10
+                                log_print(f"[{serial_number}] [{task_label}] 任务一状态为8，更改为10...")
+                                save_mission_result(target_mission_id, 10)
+                            else:
+                                # 任务二检测到变化，改为9
+                                log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
+                                save_mission_result(target_mission_id, 9)
+                        
+                        break
             
             time.sleep(check_interval)
             
@@ -2062,9 +2218,16 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 "filled_price": filled_price,
                 "transaction_fee": transaction_fee
             }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = initial_filled_amount
+            
             msg = json.dumps(msg_data, ensure_ascii=False)
             
             log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_filled_amount}")
             log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
             log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
             log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
@@ -2092,9 +2255,16 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 "filled_price": filled_price,
                 "transaction_fee": transaction_fee
             }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = initial_filled_amount
+            
             msg = json.dumps(msg_data, ensure_ascii=False)
             
             log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_filled_amount}")
             log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
             log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
             log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
@@ -2118,9 +2288,16 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 "filled_price": filled_price,
                 "transaction_fee": transaction_fee
             }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = initial_filled_amount
+            
             msg = json.dumps(msg_data, ensure_ascii=False)
             
             log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_filled_amount}")
             log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
             log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
             log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
@@ -2193,9 +2370,16 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             "progress": progress,
             "transaction_fee": transaction_fee
         }
+        
+        # Sell类型添加原数量
+        if trade_type == "Sell":
+            msg_data["initial_filled_amount"] = initial_filled_amount
+        
         msg = json.dumps(msg_data, ensure_ascii=False)
         log_print(f"[{serial_number}] [{task_label}] ✗ 有挂单，任务失败")
         log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+        if trade_type == "Sell":
+            log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_filled_amount}")
         log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
         log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
         log_print(f"[{serial_number}] [{task_label}]   挂单价格: {pending_price}")
@@ -2728,13 +2912,14 @@ def wait_for_polymarket_order_success(driver, initial_count, serial_number, time
 # 统一任务处理函数
 # ============================================================================
 
-def process_trading_mission(task_data, keep_browser_open=False):
+def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
     """
     处理交易任务（支持 Opinion Trade 和 Polymarket）
     
     Args:
         task_data: 任务数据，包含 mission 和 exchangeConfig
         keep_browser_open: 是否保持浏览器打开（用于后续数据收集）
+        retry_count: 当前重试次数（用于type=5任务的IP更换重试）
         
     Returns:
         tuple: (success, failure_reason, driver, browser_id) 如果 keep_browser_open=True
@@ -2830,9 +3015,54 @@ def process_trading_mission(task_data, keep_browser_open=False):
         
         # 根据交易所类型选择不同的处理流程
         if exchange_type == "OP":
-            success, failure_reason = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data)
+            success, failure_reason = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count)
         else:
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser)
+        
+        # 检查是否需要换IP重试（仅type=5任务且未重试过）
+        if not success and failure_reason == "NEED_IP_RETRY" and retry_count == 0:
+            mission_type = mission.get("type")
+            if mission_type == 5:
+                log_print(f"[{browser_id}] Type=5 任务需要换IP重试，开始执行重试流程...")
+                
+                # 1. 关闭浏览器
+                log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                try:
+                    if driver:
+                        driver.quit()
+                except:
+                    pass
+                close_adspower_browser(browser_id)
+                time.sleep(2)
+                
+                # 2. 强制更换IP
+                log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
+                proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                
+                if not proxy_config:
+                    log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                    if keep_browser_open:
+                        return False, "换IP失败", None, None, None
+                    else:
+                        return False, "换IP失败"
+                
+                log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                
+                # 3. 更新代理配置
+                log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                if not update_adspower_proxy(browser_id, proxy_config):
+                    log_print(f"[{browser_id}] ✗ 更新代理失败")
+                    if keep_browser_open:
+                        return False, "更新代理失败", None, None, None
+                    else:
+                        return False, "更新代理失败"
+                
+                log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                time.sleep(2)
+                
+                # 4. 递归重试任务（retry_count+1）
+                log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
+                return process_trading_mission(task_data, keep_browser_open, retry_count=1)
         
         # 根据 keep_browser_open 返回不同的格式
         if keep_browser_open:
@@ -2856,6 +3086,40 @@ def process_trading_mission(task_data, keep_browser_open=False):
         if not keep_browser_open:
             log_print(f"[{browser_id}] 任务完成，正在关闭浏览器...")
             close_adspower_browser(browser_id)
+
+
+def check_okx_wallet_p_exists(driver, browser_id, timeout=5):
+    """
+    检查是否存在 OKX Wallet 的 P 标签
+    
+    Args:
+        driver: Selenium WebDriver对象
+        browser_id: 浏览器ID
+        timeout: 检查超时时间（秒）
+        
+    Returns:
+        bool: 存在返回True，不存在返回False
+    """
+    try:
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
+                for p in p_tags:
+                    if p.text.strip() == "OKX Wallet":
+                        log_print(f"[{browser_id}] ✓ 检测到 OKX Wallet P标签存在")
+                        return True
+                time.sleep(0.5)
+            except:
+                time.sleep(0.5)
+        
+        log_print(f"[{browser_id}] ✓ 未检测到 OKX Wallet P标签")
+        return False
+        
+    except Exception as e:
+        log_print(f"[{browser_id}] ⚠ 检查 OKX Wallet P标签时出错: {str(e)}")
+        return False
 
 
 def connect_wallet_if_needed(driver, browser_id):
@@ -3209,7 +3473,7 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
         return False
 
 
-def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None):
+def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0):
     """
     处理 Opinion Trade 交易流程
     
@@ -3217,6 +3481,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         is_new_browser: 是否是新启动的浏览器
         trending_part1: 子主题名称（如果有）
         task_data: 任务数据（用于type=5的同步机制）
+        retry_count: 当前重试次数
     
     Returns:
         tuple: (success, failure_reason)
@@ -3227,47 +3492,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
         
         if not trade_box:
-            # 检查是否是 type=5 任务
-            mission = task_data.get('mission', {}) if task_data else {}
-            mission_type = mission.get('type')
-            
-            if mission_type == 5:
-                log_print(f"[{browser_id}] Type 5 任务页面加载失败，尝试强制更换IP并重试...")
-                
-                # 强制更换IP
-                proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
-                
-                if proxy_config:
-                    log_print(f"[{browser_id}] 成功获取新IP配置: IP={proxy_config['ip']}, 开始更新代理...")
-                    update_success = update_adspower_proxy(browser_id, proxy_config)
-                    
-                    if update_success:
-                        log_print(f"[{browser_id}] ✓ 代理配置更新成功，重新刷新页面...")
-                        
-                        # 刷新页面并重试
-                        try:
-                            driver.refresh()
-                            time.sleep(3)
-                            
-                            log_print(f"[{browser_id}] 重新等待页面加载...")
-                            trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
-                            
-                            if not trade_box:
-                                log_print(f"[{browser_id}] ✗ 更换IP后页面仍然加载失败")
-                                return False, "更换IP后页面加载失败"
-                            
-                            log_print(f"[{browser_id}] ✓ 更换IP后页面加载成功")
-                        except Exception as e:
-                            log_print(f"[{browser_id}] ✗ 刷新页面时发生异常: {str(e)}")
-                            return False, "刷新页面失败"
-                    else:
-                        log_print(f"[{browser_id}] ✗ 代理配置更新失败")
-                        return False, "代理配置更新失败"
-                else:
-                    log_print(f"[{browser_id}] ✗ 强制更换IP失败或返回数据中没有IP")
-                    return False, "强制更换IP失败"
-            else:
-                return False, "页面加载失败"
+            return False, "页面加载失败"
         
         # 6. 预打开OKX钱包并连接（仅在新启动的浏览器时执行）
         if is_new_browser:
@@ -3283,7 +3508,15 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         # 6.1.5 等待Position按钮出现（带重试机制）
         log_print(f"[{browser_id}] 步骤6.1.5: 等待Position按钮出现...")
         if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
-            return False, "Position按钮未出现，页面加载可能失败"
+            # 检查是否是 type=5 任务且未重试过
+            mission = task_data.get('mission', {}) if task_data else {}
+            mission_type = mission.get('type')
+            
+            if mission_type == 5 and retry_count == 0:
+                log_print(f"[{browser_id}] Type=5 任务Position按钮未出现，需要换IP重试...")
+                return False, "NEED_IP_RETRY"
+            else:
+                return False, "Position按钮未出现，页面加载可能失败"
         
         # 6.1.6 如果有 trendingPart1，点击子主题
         if trending_part1:
@@ -3306,6 +3539,10 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         if trade_type == "Buy" and initial_position_count > 0:
             return False, f"{browser_id}已有仓位"
         
+        # Sell 类型：如果没有仓位则不能下单
+        if trade_type == "Sell" and initial_position_count == 0:
+            return False, f"{browser_id}无仓位可平"
+        
         # 检查 Open Orders 数量
         log_print(f"[{browser_id}] 步骤6.3: 检查 Open Orders...")
         initial_open_orders_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
@@ -3316,14 +3553,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
         log_print(f"[{browser_id}] 初始 Open Orders 数量: {initial_open_orders_count}")
         
-        # Buy 类型：如果已有挂单则不能下单
-        if trade_type == "Buy" and initial_open_orders_count > 0:
+        # Buy 和 Sell 类型：如果已有挂单则不能下单
+        if initial_open_orders_count > 0:
             return False, f"{browser_id}已有挂单"
         
         if trade_type == "Buy":
             log_print(f"[{browser_id}] ✓ Buy 类型检查通过：无仓位，无挂单")
         else:
-            log_print(f"[{browser_id}] ✓ Sell 类型：已记录初始数量")
+            log_print(f"[{browser_id}] ✓ Sell 类型检查通过：有仓位，无挂单")
         
         # 重试机制：第7-12步最多重试2次（总共3次尝试）
         max_retry_attempts = 2
@@ -3433,7 +3670,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 initial_position_count, 
                 browser_id, 
                 trending_part1,
-                task_data
+                task_data,
+                trade_type
             )
             
             if not success:
@@ -4034,8 +4272,8 @@ def process_op_position_data(position_data):
                 if amount_str != "<0.01" and current_title:
                     try:
                         amount = float(amount_str.replace(',', ''))
-                        # YES为正数，NO为负数
-                        if option == "NO":
+                        # YES为正数，NO为负数（忽略大小写）
+                        if option.upper() == "NO":
                             amount = -amount
                         
                         # 使用 title+option 作为key来存储数据
@@ -4069,8 +4307,8 @@ def process_op_position_data(position_data):
                 if amount_str != "<0.01":
                     try:
                         amount = float(amount_str.replace(',', ''))
-                        # YES为正数，NO为负数
-                        if final_option == "NO":
+                        # YES为正数，NO为负数（忽略大小写）
+                        if final_option.upper() == "NO":
                             amount = -amount
                         
                         # 使用 title+option 作为key来存储数据
@@ -4111,8 +4349,8 @@ def process_op_position_data(position_data):
                 if amount_str != "<0.01":
                     try:
                         amount = float(amount_str.replace(',', ''))
-                        # YES为正数，NO为负数
-                        if final_option == "NO":
+                        # YES为正数，NO为负数（忽略大小写）
+                        if final_option.upper() == "NO":
                             amount = -amount
                         
                         # 使用 title+option 作为key来存储数据
@@ -5389,7 +5627,7 @@ def get_orderbook_data_without_subtopic(driver, browser_id):
         return ""
 
 
-def execute_type3_data_collection(driver, browser_id, target_url, trending_part1):
+def execute_type3_data_collection(driver, browser_id, target_url, trending_part1, side='Buy'):
     """
     执行Type 3数据收集流程（从步骤5开始，可重试）
     
@@ -5398,6 +5636,7 @@ def execute_type3_data_collection(driver, browser_id, target_url, trending_part1
         browser_id: 浏览器ID
         target_url: 目标URL
         trending_part1: 子主题（如果有）
+        side: Buy 或 Sell，默认为Buy
         
     Returns:
         tuple: (success, button_prefix, orderbook_data, error_msg)
@@ -5414,6 +5653,18 @@ def execute_type3_data_collection(driver, browser_id, target_url, trending_part1
             if not click_subtopic_button_for_type3(driver, browser_id, trending_part1):
                 return False, None, "", "点击子主题按钮失败"
             time.sleep(8)
+        
+        # 6.5. 点击 Buy 或 Sell 按钮
+        log_print(f"[{browser_id}] 步骤6.5: 点击 {side} 按钮...")
+        trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+        if not trade_box_divs:
+            return False, None, "", "未找到trade-box"
+        
+        trade_box = trade_box_divs[0]
+        if not click_opinion_trade_type_button(trade_box, side, browser_id):
+            return False, None, "", f"点击{side}按钮失败"
+        
+        time.sleep(1)
         
         # 7. 点击价格较高的按钮
         log_print(f"[{browser_id}] 步骤7: 点击价格较高的按钮...")
@@ -5459,10 +5710,12 @@ def process_type3_mission(task_data):
     browser_id = mission.get("numberList", "")
     mission_id = mission.get("id", "")
     exchange_name = mission.get("exchangeName", "")
+    side = mission.get("side", "Buy")  # 获取方向参数，默认为Buy
     
     log_print(f"\n[{browser_id}] ========== 开始处理 Type 3 任务 ==========")
     log_print(f"[{browser_id}] 任务ID: {mission_id}")
     log_print(f"[{browser_id}] 交易所: {exchange_name}")
+    log_print(f"[{browser_id}] 方向: {side}")
     
     driver = None
     orderbook_data = ""
@@ -5541,7 +5794,7 @@ def process_type3_mission(task_data):
             
             log_print(f"[{browser_id}] 开始数据收集流程（尝试 {attempt + 1}/{max_retries + 1}）...")
             success, button_prefix, orderbook_data, error_msg = execute_type3_data_collection(
-                driver, browser_id, target_url, trending_part1
+                driver, browser_id, target_url, trending_part1, side
             )
             
             if success:
@@ -5823,12 +6076,13 @@ def collect_position_data(driver, browser_id, exchange_name):
         return False, collected_data
 
 
-def process_type2_mission(task_data):
+def process_type2_mission(task_data, retry_count=0):
     """
     处理 Type 2 任务 - 获取交易所数据
     
     Args:
         task_data: 任务数据，包含 mission 和 exchangeConfig
+        retry_count: 重试次数（默认为0）
         
     Returns:
         tuple: (success, failure_reason, collected_data)
@@ -5839,7 +6093,7 @@ def process_type2_mission(task_data):
     mission_id = mission.get("id", "")
     exchange_name = mission.get("exchangeName", "")
     
-    log_print(f"\n[{browser_id}] ========== 开始处理 Type 2 任务 ==========")
+    log_print(f"\n[{browser_id}] ========== 开始处理 Type 2 任务 {'(重试第' + str(retry_count) + '次)' if retry_count > 0 else ''} ==========")
     log_print(f"[{browser_id}] 任务ID: {mission_id}")
     log_print(f"[{browser_id}] 交易所: {exchange_name}")
     
@@ -5883,6 +6137,67 @@ def process_type2_mission(task_data):
             # 4.1 检查并连接钱包
             log_print(f"[{browser_id}] 步骤4.1: 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
+            
+            # 4.2 Type2任务特殊处理：检查OKX Wallet P标签
+            log_print(f"[{browser_id}] 步骤4.2: 等待15秒后检查 OKX Wallet 状态...")
+            time.sleep(15)
+            
+            # 第一次检查是否存在 OKX Wallet P标签
+            if check_okx_wallet_p_exists(driver, browser_id, timeout=5):
+                log_print(f"[{browser_id}] ⚠ 检测到 OKX Wallet P标签仍然存在，执行第一次重连...")
+                connect_wallet_if_needed(driver, browser_id)
+                
+                # 等待15秒后第二次检查
+                log_print(f"[{browser_id}] 等待15秒后进行第二次检查...")
+                time.sleep(15)
+                
+                # 第二次检查是否存在 OKX Wallet P标签
+                if check_okx_wallet_p_exists(driver, browser_id, timeout=5):
+                    log_print(f"[{browser_id}] ✗✗✗ OKX Wallet P标签依然存在，需要换IP重试...")
+                    
+                    # 检查是否已经重试过
+                    if retry_count == 0:
+                        log_print(f"[{browser_id}] Type=2 任务需要换IP重试，开始执行重试流程...")
+                        
+                        # 1. 关闭浏览器
+                        log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                        try:
+                            if driver:
+                                driver.quit()
+                        except:
+                            pass
+                        close_adspower_browser(browser_id)
+                        time.sleep(2)
+                        
+                        # 2. 强制更换IP
+                        log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
+                        proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                        
+                        if not proxy_config:
+                            log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                            return False, "换IP失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                        
+                        # 3. 更新代理配置
+                        log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                        if not update_adspower_proxy(browser_id, proxy_config):
+                            log_print(f"[{browser_id}] ✗ 更新代理失败")
+                            return False, "更新代理失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                        time.sleep(2)
+                        
+                        # 4. 递归重试任务（retry_count+1）
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
+                        return process_type2_mission(task_data, retry_count=1)
+                    else:
+                        log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
+                        return False, "OKX Wallet连接失败且已重试", collected_data
+                else:
+                    log_print(f"[{browser_id}] ✓ 第二次检查通过，OKX Wallet 已正常连接")
+            else:
+                log_print(f"[{browser_id}] ✓ 第一次检查通过，OKX Wallet 已正常连接")
             
             # 获取数据（步骤5-9带重试机制）
             max_data_collection_retries = 3
@@ -6471,18 +6786,19 @@ def main():
             # 2. 获取线程池状态
             active_count, pending_count = get_thread_pool_status()
             
-            # 3. 尝试获取新任务
+            # 3. 检查线程池状态
             log_print(f"[系统] 线程池状态: 活跃任务 {active_count} 个, 待处理 {pending_count}/{MAX_WORKERS}")
             
             # 线程池是否已满
             pool_is_full = pending_count >= MAX_WORKERS
             
             if pool_is_full:
-                log_print(f"[系统] 线程池已满 ({pending_count}/{MAX_WORKERS})")
-            else:
-                log_print(f"[系统] 线程池有空闲，尝试获取新任务...")
+                log_print(f"[系统] 线程池已满 ({pending_count}/{MAX_WORKERS})，等待空闲...")
+                time.sleep(3)
+                continue  # 跳过获取任务，直接进入下一次循环
             
-            # 从服务器获取任务
+            # 4. 线程池有空闲，从服务器获取任务
+            log_print(f"[系统] 线程池有空闲，尝试从服务器获取新任务...")
             task_data = get_mission_from_server()
             
             if task_data:
@@ -6525,9 +6841,6 @@ def main():
                     # 提交失败结果
                     submit_mission_result(mission_id, 0, 1, {browser_id: "线程池繁忙，Type=3任务被跳过"}, status=3)
                     log_print(f"[系统] ✓ Type=3 任务 {mission_id} 已标记为失败")
-                # 如果线程池已满（不管什么类型），等待下一次循环
-                elif pool_is_full:
-                    log_print(f"[系统] 线程池已满，Type={mission_type} 任务将在下次循环处理")
                 # 线程池有空闲，提交任务
                 else:
                     # 提交到线程池

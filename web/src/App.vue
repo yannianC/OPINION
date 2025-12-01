@@ -1557,7 +1557,8 @@ const submitOrderbookTask = async () => {
       numberList: parseInt(formData.numberList),
       type: 3,  // type=3 表示获取订单薄任务
       trendingId: parseInt(formData.trendingId),
-      exchangeName: formData.exchangeName
+      exchangeName: formData.exchangeName,
+      side: 'Buy'  // 手动提交默认为Buy
     }
     
     console.log('正在提交订单薄任务...', submitData)
@@ -3449,10 +3450,11 @@ const executeAutoHedgeTasks = async () => {
           numberList: config.monitorBrowserId,
           type: 3,
           trendingId: String(config.id),
-          exchangeName: 'OP'
+          exchangeName: 'OP',
+          side: hedgeMode.isClose ? 'Sell' : 'Buy'  // 平仓时为Sell，开仓时为Buy
         }
         
-        console.log(`配置 ${config.id} - 提交新的 type=3 任务:`, taskData)
+        console.log(`配置 ${config.id} - 提交新的 type=3 任务 (${taskData.side}):`, taskData)
         
         const response = await axios.post(
           'https://sg.bicoin.com.cn/99l/mission/add',
