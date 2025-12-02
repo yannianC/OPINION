@@ -28,6 +28,9 @@
       <el-button type="warning" @click="refreshAllPositions" :loading="refreshingAll">
         刷新全部仓位
       </el-button>
+      <el-button type="danger" @click="refreshRedPositions" :loading="refreshingRed">
+        刷新变红仓位
+      </el-button>
     </div>
     
     <!-- 批量添加区域 -->
@@ -295,7 +298,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="350" align="center" fixed="right">
+      <el-table-column label="操作" width="450" align="center" fixed="right">
         <template #default="scope">
           <el-button 
             type="primary" 
@@ -312,6 +315,14 @@
             :disabled="!scope.row.g"
           >
             交易记录
+          </el-button>
+          <el-button 
+            type="success" 
+            size="small"
+            @click="showMissionLog()"
+            :disabled="!latestMissionId"
+          >
+            日志
           </el-button>
           <el-button 
             type="danger" 
@@ -369,6 +380,42 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 任务日志弹窗 -->
+    <el-dialog 
+      v-model="missionLogDialogVisible" 
+      title="任务执行日志" 
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div v-loading="loadingMissionStatus" class="mission-log-content">
+        <div class="log-item">
+          <span class="log-label">任务ID:</span>
+          <span class="log-value">{{ latestMissionId || '暂无' }}</span>
+        </div>
+        <div class="log-item">
+          <span class="log-label">状态:</span>
+          <el-tag 
+            :type="getMissionStatusType(missionStatus.status)" 
+            size="large"
+          >
+            {{ getMissionStatusText(missionStatus.status) }}
+          </el-tag>
+        </div>
+        <div class="log-item" v-if="missionStatus.msg">
+          <span class="log-label">消息:</span>
+          <span class="log-value">{{ missionStatus.msg }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="missionLogDialogVisible = false">关闭</el-button>
+          <el-button type="primary" @click="refreshMissionStatus" :loading="loadingMissionStatus">
+            刷新状态
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -390,8 +437,20 @@ const tableData = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const refreshingAll = ref(false)
+const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
 const summaryCollapsed = ref(false)  // 总计区域折叠状态
 let nextId = 1
+
+/**
+ * 任务日志相关
+ */
+const latestMissionId = ref(null)  // 最新的任务ID
+const missionLogDialogVisible = ref(false)  // 任务日志弹窗显示状态
+const loadingMissionStatus = ref(false)  // 加载任务状态的loading
+const missionStatus = ref({
+  status: null,
+  msg: ''
+})
 
 /**
  * 交易记录弹窗相关
@@ -1434,6 +1493,173 @@ const refreshAllPositions = async () => {
 }
 
 /**
+ * 刷新变红仓位（打开时间>仓位时间的）
+ */
+const refreshRedPositions = async () => {
+  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中）
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const redRows = tableData.value.filter(row => 
+    row.fingerprintNo && 
+    row.computeGroup && 
+    row.platform &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row)
+  )
+  
+  if (redRows.length === 0) {
+    ElMessage.warning('没有需要刷新的变红仓位')
+    return
+  }
+  
+  refreshingRed.value = true
+  ElMessage.info(`开始刷新 ${redRows.length} 个变红仓位，请稍候...`)
+  
+  let successCount = 0
+  let failCount = 0
+  
+  try {
+    // 提交所有 type=2 任务
+    const taskPromises = redRows.map(async (row) => {
+      try {
+        const taskData = {
+          groupNo: row.computeGroup,
+          numberList: parseInt(row.fingerprintNo),
+          type: 2,
+          exchangeName: row.platform === 'OP' ? 'OP' : 'Ploy'
+        }
+        
+        const response = await axios.post(
+          `${API_BASE_URL}/mission/add`,
+          taskData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        // 保存最新的任务ID（只保留最后一个）
+        if (response.data && response.data.data && response.data.data.id) {
+          latestMissionId.value = response.data.data.id
+        }
+        
+        console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+        successCount++
+      } catch (error) {
+        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
+        failCount++
+      }
+    })
+    
+    await Promise.all(taskPromises)
+    
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    
+    // 等待 70 秒后自动刷新列表
+    ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
+    setTimeout(async () => {
+      await loadData(true)  // 静默刷新
+      ElMessage.success('数据已自动更新')
+    }, 70000)
+    
+  } catch (error) {
+    console.error('刷新变红仓位失败:', error)
+    ElMessage.error('刷新变红仓位失败: ' + (error.message || '网络错误'))
+  } finally {
+    refreshingRed.value = false
+  }
+}
+
+/**
+ * 获取任务状态文本
+ */
+const getMissionStatusText = (status) => {
+  if (status === null || status === undefined) return '未知'
+  switch (status) {
+    case 0:
+      return '尚未执行'
+    case 2:
+      return '成功'
+    case 3:
+      return '失败'
+    case 9:
+      return '进行中'
+    default:
+      return `状态${status}`
+  }
+}
+
+/**
+ * 获取任务状态类型（用于标签颜色）
+ */
+const getMissionStatusType = (status) => {
+  if (status === null || status === undefined) return 'info'
+  switch (status) {
+    case 0:
+      return 'info'
+    case 2:
+      return 'success'
+    case 3:
+      return 'danger'
+    case 9:
+      return 'warning'
+    default:
+      return 'info'
+  }
+}
+
+/**
+ * 显示任务日志弹窗
+ */
+const showMissionLog = async () => {
+  if (!latestMissionId.value) {
+    ElMessage.warning('暂无任务ID')
+    return
+  }
+  
+  missionLogDialogVisible.value = true
+  await refreshMissionStatus()
+}
+
+/**
+ * 刷新任务状态
+ */
+const refreshMissionStatus = async () => {
+  if (!latestMissionId.value) {
+    ElMessage.warning('暂无任务ID')
+    return
+  }
+  
+  loadingMissionStatus.value = true
+  
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/mission/status`,
+      {
+        params: {
+          id: latestMissionId.value
+        }
+      }
+    )
+    
+    if (response.data && response.data.data && response.data.data.mission) {
+      const mission = response.data.data.mission
+      missionStatus.value = {
+        status: mission.status,
+        msg: mission.msg || ''
+      }
+    } else {
+      ElMessage.warning('未获取到任务状态')
+    }
+  } catch (error) {
+    console.error('获取任务状态失败:', error)
+    ElMessage.error('获取任务状态失败: ' + (error.message || '网络错误'))
+  } finally {
+    loadingMissionStatus.value = false
+  }
+}
+
+/**
  * 批量添加账户
  */
 const batchAddAccounts = async () => {
@@ -1967,6 +2193,42 @@ onUnmounted(() => {
 
 :deep(.el-table__row.highlight-row:hover > td) {
   background-color: #fdd !important;
+}
+
+/* 任务日志弹窗样式 */
+.mission-log-content {
+  padding: 20px;
+  min-height: 150px;
+}
+
+.log-item {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  border-left: 4px solid #409eff;
+}
+
+.log-item:last-child {
+  margin-bottom: 0;
+}
+
+.log-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #606266;
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.log-value {
+  font-size: 15px;
+  color: #333;
+  font-weight: 500;
+  word-break: break-all;
 }
 </style>
 

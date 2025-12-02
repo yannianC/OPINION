@@ -30,6 +30,31 @@
               <span class="amount-value">{{ hedgeStatus.amtSum || 0 }}</span>
             </div>
             
+            <!-- 交易费查询 -->
+            <div class="transaction-fee-query">
+              <div class="time-range-selector">
+                <span class="amount-label">交易费查询:</span>
+                <input 
+                  v-model="feeQuery.startTime" 
+                  type="datetime-local" 
+                  class="time-input"
+                />
+                <span class="time-separator">至</span>
+                <input 
+                  v-model="feeQuery.endTime" 
+                  type="datetime-local" 
+                  class="time-input"
+                />
+                <button class="btn btn-secondary btn-sm" @click="queryTransactionFee">
+                  查询
+                </button>
+              </div>
+              <div class="fee-result" v-if="feeQuery.totalFee !== null">
+                <span class="fee-label">总交易费:</span>
+                <span class="fee-value">${{ feeQuery.totalFee.toFixed(2) }}</span>
+              </div>
+            </div>
+            
             <div class="hedge-amount-input">
               <span class="amount-label">总数量:</span>
               <input 
@@ -1217,6 +1242,32 @@ const hedgeMode = reactive({
   intervalType: 'success',  // 'success': 挂单成功再挂另一边, 'delay': 延时
   intervalDelay: 1000  // 延时的毫秒数
 })
+
+// 交易费查询
+const feeQuery = reactive({
+  startTime: '',
+  endTime: '',
+  totalFee: null
+})
+
+// 初始化交易费查询的默认时间（最近一小时）
+const initFeeQueryTime = () => {
+  const now = new Date()
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+  
+  // 格式化为 datetime-local 需要的格式
+  const formatDateTime = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  }
+  
+  feeQuery.startTime = formatDateTime(oneHourAgo)
+  feeQuery.endTime = formatDateTime(now)
+}
 
 // 对冲日志相关
 const showHedgeLogDialog = ref(false)
@@ -3334,6 +3385,69 @@ const cleanHedgeAmount = async () => {
 }
 
 /**
+ * 查询交易费
+ */
+const queryTransactionFee = async () => {
+  if (!feeQuery.startTime || !feeQuery.endTime) {
+    showToast('请选择开始和结束时间', 'warning')
+    return
+  }
+  
+  try {
+    // 将 datetime-local 格式转换为时间戳
+    const startTimestamp = new Date(feeQuery.startTime).getTime()
+    const endTimestamp = new Date(feeQuery.endTime).getTime()
+    
+    if (startTimestamp >= endTimestamp) {
+      showToast('开始时间必须早于结束时间', 'warning')
+      return
+    }
+    
+    // 调用新的 listPart 接口
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
+      params: {
+        type: 5,
+        startTime: startTimestamp,
+        endTime: endTimestamp
+      }
+    })
+    
+    if (response.data && response.data.code === 0) {
+      const missions = response.data.data.list || []
+      let totalFee = 0
+      
+      // 遍历所有任务
+      missions.forEach(item => {
+        const mission = item.mission
+        // 只处理状态为2（成功）的任务
+        if (mission && mission.status === 2 && mission.msg) {
+          try {
+            // 解析 msg JSON
+            const msgData = JSON.parse(mission.msg)
+            if (msgData.transaction_fee) {
+              // 提取交易费数字部分（移除 $ 符号和逗号）
+              const feeStr = msgData.transaction_fee.replace(/[$,]/g, '')
+              const fee = parseFloat(feeStr) || 0
+              totalFee += fee
+            }
+          } catch (error) {
+            console.error('解析任务消息失败:', mission.id, error)
+          }
+        }
+      })
+      
+      feeQuery.totalFee = totalFee
+      showToast(`查询成功，共 ${missions.length} 个任务`, 'success')
+    } else {
+      showToast('查询失败', 'error')
+    }
+  } catch (error) {
+    console.error('查询交易费失败:', error)
+    showToast('查询交易费失败: ' + (error.message || '未知错误'), 'error')
+  }
+}
+
+/**
  * 执行自动对冲任务
  */
 const executeAutoHedgeTasks = async () => {
@@ -3649,6 +3763,11 @@ const formatTime = (timeStr) => {
 /**
  * 格式化任务消息（支持JSON格式的Type 5消息）
  */
+/**
+ * 格式化任务消息显示
+ * @param {string} msg - 任务消息JSON字符串
+ * @returns {string} - 格式化后的消息文本
+ */
 const formatTaskMsg = (msg) => {
   if (!msg) return ''
   
@@ -3658,14 +3777,73 @@ const formatTaskMsg = (msg) => {
     
     if (data.type === 'TYPE5_SUCCESS') {
       // Type 5 成功：全部成交
-      let result = `✅ 全部成交 | 数量: ${data.filled_amount} | 价格: ${data.filled_price}`
+      let result = `✅ 全部成交`
+      
+      // 处理初始数量
+      if (data.initial_filled_amount) {
+        result += ` | 初始数量: ${data.initial_filled_amount}`
+      }
+      
+      // 处理现有数量，如果是"<0.01"则显示为0
+      let currentAmount = data.filled_amount
+      if (typeof currentAmount === 'string' && currentAmount.includes('<')) {
+        currentAmount = '0'
+      }
+      result += ` | 现有数量: ${currentAmount}`
+      
+      // 计算并显示交易额（现有数量 - 初始数量）
+      if (data.initial_filled_amount && data.filled_amount) {
+        const initialAmount = parseFloat(data.initial_filled_amount) || 0
+        let filledAmount = 0
+        if (typeof data.filled_amount === 'string' && data.filled_amount.includes('<')) {
+          filledAmount = 0
+        } else {
+          filledAmount = parseFloat(data.filled_amount) || 0
+        }
+        const tradeAmount = filledAmount - initialAmount
+        result += ` | 交易额: ${tradeAmount.toFixed(2)}`
+      }
+      
+      // 显示价格
+      result += ` | 价格: ${data.filled_price}`
+      
+      // 显示交易费
       if (data.transaction_fee) {
         result += ` | 交易费: ${data.transaction_fee}`
       }
+      
       return result
     } else if (data.type === 'TYPE5_PARTIAL') {
       // Type 5 部分成交：有挂单
-      let result = `⚠️ 部分成交 | 已成交数量: ${data.filled_amount} | 成交价格: ${data.filled_price} | 挂单价格: ${data.pending_price} | 进度: ${data.progress}`
+      let result = `⚠️ 部分成交`
+      
+      // 处理初始数量
+      if (data.initial_filled_amount) {
+        result += ` | 初始数量: ${data.initial_filled_amount}`
+      }
+      
+      // 处理现有数量
+      let currentAmount = data.filled_amount
+      if (typeof currentAmount === 'string' && currentAmount.includes('<')) {
+        currentAmount = '0'
+      }
+      result += ` | 现有数量: ${currentAmount}`
+      
+      // 计算并显示交易额
+      if (data.initial_filled_amount && data.filled_amount) {
+        const initialAmount = parseFloat(data.initial_filled_amount) || 0
+        let filledAmount = 0
+        if (typeof data.filled_amount === 'string' && data.filled_amount.includes('<')) {
+          filledAmount = 0
+        } else {
+          filledAmount = parseFloat(data.filled_amount) || 0
+        }
+        const tradeAmount = filledAmount - initialAmount
+        result += ` | 交易额: ${tradeAmount.toFixed(2)}`
+      }
+      
+      result += ` | 成交价格: ${data.filled_price} | 挂单价格: ${data.pending_price} | 进度: ${data.progress}`
+      
       if (data.transaction_fee) {
         result += ` | 交易费: ${data.transaction_fee}`
       }
@@ -3730,6 +3908,9 @@ const resetAutoRefresh = () => {
 onMounted(() => {
   isConnected.value = true
   console.log('任务管理系统已启动')
+  
+  // 初始化交易费查询时间
+  initFeeQueryTime()
   
   // 加载对冲设置
   loadHedgeSettings()
@@ -3961,6 +4142,57 @@ onUnmounted(() => {
   border-radius: 8px;
 }
 
+.transaction-fee-query {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.time-range-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.time-input {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 0.875rem;
+}
+
+.time-separator {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.fee-result {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(40, 167, 69, 0.2);
+  border-radius: 4px;
+  border: 1px solid rgba(40, 167, 69, 0.4);
+}
+
+.fee-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.fee-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #4caf50;
+}
+
 .amount-label {
   font-weight: 600;
   color: rgba(255, 255, 255, 0.9);
@@ -4139,6 +4371,8 @@ onUnmounted(() => {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.9);
   word-break: break-all;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .msg-label {
@@ -4647,10 +4881,8 @@ onUnmounted(() => {
 .task-msg {
   color: #dc3545;
   font-style: italic;
-  max-width: 400px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .task-success {

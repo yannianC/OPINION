@@ -1696,7 +1696,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
 
 def check_transaction_fee(driver, serial_number, task_label, is_task1):
     """
-    检查 Transactions 中的交易费，判断任务是否真正成功
+    检查 Transactions 中的交易费和成交价格，判断任务是否真正成功
     
     Args:
         driver: Selenium WebDriver对象
@@ -1705,8 +1705,9 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         is_task1: 是否是任务一
         
     Returns:
-        tuple: (transaction_fee, success)
+        tuple: (transaction_fee, filled_price, success)
             - transaction_fee: 交易费字符串（例如 "$0.5" 或 "-"）
+            - filled_price: 成交价格字符串（例如 "14.0" 或 "-"）
             - success: 检查是否成功（任务一：交易费为0或空为成功；任务二：交易费>0为成功）
     """
     try:
@@ -1725,7 +1726,7 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         time.sleep(10)
         if not transactions_button_found:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到 Transactions 按钮")
-            return "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
+            return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
         
         # 查找 Transactions div
         log_print(f"[{serial_number}] [{task_label}] 查找 Transactions div...")
@@ -1740,7 +1741,7 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         
         if not transactions_div:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到 Transactions div")
-            return "-", is_task1  # 任务一找不到div算成功，任务二算失败
+            return "-", "-", is_task1  # 任务一找不到div算成功，任务二算失败
         
         # 获取 tbody 和第一个 tr
         tbody = transactions_div.find_element(By.TAG_NAME, "tbody")
@@ -1748,7 +1749,7 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         
         if not tr_list or len(tr_list) == 0:
             log_print(f"[{serial_number}] [{task_label}] ⚠ Transactions 中没有 tr")
-            return "-", is_task1  # 任务一没有tr算成功，任务二算失败
+            return "-", "-", is_task1  # 任务一没有tr算成功，任务二算失败
         
         # 获取第一个 tr 的第 6 个 td 的 div 的 p 标签内容
         first_tr = tr_list[0]
@@ -1756,9 +1757,29 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         
         if len(tds) < 6:
             log_print(f"[{serial_number}] [{task_label}] ⚠ Transactions 第一个 tr 的 td 数量不足6个（实际: {len(tds)}）")
-            return "-", is_task1
+            return "-", "-", is_task1
         
-        # 第6个td（index=5）
+        # 第5个td（index=4）- 获取 filled_price
+        td5 = tds[4]
+        td5_ps = td5.find_elements(By.TAG_NAME, "p")
+        filled_price_text = td5_ps[0].text.strip() if td5_ps else "-"
+        
+        log_print(f"[{serial_number}] [{task_label}] Transactions 成交价格: {filled_price_text}")
+        
+        # 解析 filled_price 数字（格式如 "14.0¢"）
+        filled_price_value = "-"
+        try:
+            # 移除 ¢ 符号和其他非数字字符，只保留数字和小数点
+            import re
+            price_number_str = re.sub(r'[^\d.]', '', filled_price_text)
+            if price_number_str and price_number_str != '':
+                filled_price_value = price_number_str
+            log_print(f"[{serial_number}] [{task_label}] 解析后的成交价格: {filled_price_value}")
+        except Exception as e:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 解析成交价格失败: {str(e)}，原始文本: {filled_price_text}")
+            filled_price_value = "-"
+        
+        # 第6个td（index=5）- 获取交易费
         td6 = tds[5]
         td6_ps = td6.find_elements(By.TAG_NAME, "p")
         transaction_fee_text = td6_ps[0].text.strip() if td6_ps else "-"
@@ -1769,7 +1790,6 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         fee_value = 0.0
         try:
             # 移除 $ 符号和其他非数字字符，只保留数字和小数点
-            import re
             fee_number_str = re.sub(r'[^\d.]', '', transaction_fee_text)
             if fee_number_str and fee_number_str != '':
                 fee_value = float(fee_number_str)
@@ -1783,24 +1803,24 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
             # 任务一：交易费为0、空、"-" 或无法解析数字 → 成功；反之失败
             if transaction_fee_text == "-" or transaction_fee_text == "" or fee_value == 0:
                 log_print(f"[{serial_number}] [{task_label}] ✓ 任务一：交易费为0或空，检查通过")
-                return transaction_fee_text, True
+                return transaction_fee_text, filled_price_value, True
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 任务一：交易费不为0（{fee_value}），检查失败")
-                return transaction_fee_text, False
+                return transaction_fee_text, filled_price_value, False
         else:
             # 任务二：交易费有值且大于0 → 成功；反之失败
             if transaction_fee_text != "-" and transaction_fee_text != "" and fee_value > 0:
                 log_print(f"[{serial_number}] [{task_label}] ✓ 任务二：交易费大于0（{fee_value}），检查通过")
-                return transaction_fee_text, True
+                return transaction_fee_text, filled_price_value, True
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 任务二：交易费为0或空，检查失败")
-                return transaction_fee_text, False
+                return transaction_fee_text, filled_price_value, False
         
     except Exception as e:
         log_print(f"[{serial_number}] [{task_label}] ✗ 检查 Transactions 失败: {str(e)}")
         import traceback
         log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-        return "-", is_task1  # 异常时，任务一算成功，任务二算失败
+        return "-", "-", is_task1  # 异常时，任务一算成功，任务二算失败
 
 
 def get_position_filled_amount(driver, serial_number, trending_part1):
@@ -2265,7 +2285,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         if not open_orders_div:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
             # 没找到div，检查 Transactions
-            transaction_fee, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
             
             import json
             msg_data = {
@@ -2302,7 +2322,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             tr_list = tbody.find_elements(By.TAG_NAME, "tr")
         except:
             # 没有tbody或tr，说明没有挂单
-            transaction_fee, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
             
             import json
             msg_data = {
@@ -2335,7 +2355,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         
         if not tr_list or len(tr_list) == 0:
             # 没有tr，说明没有挂单
-            transaction_fee, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
             
             import json
             msg_data = {
@@ -2414,7 +2434,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         log_print(f"[{serial_number}] [{task_label}] Open Orders数据 - 挂单价格: {pending_price}, 进度: {progress}")
         
         # 有挂单，获取交易费
-        transaction_fee, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+        transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
         
         # 有挂单，任务失败
         import json
@@ -4349,6 +4369,9 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                         # P5: 价格/price (索引4)
                         price = p_tags[4].text.strip()
                         
+                        # P6: 价格/price (索引5)
+                        fee = p_tags[5].text.strip()
+                        
                         # P9: 时间/time (索引8)
                         trade_time = p_tags[8].text.strip()
                         
@@ -4374,7 +4397,8 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                             "amount": amount,
                             "value": value,
                             "price": price,
-                            "time": trade_time
+                            "time": trade_time,
+                            "fee": fee
                         }
                         
                         transactions.append(transaction)
@@ -5281,6 +5305,7 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
                 cleaned_shares = clean_number_string(trans['amount'])
                 cleaned_amount = clean_number_string(trans['value'])
                 cleaned_price = clean_number_string(trans['price'])
+                cleaned_fee = clean_number_string(trans['fee'])
                 
                 transaction_data = {
                     "trending": trans['title'],
@@ -5289,10 +5314,11 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
                     "shares": cleaned_shares,    # 原 amount 字段映射到 shares (去除逗号)
                     "amount": cleaned_amount,    # 原 value 字段映射到 amount (去除符号)
                     "price": cleaned_price,      # price (去除符号)
+                    "fee": cleaned_fee,          # fee (去除符号)
                     "time": parse_time_to_timestamp(trans['time'])
                 }
                 transactions_list.append(transaction_data)
-                log_print(f"[{browser_id}]   交易 {idx}: {trans['title']} | {trans['direction']} | {trans['option']} | shares={cleaned_shares} (原:{trans['amount']}) | amount={cleaned_amount} (原:{trans['value']}) | price={cleaned_price} (原:{trans['price']}) | time={transaction_data['time']}")
+                log_print(f"[{browser_id}]   交易 {idx}: {trans['title']} | {trans['direction']} | {trans['option']} | shares={cleaned_shares} (原:{trans['amount']}) | amount={cleaned_amount} (原:{trans['value']}) | price={cleaned_price} (原:{trans['price']}) | fee={cleaned_fee} (原:{trans['fee']}) | time={transaction_data['time']}")
             
             log_print(f"[{browser_id}] ✓ 交易记录格式化完成，共 {len(transactions_list)} 条")
             
