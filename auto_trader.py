@@ -1711,6 +1711,37 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
             - success: 检查是否成功（任务一：交易费为0或空为成功；任务二：交易费>0为成功）
     """
     try:
+        # 先刷新页面
+        log_print(f"[{serial_number}] [{task_label}] 刷新页面...")
+        driver.refresh()
+        time.sleep(2)
+        log_print(f"[{serial_number}] [{task_label}] ✓ 页面已刷新")
+        
+        # 等待 Transactions 按钮出现（超时30秒）
+        log_print(f"[{serial_number}] [{task_label}] 等待 Transactions 按钮出现（超时30秒）...")
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        
+        try:
+            # 使用显式等待查找 Transactions 按钮
+            transactions_button = WebDriverWait(driver, 30).until(
+                lambda d: next(
+                    (btn for btn in d.find_elements(By.TAG_NAME, "button") 
+                     if btn.text.strip() == "Transactions"),
+                    None
+                )
+            )
+            
+            if transactions_button:
+                log_print(f"[{serial_number}] [{task_label}] ✓ Transactions 按钮已出现")
+            else:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 等待超时，未找到 Transactions 按钮")
+                return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
+                
+        except Exception as wait_error:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 等待 Transactions 按钮超时: {str(wait_error)}")
+            return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
+        
         # 点击 Transactions 按钮
         log_print(f"[{serial_number}] [{task_label}] 点击 Transactions 按钮...")
         transactions_button_found = False

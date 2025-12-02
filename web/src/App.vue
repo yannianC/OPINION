@@ -140,6 +140,20 @@
               <span v-if="hedgeMode.intervalType === 'delay'" class="filter-label">ms</span>
             </div>
             
+            <!-- 最大允许深度设置 -->
+            <div class="hedge-depth-filter">
+              <span class="filter-label">最大允许深度:</span>
+              <input 
+                v-model.number="hedgeMode.maxDepth" 
+                type="number" 
+                class="depth-input" 
+                min="0"
+                placeholder="1000"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -1240,7 +1254,8 @@ const hedgeMode = reactive({
   isClose: false,  // false: 开仓, true: 平仓
   timePassMin: 60,  // 最近xx分钟内有过任意操作的，不参与
   intervalType: 'success',  // 'success': 挂单成功再挂另一边, 'delay': 延时
-  intervalDelay: 1000  // 延时的毫秒数
+  intervalDelay: 1000,  // 延时的毫秒数
+  maxDepth: 100  // 最大允许深度
 })
 
 // 交易费查询
@@ -2431,7 +2446,7 @@ const stopAutoHedge = () => {
 }
 
 /**
- * 解析 type=3 任务的 msg，提取价格
+ * 解析type=3任务消息，提取价格和深度信息
  */
 const parseType3Message = (msg, hasSubtopic) => {
   try {
@@ -2445,14 +2460,20 @@ const parseType3Message = (msg, hasSubtopic) => {
     const group1Values = group1.split(',')
     const group2Values = group2.split(',')
     
-    let price1Str, price2Str
+    let price1Str, price2Str, depth1, depth2
     
     if (hasSubtopic) {
       price1Str = group1Values[group1Values.length - 1].trim()
       price2Str = group2Values[0].trim()
+      // 对于有子主题的，深度值在不同位置
+      depth1 = group1Values.length >= 2 ? parseFloat(group1Values[1]) : 0
+      depth2 = group2Values.length >= 2 ? parseFloat(group2Values[1]) : 0
     } else {
       price1Str = group1Values[0].trim()
       price2Str = group2Values[0].trim()
+      // 对于无子主题的，深度值是第二个值
+      depth1 = group1Values.length >= 2 ? parseFloat(group1Values[1]) : 0
+      depth2 = group2Values.length >= 2 ? parseFloat(group2Values[1]) : 0
     }
     
     const price1 = parseFloat(price1Str.replace(' ¢', '').replace('¢', '').trim())
@@ -2464,8 +2485,11 @@ const parseType3Message = (msg, hasSubtopic) => {
       firstSide,
       price1,
       price2,
+      depth1,
+      depth2,
       diff: Math.abs(price1 - price2),
-      minPrice: Math.min(price1, price2)
+      minPrice: Math.min(price1, price2),
+      maxPrice: Math.max(price1, price2)
     }
   } catch (e) {
     console.error('解析 msg 失败:', e)
@@ -2852,12 +2876,49 @@ const monitorAndExecuteHedge = async (config) => {
     return
   }
   
-  if (priceInfo.diff <= 0.15) {
-    console.log(`差值不足 (${priceInfo.diff.toFixed(2)})，无法对冲`)
+  let orderPrice
+  let canHedge = false
+  
+  if (priceInfo.diff > 0.15) {
+    // 差值大于0.15，按原逻辑对冲
+    orderPrice = (priceInfo.minPrice + 0.1).toFixed(1)
+    canHedge = true
+    console.log(`差值充足 (${priceInfo.diff.toFixed(2)})，订单价格: ${orderPrice}`)
+  } else {
+    // 差值小于等于0.15，根据开仓/平仓判断
+    console.log(`差值不足 (${priceInfo.diff.toFixed(2)})，检查深度条件`)
+    
+    if (!hedgeMode.isClose) {
+      // 开仓模式：判断价格较小的一方的深度
+      const smallerDepth = priceInfo.price1 < priceInfo.price2 ? priceInfo.depth1 : priceInfo.depth2
+      console.log(`开仓模式，价格较小方深度: ${smallerDepth}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      
+      if (smallerDepth < hedgeMode.maxDepth) {
+        orderPrice = priceInfo.minPrice.toFixed(1)
+        canHedge = true
+        console.log(`深度满足条件，允许对冲，订单价格: ${orderPrice}`)
+      } else {
+        console.log(`深度超过限制 (${smallerDepth} >= ${hedgeMode.maxDepth})，不对冲`)
+      }
+    } else {
+      // 平仓模式：判断价格较大的一方的深度
+      const largerDepth = priceInfo.price1 > priceInfo.price2 ? priceInfo.depth1 : priceInfo.depth2
+      console.log(`平仓模式，价格较大方深度: ${largerDepth}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      
+      if (largerDepth < hedgeMode.maxDepth) {
+        orderPrice = priceInfo.maxPrice.toFixed(1)
+        canHedge = true
+        console.log(`深度满足条件，允许对冲，订单价格: ${orderPrice}`)
+      } else {
+        console.log(`深度超过限制 (${largerDepth} >= ${hedgeMode.maxDepth})，不对冲`)
+      }
+    }
+  }
+  
+  if (!canHedge) {
     return
   }
   
-  const orderPrice = (priceInfo.minPrice + 0.1).toFixed(1)
   console.log(`配置 ${config.id} 符合对冲条件，订单价格: ${orderPrice}`)
   
   // 获取当前打开显示的所有主题ID
@@ -2927,7 +2988,7 @@ const executeHedgeTask = async (config, hedgeData) => {
     yesPrice: yesPrice,
     noPrice: noPrice,
     firstSide: hedgeData.firstSide,
-    side: 1,  // 固定为1（买入）
+    side: hedgeMode.isClose ? 2 : 1,  // 开仓=买入(1)，平仓=卖出(2)
     isClose: hedgeMode.isClose,
     yesTaskId: null,
     noTaskId: null,
@@ -3793,12 +3854,16 @@ const formatTaskMsg = (msg) => {
       
       // 计算并显示交易额（现有数量 - 初始数量）
       if (data.initial_filled_amount && data.filled_amount) {
-        const initialAmount = parseFloat(data.initial_filled_amount) || 0
+        // 去除千位分隔符（逗号）后再解析
+        const initialAmountStr = String(data.initial_filled_amount).replace(/,/g, '')
+        const initialAmount = parseFloat(initialAmountStr) || 0
+        
         let filledAmount = 0
         if (typeof data.filled_amount === 'string' && data.filled_amount.includes('<')) {
           filledAmount = 0
         } else {
-          filledAmount = parseFloat(data.filled_amount) || 0
+          const filledAmountStr = String(data.filled_amount).replace(/,/g, '')
+          filledAmount = parseFloat(filledAmountStr) || 0
         }
         const tradeAmount = filledAmount - initialAmount
         result += ` | 交易额: ${tradeAmount.toFixed(2)}`
@@ -4502,6 +4567,38 @@ onUnmounted(() => {
 }
 
 .delay-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 最大允许深度设置 */
+.hedge-depth-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.depth-input {
+  width: 100px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.depth-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.3);
+}
+
+.depth-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
