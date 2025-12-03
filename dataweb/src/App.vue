@@ -883,6 +883,20 @@ const parsePositions = (posStr) => {
             }
           }
           
+          // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
+          if (title.includes('Monad vs MegaETH') && (option === 'Monad' || option === 'MegaETH')) {
+            const numAmount = parseFloat(amount)
+            if (!isNaN(numAmount)) {
+              if (option === 'Monad') {
+                // Monad改为正数
+                amount = Math.abs(numAmount).toFixed(2)
+              } else if (option === 'MegaETH') {
+                // MegaETH改为负数
+                amount = (-Math.abs(numAmount)).toFixed(2)
+              }
+            }
+          }
+          
           positions.push({
             title: title,
             option: option,
@@ -908,6 +922,20 @@ const parsePositions = (posStr) => {
                 amount = Math.abs(numAmount).toFixed(2)
               } else if (option === 'ETH') {
                 // ETH改为负数
+                amount = (-Math.abs(numAmount)).toFixed(2)
+              }
+            }
+          }
+          
+          // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
+          if (title.includes('Monad vs MegaETH') && (option === 'Monad' || option === 'MegaETH')) {
+            const numAmount = parseFloat(amount)
+            if (!isNaN(numAmount)) {
+              if (option === 'Monad') {
+                // Monad改为正数
+                amount = Math.abs(numAmount).toFixed(2)
+              } else if (option === 'MegaETH') {
+                // MegaETH改为负数
                 amount = (-Math.abs(numAmount)).toFixed(2)
               }
             }

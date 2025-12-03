@@ -882,7 +882,7 @@ def open_new_tab_with_url(driver, url, serial_number):
 
 def preopen_okx_wallet(driver, serial_number):
     """
-    预先打开OKX钱包页面
+    预先打开OKX钱包页面，解锁钱包并处理所有待确认的弹窗
     
     Args:
         driver: Selenium WebDriver对象
@@ -898,6 +898,7 @@ def preopen_okx_wallet(driver, serial_number):
     
     okx_extension_id = "mcohilncbfahbmgdjkbpemcciiolgcge"
     okx_popup_url = f"chrome-extension://{okx_extension_id}/popup.html"
+    okx_window = None
     
     try:
         # 检查是否已经存在OKX钱包标签页
@@ -914,6 +915,7 @@ def preopen_okx_wallet(driver, serial_number):
                 # 检查是否包含OKX扩展ID
                 if okx_extension_id in current_url:
                     okx_window_exists = True
+                    okx_window = window
                     log_print(f"[{serial_number}] ✓ 已找到现有的 OKX 钱包标签页: {current_url}")
                     break
             except Exception as e:
@@ -930,16 +932,68 @@ def preopen_okx_wallet(driver, serial_number):
             
             if success:
                 log_print(f"[{serial_number}] ✓ OKX 钱包页面已打开")
+                # 获取新打开的OKX窗口
+                all_windows = driver.window_handles
+                for window in all_windows:
+                    if window != main_window:
+                        try:
+                            driver.switch_to.window(window)
+                            if okx_extension_id in driver.current_url:
+                                okx_window = window
+                                break
+                        except:
+                            continue
             else:
                 log_print(f"[{serial_number}] ⚠ 预打开 OKX 钱包失败，继续执行...")
                 time.sleep(3)
-            
-            # 切换回主窗口
-            log_print(f"[{serial_number}] → 切换回主窗口")
-            driver.switch_to.window(main_window)
-            log_print(f"[{serial_number}] ✓ 已切换回主窗口")
         else:
-            log_print(f"[{serial_number}] ✓ 跳过打开，使用现有的 OKX 钱包标签页")
+            log_print(f"[{serial_number}] ✓ 使用现有的 OKX 钱包标签页")
+        
+        # 如果找到了OKX窗口，进行解锁和处理确认按钮
+        if okx_window:
+            try:
+                # 切换到OKX窗口
+                driver.switch_to.window(okx_window)
+                log_print(f"[{serial_number}] → 切换到 OKX 钱包窗口进行解锁...")
+                
+                # 先解锁钱包
+                unlock_okx_wallet(driver, serial_number, serial_number)
+                
+                # 在10秒内循环查找并点击确认按钮
+                log_print(f"[{serial_number}] → 开始查找并处理确认按钮（10秒超时）...")
+                start_time = time.time()
+                buttons_clicked = 0
+                
+                while time.time() - start_time < 15:
+                    try:
+                        confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                        if confirm_buttons and len(confirm_buttons) > 0:
+                            # 点击第一个按钮
+                            confirm_buttons[0].click()
+                            buttons_clicked += 1
+                            log_print(f"[{serial_number}] ✓ 已点击第 {buttons_clicked} 个确认按钮")
+                            time.sleep(0.5)  # 等待页面响应
+                        else:
+                            # 没有找到按钮，检查是否已经处理完毕
+                            if buttons_clicked > 0:
+                                log_print(f"[{serial_number}] ✓ 所有确认按钮已处理完毕，共点击 {buttons_clicked} 个")
+                            else:
+                                log_print(f"[{serial_number}] → 未找到确认按钮")
+                            break
+                    except Exception as e:
+                        log_print(f"[{serial_number}] ⚠ 查找按钮时出错: {str(e)}")
+                        time.sleep(0.5)
+                
+                if time.time() - start_time >= 10:
+                    log_print(f"[{serial_number}] ⚠ 处理确认按钮超时（10秒），共点击 {buttons_clicked} 个")
+                    
+            except Exception as e:
+                log_print(f"[{serial_number}] ⚠ 处理 OKX 钱包时出错: {str(e)}")
+        
+        # 切换回主窗口
+        log_print(f"[{serial_number}] → 切换回主窗口")
+        driver.switch_to.window(main_window)
+        log_print(f"[{serial_number}] ✓ 已切换回主窗口")
         
         # 等待1秒
         time.sleep(1)
@@ -1600,7 +1654,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         elif status == 3:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务一状态变为3（任务二失败），点击取消按钮")
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, "任务二导致失败"
+                                            return False, False
                                         
                                         time.sleep(10)
                                     
@@ -1629,7 +1683,8 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     while True:
                                         if time.time() - start_time > max_wait_time:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务二等待任务一超时")
-                                            return False, True  # 失败，可重试
+                                            buttons[0].click() 
+                                            return False, False  # 失败，不重试
                                         
                                         tp1_status = get_mission_status(tp1)
                                         if tp1_status == 5:
@@ -1637,7 +1692,8 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             break
                                         elif tp1_status == 3:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务一失败，任务二也失败")
-                                            return False, True  # 失败，可重试
+                                            buttons[0].click() 
+                                            return False, False  # 失败，不重试
                                         
                                         time.sleep(10)
                                     
@@ -3352,12 +3408,27 @@ def connect_wallet_if_needed(driver, browser_id):
             log_print(f"[{browser_id}] → 解锁 OKX 钱包...")
             unlock_okx_wallet(driver, browser_id, browser_id)
             
-            # 点击确认按钮
-            log_print(f"[{browser_id}] → 查找确认按钮...")
-            confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
-            if len(confirm_buttons) >= 2:
-                confirm_buttons[1].click()
-                log_print(f"[{browser_id}] ✓ 已点击确认按钮")
+            # 在10秒内等待并点击确认按钮（第二个按钮）
+            log_print(f"[{browser_id}] → 查找确认按钮（10秒超时）...")
+            start_time = time.time()
+            button_clicked = False
+            
+            while time.time() - start_time < 10:
+                try:
+                    confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                    if len(confirm_buttons) >= 2:
+                        confirm_buttons[1].click()
+                        log_print(f"[{browser_id}] ✓ 已点击确认按钮（第二个）")
+                        button_clicked = True
+                        break
+                    else:
+                        time.sleep(0.5)  # 等待后重试
+                except Exception as e:
+                    log_print(f"[{browser_id}] ⚠ 查找按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not button_clicked:
+                log_print(f"[{browser_id}] ⚠ 未找到足够的确认按钮或超时")
             
             # 切换回主窗口
             driver.switch_to.window(main_window)
@@ -6865,7 +6936,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                         log_print(f"[{browser_id}] 任务一状态已是3或无法获取，无需修改")
             
             # Type 1/5任务完成后收集持仓数据（不影响任务结果）
-            if success and driver and task_browser_id and task_exchange_name:
+            if driver and task_browser_id and task_exchange_name:
                 try:
                     log_print(f"[{browser_id}] 开始额外收集持仓数据（不影响任务结果）...")
                     collect_position_data(driver, task_browser_id, task_exchange_name)
@@ -6875,12 +6946,6 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 finally:
                     log_print(f"[{browser_id}] 关闭浏览器...")
                     close_adspower_browser(task_browser_id)
-            elif not success:
-                # 任务失败，直接关闭浏览器
-                if driver and task_browser_id:
-                    log_print(f"[{browser_id}] 任务失败，关闭浏览器...")
-                    close_adspower_browser(task_browser_id)
-            
             # Type 1/5 任务结果已经在上面记录了，跳过后面的统一记录
             return
             

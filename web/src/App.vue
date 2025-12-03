@@ -4438,6 +4438,9 @@ onUnmounted(() => {
   word-break: break-all;
   white-space: pre-wrap;
   word-wrap: break-word;
+  flex: 1 1 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .msg-label {
@@ -4950,6 +4953,8 @@ onUnmounted(() => {
   display: flex;
   gap: 0.5rem;
   font-size: 0.8rem;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
 .task-label {
@@ -4964,6 +4969,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.3rem;
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .task-group {
@@ -4980,6 +4987,9 @@ onUnmounted(() => {
   font-style: italic;
   word-wrap: break-word;
   white-space: pre-wrap;
+  flex: 1 1 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .task-success {
