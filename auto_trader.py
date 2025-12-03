@@ -1604,10 +1604,17 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         
                         # 点击确认按钮
                         log_print(f"[{serial_number}] [OP] 查找确认按钮...")
-                        time.sleep(1)
+                        time.sleep(3)
                         buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
                         
                         if len(buttons) >= 2:
+                            # 检查第二个按钮（确认按钮）是否被禁用
+                            confirm_button = buttons[1]
+                            button_class = confirm_button.get_attribute("class") or ""
+                            if "btn-disabled" in button_class:
+                                log_print(f"[{serial_number}] [OP] ✗ OKX确认按钮被禁用，class: {button_class}")
+                                return False, "okx确认交易按钮不能点击"
+                            
                             # Type 5 任务需要同步机制
                             mission = task_data.get('mission', {}) if task_data else {}
                             mission_type = mission.get('type')
@@ -1645,7 +1652,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         if time.time() - start_time > max_wait_time:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务一等待任务二超时，点击取消按钮")
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, False  # 失败，不可重试
+                                            return False, "任务一等待任务二超时"
                                         
                                         status = get_mission_status(mission_id)
                                         if status == 6:
@@ -1654,7 +1661,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         elif status == 3:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务一状态变为3（任务二失败），点击取消按钮")
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, False
+                                            return False, "任务一状态变为3（任务二失败）"
                                         
                                         time.sleep(10)
                                     
@@ -1684,7 +1691,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         if time.time() - start_time > max_wait_time:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务二等待任务一超时")
                                             buttons[0].click() 
-                                            return False, False  # 失败，不重试
+                                            return False, "任务二等待任务一超时"
                                         
                                         tp1_status = get_mission_status(tp1)
                                         if tp1_status == 5:
@@ -1693,7 +1700,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         elif tp1_status == 3:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务一失败，任务二也失败")
                                             buttons[0].click() 
-                                            return False, False  # 失败，不重试
+                                            return False, "任务一失败导致任务二失败"
                                         
                                         time.sleep(10)
                                     
@@ -1711,7 +1718,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         if time.time() - start_time > max_wait_time:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务二等待任务一确认超时，点击取消按钮")
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, False  # 失败，不可重试
+                                            return False, "任务二等待任务一确认超时"
                                         
                                         tp1_status = get_mission_status(tp1)
                                         if tp1_status == 7 or tp1_status == 2:
@@ -1721,7 +1728,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         elif tp1_status == 3:
                                             log_print(f"[{serial_number}] [OP] ✗ 任务一失败，任务二也失败，点击取消按钮")
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, False  # 失败，不可重试
+                                            return False, "任务一确认阶段失败导致任务二失败"
                                         
                                         time.sleep(10)
                                     
@@ -1750,7 +1757,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         return False, True  # 失败，可重试
 
 
-def check_transaction_fee(driver, serial_number, task_label, is_task1):
+def check_transaction_fee(driver, serial_number, task_label, is_task1, trade_type="Buy"):
     """
     检查 Transactions 中的交易费和成交价格，判断任务是否真正成功
     
@@ -1759,6 +1766,7 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
         serial_number: 浏览器序列号
         task_label: 任务标签（任务一/任务二）
         is_task1: 是否是任务一
+        trade_type: 买卖方向（"Buy" 或 "Sell"）
         
     Returns:
         tuple: (transaction_fee, filled_price, success)
@@ -1766,148 +1774,228 @@ def check_transaction_fee(driver, serial_number, task_label, is_task1):
             - filled_price: 成交价格字符串（例如 "14.0" 或 "-"）
             - success: 检查是否成功（任务一：交易费为0或空为成功；任务二：交易费>0为成功）
     """
-    try:
-        # 先刷新页面
-        log_print(f"[{serial_number}] [{task_label}] 刷新页面...")
-        driver.refresh()
-        time.sleep(2)
-        log_print(f"[{serial_number}] [{task_label}] ✓ 页面已刷新")
-        
-        # 等待 Transactions 按钮出现（超时30秒）
-        log_print(f"[{serial_number}] [{task_label}] 等待 Transactions 按钮出现（超时30秒）...")
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        
+    max_retry = 6 # 最多重试3次
+    
+    for retry_count in range(max_retry):
         try:
-            # 使用显式等待查找 Transactions 按钮
-            transactions_button = WebDriverWait(driver, 30).until(
-                lambda d: next(
-                    (btn for btn in d.find_elements(By.TAG_NAME, "button") 
-                     if btn.text.strip() == "Transactions"),
-                    None
-                )
-            )
+            if retry_count > 0:
+                log_print(f"[{serial_number}] [{task_label}] 第 {retry_count + 1}/{max_retry} 次尝试检查 Transactions...")
+            time.sleep(60)
+            # 先刷新页面
+            log_print(f"[{serial_number}] [{task_label}] 刷新页面...")
+            driver.refresh()
+            time.sleep(2)
+            log_print(f"[{serial_number}] [{task_label}] ✓ 页面已刷新")
             
-            if transactions_button:
-                log_print(f"[{serial_number}] [{task_label}] ✓ Transactions 按钮已出现")
-            else:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 等待超时，未找到 Transactions 按钮")
-                return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
+            # 等待 Transactions 按钮出现（超时30秒）
+            log_print(f"[{serial_number}] [{task_label}] 等待 Transactions 按钮出现（超时30秒）...")
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            
+            need_retry = False
+            try:
+                # 使用显式等待查找 Transactions 按钮
+                transactions_button = WebDriverWait(driver, 60).until(
+                    lambda d: next(
+                        (btn for btn in d.find_elements(By.TAG_NAME, "button") 
+                         if btn.text.strip() == "Transactions"),
+                        None
+                    )
+                )
                 
-        except Exception as wait_error:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 等待 Transactions 按钮超时: {str(wait_error)}")
-            return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
-        
-        # 点击 Transactions 按钮
-        log_print(f"[{serial_number}] [{task_label}] 点击 Transactions 按钮...")
-        transactions_button_found = False
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        for btn in buttons:
-            if btn.text.strip() == "Transactions":
-                btn.click()
-                time.sleep(2)
-                transactions_button_found = True
-                log_print(f"[{serial_number}] [{task_label}] ✓ 已点击 Transactions 按钮")
-                break
-        
-        time.sleep(10)
-        if not transactions_button_found:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到 Transactions 按钮")
-            return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
-        
-        # 查找 Transactions div
-        log_print(f"[{serial_number}] [{task_label}] 查找 Transactions div...")
-        tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
-        transactions_div = None
-        for div in tabs_divs:
-            div_id = div.get_attribute('id')
-            if div_id and 'content-transactions' in div_id.lower():
-                transactions_div = div
-                log_print(f"[{serial_number}] [{task_label}] ✓ 找到 Transactions div，id: {div_id}")
-                break
-        
-        if not transactions_div:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到 Transactions div")
-            return "-", "-", is_task1  # 任务一找不到div算成功，任务二算失败
-        
-        # 获取 tbody 和第一个 tr
-        tbody = transactions_div.find_element(By.TAG_NAME, "tbody")
-        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-        
-        if not tr_list or len(tr_list) == 0:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ Transactions 中没有 tr")
-            return "-", "-", is_task1  # 任务一没有tr算成功，任务二算失败
-        
-        # 获取第一个 tr 的第 6 个 td 的 div 的 p 标签内容
-        first_tr = tr_list[0]
-        tds = first_tr.find_elements(By.TAG_NAME, "td")
-        
-        if len(tds) < 6:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ Transactions 第一个 tr 的 td 数量不足6个（实际: {len(tds)}）")
-            return "-", "-", is_task1
-        
-        # 第5个td（index=4）- 获取 filled_price
-        td5 = tds[4]
-        td5_ps = td5.find_elements(By.TAG_NAME, "p")
-        filled_price_text = td5_ps[0].text.strip() if td5_ps else "-"
-        
-        log_print(f"[{serial_number}] [{task_label}] Transactions 成交价格: {filled_price_text}")
-        
-        # 解析 filled_price 数字（格式如 "14.0¢"）
-        filled_price_value = "-"
-        try:
-            # 移除 ¢ 符号和其他非数字字符，只保留数字和小数点
-            import re
-            price_number_str = re.sub(r'[^\d.]', '', filled_price_text)
-            if price_number_str and price_number_str != '':
-                filled_price_value = price_number_str
-            log_print(f"[{serial_number}] [{task_label}] 解析后的成交价格: {filled_price_value}")
-        except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 解析成交价格失败: {str(e)}，原始文本: {filled_price_text}")
+                if transactions_button:
+                    log_print(f"[{serial_number}] [{task_label}] ✓ Transactions 按钮已出现")
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 等待超时，未找到 Transactions 按钮")
+                    need_retry = True
+                    
+            except Exception as wait_error:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 等待 Transactions 按钮超时: {str(wait_error)}")
+                need_retry = True
+            
+            # 如果需要重试
+            if need_retry:
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(10)
+                    continue  # 继续下一次重试
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 已达到最大重试次数")
+                    return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
+            
+            # 点击 Transactions 按钮
+            log_print(f"[{serial_number}] [{task_label}] 点击 Transactions 按钮...")
+            transactions_button_found = False
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                if btn.text.strip() == "Transactions":
+                    btn.click()
+                    time.sleep(2)
+                    transactions_button_found = True
+                    log_print(f"[{serial_number}] [{task_label}] ✓ 已点击 Transactions 按钮")
+                    break
+            
+            time.sleep(3)
+            if not transactions_button_found:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到 Transactions 按钮")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return "-", "-", is_task1  # 任务一找不到按钮算成功，任务二算失败
+            
+            # 查找 Transactions div
+            log_print(f"[{serial_number}] [{task_label}] 查找 Transactions div...")
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            transactions_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'content-transactions' in div_id.lower():
+                    transactions_div = div
+                    log_print(f"[{serial_number}] [{task_label}] ✓ 找到 Transactions div，id: {div_id}")
+                    break
+            
+            if not transactions_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到 Transactions div")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return "-", "-", is_task1  # 任务一找不到div算成功，任务二算失败
+            
+            # 获取 tbody 和第一个 tr
+            tbody = transactions_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            
+            if not tr_list or len(tr_list) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ Transactions 中没有 tr")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return "-", "-", is_task1  # 任务一没有tr算成功，任务二算失败
+            
+            # 获取第一个 tr
+            first_tr = tr_list[0]
+            tds = first_tr.find_elements(By.TAG_NAME, "td")
+            
+            if len(tds) < 6:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ Transactions 第一个 tr 的 td 数量不足6个（实际: {len(tds)}）")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return "-", "-", is_task1
+            
+            # 检查第一个 td 的 p 标签内容是否与买卖方向一致
+            td1 = tds[0]
+            td1_ps = td1.find_elements(By.TAG_NAME, "p")
+            td1_text = td1_ps[0].text.strip() if td1_ps else ""
+            log_print(f"[{serial_number}] [{task_label}] 第一个 td 内容: {td1_text}, 期望买卖方向: {trade_type}")
+            
+            if trade_type not in td1_text:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 买卖方向不一致（期望: {trade_type}, 实际: {td1_text}）")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue  # 继续下一次重试
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 已达到最大重试次数，买卖方向仍不一致")
+                    return "-", "-", is_task1
+            
+            log_print(f"[{serial_number}] [{task_label}] ✓ 买卖方向一致")
+            
+            # 第5个td（index=4）- 获取 filled_price
+            td5 = tds[4]
+            td5_ps = td5.find_elements(By.TAG_NAME, "p")
+            filled_price_text = td5_ps[0].text.strip() if td5_ps else "-"
+            
+            log_print(f"[{serial_number}] [{task_label}] Transactions 成交价格: {filled_price_text}")
+            
+            # 解析 filled_price 数字（格式如 "14.0¢"）
             filled_price_value = "-"
-        
-        # 第6个td（index=5）- 获取交易费
-        td6 = tds[5]
-        td6_ps = td6.find_elements(By.TAG_NAME, "p")
-        transaction_fee_text = td6_ps[0].text.strip() if td6_ps else "-"
-        
-        log_print(f"[{serial_number}] [{task_label}] Transactions 交易费: {transaction_fee_text}")
-        
-        # 解析交易费数字
-        fee_value = 0.0
-        try:
-            # 移除 $ 符号和其他非数字字符，只保留数字和小数点
-            fee_number_str = re.sub(r'[^\d.]', '', transaction_fee_text)
-            if fee_number_str and fee_number_str != '':
-                fee_value = float(fee_number_str)
-            log_print(f"[{serial_number}] [{task_label}] 解析后的交易费数值: {fee_value}")
-        except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 解析交易费失败: {str(e)}，原始文本: {transaction_fee_text}")
+            try:
+                # 移除 ¢ 符号和其他非数字字符，只保留数字和小数点
+                import re
+                price_number_str = re.sub(r'[^\d.]', '', filled_price_text)
+                if price_number_str and price_number_str != '':
+                    filled_price_value = price_number_str
+                else:
+                    # 解析结果为空，需要重试
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 解析成交价格为空，原始文本: {filled_price_text}")
+                    if retry_count < max_retry - 1:
+                        log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                        time.sleep(2)
+                        continue
+                log_print(f"[{serial_number}] [{task_label}] 解析后的成交价格: {filled_price_value}")
+            except Exception as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 解析成交价格失败: {str(e)}，原始文本: {filled_price_text}")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue
+                filled_price_value = "-"
+            
+            # 第6个td（index=5）- 获取交易费
+            td6 = tds[5]
+            td6_ps = td6.find_elements(By.TAG_NAME, "p")
+            transaction_fee_text = td6_ps[0].text.strip() if td6_ps else "-"
+            
+            log_print(f"[{serial_number}] [{task_label}] Transactions 交易费: {transaction_fee_text}")
+            
+            # 解析交易费数字
             fee_value = 0.0
-        
-        # 判断逻辑
-        if is_task1:
-            # 任务一：交易费为0、空、"-" 或无法解析数字 → 成功；反之失败
-            if transaction_fee_text == "-" or transaction_fee_text == "" or fee_value == 0:
-                log_print(f"[{serial_number}] [{task_label}] ✓ 任务一：交易费为0或空，检查通过")
-                return transaction_fee_text, filled_price_value, True
+            try:
+                # 移除 $ 符号和其他非数字字符，只保留数字和小数点
+                import re
+                fee_number_str = re.sub(r'[^\d.]', '', transaction_fee_text)
+                if fee_number_str and fee_number_str != '':
+                    fee_value = float(fee_number_str)
+                log_print(f"[{serial_number}] [{task_label}] 解析后的交易费数值: {fee_value}")
+            except Exception as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 解析交易费失败: {str(e)}，原始文本: {transaction_fee_text}")
+                if retry_count < max_retry - 1:
+                    log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                    time.sleep(2)
+                    continue
+                fee_value = 0.0
+            
+            # 判断逻辑
+            if is_task1:
+                # 任务一：交易费为0、空、"-" 或无法解析数字 → 成功；反之失败
+                if transaction_fee_text == "-" or transaction_fee_text == "" or fee_value == 0:
+                    log_print(f"[{serial_number}] [{task_label}] ✓ 任务一：交易费为0或空，检查通过")
+                    return transaction_fee_text, filled_price_value, True
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] ✗ 任务一：交易费不为0（{fee_value}），检查失败")
+                    return transaction_fee_text, filled_price_value, False
             else:
-                log_print(f"[{serial_number}] [{task_label}] ✗ 任务一：交易费不为0（{fee_value}），检查失败")
-                return transaction_fee_text, filled_price_value, False
-        else:
-            # 任务二：交易费有值且大于0 → 成功；反之失败
-            if transaction_fee_text != "-" and transaction_fee_text != "" and fee_value > 0:
-                log_print(f"[{serial_number}] [{task_label}] ✓ 任务二：交易费大于0（{fee_value}），检查通过")
-                return transaction_fee_text, filled_price_value, True
+                # 任务二：交易费有值且大于0 → 成功；反之失败
+                if transaction_fee_text != "-" and transaction_fee_text != "" and fee_value > 0:
+                    log_print(f"[{serial_number}] [{task_label}] ✓ 任务二：交易费大于0（{fee_value}），检查通过")
+                    return transaction_fee_text, filled_price_value, True
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] ✗ 任务二：交易费为0或空，检查失败")
+                    return transaction_fee_text, filled_price_value, False
+            
+        except Exception as e:
+            log_print(f"[{serial_number}] [{task_label}] ✗ 检查 Transactions 失败: {str(e)}")
+            import traceback
+            log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
+            
+            if retry_count < max_retry - 1:
+                log_print(f"[{serial_number}] [{task_label}] → 准备重试...")
+                time.sleep(2)
+                continue
             else:
-                log_print(f"[{serial_number}] [{task_label}] ✗ 任务二：交易费为0或空，检查失败")
-                return transaction_fee_text, filled_price_value, False
-        
-    except Exception as e:
-        log_print(f"[{serial_number}] [{task_label}] ✗ 检查 Transactions 失败: {str(e)}")
-        import traceback
-        log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-        return "-", "-", is_task1  # 异常时，任务一算成功，任务二算失败
+                return "-", "-", is_task1  # 异常时，任务一算成功，任务二算失败
+    
+    # 如果所有重试都失败
+    return "-", "-", is_task1
 
 
 def get_position_filled_amount(driver, serial_number, trending_part1):
@@ -2223,7 +2311,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     
     if not status_is_10:
         log_print(f"[{serial_number}] [{task_label}] ✗ 检测吃单超时")
-        return False, "检测吃单超时"
+        return False, "检测对方吃单超时，自己仓位已变化"
     
     # 第三阶段：获取Position和Open Orders的详细数据
     log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
@@ -2372,7 +2460,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         if not open_orders_div:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
             # 没找到div，检查 Transactions
-            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1, trade_type)
             
             import json
             msg_data = {
@@ -2409,7 +2497,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             tr_list = tbody.find_elements(By.TAG_NAME, "tr")
         except:
             # 没有tbody或tr，说明没有挂单
-            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1, trade_type)
             
             import json
             msg_data = {
@@ -2442,7 +2530,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         
         if not tr_list or len(tr_list) == 0:
             # 没有tr，说明没有挂单
-            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1, trade_type)
             
             import json
             msg_data = {
@@ -2521,7 +2609,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         log_print(f"[{serial_number}] [{task_label}] Open Orders数据 - 挂单价格: {pending_price}, 进度: {progress}")
         
         # 有挂单，获取交易费
-        transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1)
+        transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1, trade_type)
         
         # 有挂单，任务失败
         import json
@@ -3939,6 +4027,156 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         mission_type = mission.get('type')
         
         if mission_type == 5:
+         
+            
+            # Type 5 任务：检查是否有 "order failed" 并进行重试
+            max_order_retry = 3  # 最多重试3次
+            order_retry_count = 0
+            
+            while order_retry_count < max_order_retry:
+                # 在10秒内检查是否有包含 "order failed" 和 "Please try again" 的div
+                log_print(f"[{browser_id}] 检查是否存在 'order failed' 提示（10秒超时）...")
+                order_failed_detected = False
+                check_start_time = time.time()
+                
+                while time.time() - check_start_time < 10:
+                    try:
+                        # 查找所有div元素
+                        divs = driver.find_elements(By.TAG_NAME, "div")
+                        for div in divs:
+                            try:
+                                div_text = div.text.lower()
+                                if "order failed" in div_text and "please try again" in div_text:
+                                    order_failed_detected = True
+                                    log_print(f"[{browser_id}] ⚠ 检测到订单失败提示！")
+                                    break
+                            except:
+                                continue
+                        
+                        if order_failed_detected:
+                            break
+                        time.sleep(1)
+                    except Exception as e:
+                        log_print(f"[{browser_id}] ⚠ 检查订单失败提示时出错: {str(e)}")
+                        time.sleep(1)
+                
+                if not order_failed_detected:
+                    # 没有检测到订单失败，退出循环
+                    log_print(f"[{browser_id}] ✓ 未检测到 'order failed' 提示")
+                    break
+                
+                # 检测到订单失败，进行重试
+                order_retry_count += 1
+                log_print(f"[{browser_id}] ⚠ 订单失败，进行第 {order_retry_count}/{max_order_retry} 次重试...")
+                
+                try:
+                    # 重新获取 trade_box 并找到提交按钮（不需要同步机制）
+                    log_print(f"[{browser_id}] → 重新查找 trade-box...")
+                    trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                    
+                    if not trade_box_divs:
+                        log_print(f"[{browser_id}] ✗ 未找到 trade-box div")
+                        continue
+                    
+                    trade_box = trade_box_divs[0]
+                    
+                    # 查找 tabs content div
+                    tabs_content_divs = trade_box.find_elements(By.CSS_SELECTOR, 
+                        'div[data-scope="tabs"][data-part="content"][data-state="open"]')
+                    
+                    if not tabs_content_divs:
+                        log_print(f"[{browser_id}] ✗ 未找到 tabs content div")
+                        continue
+                    
+                    tabs_content = tabs_content_divs[0]
+                    
+                    # 查找并点击提交按钮
+                    log_print(f"[{browser_id}] → 查找提交订单按钮...")
+                    p_tags = tabs_content.find_elements(By.TAG_NAME, "p")
+                    submit_clicked = False
+                    
+                    for p in p_tags:
+                        try:
+                            text = p.text.strip()
+                            if trade_type in text and option_type in text:
+                                log_print(f"[{browser_id}] ✓ 找到提交按钮，文本: {text}")
+                                parent = p.find_element(By.XPATH, "..")
+                                parent.click()
+                                log_print(f"[{browser_id}] ✓ 已点击提交订单按钮")
+                                submit_clicked = True
+                                break
+                        except:
+                            continue
+                    
+                    if not submit_clicked:
+                        log_print(f"[{browser_id}] ✗ 未找到提交按钮")
+                        continue
+                    
+                    time.sleep(2)
+                    
+                    # 切换到OKX页面
+                    log_print(f"[{browser_id}] → 切换到 OKX 钱包页面...")
+                    all_windows = driver.window_handles
+                    okx_window_found = False
+                    
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
+                            log_print(f"[{browser_id}] ✓ 已切换到 OKX 页面")
+                            okx_window_found = True
+                            break
+                    
+                    if not okx_window_found:
+                        log_print(f"[{browser_id}] ✗ 未找到 OKX 钱包窗口")
+                        continue
+                    
+                    # 解锁钱包
+                    log_print(f"[{browser_id}] → 解锁 OKX 钱包...")
+                    unlock_okx_wallet(driver, browser_id, browser_id)
+                    
+                    # 在5秒内查找并点击第二个确认按钮
+                    log_print(f"[{browser_id}] → 查找确认按钮（5秒超时）...")
+                    button_clicked = False
+                    button_start_time = time.time()
+                    
+                    while time.time() - button_start_time < 5:
+                        try:
+                            confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                            if len(confirm_buttons) >= 2:
+                                confirm_buttons[1].click()
+                                log_print(f"[{browser_id}] ✓ 已点击确认按钮（第二个）")
+                                button_clicked = True
+                                break
+                            else:
+                                time.sleep(0.5)
+                        except Exception as e:
+                            log_print(f"[{browser_id}] ⚠ 查找按钮时出错: {str(e)}")
+                            time.sleep(0.5)
+                    
+                    if not button_clicked:
+                        log_print(f"[{browser_id}] ⚠ 未找到足够的确认按钮或超时")
+                    
+                    # 切换回主页面
+                    log_print(f"[{browser_id}] → 切换回主页面...")
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "app.opinion.trade" in current_url:
+                            log_print(f"[{browser_id}] ✓ 已切换回主页面")
+                            break
+                    
+                    time.sleep(3)  # 等待页面响应
+                    
+                except Exception as e:
+                    log_print(f"[{browser_id}] ✗ 重试过程出错: {str(e)}")
+                    continue
+            
+            # 检查是否超过最大重试次数
+            if order_retry_count >= max_order_retry:
+                log_print(f"[{browser_id}] ========== Type 5 任务失败: 订单失败重试{max_order_retry}次仍未成功 ==========\n")
+                return False, f"订单失败重试{max_order_retry}次仍未成功"
+            
             log_print(f"[{browser_id}] 步骤13: Type 5 任务 - 等待订单确认并收集数据...")
             success, msg = wait_for_type5_order_and_collect_data(
                 driver, 
@@ -3949,6 +4187,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 trade_type,
                 option_type
             )
+            
             
             if not success:
                 log_print(f"[{browser_id}] ========== Type 5 任务失败: {msg} ==========\n")
@@ -4492,18 +4731,18 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
                                 final_title = f"{current_title}###{sub_title}"
                                 log_print(f"[{serial_number}] [OP] TR {tr_idx}: 检测到子标题 - 主题={final_title}, 选项={final_option}")
                         
-                        transaction = {
-                            "title": final_title,
-                            "direction": direction,
-                            "option": final_option,
-                            "amount": amount,
-                            "value": value,
-                            "price": price,
-                            "time": trade_time,
-                            "fee": fee
-                        }
-                        
-                        transactions.append(transaction)
+                        if amount != "-" and value != "-" and fee != "-":
+                            transaction = {
+                                "title": final_title,
+                                "direction": direction,
+                                "option": final_option,
+                                "amount": amount,
+                                "value": value,
+                                "price": price,
+                                "time": trade_time,
+                                "fee": fee
+                            }
+                            transactions.append(transaction)
                      
                     
                 except Exception as e:
@@ -6121,6 +6360,23 @@ def process_type3_mission(task_data):
     finally:
         # Type 3 任务不关闭浏览器
         log_print(f"[{browser_id}] Type 3 任务结束，浏览器保持打开")
+        
+        # 紧急清理：确保浏览器标记和任务计数被正确更新（双重保险）
+        try:
+            # 清除浏览器标记
+            with active_type3_browsers_lock:
+                if browser_id in active_type3_browsers:
+                    old_mid = active_type3_browsers.pop(browser_id, None)
+                    log_print(f"[{browser_id}] [紧急清理] 已清除浏览器标记（任务ID: {old_mid}）")
+            
+            # 更新任务完成计数
+            with active_tasks_lock:
+                if mission_id and mission_id in active_tasks:
+                    if active_tasks[mission_id]['completed'] < active_tasks[mission_id]['total']:
+                        active_tasks[mission_id]['completed'] += 1
+                        log_print(f"[{browser_id}] [紧急清理] 已更新任务 {mission_id} 计数 (completed: {active_tasks[mission_id]['completed']}/{active_tasks[mission_id]['total']})")
+        except Exception as cleanup_err:
+            log_print(f"[{browser_id}] [紧急清理] 清理失败: {str(cleanup_err)}")
 
 
 # ============================================================================
@@ -6926,14 +7182,27 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 tp1 = mission.get('tp1')
                 if tp1:
                     # 这是任务二，失败了
+                    # Type 5 任务状态说明
+                    type5_status_map = {
+                        0: "未启动",
+                        2: "成功",
+                        3: "失败",
+                        5: "任务一订单已准备",
+                        6: "任务1任务2订单已准备",
+                        7: "任务1已点击下单",
+                        8: "任务一仓位已变化",
+                        9: "任务二仓位已变化",
+                        10: "双方仓位都已变化"
+                    }
                     log_print(f"[{browser_id}] Type 5 任务二失败，检查任务一状态...")
                     task1_status = get_mission_status(tp1)
-                    if task1_status is not None and task1_status != 3:
-                        # 任务一状态不是3，将其改为3
-                        log_print(f"[{browser_id}] 任务一当前状态: {task1_status}，将其改为状态3（任务二失败）")
-                        save_mission_result(tp1, 3, "任务二失败")
+                    if task1_status is not None and task1_status not in [2, 3]:
+                        # 任务一状态不是2或3，将其改为3
+                        status_desc = type5_status_map.get(task1_status, "未知状态")
+                        log_print(f"[{browser_id}] 任务一当前状态: {task1_status}（{status_desc}），将其改为状态3（任务二失败）")
+                        save_mission_result(tp1, 3, f"任务二失败，任务一原状态: {task1_status}（{status_desc}）")
                     else:
-                        log_print(f"[{browser_id}] 任务一状态已是3或无法获取，无需修改")
+                        log_print(f"[{browser_id}] 任务一状态已是2或3或无法获取，无需修改")
             
             # Type 1/5任务完成后收集持仓数据（不影响任务结果）
             if driver and task_browser_id and task_exchange_name:

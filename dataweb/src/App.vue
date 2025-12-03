@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <h1 class="app-title">PLOY/OP数据</h1>
+    <h1 class="app-title">OP数据</h1>
     
     <!-- 顶部操作按钮 -->
     <div class="toolbar">
@@ -31,6 +31,7 @@
       <el-button type="danger" @click="refreshRedPositions" :loading="refreshingRed">
         刷新变红仓位
       </el-button>
+      <span class="red-count-label">变红仓位数量：<strong>{{ redPositionCount }}</strong></span>
     </div>
     
     <!-- 批量添加区域 -->
@@ -114,7 +115,7 @@
             style="width: 120px"
           >
             <el-option label="OP" value="OP" />
-            <el-option label="Ploy" value="Ploy" />
+            <el-option label="监控" value="监控" />
           </el-select>
         </div>
         <div class="filter-item">
@@ -222,7 +223,7 @@
             @change="saveRowData(scope.row)"
           >
             <el-option label="OP" value="OP" />
-            <el-option label="Ploy" value="Ploy" />
+            <el-option label="监控" value="监控" />
           </el-select>
         </template>
       </el-table-column>
@@ -677,6 +678,21 @@ const summaryData = computed(() => {
 })
 
 /**
+ * 计算变红仓位数量（打开时间>仓位时间，且不在忽略列表中，且不是监控类型）
+ */
+const redPositionCount = computed(() => {
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  return tableData.value.filter(row => 
+    row.fingerprintNo && 
+    row.computeGroup && 
+    row.platform &&
+    row.platform !== '监控' &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row)
+  ).length
+})
+
+/**
  * 数字排序方法
  */
 const sortByNumber = (a, b) => {
@@ -740,8 +756,12 @@ const getIgnoredBrowsersSet = () => {
 
 /**
  * 判断行是否应该高亮（打开时间>仓位时间）
+ * 监控类型的数据不需要检测仓位时间和打开时间变红置顶
  */
 const shouldHighlightRow = (row) => {
+  // 监控类型不需要检测仓位时间和打开时间
+  if (row.platform === '监控') return false
+  
   if (!row.f || !row.d) return false
   
   const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
@@ -797,6 +817,7 @@ const toggleAutoUpdate = () => {
 
 /**
  * 执行自动更新
+ * 监控类型的数据不需要执行刷新仓位的任务
  */
 const performAutoUpdate = async () => {
   console.log('[自动更新] 开始检查需要更新的仓位...')
@@ -808,6 +829,11 @@ const performAutoUpdate = async () => {
   const browsersToUpdate = []
   
   for (const row of tableData.value) {
+    // 跳过监控类型的浏览器（不需要执行刷新仓位的任务）
+    if (row.platform === '监控') {
+      continue
+    }
+    
     // 跳过忽略的浏览器
     if (ignoredBrowsersSet.has(String(row.fingerprintNo))) {
       continue
@@ -1321,11 +1347,14 @@ const refreshPosition = async (row) => {
     // 1. 发送 type=2 任务请求，让服务器采集最新数据
     ElMessage.info(`正在采集浏览器 ${row.fingerprintNo} 的最新仓位数据...`)
     
+    if (row.platform != 'OP'){
+      return
+    }
     const taskData = {
       groupNo: row.computeGroup,
       numberList: parseInt(row.fingerprintNo),
       type: 2,  // Type 2 任务
-      exchangeName: row.platform === 'OP' ? 'OP' : 'Ploy'
+      exchangeName: row.platform === 'OP' ? 'OP' : '监控'
     }
     
     // 发送任务请求
@@ -1476,25 +1505,28 @@ const refreshAllPositions = async () => {
     // 提交所有 type=2 任务
     const taskPromises = validRows.map(async (row) => {
       try {
-        const taskData = {
-          groupNo: row.computeGroup,
-          numberList: parseInt(row.fingerprintNo),
-          type: 2,
-          exchangeName: row.platform === 'OP' ? 'OP' : 'Ploy'
-        }
-        
-        await axios.post(
-          `${API_BASE_URL}/mission/add`,
-          taskData,
-          {
-            headers: {
-              'Content-Type': 'application/json'
+        if (row.platform == 'OP'){
+            const taskData = {
+              groupNo: row.computeGroup,
+              numberList: parseInt(row.fingerprintNo),
+              type: 2,
+              exchangeName: row.platform === 'OP' ? 'OP' : '监控'
             }
-          }
-        )
-        
-        console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
-        successCount++
+            
+            await axios.post(
+              `${API_BASE_URL}/mission/add`,
+              taskData,
+              {
+                headers: {
+                  'Content-Type': 'application/json'
+                }
+              }
+            )
+            
+            console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+            successCount++
+        }
+      
       } catch (error) {
         console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
         failCount++
@@ -1549,30 +1581,34 @@ const refreshRedPositions = async () => {
     // 提交所有 type=2 任务
     const taskPromises = redRows.map(async (row) => {
       try {
-        const taskData = {
-          groupNo: row.computeGroup,
-          numberList: parseInt(row.fingerprintNo),
-          type: 2,
-          exchangeName: row.platform === 'OP' ? 'OP' : 'Ploy'
-        }
-        
-        const response = await axios.post(
-          `${API_BASE_URL}/mission/add`,
-          taskData,
-          {
-            headers: {
-              'Content-Type': 'application/json'
-            }
+        if (row.platform == 'OP'){
+          const taskData = {
+            groupNo: row.computeGroup,
+            numberList: parseInt(row.fingerprintNo),
+            type: 2,
+            exchangeName: row.platform === 'OP' ? 'OP' : '监控'
           }
-        )
-        
-        // 保存最新的任务ID（只保留最后一个）
-        if (response.data && response.data.data && response.data.data.id) {
-          latestMissionId.value = response.data.data.id
+          
+          const response = await axios.post(
+            `${API_BASE_URL}/mission/add`,
+            taskData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          )
+          
+          // 保存最新的任务ID（只保留最后一个）
+          if (response.data && response.data.data && response.data.data.id) {
+            latestMissionId.value = response.data.data.id
+          }
+          
+          console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+          successCount++
+
         }
-        
-        console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
-        successCount++
+     
       } catch (error) {
         console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
         failCount++
@@ -1904,6 +1940,20 @@ onUnmounted(() => {
 .auto-refresh-control span {
   font-size: 14px;
   color: #606266;
+}
+
+.red-count-label {
+  font-size: 14px;
+  color: #f56c6c;
+  padding: 0 12px;
+  border-left: 2px solid #ddd;
+  white-space: nowrap;
+}
+
+.red-count-label strong {
+  font-size: 16px;
+  color: #e74c3c;
+  font-weight: 700;
 }
 
 .batch-add-container {
