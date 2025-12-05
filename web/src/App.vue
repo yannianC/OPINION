@@ -817,7 +817,7 @@
                   <span class="mission-id">对冲记录 #{{ item.id }}</span>
                 </div>
                 <div class="mission-time">
-                  {{ formatTime(item.createTime) }}
+                  {{ formatTime(item.time) }}
                 </div>
               </div>
 
@@ -825,7 +825,7 @@
                 <div class="info-grid">
                   <div class="info-item">
                     <span class="label">事件链接:</span>
-                    <span class="value">{{ getTrendingById(item.trendingId) }}</span>
+                    <span class="value">{{ item.exchangeConfig?.trending || getTrendingById(item.trendingId) }}</span>
                   </div>
                   <div class="info-item">
                     <span class="label">价格:</span>
@@ -1697,7 +1697,7 @@ const fetchHedgeHistory = async () => {
     const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/hedgeHist')
     
     if (response.data && response.data.code === 0) {
-      hedgeHistoryList.value = response.data.data || []
+      hedgeHistoryList.value = response.data.data.list || []
       console.log(`对冲记录已加载，共 ${hedgeHistoryList.value.length} 条记录`)
     } else {
       console.warn(`获取对冲记录失败: ${response.data?.msg || '未知错误'}`)
