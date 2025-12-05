@@ -3,7 +3,7 @@
     <header class="top-header">
       <h1>任务管理系统</h1>
       <div class="header-actions">
-        <button class="btn-header" @click="showAddConfigDialog">添加配置</button>
+        <button class="btn-header" @click="syncConfigFromMarkets">更新配置</button>
         <button class="btn-header" @click="showEditConfigDialog">修改配置</button>
       </div>
     </header>
@@ -169,6 +169,15 @@
             >
               📊 总日志
             </button>
+            
+            <button 
+              class="btn btn-success btn-sm" 
+              @click="randomGetAvailableTopic"
+              :disabled="isRandomGetting"
+              title="随机获取一个可用的主题"
+            >
+              {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
+            </button>
           </div>
           
           <div class="trending-list">
@@ -184,42 +193,64 @@
                 <div class="trending-header">
                   <div class="trending-name-row">
                     <span class="trending-name">
-                      {{ config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending }}
+                      {{ config.trendingPart1 ? `${config.trending}` : config.trending }}
                     </span>
+                    <button 
+                      v-if="config.opUrl" 
+                      class="btn-link btn-sm" 
+                      @click="openOpUrl(config.opUrl)"
+                      title="在新标签页打开主题页面"
+                    >
+                      🔗 打开
+                    </button>
                     <button class="btn-log btn-sm" @click="showHedgeLog(config)">
                       📋 日志
                     </button>
-                    <input 
-                      v-model="config.monitorBrowserId" 
-                      type="text" 
-                      class="monitor-input" 
-                      placeholder="监听深度浏览器ID"
-                      :disabled="autoHedgeRunning"
-                      @blur="saveMonitorBrowserIds"
-                    />
+                    <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
+                      ❌ 关闭任务
+                    </button>
+                    <span v-if="config.errorMessage" class="error-badge">
+                      {{ config.errorMessage }}
+                    </span>
                   </div>
                 </div>
                 
-                <!-- Type 3 任务和对冲信息显示区域 -->
+                <!-- 订单薄数据和对冲信息显示区域 -->
                 <div class="task-hedge-container">
-                  <!-- 左侧：Type 3 任务信息 -->
+                  <!-- 左侧：订单薄数据 -->
                   <div class="type3-task-section">
-                    <div class="section-title">Type 3 任务</div>
-                    <div v-if="config.type3Task" class="type3-task-info">
+                    <div class="section-title">订单薄数据</div>
+                    <div v-if="config.orderbookData" class="type3-task-info">
                       <div class="task-status-row">
-                        <span class="task-label">任务 #{{ config.type3Task.id }}</span>
-                        <span class="task-browser">浏览器: {{ config.type3Task.numberList }}</span>
-                        <span 
-                          class="task-status-badge" 
-                          :class="getStatusClass(config.type3Task.status)"
-                        >
-                          {{ getStatusText(config.type3Task.status) }}
-                        </span>
+                        <span class="task-label">先挂方: {{ config.orderbookData.firstSide }}</span>
+                        <span class="task-status-badge status-success">已更新</span>
                       </div>
-                      <div class="task-time">{{ formatTime(config.type3Task.updateTime) }}</div>
-                      <div v-if="config.type3Task.msg" class="task-msg">
-                        <span class="msg-content">{{ formatTaskMsg(config.type3Task.msg) }}</span>
+                      <div v-if="config.lastRequestTime" class="task-time">
+                        {{ formatTime(config.lastRequestTime) }}
                       </div>
+                      <div class="task-msg">
+                        <div class="orderbook-detail">
+                          <div class="price-row">
+                            <span class="label">先挂价格:</span>
+                            <span class="value">{{ config.orderbookData.price1.toFixed(2) }}¢</span>
+                          </div>
+                          <div class="price-row">
+                            <span class="label">后挂价格:</span>
+                            <span class="value">{{ config.orderbookData.price2.toFixed(2) }}¢</span>
+                          </div>
+                          <div class="price-row">
+                            <span class="label">价差:</span>
+                            <span class="value highlight">{{ config.orderbookData.diff.toFixed(2) }}¢</span>
+                          </div>
+                          <div class="price-row">
+                            <span class="label">深度:</span>
+                            <span class="value">{{ config.orderbookData.depth1.toFixed(2) }} / {{ config.orderbookData.depth2.toFixed(2) }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else-if="config.isFetching" class="no-data">
+                      正在请求订单薄...
                     </div>
                     <div v-else class="no-data">暂无数据</div>
                   </div>
@@ -984,10 +1015,10 @@
                   <label>Trending *</label>
                   <input v-model="config.trending" type="text" required />
                 </div>
-                <div class="form-group">
+                <!-- <div class="form-group">
                   <label>子主题</label>
                   <input v-model="config.trendingPart1" type="text" placeholder="选填" />
-                </div>
+                </div> -->
               </div>
               <div class="form-group">
                 <label>OP Topic ID *</label>
@@ -1199,6 +1230,7 @@ const autoRefresh = reactive({
 const showAddConfig = ref(false)
 const showEditConfig = ref(false)
 const editConfigList = ref([])
+const originalConfigList = ref([])  // 保存原始配置数据，用于比较是否修改
 
 // 配置筛选
 const autoHedgeFilter = ref('')  // 自动对冲功能块的筛选
@@ -1242,6 +1274,11 @@ const autoHedgeRunning = ref(false)
 const autoHedgeInterval = ref(null)
 const activeConfigs = ref([])  // 启用的配置列表
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
+const isRandomGetting = ref(false)  // 是否正在随机获取主题
+
+// 订单薄API配置
+const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
+const ORDERBOOK_API_URL = 'https://proxy.opinion.trade:8443/openapi/token/orderbook'
 
 // 对冲状态（重命名以避免与下面的 hedgeStatus 冲突）
 const hedgeStatus = reactive({
@@ -1439,12 +1476,8 @@ const fetchMissionList = async () => {
     if (response.data && response.data.code === 0) {
       const allMissions = response.data.data.list || []
       
-      // 过滤掉 type=3 的任务，只显示 type=1 和 type=2 的任务
-      missionList.value = allMissions.filter(item => item.mission.type !== 3)
-      
-      // 单独处理 type=3 的任务，更新到 activeConfigs 中
-      const type3Missions = allMissions.filter(item => item.mission.type === 3)
-      updateType3TasksInConfigs(type3Missions)
+      // 显示所有任务（不再过滤type=3，因为不再使用type=3任务）
+      missionList.value = allMissions
       
       // 更新对冲任务状态（使用新接口）
       for (const config of activeConfigs.value) {
@@ -1726,7 +1759,7 @@ const submitHedgeHistory = async (hedgeRecord) => {
     
     if (response.data) {
       console.log('对冲记录提交成功:', response.data)
-      fetchHedgeHistory()  // 刷新对冲记录列表
+      // fetchHedgeHistory()  // 刷新对冲记录列表
     }
   } catch (error) {
     console.error('对冲记录提交失败:', error)
@@ -2079,6 +2112,163 @@ const resetHedgeForm = () => {
 }
 
 /**
+ * 从 markets 同步配置到 exchangeConfig
+ */
+const syncConfigFromMarkets = async () => {
+  try {
+    showToast('正在同步配置...', 'info')
+    
+    // 1. 并行请求两个接口
+    const [marketsResponse, configResponse] = await Promise.all([
+      axios.get('http://43.165.186.117:10001/api/markets'),
+      axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    ])
+    
+    if (!marketsResponse.data?.success || !marketsResponse.data?.data) {
+      throw new Error('获取 markets 数据失败')
+    }
+    
+    if (configResponse.data?.code !== 0) {
+      throw new Error('获取配置数据失败')
+    }
+    
+    const markets = marketsResponse.data.data
+    const existingConfigs = configResponse.data.data.configList || []
+    
+    // 2. 创建 trending 到 config 的映射
+    const configMap = new Map()
+    existingConfigs.forEach(config => {
+      configMap.set(config.trending, config)
+    })
+    
+    // 3. 创建 trending 到 market 的映射
+    const marketMap = new Map()
+    let skippedCount = 0
+    let addedCount = 0
+    
+    markets.forEach(market => {
+      // 只处理有yesTokenId和noTokenId的市场
+      if (!market.yesTokenId || !market.noTokenId) {
+        console.warn(`市场 ${market.marketTitle} 缺少tokenId (yesTokenId: ${market.yesTokenId}, noTokenId: ${market.noTokenId})，跳过`)
+        skippedCount++
+        return
+      }
+      
+      let trending
+      if (market.parentEvent) {
+        trending = `${market.parentEvent.title}###${market.marketTitle}`
+      } else {
+        trending = market.marketTitle
+      }
+      marketMap.set(trending, market)
+      addedCount++
+    })
+    
+    console.log(`Markets API: 总共 ${markets.length} 个市场，有效 ${addedCount} 个，跳过 ${skippedCount} 个`)
+    
+    // 4. 更新现有配置
+    const updatedConfigs = []
+    let matchedCount = 0
+    let unmatchedCount = 0
+    
+    for (const config of existingConfigs) {
+      const market = marketMap.get(config.trending)
+      if (market) {
+        // 找到匹配的 market，更新配置
+        matchedCount++
+        console.log(`✅ 匹配成功: ${config.trending} -> yesToken: ${market.yesTokenId?.substring(0, 20)}...`)
+        updatedConfigs.push({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: market.yesTokenId,
+          trendingPart2: market.noTokenId,
+          trendingPart3: config.trendingPart3,
+          opUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
+          polyUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
+          opTopicId: String(market.marketId),
+          weight: 2,
+          isOpen: config.isOpen || 0
+        })
+        // 从 map 中移除已处理的
+        marketMap.delete(config.trending)
+      } else {
+        // 没有匹配的 market，保持原配置
+        unmatchedCount++
+        if (unmatchedCount <= 5) {
+          console.log(`❌ 未匹配: ${config.trending}`)
+        }
+        updatedConfigs.push({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1,
+          trendingPart2: config.trendingPart2,
+          trendingPart3: config.trendingPart3,
+          opUrl: config.opUrl,
+          polyUrl: config.polyUrl,
+          opTopicId: config.opTopicId,
+          weight: config.weight,
+          isOpen: config.isOpen || 0
+        })
+      }
+    }
+    
+    console.log(`配置匹配结果: 匹配 ${matchedCount} 个，未匹配 ${unmatchedCount} 个`)
+    
+    // 5. 添加新配置（markets 中有但 exchangeConfig 中没有的）
+    const newConfigs = []
+    for (const [trending, market] of marketMap) {
+      newConfigs.push({
+        trending: trending,
+        trendingPart1: market.yesTokenId,
+        trendingPart2: market.noTokenId,
+        trendingPart3: null,
+        opUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
+        polyUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
+        opTopicId: String(market.marketId),
+        weight: 2,
+        isOpen: 0
+      })
+    }
+    
+    // 6. 合并更新的配置和新配置
+    const allConfigs = [...updatedConfigs, ...newConfigs]
+    
+    // 7. 提交到服务器
+    const submitData = {
+      list: allConfigs
+    }
+    
+    console.log('同步配置数据:', {
+      更新数量: updatedConfigs.length,
+      新增数量: newConfigs.length,
+      总数量: allConfigs.length
+    })
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('配置同步成功:', response.data)
+      showToast(`配置同步成功！更新 ${updatedConfigs.length} 条，新增 ${newConfigs.length} 条`, 'success')
+      // 重新加载配置
+      updateActiveConfigs()
+      fetchExchangeConfig()
+    }
+  } catch (error) {
+    console.error('配置同步失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    showToast(`配置同步失败: ${errorMsg}`, 'error')
+  }
+}
+
+/**
  * 显示添加配置弹窗
  */
 const showAddConfigDialog = () => {
@@ -2151,6 +2341,9 @@ const submitAddConfig = async () => {
 /**
  * 显示修改配置弹窗
  */
+/**
+ * 显示修改配置弹窗
+ */
 const showEditConfigDialog = () => {
   // 深拷贝当前配置列表，并确保 enabled 字段正确映射
   const baseList = JSON.parse(JSON.stringify(configList.value)).map(config => ({
@@ -2161,6 +2354,10 @@ const showEditConfigDialog = () => {
   
   // 加载显示状态
   editConfigList.value = loadConfigVisibleStatus(baseList)
+  
+  // 保存原始配置数据的副本，用于比较是否修改
+  originalConfigList.value = JSON.parse(JSON.stringify(editConfigList.value))
+  
   showEditConfig.value = true
 }
 
@@ -2171,6 +2368,8 @@ const closeEditConfigDialog = () => {
   showEditConfig.value = false
   // 关闭时清空筛选
   editConfigFilter.value = ''
+  // 清空原始配置数据
+  originalConfigList.value = []
 }
 
 /**
@@ -2219,20 +2418,70 @@ const removeConfigItem = (index) => {
 }
 
 /**
- * 提交修改配置
+ * 提交修改配置（只上传修改过的主题）
  */
 const submitEditConfig = async () => {
   isSubmittingConfig.value = true
   
   try {
+    // 先检查是否有任何修改（包括 visible 字段）
+    let hasAnyChange = false
+    let hasVisibleChange = false
+    const modifiedConfigs = []
+    
+    for (let i = 0; i < editConfigList.value.length; i++) {
+      const currentConfig = editConfigList.value[i]
+      const originalConfig = originalConfigList.value[i]
+      
+      // 检查 visible 字段是否变化
+      if (currentConfig.visible !== originalConfig.visible) {
+        hasVisibleChange = true
+        hasAnyChange = true
+      }
+      
+      // 比较需要提交到服务器的字段是否发生变化
+      const isServerFieldModified = 
+        currentConfig.trending !== originalConfig.trending ||
+        currentConfig.opUrl !== originalConfig.opUrl ||
+        currentConfig.polyUrl !== originalConfig.polyUrl ||
+        currentConfig.opTopicId !== originalConfig.opTopicId ||
+        currentConfig.weight !== originalConfig.weight ||
+        currentConfig.enabled !== originalConfig.enabled
+      
+      if (isServerFieldModified) {
+        hasAnyChange = true
+        modifiedConfigs.push(currentConfig)
+      }
+    }
+    
+    // 如果没有任何修改，提示并返回
+    if (!hasAnyChange) {
+      alert('没有修改任何配置')
+      isSubmittingConfig.value = false
+      return
+    }
+    
     // 保存显示状态到本地存储（不提交到服务器）
     saveConfigVisibleStatus(editConfigList.value)
     
+    // 如果只修改了显示/隐藏状态，不需要提交到服务器
+    if (hasVisibleChange && modifiedConfigs.length === 0) {
+      alert('显示/隐藏状态已保存到本地')
+      // 更新活动配置列表，使显示/隐藏状态生效
+      updateActiveConfigs()
+      closeEditConfigDialog()
+      isSubmittingConfig.value = false
+      return
+    }
+    
+    // 构建提交数据，保持 trendingPart1、trendingPart2、trendingPart3 不变
     const submitData = {
-      list: editConfigList.value.map(config => ({
+      list: modifiedConfigs.map(config => ({
         id: config.id,  // 带上id表示更新
         trending: config.trending,
         trendingPart1: config.trendingPart1 || null,
+        trendingPart2: config.trendingPart2 || null,
+        trendingPart3: config.trendingPart3 || null,
         opUrl: config.opUrl,
         polyUrl: config.polyUrl,
         opTopicId: config.opTopicId,
@@ -2242,7 +2491,7 @@ const submitEditConfig = async () => {
       }))
     }
     
-    console.log('提交修改配置:', submitData)
+    console.log(`提交修改配置（共 ${modifiedConfigs.length} 个）:`, submitData)
     
     const response = await axios.post(
       'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
@@ -2256,7 +2505,7 @@ const submitEditConfig = async () => {
     
     if (response.data) {
       console.log('配置更新成功:', response.data)
-      alert('配置更新成功！')
+      alert(`配置更新成功！共更新 ${modifiedConfigs.length} 个主题`)
       closeEditConfigDialog()
       // 重新加载配置
       fetchExchangeConfig()
@@ -2330,59 +2579,16 @@ const updateActiveConfigs = () => {
     .filter(config => config.visible !== false)  // 显示开关打开的配置
     .map(config => ({
       ...config,
-      monitorBrowserId: config.monitorBrowserId || '',
-      orderbookData: config.orderbookData || '',
+      orderbookData: config.orderbookData || null,  // 订单薄数据
       weight: config.weight || 0,
-      type3Task: config.type3Task || null,
-      currentHedge: config.currentHedge || null,
-      pendingType3TaskId: config.pendingType3TaskId || null,  // 正在进行的type=3任务ID
-      pendingType3TaskStartTime: config.pendingType3TaskStartTime || null  // 任务提交时间
+      currentHedge: config.currentHedge || null,  // 当前对冲任务
+      lastRequestTime: config.lastRequestTime || null,  // 上次请求时间
+      lastHedgeTime: config.lastHedgeTime || null,  // 上次对冲时间
+      noHedgeSince: config.noHedgeSince || null,  // 开始无法对冲的时间
+      isFetching: config.isFetching || false,  // 是否正在请求中
+      retryCount: config.retryCount || 0,  // 重试次数
+      errorMessage: config.errorMessage || null  // 错误信息
     }))
-  
-  // 加载本地保存的监听浏览器ID
-  loadMonitorBrowserIds()
-}
-
-/**
- * 更新配置中的 type=3 任务信息
- */
-const updateType3TasksInConfigs = (type3Missions) => {
-  for (const config of activeConfigs.value) {
-    // 查找与当前配置 trendingId 匹配的 type=3 任务
-    // 只显示 status=2（成功）或 status=3（失败）的任务
-    const matchedTasks = type3Missions.filter(item => 
-      item.mission.trendingId === config.id &&
-      (item.mission.status === 2 || item.mission.status === 3)
-    )
-    
-    if (matchedTasks.length > 0) {
-      // 按更新时间排序，获取最新的任务
-      const latestTask = matchedTasks.sort((a, b) => {
-        const timeA = new Date(a.mission.updateTime).getTime()
-        const timeB = new Date(b.mission.updateTime).getTime()
-        return timeB - timeA  // 降序排序，最新的在前
-      })[0]
-      
-      config.type3Task = {
-        id: latestTask.mission.id,
-        status: latestTask.mission.status,
-        msg: latestTask.mission.msg,
-        createTime: latestTask.mission.createTime,
-        updateTime: latestTask.mission.updateTime,
-        numberList: latestTask.mission.numberList
-      }
-      
-      // 如果这个任务ID正是当前正在等待的任务，且任务已完成，清除pending标记
-      if (config.pendingType3TaskId === latestTask.mission.id) {
-        console.log(`配置 ${config.id} - 正在等待的任务 ${latestTask.mission.id} 已完成，清除pending标记`)
-        config.pendingType3TaskId = null
-        config.pendingType3TaskStartTime = null
-      }
-    } else {
-      // 如果没有符合条件的任务，清除显示
-      config.type3Task = null
-    }
-  }
 }
 
 /**
@@ -2405,9 +2611,10 @@ const startAutoHedge = () => {
     return
   }
   
-  const hasMonitor = activeConfigs.value.some(c => c.monitorBrowserId)
-  if (!hasMonitor) {
-    alert('请至少为一个主题配置监听深度浏览器ID')
+  // 检查是否有配置了tokenId的主题
+  const hasValidConfig = activeConfigs.value.some(c => c.trendingPart1 && c.trendingPart2)
+  if (!hasValidConfig) {
+    alert('请至少为一个主题配置tokenId（需要先更新配置）')
     return
   }
   
@@ -2433,16 +2640,186 @@ const stopAutoHedge = () => {
     autoHedgeInterval.value = null
   }
   
-  // 清除所有配置的pending标记
+  // 清除所有配置的状态
   for (const config of activeConfigs.value) {
-    if (config.pendingType3TaskId) {
-      console.log(`配置 ${config.id} - 清除pending任务标记`)
-      config.pendingType3TaskId = null
-      config.pendingType3TaskStartTime = null
-    }
+    config.isFetching = false
+    config.retryCount = 0
+    config.errorMessage = null
+    config.noHedgeSince = null
+    console.log(`配置 ${config.id} - 清除状态`)
   }
   
   console.log('停止自动对冲')
+}
+
+/**
+ * 请求订单薄数据
+ */
+const fetchOrderbook = async (tokenId) => {
+  try {
+    const response = await axios.get(ORDERBOOK_API_URL, {
+      params: {
+        token_id: tokenId
+      },
+      headers: {
+        'apikey': ORDERBOOK_API_KEY
+      }
+    })
+    
+    if (response.data && response.data.errno === 0 && response.data.result) {
+      return response.data.result
+    }
+    
+    throw new Error('订单薄数据格式错误')
+  } catch (error) {
+    console.error('获取订单薄失败:', error)
+    throw error
+  }
+}
+
+/**
+ * 解析订单薄数据，判断先挂方和价格
+ */
+/**
+ * 解析订单薄数据，获取先挂方的买一价和卖一价
+ * 类似 parseType3Message 的处理方式，直接返回先挂方的数据
+ * 增加深度和价差判断
+ */
+const parseOrderbookData = async (config, isClose) => {
+  try {
+    // 获取yes和no的订单薄数据
+    const [yesOrderbook, noOrderbook] = await Promise.all([
+      fetchOrderbook(config.trendingPart1),
+      fetchOrderbook(config.trendingPart2)
+    ])
+    
+    // 获取YES的买一价和卖一价
+    const yesBids = yesOrderbook.bids || []
+    const yesAsks = yesOrderbook.asks || []
+    const noBids = noOrderbook.bids || []
+    const noAsks = noOrderbook.asks || []
+    
+    // 基本数据检查
+    if (yesBids.length === 0 || yesAsks.length === 0 || 
+        noBids.length === 0 || noAsks.length === 0) {
+      throw new Error('订单薄数据不足')
+    }
+    
+    // 检查数据数量：asks和bids每个都至少要有3组数据
+    if (yesBids.length < 3 || yesAsks.length < 3 || 
+        noBids.length < 3 || noAsks.length < 3) {
+      throw new Error('订单薄数据不足3组')
+    }
+    
+    // 对 bids 和 asks 进行排序（确保顺序正确）
+    // bids 按价格从高到低排序
+    yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    // asks 按价格从低到高排序
+    yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    
+    // 获取YES方的买一和卖一
+    const yesBid = yesBids[0]
+    const yesAsk = yesAsks[0]
+    
+    // 获取NO方的买一和卖一  
+    const noBid = noBids[0]
+    const noAsk = noAsks[0]
+    
+    // 转换为百分比格式（API返回的是小数，需要乘以100）
+    const yesBidPrice = parseFloat(yesBid.price) * 100
+    const yesAskPrice = parseFloat(yesAsk.price) * 100
+    const noBidPrice = parseFloat(noBid.price) * 100
+    const noAskPrice = parseFloat(noAsk.price) * 100
+    
+    const yesBidDepth = parseFloat(yesBid.size)
+    const yesAskDepth = parseFloat(yesAsk.size)
+    const noBidDepth = parseFloat(noBid.size)
+    const noAskDepth = parseFloat(noAsk.size)
+    
+    // 确定先挂方：根据开仓/平仓判断
+    let firstSide, price1, price2, depth1, depth2
+    let firstBids, firstAsks
+    
+    if (isClose) {
+      // 平仓：买一价更高的为先挂方
+      firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
+      firstBids = firstSide === 'YES' ? yesBids : noBids
+      firstAsks = firstSide === 'YES' ? yesAsks : noAsks
+    } else {
+      // 开仓：卖一价更高的为先挂方
+      firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
+      firstBids = firstSide === 'YES' ? yesBids : noBids
+      firstAsks = firstSide === 'YES' ? yesAsks : noAsks
+    }
+    
+    // 获取先挂方的买一价和卖一价
+    if (firstSide === 'YES') {
+      price1 = yesBidPrice  // 先挂方的买一价
+      price2 = yesAskPrice  // 先挂方的卖一价
+      depth1 = yesBidDepth  // 先挂方的买一深度
+      depth2 = yesAskDepth  // 先挂方的卖一深度
+    } else {
+      price1 = noBidPrice   // 先挂方的买一价
+      price2 = noAskPrice   // 先挂方的卖一价
+      depth1 = noBidDepth   // 先挂方的买一深度
+      depth2 = noAskDepth   // 先挂方的卖一深度
+    }
+    
+    // === 新增判断：深度检查 ===
+    // 累加 bids 价格最高的3组数据的 size
+    const top3BidsDepth = firstBids.slice(0, 3).reduce((sum, bid) => sum + parseFloat(bid.size), 0)
+    // 累加 asks 价格最低的3组数据的 size
+    const top3AsksDepth = firstAsks.slice(0, 3).reduce((sum, ask) => sum + parseFloat(ask.size), 0)
+    
+    console.log(`先挂方 ${firstSide} - 买1-3深度累计: ${top3BidsDepth.toFixed(2)}, 卖1-3深度累计: ${top3AsksDepth.toFixed(2)}`)
+    
+    if (top3BidsDepth < 2000 || top3AsksDepth < 2000) {
+      throw new Error(`深度不足：买1-3累计=${top3BidsDepth.toFixed(2)}, 卖1-3累计=${top3AsksDepth.toFixed(2)}`)
+    }
+    
+    // === 新增判断：价差检查 ===
+    if (isClose) {
+      // 平仓：检查先挂方 bids 中买1和买3的价差
+      const bid1Price = parseFloat(firstBids[0].price) * 100
+      const bid3Price = parseFloat(firstBids[2].price) * 100
+      const bidsPriceDiff = bid1Price - bid3Price
+      
+      console.log(`平仓模式 - 先挂方买1价格: ${bid1Price.toFixed(2)}, 买3价格: ${bid3Price.toFixed(2)}, 差值: ${bidsPriceDiff.toFixed(2)}`)
+      
+      if (bidsPriceDiff >= 15) {
+        throw new Error(`买1-买3价差过大: ${bidsPriceDiff.toFixed(2)} >= 15`)
+      }
+    } else {
+      // 开仓：检查先挂方 asks 中卖1和卖3的价差
+      const ask1Price = parseFloat(firstAsks[0].price) * 100
+      const ask3Price = parseFloat(firstAsks[2].price) * 100
+      const asksPriceDiff = ask3Price - ask1Price
+      
+      console.log(`开仓模式 - 先挂方卖1价格: ${ask1Price.toFixed(2)}, 卖3价格: ${ask3Price.toFixed(2)}, 差值: ${asksPriceDiff.toFixed(2)}`)
+      
+      if (asksPriceDiff >= 15) {
+        throw new Error(`卖1-卖3价差过大: ${asksPriceDiff.toFixed(2)} >= 15`)
+      }
+    }
+    
+    return {
+      firstSide,
+      price1,           // 先挂方的买一价
+      price2,           // 先挂方的卖一价
+      depth1,           // 先挂方的买一深度
+      depth2,           // 先挂方的卖一深度
+      diff: Math.abs(price1 - price2),  // 先挂方买卖价差
+      minPrice: Math.min(price1, price2),
+      maxPrice: Math.max(price1, price2),
+      top3BidsDepth,    // 买1-3深度累计
+      top3AsksDepth     // 卖1-3深度累计
+    }
+  } catch (error) {
+    console.error('解析订单薄数据失败:', error)
+    throw error
+  }
 }
 
 /**
@@ -2515,12 +2892,379 @@ const checkHedgeCondition = (task) => {
 }
 
 /**
+ * 检查订单薄数据是否满足对冲条件
+ * 类似 App_old.vue 中的判断逻辑：
+ * 1. 先挂方的买一和卖一价差值 > 0.15
+ * 2. 或者根据开仓/平仓判断先挂方的深度
+ */
+const checkOrderbookHedgeCondition = (priceInfo) => {
+  if (!priceInfo) return false
+  
+  let canHedge = false
+  
+  // price1: 先挂方的买一价
+  // price2: 先挂方的卖一价
+  // depth1: 先挂方的买一深度
+  // depth2: 先挂方的卖一深度
+  
+  if (priceInfo.diff > 0.15) {
+    // 先挂方的买卖价差大于0.15，可以对冲
+    canHedge = true
+    console.log(`✅ 先挂方买卖价差充足 (${priceInfo.diff.toFixed(2)})，满足对冲条件`)
+  } else {
+    // 差值小于等于0.15，根据开仓/平仓判断先挂方的深度
+    console.log(`⚠️ 先挂方买卖价差不足 (${priceInfo.diff.toFixed(2)})，检查深度条件`)
+    
+    if (!hedgeMode.isClose) {
+      // 开仓模式：判断先挂方卖一价的深度（depth2，因为开仓是卖出）
+      const askDepth = priceInfo.depth2
+      console.log(`开仓模式，先挂方卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      
+      if (askDepth < hedgeMode.maxDepth) {
+        canHedge = true
+        console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+      } else {
+        console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+      }
+    } else {
+      // 平仓模式：判断先挂方买一价的深度（depth1，因为平仓是买入）
+      const bidDepth = priceInfo.depth1
+      console.log(`平仓模式，先挂方买一深度: ${bidDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      
+      if (bidDepth < hedgeMode.maxDepth) {
+        canHedge = true
+        console.log(`✅ 深度满足条件 (${bidDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+      } else {
+        console.log(`❌ 深度超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+      }
+    }
+  }
+  
+  return canHedge
+}
+
+/**
+ * 从订单薄数据执行对冲
+ * price1: 先挂方的买一价
+ * price2: 先挂方的卖一价
+ */
+const executeHedgeFromOrderbook = async (config, priceInfo) => {
+  try {
+    console.log(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
+    
+    // 计算订单价格
+    let orderPrice
+    if (priceInfo.diff > 0.15) {
+      // 先挂方买卖价差大于0.15，取平均价
+      orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
+      console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
+    } else {
+      // 差值小于等于0.15，根据开仓/平仓取价格
+      if (!hedgeMode.isClose) {
+        // 开仓模式：取较小的价格（买一价）
+        orderPrice = priceInfo.minPrice.toFixed(1)
+        console.log(`开仓模式，订单价格（买一价）: ${orderPrice}`)
+      } else {
+        // 平仓模式：取较大的价格（卖一价）
+        orderPrice = priceInfo.maxPrice.toFixed(1)
+        console.log(`平仓模式，订单价格（卖一价）: ${orderPrice}`)
+      }
+    }
+    
+    // 获取当前打开显示的所有主题ID
+    const trendingIds = activeConfigs.value.map(c => c.id).join(',')
+    console.log(`当前打开显示的主题: ${trendingIds}`)
+    
+    // 调用服务器接口获取对冲双方
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV2',
+      {
+        trendingId: config.id,
+        isClose: hedgeMode.isClose,
+        currentPrice: orderPrice,
+        timePassMin: hedgeMode.timePassMin,
+        trendingIds: trendingIds
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.data) {
+      const hedgeData = response.data.data
+      console.log('获取对冲双方成功:', hedgeData)
+      
+      // 直接执行对冲任务（在 executeHedgeTask 中创建 hedgeRecord）
+      await executeHedgeTask(config, {
+        ...hedgeData,
+        currentPrice: orderPrice,
+        firstSide: priceInfo.firstSide
+      })
+      
+      console.log(`配置 ${config.id} - 对冲任务已提交`)
+    } else {
+      throw new Error('获取对冲双方失败')
+    }
+  } catch (error) {
+    console.error(`配置 ${config.id} - 执行对冲失败:`, error)
+    if (config.currentHedge) {
+      config.currentHedge.finalStatus = 'failed'
+      config.currentHedge.error = error.message
+      finishHedge(config, config.currentHedge)
+    }
+  }
+}
+
+/**
+ * 打开主题链接（在新标签页打开）
+ */
+const openOpUrl = (url) => {
+  if (url) {
+    window.open(url, '_blank')
+  }
+}
+
+/**
  * 显示对冲日志
  */
 const showHedgeLog = (config) => {
   currentLogConfig.value = config
   hedgeLogs.value = loadHedgeLogs(config.id)
   showHedgeLogDialog.value = true
+}
+
+/**
+ * 关闭配置任务
+ */
+const closeConfigTask = async (config) => {
+  if (!confirm(`确定要关闭任务"${config.trending}"吗？`)) {
+    return
+  }
+  
+  try {
+    // 1. 更新本地显示状态（只更新这一个主题，不影响其他主题）
+    try {
+      const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+      visibleData[config.id] = false
+      localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+      console.log(`主题 ${config.id} 的显示状态已设置为 false`)
+    } catch (e) {
+      console.error('更新显示状态失败:', e)
+    }
+    
+    // 2. 更新服务器配置，将isOpen设为0
+    const updateData = {
+      list: [{
+        id: config.id,
+        trending: config.trending,
+        trendingPart1: config.trendingPart1,
+        trendingPart2: config.trendingPart2,
+        trendingPart3: config.trendingPart3,
+        opUrl: config.opUrl,
+        polyUrl: config.polyUrl,
+        opTopicId: config.opTopicId,
+        weight: config.weight,
+        isOpen: 0  // 关闭任务
+      }]
+    }
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      updateData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log(`配置 ${config.id} 已关闭`)
+      showToast(`任务"${config.trending}"已关闭`, 'success')
+      
+      // 3. 更新本地配置列表中这个配置的状态（避免重新加载所有配置）
+      const configInList = configList.value.find(c => c.id === config.id)
+      if (configInList) {
+        configInList.isOpen = 0
+        configInList.enabled = false
+      }
+      
+      // 4. 更新活动配置列表
+      updateActiveConfigs()
+    }
+  } catch (error) {
+    console.error('关闭任务失败:', error)
+    showToast(`关闭任务失败: ${error.message}`, 'error')
+  }
+}
+
+/**
+ * 随机获取可用主题
+ */
+const randomGetAvailableTopic = async () => {
+  if (isRandomGetting.value) return
+  
+  isRandomGetting.value = true
+  showToast('正在随机获取可用主题...', 'info')
+  
+  try {
+    // 1. 请求配置列表
+    const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    
+    if (configResponse.data?.code !== 0) {
+      throw new Error('获取配置数据失败')
+    }
+    
+    const allConfigs = configResponse.data.data.configList || []
+    
+    console.log(`获取到 ${allConfigs.length} 个配置`)
+    
+    // 统计各种状态
+    const openCount = allConfigs.filter(c => c.isOpen === 1).length
+    const closedCount = allConfigs.filter(c => c.isOpen === 0).length
+    const hasTokenCount = allConfigs.filter(c => c.trendingPart1 && c.trendingPart2).length
+    
+    console.log(`- isOpen=1 (打开): ${openCount} 个`)
+    console.log(`- isOpen=0 (关闭): ${closedCount} 个`)
+    console.log(`- 有tokenId: ${hasTokenCount} 个`)
+    
+    // 2. 筛选出isOpen=0且有tokenId的主题
+    const closedConfigs = allConfigs.filter(config => 
+      config.isOpen === 0 && 
+      config.trendingPart1 && 
+      config.trendingPart2
+    )
+    
+    console.log(`符合条件的主题: ${closedConfigs.length} 个`)
+    
+    if (closedConfigs.length === 0) {
+      showToast(`没有可用的关闭主题 (总配置:${allConfigs.length}, 关闭:${closedCount}, 有token:${hasTokenCount})`, 'warning')
+      return
+    }
+    
+    console.log(`找到 ${closedConfigs.length} 个关闭的主题，开始随机测试...`)
+    
+    // 3. 打乱顺序（测试所有主题，直到找到一个符合条件的）
+    const shuffled = [...closedConfigs].sort(() => Math.random() - 0.5)
+    
+    console.log(`将测试所有 ${shuffled.length} 个主题，直到找到符合条件的`)
+    
+    // 4. 遍历测试每个主题
+    let testedCount = 0
+    for (const config of shuffled) {
+      testedCount++
+      try {
+        console.log(`[${testedCount}/${shuffled.length}] 测试主题: ${config.trending}`)
+        showToast(`正在测试 ${testedCount}/${shuffled.length}: ${config.trending.substring(0, 30)}...`, 'info')
+        
+        // 请求订单薄数据
+        const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        
+        if (!priceInfo) {
+          console.log(`主题 ${config.trending} 订单薄数据不足，跳过`)
+          continue
+        }
+        
+        // 检查是否满足对冲条件
+        if (checkOrderbookHedgeCondition(priceInfo)) {
+          console.log(`✅ 主题 ${config.trending} 满足对冲条件！`)
+          showToast(`✅ 找到可用主题: ${config.trending}`, 'success')
+          
+          // 打开这个主题
+          await openConfigTask(config)
+          return  // 找到就立即返回
+        } else {
+          console.log(`❌ 主题 ${config.trending} 不满足对冲条件，继续寻找...`)
+        }
+      } catch (error) {
+        console.error(`测试主题 ${config.trending} 失败:`, error)
+        // 继续测试下一个
+      }
+      
+      // 添加小延迟，避免请求过快
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+    
+    // 如果所有测试的主题都不满足条件
+    showToast(`测试了所有 ${testedCount} 个主题，未找到满足对冲条件的主题`, 'warning')
+    
+  } catch (error) {
+    console.error('随机获取主题失败:', error)
+    showToast(`获取失败: ${error.message}`, 'error')
+  } finally {
+    isRandomGetting.value = false
+  }
+}
+
+/**
+ * 打开配置任务
+ */
+const openConfigTask = async (config) => {
+  try {
+    // 1. 更新服务器配置，将isOpen设为1
+    const updateData = {
+      list: [{
+        id: config.id,
+        trending: config.trending,
+        trendingPart1: config.trendingPart1,
+        trendingPart2: config.trendingPart2,
+        trendingPart3: config.trendingPart3,
+        opUrl: config.opUrl,
+        polyUrl: config.polyUrl,
+        opTopicId: config.opTopicId,
+        weight: config.weight,
+        isOpen: 1  // 打开任务
+      }]
+    }
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      updateData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log(`配置 ${config.id} 已打开`)
+      
+      // 2. 更新本地显示状态（只更新这一个主题，不影响其他主题）
+      try {
+        const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+        visibleData[config.id] = true
+        localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+        console.log(`主题 ${config.id} 的显示状态已设置为 true`)
+      } catch (e) {
+        console.error('更新显示状态失败:', e)
+      }
+      
+      // 3. 更新本地配置列表中这个配置的状态（避免重新加载所有配置）
+      let configInList = configList.value.find(c => c.id === config.id)
+      if (configInList) {
+        configInList.isOpen = 1
+        configInList.enabled = true
+      } else {
+        // 如果本地列表中没有这个配置（例如随机获取的新主题），添加到列表
+        configList.value.push({
+          ...config,
+          isOpen: 1,
+          enabled: true
+        })
+      }
+      
+      // 4. 更新活动配置列表
+      updateActiveConfigs()
+      
+      showToast(`主题"${config.trending}"已打开`, 'success')
+    }
+  } catch (error) {
+    console.error('打开任务失败:', error)
+    showToast(`打开任务失败: ${error.message}`, 'error')
+  }
 }
 
 /**
@@ -2710,39 +3454,6 @@ const loadHedgeSettings = () => {
 }
 
 /**
- * 保存监听浏览器ID
- */
-const saveMonitorBrowserIds = () => {
-  try {
-    const monitorData = {}
-    activeConfigs.value.forEach(config => {
-      if (config.monitorBrowserId) {
-        monitorData[config.id] = config.monitorBrowserId
-      }
-    })
-    localStorage.setItem(MONITOR_BROWSER_KEY, JSON.stringify(monitorData))
-  } catch (e) {
-    console.error('保存监听浏览器ID失败:', e)
-  }
-}
-
-/**
- * 加载监听浏览器ID
- */
-const loadMonitorBrowserIds = () => {
-  try {
-    const monitorData = JSON.parse(localStorage.getItem(MONITOR_BROWSER_KEY) || '{}')
-    activeConfigs.value.forEach(config => {
-      if (monitorData[config.id]) {
-        config.monitorBrowserId = monitorData[config.id]
-      }
-    })
-  } catch (e) {
-    console.error('加载监听浏览器ID失败:', e)
-  }
-}
-
-/**
  * 保存配置显示状态到本地存储
  * @param {Array} configList - 配置列表
  */
@@ -2839,122 +3550,6 @@ const getHedgeLogStatusText = (log) => {
  */
 const getHedgeLogStatusClass = (log) => {
   return getHedgeStatusClass(log)
-}
-
-/**
- * 监控并执行对冲
- */
-const monitorAndExecuteHedge = async (config) => {
-  const task = config.type3Task
-  if (!task) return
-  
-  // 检查是否已经有正在进行中的对冲任务
-  if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-    const startTime = new Date(config.currentHedge.startTime)
-    const now = new Date()
-    const elapsed = (now - startTime) / 1000 / 60  // 转换为分钟
-    
-    // 检查是否超过20分钟超时
-    if (elapsed >= 20) {
-      console.log(`配置 ${config.id} (${config.trending}) 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
-      config.currentHedge.finalStatus = 'timeout'
-      finishHedge(config, config.currentHedge)
-      // 继续执行新的对冲
-    } else {
-      console.log(`配置 ${config.id} (${config.trending}) 已有对冲任务正在进行中（${elapsed.toFixed(1)}/20分钟），跳过新的对冲请求`)
-      return
-    }
-  }
-  
-  if (!checkHedgeCondition(task)) return
-  
-  const hasSubtopic = config.trending.includes('###')
-  const priceInfo = parseType3Message(task.msg, hasSubtopic)
-  
-  if (!priceInfo) {
-    console.log('价格解析失败:', task.msg)
-    return
-  }
-  
-  let orderPrice
-  let canHedge = false
-  
-  if (priceInfo.diff > 0.15) {
-    // 差值大于0.15，按原逻辑对冲
-    orderPrice = ((priceInfo.price1 + priceInfo.price2)/2).toFixed(1)
-    canHedge = true
-    console.log(`差值充足 (${priceInfo.diff.toFixed(2)})，订单价格: ${orderPrice}`)
-  } else {
-    // 差值小于等于0.15，根据开仓/平仓判断
-    console.log(`差值不足 (${priceInfo.diff.toFixed(2)})，检查深度条件`)
-    
-    if (!hedgeMode.isClose) {
-      // 开仓模式：判断价格较小的一方的深度
-      const smallerDepth = priceInfo.price1 < priceInfo.price2 ? priceInfo.depth1 : priceInfo.depth2
-      console.log(`开仓模式，价格较小方深度: ${smallerDepth}, 最大允许深度: ${hedgeMode.maxDepth}`)
-      
-      if (smallerDepth < hedgeMode.maxDepth) {
-        orderPrice = priceInfo.minPrice.toFixed(1)
-        canHedge = true
-        console.log(`深度满足条件，允许对冲，订单价格: ${orderPrice}`)
-      } else {
-        console.log(`深度超过限制 (${smallerDepth} >= ${hedgeMode.maxDepth})，不对冲`)
-      }
-    } else {
-      // 平仓模式：判断价格较大的一方的深度
-      const largerDepth = priceInfo.price1 > priceInfo.price2 ? priceInfo.depth1 : priceInfo.depth2
-      console.log(`平仓模式，价格较大方深度: ${largerDepth}, 最大允许深度: ${hedgeMode.maxDepth}`)
-      
-      if (largerDepth < hedgeMode.maxDepth) {
-        orderPrice = priceInfo.maxPrice.toFixed(1)
-        canHedge = true
-        console.log(`深度满足条件，允许对冲，订单价格: ${orderPrice}`)
-      } else {
-        console.log(`深度超过限制 (${largerDepth} >= ${hedgeMode.maxDepth})，不对冲`)
-      }
-    }
-  }
-  
-  if (!canHedge) {
-    return
-  }
-  
-  console.log(`配置 ${config.id} 符合对冲条件，订单价格: ${orderPrice}`)
-  
-  // 获取当前打开显示的所有主题ID
-  const trendingIds = activeConfigs.value.map(c => c.id).join(',')
-  console.log(`当前打开显示的主题: ${trendingIds}`)
-  
-  try {
-    const response = await axios.post(
-      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV2',
-      {
-        trendingId: config.id,
-        isClose: hedgeMode.isClose,
-        currentPrice: orderPrice,
-        timePassMin: hedgeMode.timePassMin,
-        trendingIds: trendingIds
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    )
-    
-    if (response.data && response.data.data) {
-      const hedgeData = response.data.data
-      console.log('获取对冲双方成功:', hedgeData)
-      
-      await executeHedgeTask(config, {
-        ...hedgeData,
-        currentPrice: orderPrice,
-        firstSide: priceInfo.firstSide
-      })
-    }
-  } catch (error) {
-    console.error('获取对冲双方失败:', error)
-  }
 }
 
 /**
@@ -3509,7 +4104,7 @@ const queryTransactionFee = async () => {
 }
 
 /**
- * 执行自动对冲任务
+ * 执行自动对冲任务（新逻辑：通过API请求订单薄）
  */
 const executeAutoHedgeTasks = async () => {
   console.log('执行自动对冲任务...')
@@ -3521,9 +4116,14 @@ const executeAutoHedgeTasks = async () => {
   }
   
   for (const config of activeConfigs.value) {
-    // 检查该主题是否正在执行对冲
-    if (pausedType3Tasks.value.has(config.id)) {
-      // 检查是否超时
+    try {
+      // 检查该主题的token是否配置完整
+      if (!config.trendingPart1 || !config.trendingPart2) {
+        console.log(`配置 ${config.id} - 缺少tokenId配置，跳过`)
+        continue
+      }
+      
+      // 检查该主题是否正在执行对冲
       if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
         const startTime = new Date(config.currentHedge.startTime)
         const now = new Date()
@@ -3533,146 +4133,109 @@ const executeAutoHedgeTasks = async () => {
           console.log(`配置 ${config.id} 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
           config.currentHedge.finalStatus = 'timeout'
           finishHedge(config, config.currentHedge)
+          // 清空错误信息和无法对冲时间
+          config.errorMessage = null
+          config.noHedgeSince = null
           // 继续执行，可以开始新的对冲
         } else {
-          console.log(`配置 ${config.id} 正在执行对冲（${elapsed.toFixed(1)}/20分钟），跳过`)
+          console.log(`配置 ${config.id} 正在执行对冲（${elapsed.toFixed(1)}/20分钟），跳过订单薄请求`)
           continue
         }
-      } else {
-        // pausedType3Tasks中有但currentHedge不在运行中，清理状态
-        console.log(`配置 ${config.id} pausedType3Tasks状态不一致，清理`)
-        pausedType3Tasks.value.delete(config.id)
       }
-    }
-    
-    // 只有在可以开始新对冲时才执行
-    if (!canStartNewHedge) {
-      continue
-    }
-    
-    // 先尝试监控并执行对冲
-    await monitorAndExecuteHedge(config)
-    
-    // 如果没有监听浏览器ID，跳过
-    if (!config.monitorBrowserId) {
-      continue
-    }
-    
-    // 检查是否有正在进行的 type=3 任务
-    if (config.pendingType3TaskId) {
-      const taskId = config.pendingType3TaskId
-      const startTime = config.pendingType3TaskStartTime
-      const now = Date.now()
-      const elapsed = (now - startTime) / 1000 / 60  // 转换为分钟
       
-      // 获取任务状态
-      try {
-        const taskData = await fetchMissionStatus(taskId)
-        
-        if (taskData) {
-          const status = taskData.status
-          console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 状态: ${status}, 已用时: ${elapsed.toFixed(1)}分钟`)
-          
-          // 任务已完成（成功或失败）
-          if (status === 2 || status === 3) {
-            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 已完成，清除标记`)
-            config.pendingType3TaskId = null
-            config.pendingType3TaskStartTime = null
-            // 继续执行，会在下面提交新任务
-          }
-          // 任务超时（超过3分钟）
-          else if (elapsed >= 3) {
-            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 超时（${elapsed.toFixed(1)}分钟），清除标记`)
-            config.pendingType3TaskId = null
-            config.pendingType3TaskStartTime = null
-            // 继续执行，会在下面提交新任务
-          }
-          // 任务还在进行中
-          else {
-            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 还在进行中，跳过`)
-            continue  // 跳过，不提交新任务
-          }
-        } else {
-          // 无法获取任务状态，检查超时
-          if (elapsed >= 3) {
-            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 无法获取状态且超时，清除标记`)
-            config.pendingType3TaskId = null
-            config.pendingType3TaskStartTime = null
-          } else {
-            console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 无法获取状态，继续等待`)
-            continue
-          }
-        }
-      } catch (error) {
-        console.error(`获取任务 ${taskId} 状态失败:`, error)
-        // 检查超时
-        if (elapsed >= 3) {
-          console.log(`配置 ${config.id} - Type=3 任务 ${taskId} 获取状态失败且超时，清除标记`)
-          config.pendingType3TaskId = null
-          config.pendingType3TaskStartTime = null
-        } else {
-          continue
-        }
+      // 检查是否正在请求中
+      if (config.isFetching) {
+        console.log(`配置 ${config.id} - 正在请求订单薄中，跳过`)
+        continue
       }
-    }
-    
-    // 如果没有正在进行的任务（或任务已完成/超时），提交新的 type=3 任务
-    if (!config.pendingType3TaskId) {
+      
+      // 检查是否需要请求订单薄
+      const now = Date.now()
+      const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
+      
+      if (!shouldFetch) {
+        const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
+        console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
+        continue
+      }
+      
+      // 开始请求订单薄
+      config.isFetching = true
+      config.lastRequestTime = now
+      
       try {
-        // 提交 type=3 任务
-        const taskData = {
-          groupNo: browserToGroupMap.value[config.monitorBrowserId],
-          numberList: config.monitorBrowserId,
-          type: 3,
-          trendingId: String(config.id),
-          exchangeName: 'OP',
-          side: hedgeMode.isClose ? 2 : 1  // 平仓时为Sell，开仓时为Buy
+        console.log(`配置 ${config.id} - 开始请求订单薄...`)
+        
+        // 解析订单薄数据
+        const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        
+        if (!priceInfo) {
+          throw new Error('解析订单薄数据失败')
         }
         
-        console.log(`配置 ${config.id} - 提交新的 type=3 任务 (${taskData.side}):`, taskData)
+        // 保存订单薄数据
+        config.orderbookData = priceInfo
+        config.retryCount = 0  // 重置重试次数
+        config.errorMessage = null  // 清除错误信息
         
-        const response = await axios.post(
-          'https://sg.bicoin.com.cn/99l/mission/add',
-          taskData,
-          {
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }
-        )
+        console.log(`配置 ${config.id} - 订单薄数据:`, {
+          先挂方: priceInfo.firstSide,
+          先挂价格: priceInfo.price1,
+          后挂价格: priceInfo.price2,
+          价差: priceInfo.diff
+        })
         
-        if (response.data && response.data.data) {
-          const taskData = response.data.data
-          // 确保从响应中正确提取id字段
-          let taskId = null
-          
-          if (typeof taskData === 'object' && taskData !== null) {
-            // 如果返回的是对象，提取id字段
-            taskId = taskData.id
-          } else if (typeof taskData === 'number' || typeof taskData === 'string') {
-            // 如果直接返回的是数字或字符串ID
-            taskId = taskData
-          }
-          
-          // 确保taskId是有效的数字或字符串，且不是对象
-          if (taskId === undefined || taskId === null || typeof taskId === 'object') {
-            console.error(`配置 ${config.id} - type=3 任务提交失败: 无效的任务ID`, { taskData, taskId })
-          } else {
-            // 转换为数字（确保不会传递对象或字符串对象）
-            taskId = Number(taskId)
+        // 只有在可以开始新对冲时才判断是否执行对冲
+        if (canStartNewHedge) {
+          // 检查是否满足对冲条件
+          if (checkOrderbookHedgeCondition(priceInfo)) {
+            console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
-            if (isNaN(taskId)) {
-              console.error(`配置 ${config.id} - type=3 任务提交失败: 任务ID不是有效数字`, taskData)
+            // 清空无法对冲时间
+            config.noHedgeSince = null
+            
+            // 执行对冲
+            await executeHedgeFromOrderbook(config, priceInfo)
+            
+            // 记录对冲时间
+            config.lastHedgeTime = Date.now()
+          } else {
+            console.log(`配置 ${config.id} - 不满足对冲条件`)
+            
+            // 记录开始无法对冲的时间
+            if (!config.noHedgeSince) {
+              config.noHedgeSince = Date.now()
             } else {
-              config.pendingType3TaskId = taskId
-              config.pendingType3TaskStartTime = Date.now()
-              console.log(`配置 ${config.id} - type=3 任务提交成功，任务ID: ${taskId}`)
+              // 检查是否超过5分钟都无法对冲
+              const noHedgeElapsed = (Date.now() - config.noHedgeSince) / 1000 / 60
+              if (noHedgeElapsed >= 5) {
+                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲`
+                console.warn(`配置 ${config.id} - ${config.errorMessage}`)
+              }
             }
           }
         }
+        
       } catch (error) {
-        console.error(`配置 ${config.id} - 提交任务失败:`, error)
+        console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
+        config.retryCount++
+        
+        // 随机1-3秒后重试
+        const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
+        console.log(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
+        
+        setTimeout(() => {
+          config.isFetching = false
+          config.lastRequestTime = Date.now() - 20000  // 立即允许重试
+        }, retryDelay)
+        
+        continue
+      } finally {
+        config.isFetching = false
       }
+      
+    } catch (error) {
+      console.error(`配置 ${config.id} - 处理失败:`, error)
     }
   }
 }
@@ -3990,7 +4553,7 @@ onMounted(() => {
   fetchMissionList()
   
   // 初始加载对冲记录
-  fetchHedgeHistory()
+  // fetchHedgeHistory()
   
   // 启动自动刷新（默认启用，10秒间隔）
   startAutoRefresh()
@@ -4021,6 +4584,10 @@ onUnmounted(() => {
 .app {
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .top-header {
@@ -4103,8 +4670,11 @@ onUnmounted(() => {
 }
 
 .container {
-  max-width: 1600px;
+  max-width: 100%;
+  width: 100%;
   margin: 0 auto;
+  padding: 0 1rem;
+  box-sizing: border-box;
   display: grid;
   gap: 2rem;
 }
@@ -4316,6 +4886,9 @@ onUnmounted(() => {
   padding: 1rem;
   border-radius: 8px;
   backdrop-filter: blur(10px);
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .trending-info {
@@ -4615,8 +5188,17 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-start;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
   margin-bottom: 0;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.trending-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  font-weight: 500;
 }
 
 .btn-log {
@@ -4627,10 +5209,98 @@ onUnmounted(() => {
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 .btn-log:hover {
   background: rgba(255, 255, 255, 0.4);
+}
+
+.btn-link {
+  padding: 0.3rem 0.6rem;
+  background: rgba(52, 199, 89, 0.6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.btn-link:hover {
+  background: rgba(52, 199, 89, 0.8);
+  transform: scale(1.05);
+}
+
+.btn-close-task {
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 59, 48, 0.6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.btn-close-task:hover {
+  background: rgba(255, 59, 48, 0.8);
+  transform: scale(1.05);
+}
+
+.error-badge {
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 59, 48, 0.8);
+  color: white;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.orderbook-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.orderbook-detail .price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.orderbook-detail .price-row:last-child {
+  border-bottom: none;
+}
+
+.orderbook-detail .label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.orderbook-detail .value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.orderbook-detail .value.highlight {
+  color: #4ade80;
+  font-weight: 700;
 }
 
 /* Type 3 任务和对冲信息容器 */
@@ -4639,6 +5309,9 @@ onUnmounted(() => {
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
   margin-top: 0.75rem;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .type3-task-section,
@@ -4646,6 +5319,9 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
   padding: 0.75rem;
+  min-width: 0;
+  overflow: hidden;
+  word-wrap: break-word;
 }
 
 .section-title {
@@ -5275,6 +5951,16 @@ onUnmounted(() => {
 .btn-info:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(23, 162, 184, 0.4);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
 }
 
 /* 单选框样式 */
