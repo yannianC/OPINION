@@ -2881,7 +2881,7 @@ const monitorAndExecuteHedge = async (config) => {
   
   if (priceInfo.diff > 0.15) {
     // 差值大于0.15，按原逻辑对冲
-    orderPrice = (priceInfo.minPrice + 0.1).toFixed(1)
+    orderPrice = ((priceInfo.price1 + priceInfo.price2)/2).toFixed(1)
     canHedge = true
     console.log(`差值充足 (${priceInfo.diff.toFixed(2)})，订单价格: ${orderPrice}`)
   } else {

@@ -958,6 +958,10 @@ def create_selenium_driver(browser_data):
     service = Service(executable_path=browser_data["webdriver"])
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
+    # 设置页面加载超时时间为60秒，防止页面加载卡死
+    driver.set_page_load_timeout(60)
+    driver.set_script_timeout(60)
+    
     return driver
 
 

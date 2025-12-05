@@ -157,7 +157,7 @@ def save_mission_result(mission_id, status, msg=""):
     return False
 
 # 全局线程池配置
-MAX_WORKERS = 6
+MAX_WORKERS = 8
 global_thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 active_tasks_lock = threading.Lock()
 active_tasks = {}  # {mission_id: {'futures': [], 'results': {}, 'total': 0, 'completed': 0}}
@@ -606,6 +606,10 @@ def create_selenium_driver(browser_data):
     
     service = Service(executable_path=chrome_driver)
     driver = webdriver.Chrome(service=service, options=options)
+    
+    # 设置页面加载超时时间为60秒，防止页面加载卡死导致线程无法释放
+    driver.set_page_load_timeout(60)
+    driver.set_script_timeout(60)
     
     return driver
 
@@ -3248,7 +3252,11 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             browser_data = start_adspower_browser(browser_id)
             
             if not browser_data:
-                return False, "浏览器启动失败"
+                log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
+                if keep_browser_open:
+                    return False, "浏览器启动失败", None, None, None
+                else:
+                    return False, "浏览器启动失败"
             
             is_new_browser = True
             log_print(f"[{browser_id}] ✓ 浏览器已新启动")
@@ -3328,6 +3336,17 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         log_print(f"[{browser_id}] ✗✗✗ 任务执行异常: {str(e)}")
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        
+        # 如果是新启动的浏览器且发生异常，需要关闭浏览器
+        if is_new_browser:
+            log_print(f"[{browser_id}] 检测到异常且浏览器是新启动的，立即关闭浏览器...")
+            try:
+                if driver:
+                    driver.quit()
+            except:
+                pass
+            close_adspower_browser(browser_id)
+        
         if keep_browser_open:
             return False, f"执行异常: {str(e)}", None, None, None
         else:
@@ -7215,6 +7234,11 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 finally:
                     log_print(f"[{browser_id}] 关闭浏览器...")
                     close_adspower_browser(task_browser_id)
+            else:
+                # 如果 driver 等为 None，说明任务失败，尝试关闭浏览器（可能已被关闭）
+                if not success:
+                    log_print(f"[{browser_id}] 任务失败且未返回driver，尝试关闭浏览器（兜底）...")
+                    close_adspower_browser(browser_id)
             # Type 1/5 任务结果已经在上面记录了，跳过后面的统一记录
             return
             
@@ -7317,17 +7341,31 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     active_type3_browsers.pop(browser_id, None)
                     log_print(f"[{browser_id}] Type 3 任务 {mission_id} 异常，清除浏览器标记")
         
-        # 记录失败（Type 1 和 Type 3 已经在各自的逻辑中更新了计数，这里只处理 Type 2 和其他类型）
-        if mission_type not in [1, 3]:
-            with active_tasks_lock:
-                if mission_id in active_tasks:
+        # 对于 Type 1/2/5 任务，尝试关闭浏览器（兜底保护，避免浏览器泄漏）
+        if mission_type in [1, 2, 5]:
+            log_print(f"[{browser_id}] Type {mission_type} 任务异常，尝试关闭浏览器（兜底）...")
+            try:
+                close_adspower_browser(browser_id)
+            except Exception as close_error:
+                log_print(f"[{browser_id}] 关闭浏览器时出错: {str(close_error)}")
+        
+        # 记录失败并确保更新计数（避免线程泄漏）
+        with active_tasks_lock:
+            if mission_id in active_tasks:
+                # 检查是否已经更新过计数（避免重复计数）
+                already_counted = browser_id in active_tasks[mission_id]['results']
+                
+                if not already_counted:
+                    # 如果还没有记录过结果，记录失败并更新计数
                     active_tasks[mission_id]['results'][browser_id] = {
                         'success': False,
                         'reason': f"执行异常: {str(e)}"
                     }
                     active_tasks[mission_id]['completed'] += 1
-        else:
-            log_print(f"[{browser_id}] Type {mission_type} 任务异常，计数已在其他地方更新")
+                    log_print(f"[{browser_id}] ✓ 异常任务已标记为完成，避免线程泄漏")
+                else:
+                    # 如果已经记录过了，只打印日志
+                    log_print(f"[{browser_id}] Type {mission_type} 任务异常，计数已在其他地方更新")
 
 
 # ============================================================================
