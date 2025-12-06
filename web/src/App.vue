@@ -154,6 +154,34 @@
               />
             </div>
             
+            <!-- 最小开单设置 -->
+            <div class="hedge-amount-range">
+              <span class="filter-label">最小开单:</span>
+              <input 
+                v-model.number="hedgeMode.minUAmt" 
+                type="number" 
+                class="amount-range-input" 
+                min="0"
+                placeholder="10"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            
+            <!-- 最大开单设置 -->
+            <div class="hedge-amount-range">
+              <span class="filter-label">最大开单:</span>
+              <input 
+                v-model.number="hedgeMode.maxUAmt" 
+                type="number" 
+                class="amount-range-input" 
+                min="0"
+                placeholder="1500"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -1275,6 +1303,7 @@ const autoHedgeInterval = ref(null)
 const activeConfigs = ref([])  // 启用的配置列表
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
+const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
 
 // 订单薄API配置
 const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
@@ -1292,7 +1321,9 @@ const hedgeMode = reactive({
   timePassMin: 60,  // 最近xx分钟内有过任意操作的，不参与
   intervalType: 'success',  // 'success': 挂单成功再挂另一边, 'delay': 延时
   intervalDelay: 1000,  // 延时的毫秒数
-  maxDepth: 100  // 最大允许深度
+  maxDepth: 100,  // 最大允许深度
+  minUAmt: 10,  // 最小开单
+  maxUAmt: 1500  // 最大开单
 })
 
 // 交易费查询
@@ -2977,13 +3008,15 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     
     // 调用服务器接口获取对冲双方
     const response = await axios.post(
-      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV2',
+      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV3',
       {
         trendingId: config.id,
         isClose: hedgeMode.isClose,
         currentPrice: orderPrice,
+        priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
         timePassMin: hedgeMode.timePassMin,
-        trendingIds: trendingIds
+        minUAmt: hedgeMode.minUAmt,  // 最小开单
+        maxUAmt: hedgeMode.maxUAmt   // 最大开单
       },
       {
         headers: {
@@ -3110,6 +3143,19 @@ const randomGetAvailableTopic = async () => {
   showToast('正在随机获取可用主题...', 'info')
   
   try {
+    // 如果是平仓模式，先获取持仓数据
+    if (hedgeMode.isClose) {
+      console.log('平仓模式：先获取持仓数据...')
+      await fetchPositionTopics()
+      console.log(`当前持仓主题数量: ${positionTopics.value.size}`)
+      
+      if (positionTopics.value.size === 0) {
+        showToast('当前没有任何持仓，无法进行平仓操作', 'warning')
+        isRandomGetting.value = false
+        return
+      }
+    }
+    
     // 1. 请求配置列表
     const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     
@@ -3169,6 +3215,17 @@ const randomGetAvailableTopic = async () => {
         
         // 检查是否满足对冲条件
         if (checkOrderbookHedgeCondition(priceInfo)) {
+          // 如果是平仓模式，需要检查主题是否在持仓列表中
+          if (hedgeMode.isClose) {
+            const isInPosition = positionTopics.value.has(config.trending)
+            console.log(`平仓检查: 主题 "${config.trending}" ${isInPosition ? '在' : '不在'}持仓列表中`)
+            
+            if (!isInPosition) {
+              console.log(`❌ 主题 ${config.trending} 不在持仓列表中，跳过`)
+              continue
+            }
+          }
+          
           console.log(`✅ 主题 ${config.trending} 满足对冲条件！`)
           showToast(`✅ 找到可用主题: ${config.trending}`, 'success')
           
@@ -3426,7 +3483,9 @@ const saveHedgeSettings = () => {
     localStorage.setItem(HEDGE_SETTINGS_KEY, JSON.stringify({
       timePassMin: hedgeMode.timePassMin,
       intervalType: hedgeMode.intervalType,
-      intervalDelay: hedgeMode.intervalDelay
+      intervalDelay: hedgeMode.intervalDelay,
+      minUAmt: hedgeMode.minUAmt,
+      maxUAmt: hedgeMode.maxUAmt
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -3448,8 +3507,62 @@ const loadHedgeSettings = () => {
     if (settings.intervalDelay !== undefined) {
       hedgeMode.intervalDelay = settings.intervalDelay
     }
+    if (settings.minUAmt !== undefined) {
+      hedgeMode.minUAmt = settings.minUAmt
+    }
+    if (settings.maxUAmt !== undefined) {
+      hedgeMode.maxUAmt = settings.maxUAmt
+    }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
+  }
+}
+
+/**
+ * 获取并解析账户持仓数据
+ * 从 findAccountConfigCache 接口获取所有账户的持仓信息
+ * 解析 a 字段，提取所有持仓的主题名称
+ */
+const fetchPositionTopics = async () => {
+  try {
+    console.log('开始获取持仓数据...')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+    
+    if (response.data && response.data.data) {
+      const accounts = response.data.data
+      const topics = new Set()
+      
+      // 遍历所有账户
+      accounts.forEach(account => {
+        if (account.a && account.a.trim()) {
+          // a 字段格式：多个持仓用 ; 分割
+          const positions = account.a.split(';')
+          
+          positions.forEach(position => {
+            if (position.trim()) {
+              // 每个持仓内部用 ||| 分割，第一个字段是主题名称
+              const parts = position.split('|||')
+              if (parts.length > 0 && parts[0].trim()) {
+                topics.add(parts[0].trim())
+              }
+            }
+          })
+        }
+      })
+      
+      positionTopics.value = topics
+      console.log(`持仓数据已更新，共 ${topics.size} 个不同的主题`)
+      console.log('持仓主题列表:', Array.from(topics))
+      
+      return topics
+    } else {
+      console.warn('获取持仓数据失败: 返回数据格式错误')
+      return new Set()
+    }
+  } catch (error) {
+    console.error('获取持仓数据失败:', error)
+    showToast('获取持仓数据失败', 'error')
+    return new Set()
   }
 }
 
@@ -5179,6 +5292,38 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
+/* 最小/最大开单设置 */
+.hedge-amount-range {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.amount-range-input {
+  width: 100px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.amount-range-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.3);
+}
+
+.amount-range-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Trending 头部布局 */
 .trending-header {
   margin-bottom: 1rem;
@@ -5306,7 +5451,7 @@ onUnmounted(() => {
 /* Type 3 任务和对冲信息容器 */
 .task-hedge-container {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 1rem;
   margin-top: 0.75rem;
   overflow: hidden;
@@ -5429,7 +5574,7 @@ onUnmounted(() => {
 
 .hedge-task-details-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   gap: 0.5rem;
 }
 
