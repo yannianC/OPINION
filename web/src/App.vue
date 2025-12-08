@@ -23,6 +23,67 @@
                 placeholder="输入 Trending 关键词筛选"
               />
             </div>
+            <div class="trending-filter">
+              <label>订单薄至少组数:</label>
+              <input 
+                v-model.number="hedgeMode.minOrderbookDepth" 
+                type="number" 
+                class="filter-input" 
+                min="1"
+                placeholder="3"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>最大价差:</label>
+              <input 
+                v-model.number="hedgeMode.maxPriceDiff" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                step="0.1"
+                placeholder="15"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>先挂方价格区间:</label>
+              <input 
+                v-model.number="hedgeMode.priceRangeMin" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                max="100"
+                placeholder="65"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+              <span style="margin: 0 5px;">-</span>
+              <input 
+                v-model.number="hedgeMode.priceRangeMax" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                max="100"
+                placeholder="85"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>最小累计深度:</label>
+              <input 
+                v-model.number="hedgeMode.minTotalDepth" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                placeholder="2000"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
           </div>
           <div class="auto-hedge-controls">
             <div class="hedge-amount-info">
@@ -1323,7 +1384,12 @@ const hedgeMode = reactive({
   intervalDelay: 1000,  // 延时的毫秒数
   maxDepth: 100,  // 最大允许深度
   minUAmt: 10,  // 最小开单
-  maxUAmt: 1500  // 最大开单
+  maxUAmt: 1500,  // 最大开单
+  minOrderbookDepth: 3,  // 订单薄至少几组数据
+  maxPriceDiff: 15,  // 买1-买3或卖1-卖3的最大价差
+  priceRangeMin: 65,  // 先挂方价格区间最小值
+  priceRangeMax: 85,  // 先挂方价格区间最大值
+  minTotalDepth: 2000  // 买1-N和卖1-N累加的最小深度
 })
 
 // 交易费查询
@@ -2736,10 +2802,11 @@ const parseOrderbookData = async (config, isClose) => {
       throw new Error('订单薄数据不足')
     }
     
-    // 检查数据数量：asks和bids每个都至少要有3组数据
-    if (yesBids.length < 3 || yesAsks.length < 3 || 
-        noBids.length < 3 || noAsks.length < 3) {
-      throw new Error('订单薄数据不足3组')
+    // 检查数据数量：asks和bids每个都至少要有指定组数据
+    const minDepth = hedgeMode.minOrderbookDepth
+    if (yesBids.length < minDepth || yesAsks.length < minDepth || 
+        noBids.length < minDepth || noAsks.length < minDepth) {
+      throw new Error(`订单薄数据不足${minDepth}组`)
     }
     
     // 对 bids 和 asks 进行排序（确保顺序正确）
@@ -2799,39 +2866,64 @@ const parseOrderbookData = async (config, isClose) => {
     }
     
     // === 新增判断：深度检查 ===
-    // 累加 bids 价格最高的3组数据的 size
-    const top3BidsDepth = firstBids.slice(0, 3).reduce((sum, bid) => sum + parseFloat(bid.size), 0)
-    // 累加 asks 价格最低的3组数据的 size
-    const top3AsksDepth = firstAsks.slice(0, 3).reduce((sum, ask) => sum + parseFloat(ask.size), 0)
+    // 累加 bids 价格最高的N组数据的 size
+    const depthCount = hedgeMode.minOrderbookDepth
+    const topNBidsDepth = firstBids.slice(0, depthCount).reduce((sum, bid) => sum + parseFloat(bid.size), 0)
+    // 累加 asks 价格最低的N组数据的 size
+    const topNAsksDepth = firstAsks.slice(0, depthCount).reduce((sum, ask) => sum + parseFloat(ask.size), 0)
     
-    console.log(`先挂方 ${firstSide} - 买1-3深度累计: ${top3BidsDepth.toFixed(2)}, 卖1-3深度累计: ${top3AsksDepth.toFixed(2)}`)
+    console.log(`先挂方 ${firstSide} - 买1-${depthCount}深度累计: ${topNBidsDepth.toFixed(2)}, 卖1-${depthCount}深度累计: ${topNAsksDepth.toFixed(2)}`)
     
-    if (top3BidsDepth < 2000 || top3AsksDepth < 2000) {
-      throw new Error(`深度不足：买1-3累计=${top3BidsDepth.toFixed(2)}, 卖1-3累计=${top3AsksDepth.toFixed(2)}`)
+    const minTotalDepth = hedgeMode.minTotalDepth
+    if (topNBidsDepth < minTotalDepth || topNAsksDepth < minTotalDepth) {
+      throw new Error(`深度不足：买1-${depthCount}累计=${topNBidsDepth.toFixed(2)}, 卖1-${depthCount}累计=${topNAsksDepth.toFixed(2)}, 要求>=${minTotalDepth}`)
     }
     
     // === 新增判断：价差检查 ===
+    const maxPriceDiff = hedgeMode.maxPriceDiff
+    const depthIndex = hedgeMode.minOrderbookDepth - 1  // 转为索引（0-based）
+    
     if (isClose) {
-      // 平仓：检查先挂方 bids 中买1和买3的价差
+      // 平仓：检查先挂方 bids 中买1和买N的价差
       const bid1Price = parseFloat(firstBids[0].price) * 100
-      const bid3Price = parseFloat(firstBids[2].price) * 100
-      const bidsPriceDiff = bid1Price - bid3Price
+      const bidNPrice = parseFloat(firstBids[depthIndex].price) * 100
+      const bidsPriceDiff = bid1Price - bidNPrice
       
-      console.log(`平仓模式 - 先挂方买1价格: ${bid1Price.toFixed(2)}, 买3价格: ${bid3Price.toFixed(2)}, 差值: ${bidsPriceDiff.toFixed(2)}`)
+      console.log(`平仓模式 - 先挂方买1价格: ${bid1Price.toFixed(2)}, 买${hedgeMode.minOrderbookDepth}价格: ${bidNPrice.toFixed(2)}, 差值: ${bidsPriceDiff.toFixed(2)}`)
       
-      if (bidsPriceDiff >= 15) {
-        throw new Error(`买1-买3价差过大: ${bidsPriceDiff.toFixed(2)} >= 15`)
+      if (bidsPriceDiff >= maxPriceDiff) {
+        throw new Error(`买1-买${hedgeMode.minOrderbookDepth}价差过大: ${bidsPriceDiff.toFixed(2)} >= ${maxPriceDiff}`)
       }
     } else {
-      // 开仓：检查先挂方 asks 中卖1和卖3的价差
+      // 开仓：检查先挂方 asks 中卖1和卖N的价差
       const ask1Price = parseFloat(firstAsks[0].price) * 100
-      const ask3Price = parseFloat(firstAsks[2].price) * 100
-      const asksPriceDiff = ask3Price - ask1Price
+      const askNPrice = parseFloat(firstAsks[depthIndex].price) * 100
+      const asksPriceDiff = askNPrice - ask1Price
       
-      console.log(`开仓模式 - 先挂方卖1价格: ${ask1Price.toFixed(2)}, 卖3价格: ${ask3Price.toFixed(2)}, 差值: ${asksPriceDiff.toFixed(2)}`)
+      console.log(`开仓模式 - 先挂方卖1价格: ${ask1Price.toFixed(2)}, 卖${hedgeMode.minOrderbookDepth}价格: ${askNPrice.toFixed(2)}, 差值: ${asksPriceDiff.toFixed(2)}`)
       
-      if (asksPriceDiff >= 15) {
-        throw new Error(`卖1-卖3价差过大: ${asksPriceDiff.toFixed(2)} >= 15`)
+      if (asksPriceDiff >= maxPriceDiff) {
+        throw new Error(`卖1-卖${hedgeMode.minOrderbookDepth}价差过大: ${asksPriceDiff.toFixed(2)} >= ${maxPriceDiff}`)
+      }
+    }
+    
+    // === 新增判断：先挂方价格区间检查 ===
+    const priceMin = hedgeMode.priceRangeMin
+    const priceMax = hedgeMode.priceRangeMax
+    
+    if (isClose) {
+      // 平仓模式：检查先挂方买一价格是否在区间内
+      console.log(`平仓模式 - 先挂方买一价格: ${price1.toFixed(2)}, 允许区间: [${priceMin}, ${priceMax}]`)
+      
+      if (price1 < priceMin || price1 > priceMax) {
+        throw new Error(`先挂方买一价格 ${price1.toFixed(2)} 不在允许区间 [${priceMin}, ${priceMax}] 内`)
+      }
+    } else {
+      // 开仓模式：检查先挂方卖一价格是否在区间内
+      console.log(`开仓模式 - 先挂方卖一价格: ${price2.toFixed(2)}, 允许区间: [${priceMin}, ${priceMax}]`)
+      
+      if (price2 < priceMin || price2 > priceMax) {
+        throw new Error(`先挂方卖一价格 ${price2.toFixed(2)} 不在允许区间 [${priceMin}, ${priceMax}] 内`)
       }
     }
     
@@ -2844,8 +2936,8 @@ const parseOrderbookData = async (config, isClose) => {
       diff: Math.abs(price1 - price2),  // 先挂方买卖价差
       minPrice: Math.min(price1, price2),
       maxPrice: Math.max(price1, price2),
-      top3BidsDepth,    // 买1-3深度累计
-      top3AsksDepth     // 卖1-3深度累计
+      topNBidsDepth,    // 买1-N深度累计
+      topNAsksDepth     // 卖1-N深度累计
     }
   } catch (error) {
     console.error('解析订单薄数据失败:', error)
