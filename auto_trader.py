@@ -63,7 +63,7 @@ def get_browser_password(browser_id):
 
 
 # 电脑组
-COMPUTER_GROUP = "7"
+COMPUTER_GROUP = "0"
 
 # 密码配置（密码 -> 浏览器ID列表）
 # 格式：密码: "浏览器ID1,浏览器ID2,浏览器ID3,..."
@@ -80,7 +80,7 @@ PASSWORD_MAP = {
 
 # 默认密码（仅当 PASSWORD_MAP 为空或没有 "else" 配置时使用）
 # 如果您使用了 PASSWORD_MAP = {"your_password": "else"}，则此值不会被使用
-PWD = "cx142359."
+PWD = "Ok123456"
 
 # 服务器API配置
 SERVER_BASE_URL = "https://sg.bicoin.com.cn/99l"
@@ -165,6 +165,10 @@ active_tasks = {}  # {mission_id: {'futures': [], 'results': {}, 'total': 0, 'co
 # 正在执行 type=3 任务的浏览器ID映射 {browser_id: mission_id}
 active_type3_browsers = {}
 active_type3_browsers_lock = threading.Lock()
+
+# 正在执行 type=2 任务的浏览器ID映射 {browser_id: mission_id}
+active_type2_browsers = {}
+active_type2_browsers_lock = threading.Lock()
 
 # AdsPower配置
 ADSPOWER_BASE_URL = "http://127.0.0.1:50325"
@@ -4517,19 +4521,149 @@ def click_opinion_position_and_get_data(driver, serial_number):
         return [], False
 
 
+def get_p_tag_text_from_element(element):
+    """
+    从元素中获取p标签的文本内容（可能有多层嵌套）
+    
+    Args:
+        element: WebElement对象
+        
+    Returns:
+        str: p标签的文本内容，如果找不到则返回空字符串
+    """
+    try:
+        # 使用 XPath 查找所有 p 标签（包括嵌套的）
+        p_tags = element.find_elements(By.XPATH, ".//p")
+        if p_tags:
+            # 返回第一个非空的p标签文本
+            for p in p_tags:
+                text = p.text.strip()
+                if text:
+                    return text
+        return ""
+    except:
+        return ""
+
+
 def click_opinion_open_orders_and_get_data(driver, serial_number):
     """
-    点击 Opinion Trade Open Orders 按钮并获取数据
+    点击 Opinion Trade Open Orders 按钮并获取数据，返回标准格式字符串（支持分页）
     
     Args:
         driver: Selenium WebDriver对象
         serial_number: 浏览器序列号
         
     Returns:
-        tuple: (p标签内容列表, 是否需要刷新重试)
-            - 如果正常获取数据或找到"No data yet": (data, False)
-            - 如果超时且没有"No data yet": ([], True)
+        tuple: (标准格式字符串, 是否需要刷新重试)
+            - 如果正常获取数据或找到"No data yet": (标准格式字符串, False)
+            - 如果超时且没有"No data yet": ("", True)
+            标准格式: "唯一标题|||方向|||数量|||均价;唯一标题|||方向|||数量|||均价"
     """
+    
+    def parse_tbody_data(open_orders_div, serial_number):
+        """
+        解析当前页的tbody数据
+        
+        Args:
+            open_orders_div: Open Orders div元素
+            serial_number: 浏览器序列号
+            
+        Returns:
+            list: 解析后的订单字符串列表
+        """
+        result_parts = []
+        
+        # 先检查是否有"No data yet"
+        all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
+        for p in all_p_tags_in_div:
+            if "No data yet" in p.text:
+                log_print(f"[{serial_number}] [OP] ✓ Open Orders 发现 'No data yet'，无数据")
+                return result_parts, True  # 返回空列表和"无数据"标记
+        
+        # 再找这个 div 下的 tbody
+        tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+        
+        if len(tr_list) == 0:
+            return result_parts, False  # 返回空列表，但不是"No data yet"
+        
+        log_print(f"[{serial_number}] [OP] ✓ 当前页找到 {len(tr_list)} 个 tr 标签")
+        
+        # 解析tr标签，构建标准格式字符串
+        current_main_title = ""
+        i = 0
+        
+        while i < len(tr_list):
+            tr = tr_list[i]
+            try:
+                td_list = tr.find_elements(By.TAG_NAME, "td")
+                
+                # 如果只有一个td，这是主标题
+                if len(td_list) == 1:
+                    main_title_text = get_p_tag_text_from_element(td_list[0])
+                    if main_title_text:
+                        current_main_title = main_title_text.strip()
+                        log_print(f"[{serial_number}] [OP] 找到主标题: {current_main_title}")
+                    i += 1
+                    continue
+                
+                # 如果有多个td，这是仓位信息
+                if len(td_list) >= 4 and current_main_title:
+                    # 第一个td: (子标题-)方向
+                    first_td_text = get_p_tag_text_from_element(td_list[0]).strip()
+                    if not first_td_text:
+                        i += 1
+                        continue
+                    
+                    # 解析方向和子标题
+                    direction = ""
+                    sub_title = ""
+                    unique_title = current_main_title
+                    
+                    if " - " in first_td_text:
+                        # 有子标题，例如 "Kendrick Lamar - YES"
+                        parts = first_td_text.split(" - ", 1)
+                        if len(parts) == 2:
+                            sub_title = parts[0].strip()
+                            direction = parts[1].strip()
+                            unique_title = f"{current_main_title}###{sub_title}"
+                    else:
+                        # 没有子标题，直接是方向
+                        direction = first_td_text
+                    
+                    # 第二个td: 数量
+                    second_td_text = get_p_tag_text_from_element(td_list[1]).strip()
+                    if not second_td_text:
+                        i += 1
+                        continue
+                    
+                    # 根据方向添加正负号（如果数量本身没有正负号）
+                    quantity = second_td_text
+                    if not quantity.startswith(('+', '-')):
+                        if direction.upper() == "YES":
+                            quantity = f"+{quantity}"
+                        elif direction.upper() == "NO":
+                            quantity = f"-{quantity}"
+                    
+                    # 第4个td: 均价
+                    fourth_td_text = get_p_tag_text_from_element(td_list[3]).strip()
+                    if not fourth_td_text:
+                        i += 1
+                        continue
+                    
+                    # 拼接标准格式: 唯一标题|||方向|||数量|||均价
+                    order_str = f"{unique_title}|||{direction}|||{quantity}|||{fourth_td_text}"
+                    result_parts.append(order_str)
+                    log_print(f"[{serial_number}] [OP] 解析到仓位: {order_str}")
+                
+                i += 1
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
+                i += 1
+                continue
+        
+        return result_parts, False  # 返回解析结果，不是"No data yet"
+    
     try:
         log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Open Orders 按钮...")
         
@@ -4556,56 +4690,85 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         
         if not open_orders_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮")
-            return [], False
+            return "", False
         
         time.sleep(5)
         
         try:
-            # 先找到 ID 以 content-open-orders 结尾的 div
-            log_print(f"[{serial_number}] [OP] 查找 Open Orders 内容区域...")
-            open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
-            log_print(f"[{serial_number}] [OP] ✓ 找到 Open Orders 内容区域 (ID: {open_orders_div.get_attribute('id')})")
-            
-            # 在180秒内多次查找p标签，如果数量为0则等待5秒后重试
+            # 在180秒内多次查找tbody和tr标签，如果数量为0则等待5秒后重试
             max_retry_time = 180
             retry_start_time = time.time()
-            p_contents = []
+            
+            # 所有页面的结果
+            all_result_parts = []
+            page_num = 1
             
             while time.time() - retry_start_time < max_retry_time:
                 try:
-                    # 先检查是否有"No data yet"
-                    all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
-                    for p in all_p_tags_in_div:
-                        if "No data yet" in p.text:
-                            log_print(f"[{serial_number}] [OP] ✓ Open Orders 发现 'No data yet'，无数据")
-                            return [], False
+                    # 重新获取 open_orders_div（因为分页后内容会刷新）
+                    log_print(f"[{serial_number}] [OP] 查找 Open Orders 内容区域（第 {page_num} 页）...")
+                    open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                    log_print(f"[{serial_number}] [OP] ✓ 找到 Open Orders 内容区域 (ID: {open_orders_div.get_attribute('id')})")
                     
-                    # 再找这个 div 下的 tbody
-                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-                    p_tags = tbody.find_elements(By.TAG_NAME, "p")
-                    p_contents = [p.text.strip() for p in p_tags if p.text.strip()]
+                    # 解析当前页数据
+                    page_result_parts, is_no_data = parse_tbody_data(open_orders_div, serial_number)
                     
-                    if len(p_contents) > 0:
-                        log_print(f"[{serial_number}] [OP] ✓ Open Orders tbody 中找到 {len(p_contents)} 个 p 标签")
-                        return p_contents, False
+                    if is_no_data:
+                        # 如果是"No data yet"，直接返回
+                        if len(all_result_parts) == 0:
+                            return "", False
+                        else:
+                            # 已经有数据了，说明之前有数据，现在没数据了，返回已有数据
+                            break
+                    
+                    if len(page_result_parts) > 0:
+                        all_result_parts.extend(page_result_parts)
+                        log_print(f"[{serial_number}] [OP] ✓ 第 {page_num} 页解析完成，共 {len(page_result_parts)} 个仓位，累计 {len(all_result_parts)} 个仓位")
                     else:
                         elapsed = int(time.time() - retry_start_time)
-                        log_print(f"[{serial_number}] [OP] ⚠ Open Orders p标签数量为0，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
-                        time.sleep(5)
+                        log_print(f"[{serial_number}] [OP] ⚠ 第 {page_num} 页解析后无有效仓位数据")
+                    
+                    # 检查是否有下一页（即使当前页没有数据，也可能有下一页）
+                    try:
+                        next_page_button = open_orders_div.find_element(By.CSS_SELECTOR, 'button[aria-label="next page"]')
+                        is_disabled = next_page_button.get_attribute("disabled") is not None
+                        
+                        if is_disabled:
+                            log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面数据获取完成")
+                            break
+                        else:
+                            log_print(f"[{serial_number}] [OP] 发现下一页，点击下一页按钮...")
+                            next_page_button.click()
+                            time.sleep(3)  # 等待页面加载
+                            page_num += 1
+                            retry_start_time = time.time()  # 重置超时时间，因为开始新的一页
+                            continue
+                    except Exception as e:
+                        # 找不到下一页按钮，说明没有分页或已经是最后一页
+                        log_print(f"[{serial_number}] [OP] ✓ 未找到下一页按钮，所有页面数据获取完成")
+                        break
+                    
                 except Exception as e:
-                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Open Orders p标签异常: {str(e)}，等待5秒后重试...")
+                    elapsed = int(time.time() - retry_start_time)
+                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Open Orders 数据异常: {str(e)}，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
                     time.sleep(5)
             
-            log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Open Orders 数据且无'No data yet'，需要刷新重试")
-            return [], True
+            # 返回所有页面的结果
+            if len(all_result_parts) > 0:
+                result_str = ";".join(all_result_parts)
+                log_print(f"[{serial_number}] [OP] ✓ Open Orders 所有页面解析完成，共 {len(all_result_parts)} 个仓位")
+                return result_str, False
+            else:
+                log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Open Orders 数据且无'No data yet'，需要刷新重试")
+                return "", True
             
         except Exception as e:
-            log_print(f"[{serial_number}] [OP] ⚠ 获取 Open Orders tbody 失败: {str(e)}")
-            return [], False
+            log_print(f"[{serial_number}] [OP] ⚠ 获取 Open Orders 数据失败: {str(e)}")
+            return "", True
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 点击 Open Orders 按钮失败: {str(e)}")
-        return [], False
+        return "", False
 
 
 def click_opinion_transactions_and_get_data(driver, serial_number):
@@ -6550,10 +6713,10 @@ def collect_position_data(driver, browser_id, exchange_name):
             # 处理数据为标准格式
             log_print(f"[{browser_id}] 处理数据为标准格式...")
             processed_positions = process_op_position_data(position_data)
-            processed_open_orders = process_op_open_orders_data(open_orders_data)
             
+            # open_orders_data 已经是标准格式字符串，不需要再处理
             collected_data['positions'] = processed_positions
-            collected_data['open_orders'] = processed_open_orders
+            collected_data['open_orders'] = open_orders_data
             collected_data['transactions'] = transactions_data
             
             # 打印收集到的数据
@@ -6563,9 +6726,14 @@ def collect_position_data(driver, browser_id, exchange_name):
             log_print(f"[{browser_id}] Position 数据 ({len(processed_positions)} 项):")
             for i, item in enumerate(processed_positions, 1):
                 log_print(f"[{browser_id}]   {i}. {item}")
-            log_print(f"[{browser_id}] Open Orders 数据 ({len(processed_open_orders)} 项):")
-            for i, item in enumerate(processed_open_orders, 1):
-                log_print(f"[{browser_id}]   {i}. {item['title']}, {item['price']}, {item['progress']}")
+            log_print(f"[{browser_id}] Open Orders 数据 (标准格式):")
+            if open_orders_data:
+                # 按分号分割显示每个仓位
+                orders = open_orders_data.split(';')
+                for i, order in enumerate(orders, 1):
+                    log_print(f"[{browser_id}]   {i}. {order}")
+            else:
+                log_print(f"[{browser_id}]   无数据")
             log_print(f"[{browser_id}] ==========================================\n")
             
             # 上传数据
@@ -6913,10 +7081,10 @@ def process_type2_mission(task_data, retry_count=0):
             # 处理数据为标准格式
             log_print(f"[{browser_id}] 步骤10: 处理数据为标准格式...")
             processed_positions = process_op_position_data(position_data)
-            processed_open_orders = process_op_open_orders_data(open_orders_data)
             
+            # open_orders_data 已经是标准格式字符串，不需要再处理
             collected_data['positions'] = processed_positions
-            collected_data['open_orders'] = processed_open_orders
+            collected_data['open_orders'] = open_orders_data
             collected_data['transactions'] = transactions_data
             
             # 打印收集到的数据
@@ -6926,9 +7094,14 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] Position 数据 ({len(processed_positions)} 项):")
             for i, item in enumerate(processed_positions, 1):
                 log_print(f"[{browser_id}]   {i}. {item}")
-            log_print(f"[{browser_id}] Open Orders 数据 ({len(processed_open_orders)} 项):")
-            for i, item in enumerate(processed_open_orders, 1):
-                log_print(f"[{browser_id}]   {i}. {item['title']}, {item['price']}, {item['progress']}")
+            log_print(f"[{browser_id}] Open Orders 数据 (标准格式):")
+            if open_orders_data:
+                # 按分号分割显示每个仓位
+                orders = open_orders_data.split(';')
+                for i, order in enumerate(orders, 1):
+                    log_print(f"[{browser_id}]   {i}. {order}")
+            else:
+                log_print(f"[{browser_id}]   无数据")
             log_print(f"[{browser_id}] ==========================================\n")
             
             # 上传数据
@@ -7244,7 +7417,29 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             
         elif mission_type == 2:
             # Type 2: 数据获取任务
-            success, failure_reason, collected_data = process_type2_mission(task_data)
+            # 初始化变量（放在最前面，确保即使前面发生异常也能访问）
+            success = False
+            failure_reason = "未执行"
+            
+            try:
+                # 将浏览器ID和任务ID加入正在执行的映射
+                with active_type2_browsers_lock:
+                    active_type2_browsers[browser_id] = mission_id
+                    log_print(f"[{browser_id}] Type 2 任务 {mission_id} 开始，浏览器已标记为繁忙")
+                
+                try:
+                    success, failure_reason, collected_data = process_type2_mission(task_data)
+                finally:
+                    # 无论成功还是失败，都从映射中移除浏览器ID
+                    with active_type2_browsers_lock:
+                        active_type2_browsers.pop(browser_id, None)
+                        log_print(f"[{browser_id}] Type 2 任务 {mission_id} 完成，浏览器标记已清除")
+            except Exception as e:
+                # 如果 process_type2_mission 本身抛出异常，确保清除标记
+                with active_type2_browsers_lock:
+                    active_type2_browsers.pop(browser_id, None)
+                    log_print(f"[{browser_id}] Type 2 任务 {mission_id} 异常，清除浏览器标记")
+                raise
             
         elif mission_type == 3:
             # Type 3: 订单簿数据获取任务
@@ -7334,6 +7529,13 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
         
+        # 如果是 type=2 任务发生异常，确保清除浏览器标记
+        if mission_type == 2:
+            with active_type2_browsers_lock:
+                if browser_id in active_type2_browsers:
+                    active_type2_browsers.pop(browser_id, None)
+                    log_print(f"[{browser_id}] Type 2 任务 {mission_id} 异常，清除浏览器标记")
+        
         # 如果是 type=3 任务发生异常，确保清除浏览器标记
         if mission_type == 3:
             with active_type3_browsers_lock:
@@ -7419,6 +7621,31 @@ def main():
                 browser_id = str(mission.get("numberList", ""))
                 
                 log_print(f"[系统] 获取到任务 {mission_id}，类型: {mission_type}，交易所: {exchange_name}，浏览器: {browser_id}")
+                
+                # 如果是 type=2 任务，检查该浏览器是否已经在执行 type=2 任务
+                if mission_type == 2:
+                    browser_is_busy = False
+                    with active_type2_browsers_lock:
+                        if browser_id in active_type2_browsers:
+                            old_mission_id = active_type2_browsers[browser_id]
+                            # 检查旧任务是否真的还在运行
+                            with active_tasks_lock:
+                                if old_mission_id in active_tasks:
+                                    # 旧任务还在运行，浏览器确实繁忙
+                                    browser_is_busy = True
+                                    log_print(f"[系统] 浏览器 {browser_id} 正在执行 Type=2 任务 {old_mission_id}")
+                                else:
+                                    # 旧任务已完成但标记未清除（幽灵标记），自动清理
+                                    log_print(f"[系统] ⚠ 检测到幽灵标记：浏览器 {browser_id} 的旧任务 {old_mission_id} 已完成但标记未清除，自动清理")
+                                    active_type2_browsers.pop(browser_id, None)
+                                    browser_is_busy = False
+                    
+                    if browser_is_busy:
+                        log_print(f"[系统] ⚠ 浏览器 {browser_id} 已有 Type=2 任务正在执行，跳过任务 {mission_id}")
+                        # 提交失败结果
+                        submit_mission_result(mission_id, 0, 1, {browser_id: "该浏览器已有Type=2任务正在执行"}, status=3)
+                        log_print(f"[系统] ✓ Type=2 任务 {mission_id} 已标记为失败")
+                        continue  # 跳过后续处理，继续下一次循环
                 
                 # 如果是 type=3 任务，检查该浏览器是否已经在执行 type=3 任务
                 if mission_type == 3:

@@ -1586,6 +1586,7 @@ const saveAll = async () => {
  * 刷新单个账户的仓位数据
  */
 const refreshPosition = async (row) => {
+  
   if (!row.fingerprintNo) {
     ElMessage.warning('请先填写浏览器编号')
     return
@@ -1601,10 +1602,33 @@ const refreshPosition = async (row) => {
     return
   }
   
-  // 找到行在数组中的索引
+  // 找到行在数组中的索引（使用唯一标识符而不是引用比较）
+  // 因为 loadData 会创建新对象，导致引用失效
   const currentData = [...tableData.value]
-  const rowIndex = currentData.findIndex(r => r === row)
-  if (rowIndex === -1) return
+  const rowIndex = currentData.findIndex(r => {
+    // 优先使用 id，如果没有 id 则使用 fingerprintNo + computeGroup 组合
+    if (row.id && r.id) {
+      return r.id === row.id
+    }
+    return r.fingerprintNo === row.fingerprintNo && 
+           r.computeGroup === row.computeGroup
+  })
+  if (rowIndex === -1) {
+    console.warn("未找到行在数组中的索引", {
+      fingerprintNo: row.fingerprintNo,
+      computeGroup: row.computeGroup,
+      id: row.id,
+      tableDataLength: currentData.length
+    })
+    ElMessage.warning('无法找到对应的数据行，请刷新列表后重试')
+    return
+  }
+  
+  // 检查平台类型，仅支持 OP 平台
+  if (row.platform != 'OP'){
+    ElMessage.warning('当前仅支持 OP 平台的仓位刷新')
+    return
+  }
   
   currentData[rowIndex] = { ...currentData[rowIndex], refreshing: true }
   tableData.value = currentData
@@ -1612,10 +1636,6 @@ const refreshPosition = async (row) => {
   try {
     // 1. 发送 type=2 任务请求，让服务器采集最新数据
     ElMessage.info(`正在采集浏览器 ${row.fingerprintNo} 的最新仓位数据...`)
-    
-    if (row.platform != 'OP'){
-      return
-    }
     const taskData = {
       groupNo: row.computeGroup,
       numberList: parseInt(row.fingerprintNo),
