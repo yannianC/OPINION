@@ -63,7 +63,7 @@ def get_browser_password(browser_id):
 
 
 # 电脑组
-COMPUTER_GROUP = "0"
+COMPUTER_GROUP = "8"
 
 # 密码配置（密码 -> 浏览器ID列表）
 # 格式：密码: "浏览器ID1,浏览器ID2,浏览器ID3,..."
@@ -80,7 +80,7 @@ PASSWORD_MAP = {
 
 # 默认密码（仅当 PASSWORD_MAP 为空或没有 "else" 配置时使用）
 # 如果您使用了 PASSWORD_MAP = {"your_password": "else"}，则此值不会被使用
-PWD = "Ok123456"
+PWD = "ywj000805*"
 
 # 服务器API配置
 SERVER_BASE_URL = "https://sg.bicoin.com.cn/99l"
@@ -3403,53 +3403,6 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         log_print(f"[{browser_id}] 步骤5: 打开目标页面")
         driver.get(target_url)
         
-        # 5.5 检查并点击 "I Understand and Agree" p标签（如果存在）
-        log_print(f"[{browser_id}] 步骤5.5: 检查是否存在 'I Understand and Agree' p标签...")
-        if check_and_click_understand_agree(driver, browser_id, timeout=5):
-            # 如果存在并点击了，需要换IP重试（仅type=5任务且未重试过）
-            mission_type = mission.get("type")
-            if mission_type == 5 and retry_count == 0:
-                log_print(f"[{browser_id}] Type=5 任务检测到 'I Understand and Agree'，需要换IP重试，开始执行重试流程...")
-                
-                # 1. 关闭浏览器
-                log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
-                try:
-                    if driver:
-                        driver.quit()
-                except:
-                    pass
-                close_adspower_browser(browser_id)
-                time.sleep(15)
-                
-                # 2. 强制更换IP
-                log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
-                
-                if not proxy_config:
-                    log_print(f"[{browser_id}] ✗ 获取新IP失败")
-                    if keep_browser_open:
-                        return False, "换IP失败", None, None, None
-                    else:
-                        return False, "换IP失败"
-                
-                log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
-                
-                # 3. 更新代理配置
-                log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                if not update_adspower_proxy(browser_id, proxy_config):
-                    log_print(f"[{browser_id}] ✗ 更新代理失败")
-                    if keep_browser_open:
-                        return False, "更新代理失败", None, None, None
-                    else:
-                        return False, "更新代理失败"
-                
-                log_print(f"[{browser_id}] ✓ 代理配置已更新")
-                time.sleep(10)
-                
-                # 4. 递归重试任务（retry_count+1）
-                log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                return process_trading_mission(task_data, keep_browser_open, retry_count=1)
-        
         # 根据交易所类型选择不同的处理流程
         if exchange_type == "OP":
             success, failure_reason = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count)
@@ -3567,51 +3520,6 @@ def check_okx_wallet_p_exists(driver, browser_id, timeout=5):
         
     except Exception as e:
         log_print(f"[{browser_id}] ⚠ 检查 OKX Wallet P标签时出错: {str(e)}")
-        return False
-
-
-def check_and_click_understand_agree(driver, browser_id, timeout=5):
-    """
-    检查是否存在内容等于 "I Understand and Agree" 的p标签，如果存在则点击其父节点
-    
-    Args:
-        driver: Selenium WebDriver对象
-        browser_id: 浏览器ID
-        timeout: 检查超时时间（秒）
-        
-    Returns:
-        bool: 如果找到并点击了返回True，否则返回False
-    """
-    try:
-        log_print(f"[{browser_id}] 在{timeout}秒内检查是否存在 'I Understand and Agree' p标签...")
-        start_time = time.time()
-        
-        while time.time() - start_time < timeout:
-            try:
-                p_tags = driver.find_elements(By.TAG_NAME, "p")
-                for p in p_tags:
-                    if p.text.strip() == "I Understand and Agree":
-                        log_print(f"[{browser_id}] ✓ 检测到 'I Understand and Agree' p标签存在")
-                        try:
-                            # 获取父节点并点击
-                            parent = p.find_element(By.XPATH, "..")
-                            log_print(f"[{browser_id}] → 点击 'I Understand and Agree' 的父节点...")
-                            parent.click()
-                            log_print(f"[{browser_id}] ✓ 已点击父节点")
-                            time.sleep(1)
-                            return True
-                        except Exception as e:
-                            log_print(f"[{browser_id}] ⚠ 点击父节点时出错: {str(e)}")
-                            return False
-                time.sleep(0.5)
-            except:
-                time.sleep(0.5)
-        
-        log_print(f"[{browser_id}] ✓ 未检测到 'I Understand and Agree' p标签")
-        return False
-        
-    except Exception as e:
-        log_print(f"[{browser_id}] ⚠ 检查 'I Understand and Agree' p标签时出错: {str(e)}")
         return False
 
 
@@ -4207,22 +4115,6 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         while retry_count <= max_retry_attempts:
             try:
                 if retry_count > 0:
-                    # 检查当前是否在OKX界面，如果是则切换回主页面
-                    log_print(f"[{browser_id}] ⚠ 第{retry_count}次重试，检查当前窗口...")
-                    all_windows = driver.window_handles
-                    current_url = driver.current_url
-                    
-                    # 如果当前在OKX界面，切换回主页面
-                    if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
-                        log_print(f"[{browser_id}] ⚠ 当前在OKX界面，切换回主页面...")
-                        for window in all_windows:
-                            driver.switch_to.window(window)
-                            current_url = driver.current_url
-                            if "app.opinion.trade" in current_url:
-                                log_print(f"[{browser_id}] ✓ 已切换回主页面")
-                                break
-                        time.sleep(2)  # 等待页面切换完成
-                    
                     log_print(f"[{browser_id}] ⚠ 第{retry_count}次重试，刷新页面...")
                     driver.refresh()
                     
@@ -7531,49 +7423,6 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
             
             time.sleep(2)
-            
-            # 4.0.4 检查并点击 "I Understand and Agree" p标签（如果存在）
-            log_print(f"[{browser_id}] 步骤4.0.4: 检查是否存在 'I Understand and Agree' p标签...")
-            if check_and_click_understand_agree(driver, browser_id, timeout=5):
-                # 如果存在并点击了，需要换IP重试（仅未重试过）
-                if retry_count == 0:
-                    log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试，开始执行重试流程...")
-                    
-                    # 1. 关闭浏览器
-                    log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
-                    try:
-                        if driver:
-                            driver.quit()
-                    except:
-                        pass
-                    close_adspower_browser(browser_id)
-                    time.sleep(15)
-                    
-                    # 2. 强制更换IP
-                    log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                    proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
-                    
-                    if not proxy_config:
-                        log_print(f"[{browser_id}] ✗ 获取新IP失败")
-                        return False, "换IP失败", collected_data
-                    
-                    log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
-                    
-                    # 3. 更新代理配置
-                    log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                    if not update_adspower_proxy(browser_id, proxy_config):
-                        log_print(f"[{browser_id}] ✗ 更新代理失败")
-                        return False, "更新代理失败", collected_data
-                    
-                    log_print(f"[{browser_id}] ✓ 代理配置已更新")
-                    time.sleep(10)
-                    
-                    # 4. 递归重试任务（retry_count+1）
-                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                    return process_type2_mission(task_data, retry_count=1)
-                else:
-                    log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
-                    return False, "检测到 'I Understand and Agree' 且已重试", collected_data
             
             # 4.0.5 预打开OKX钱包
             log_print(f"[{browser_id}] 步骤4.0.5: 预打开OKX钱包...")

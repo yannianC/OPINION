@@ -175,8 +175,24 @@ const parsePositions = (posStr) => {
 }
 
 /**
+ * 解析带逗号的数字字符串（如：1,369.55）
+ */
+const parseNumberWithComma = (str) => {
+  if (!str) return 0
+  // 移除逗号后解析
+  const cleaned = str.replace(/,/g, '')
+  return parseFloat(cleaned) || 0
+}
+
+/**
  * 解析挂单数据字符串（b字段）
- * 格式: "事件唯一名|||买卖方向|||方向|||价格|||已成交/总挂单量;..."
+ * 支持多种格式：
+ * 1. 新格式（5个字段）："事件唯一名|||买卖方向|||方向|||价格|||进度"
+ * 2. 旧格式（3个字段）："标题|||价格|||进度"
+ * 3. 更旧格式（逗号分隔）："标题,价格,进度"
+ * 进度格式支持：
+ * - 数量格式：60.55/554.74shares 或 239.13/1,369.55shares
+ * - 金额格式：$0/$462.2 或 $0/$1,462.2
  */
 const parseOrders = (ordersStr) => {
   if (!ordersStr) return []
@@ -188,31 +204,156 @@ const parseOrders = (ordersStr) => {
     for (const item of items) {
       if (!item.trim()) continue
       
+      // 优先尝试新格式（5个字段：唯一标题|||买卖方向|||选项|||价格|||进度）
       if (item.includes('|||')) {
         const parts = item.split('|||')
         if (parts.length >= 5) {
+          // 新格式：唯一标题|||买卖方向|||选项|||价格|||进度
           const title = parts[0].trim()
           const buySellDirection = parts[1].trim() // "Buy" 或 "Sell"
           const option = parts[2].trim() // "YES" 或 "NO"
           const price = parts[3].trim()
-          const progress = parts[4].trim() // "60.55/554.74shares"
+          const progress = parts[4].trim()
           
-          // 解析进度：已成交/总挂单量
-          const progressMatch = progress.match(/([\d.]+)\/([\d.]+)/)
+          // 解析价格：83.8 ¢ -> 提取数字部分
+          let priceNum = 0
+          const priceMatch = price.match(/([\d.]+)/)
+          if (priceMatch) {
+            priceNum = parseFloat(priceMatch[1]) || 0
+          }
+          
+          let pending = 0
           let filled = 0
           let total = 0
           
-          if (progressMatch) {
-            filled = parseFloat(progressMatch[1]) || 0
-            total = parseFloat(progressMatch[2]) || 0
+          // 判断进度格式：$0/$462.2（金额格式）或 60.55/554.74shares 或 239.13/1,369.55shares（数量格式）
+          if (progress.includes('$')) {
+            // 金额格式：$0/$462.2 或 $0/$1,462.2 -> 未成交金额 = 总金额 - 已成交金额
+            const amountMatch = progress.match(/\$?([\d.,]+)\/\$?([\d.,]+)/)
+            if (amountMatch) {
+              const filledAmount = parseNumberWithComma(amountMatch[1])
+              const totalAmount = parseNumberWithComma(amountMatch[2])
+              const pendingAmount = totalAmount - filledAmount
+              // 未成交数量 = 未成交金额 * 100 / 价格
+              if (priceNum > 0) {
+                pending = (pendingAmount * 100) / priceNum
+              }
+              filled = filledAmount
+              total = totalAmount
+            }
+          } else {
+            // 数量格式：60.55/554.74shares 或 239.13/1,369.55shares -> 未成交数量 = 总数量 - 已成交数量
+            const progressMatch = progress.match(/([\d.,]+)\/([\d.,]+)/)
+            if (progressMatch) {
+              filled = parseNumberWithComma(progressMatch[1])
+              total = parseNumberWithComma(progressMatch[2])
+              pending = total - filled
+            }
           }
-          
-          const pending = total - filled // 未成交量
           
           orders.push({
             title: title,
             buySellDirection: buySellDirection,
             option: option,
+            price: price,
+            filled: filled,
+            total: total,
+            pending: pending
+          })
+        } else if (parts.length >= 3) {
+          // 兼容旧格式（3个字段：标题|||价格|||进度）
+          const title = parts[0].trim()
+          const price = parts[1].trim()
+          const progress = parts[2].trim()
+          
+          // 解析价格
+          let priceNum = 0
+          const priceMatch = price.match(/([\d.]+)/)
+          if (priceMatch) {
+            priceNum = parseFloat(priceMatch[1]) || 0
+          }
+          
+          let pending = 0
+          let filled = 0
+          let total = 0
+          
+          // 判断进度格式
+          if (progress.includes('$')) {
+            // 金额格式
+            const amountMatch = progress.match(/\$?([\d.,]+)\/\$?([\d.,]+)/)
+            if (amountMatch) {
+              const filledAmount = parseNumberWithComma(amountMatch[1])
+              const totalAmount = parseNumberWithComma(amountMatch[2])
+              const pendingAmount = totalAmount - filledAmount
+              if (priceNum > 0) {
+                pending = (pendingAmount * 100) / priceNum
+              }
+              filled = filledAmount
+              total = totalAmount
+            }
+          } else {
+            // 数量格式
+            const progressMatch = progress.match(/([\d.,]+)\/([\d.,]+)/)
+            if (progressMatch) {
+              filled = parseNumberWithComma(progressMatch[1])
+              total = parseNumberWithComma(progressMatch[2])
+              pending = total - filled
+            }
+          }
+          
+          orders.push({
+            title: title,
+            price: price,
+            filled: filled,
+            total: total,
+            pending: pending
+          })
+        }
+      } else {
+        // 兼容更旧格式（逗号分隔符）
+        const parts = item.split(',')
+        if (parts.length >= 3) {
+          const title = parts[0].trim()
+          const price = parts[1].trim()
+          const progress = parts[2].trim()
+          
+          // 解析价格
+          let priceNum = 0
+          const priceMatch = price.match(/([\d.]+)/)
+          if (priceMatch) {
+            priceNum = parseFloat(priceMatch[1]) || 0
+          }
+          
+          let pending = 0
+          let filled = 0
+          let total = 0
+          
+          // 判断进度格式
+          if (progress.includes('$')) {
+            // 金额格式
+            const amountMatch = progress.match(/\$?([\d.,]+)\/\$?([\d.,]+)/)
+            if (amountMatch) {
+              const filledAmount = parseNumberWithComma(amountMatch[1])
+              const totalAmount = parseNumberWithComma(amountMatch[2])
+              const pendingAmount = totalAmount - filledAmount
+              if (priceNum > 0) {
+                pending = (pendingAmount * 100) / priceNum
+              }
+              filled = filledAmount
+              total = totalAmount
+            }
+          } else {
+            // 数量格式
+            const progressMatch = progress.match(/([\d.,]+)\/([\d.,]+)/)
+            if (progressMatch) {
+              filled = parseNumberWithComma(progressMatch[1])
+              total = parseNumberWithComma(progressMatch[2])
+              pending = total - filled
+            }
+          }
+          
+          orders.push({
+            title: title,
             price: price,
             filled: filled,
             total: total,

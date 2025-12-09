@@ -9,13 +9,16 @@
     </div>
 
     <!-- 数据表格 -->
-    <el-table 
-      :data="tableData" 
-      border 
-      style="width: 100%"
-      v-loading="loading"
-      height="calc(100vh - 300px)"
-    >
+    <div class="table-wrapper">
+      <el-table 
+        :data="tableData" 
+        border 
+        style="width: 100%"
+        v-loading="loading"
+        height="calc(100vh - 300px)"
+        :row-class-name="getRowClassName"
+        ref="tableRef"
+      >
       <el-table-column prop="index" label="序号" width="80" align="center" fixed />
       
       <el-table-column label="电脑组" width="100" align="center">
@@ -129,12 +132,30 @@
           </el-button>
         </template>
       </el-table-column>
-    </el-table>
+      </el-table>
+      
+      <!-- 总计行 - 看起来像表格的一行数据 -->
+      <div class="summary-row-wrapper" v-if="tableData.length > 0">
+        <div class="summary-row">
+          <div class="summary-cell" style="width: 80px; text-align: center; border-right: 1px solid #dcdfe6;">总计</div>
+          <div class="summary-cell" style="width: 100px; border-right: 1px solid #dcdfe6;"></div>
+          <div class="summary-cell" style="width: 150px; border-right: 1px solid #dcdfe6;"></div>
+          <div class="summary-cell" style="width: 120px; border-right: 1px solid #dcdfe6;"></div>
+          <div class="summary-cell summary-value" style="width: 120px; text-align: center; border-right: 1px solid #dcdfe6;">{{ formatNumber(totalSummary.balance) }}</div>
+          <div class="summary-cell summary-value" style="width: 120px; text-align: center; border-right: 1px solid #dcdfe6;">{{ formatNumber(totalSummary.portfolio) }}</div>
+          <div class="summary-cell summary-value" style="width: 130px; text-align: center; border-right: 1px solid #dcdfe6;">{{ formatNumber(totalSummary.pendingQuantity) }}</div>
+          <div class="summary-cell summary-value" style="width: 130px; text-align: center; border-right: 1px solid #dcdfe6;">{{ formatNumber(totalSummary.pendingAmount) }}</div>
+          <div class="summary-cell" style="width: 500px; border-right: 1px solid #dcdfe6;"></div>
+          <div class="summary-cell" style="width: 150px; border-right: 1px solid #dcdfe6;"></div>
+          <div class="summary-cell" style="width: 150px;"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
@@ -143,6 +164,28 @@ const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
 const loading = ref(false)
 const tableData = ref([])
 const parsedOrders = ref({})
+const tableRef = ref(null)
+
+/**
+ * 计算总计
+ */
+const totalSummary = computed(() => {
+  const summary = {
+    balance: 0,
+    portfolio: 0,
+    pendingQuantity: 0,
+    pendingAmount: 0
+  }
+  
+  tableData.value.forEach(row => {
+    summary.balance += parseFloat(row.balance) || 0
+    summary.portfolio += parseFloat(row.c) || 0
+    summary.pendingQuantity += parseFloat(row.pendingQuantity) || 0
+    summary.pendingAmount += parseFloat(row.pendingAmount) || 0
+  })
+  
+  return summary
+})
 
 /**
  * 格式化数字
@@ -170,6 +213,14 @@ const sortByNumber = (a, b) => {
   const numB = parseFloat(b) || 0
   return numA - numB
 }
+
+/**
+ * 获取行的类名
+ */
+const getRowClassName = ({ row, rowIndex }) => {
+  return ''
+}
+
 
 /**
  * 解析带逗号的数字字符串（如：1,369.55）
@@ -612,6 +663,51 @@ onMounted(() => {
 .empty-text {
   color: #ccc;
   font-style: italic;
+}
+
+/* 表格包装器 */
+.table-wrapper {
+  position: relative;
+}
+
+/* 总计行样式 - 让它看起来像表格的一行数据 */
+.summary-row-wrapper {
+  position: absolute;
+  top: 48px; /* 表头高度，需要根据实际表头高度调整 */
+  left: 0;
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.summary-row {
+  display: flex;
+  background-color: #f5f7fa;
+  border: 1px solid #dcdfe6;
+  border-top: none;
+  min-height: 48px; /* 与表格行高度一致 */
+  align-items: center;
+}
+
+.summary-cell {
+  padding: 12px;
+  font-size: 14px;
+  background-color: #f5f7fa;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+}
+
+.summary-value {
+  color: #409eff;
+  font-weight: 600;
+}
+
+/* 调整数据表格，为总计行留出空间 */
+.table-wrapper :deep(.el-table__body-wrapper) {
+  padding-top: 48px; /* 为总计行留出空间 */
 }
 </style>
 
