@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSC Token Transfers 查询工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/web3@4.3.0/dist/web3.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 300px;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .search-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .config-box {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .config-box label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #666;
+            font-weight: 600;
+        }
+
+        .config-box input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .filter-box {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-item label {
+            font-size: 14px;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        .filter-item select,
+        .filter-item input {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .status-message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .status-message.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border-left: 4px solid #1976d2;
+        }
+
+        .status-message.error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+
+        .status-message.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        thead {
+            background: #f5f5f5;
+        }
+
+        th {
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #e0e0e0;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            color: #666;
+        }
+
+        tbody tr:hover {
+            background: #f9f9f9;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .type-badge.token {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .type-badge.bnb {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .address-link {
+            color: #667eea;
+            text-decoration: none;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .address-link:hover {
+            text-decoration: underline;
+        }
+
+        .hash-link {
+            color: #667eea;
+            text-decoration: none;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .hash-link:hover {
+            text-decoration: underline;
+        }
+
+        .amount {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .amount.positive {
+            color: #2e7d32;
+        }
+
+        .amount.negative {
+            color: #c62828;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .pagination button {
+            padding: 8px 16px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #f5f5f5;
+            border-color: #667eea;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .current-page {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+
+            .search-box {
+                flex-direction: column;
+            }
+
+            .search-input {
+                min-width: 100%;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px 10px;
+            }
+
+            .address-link,
+            .hash-link {
+                font-size: 11px;
+                word-break: break-all;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 BSC Token Transfers 查询工具</h1>
+        <p class="subtitle">纯前端版本 - 直接在浏览器中查询 BSC 链上 Token 转账记录</p>
+
+        <!-- RPC 节点配置 -->
+        <div class="config-box">
+            <label>BSC RPC 节点地址（可选，默认使用公共节点）:</label>
+            <input type="text" id="rpcUrl" placeholder="https://bsc-dataseed1.binance.org/" 
+                   value="https://bsc-dataseed1.binance.org/">
+        </div>
+
+        <!-- 搜索框 -->
+        <div class="search-box">
+            <input
+                type="text"
+                id="searchAddress"
+                class="search-input"
+                placeholder="输入 BSC 地址 (例如: 0x1234...)"
+                onkeyup="if(event.key==='Enter') search()"
+            />
+            <button class="search-btn" id="searchBtn" onclick="search()">查询</button>
+        </div>
+
+        <!-- 筛选选项 -->
+        <div id="filterBox" class="filter-box" style="display: none;">
+            <div class="filter-item">
+                <label>交易类型:</label>
+                <select id="filterType" onchange="applyFilters()">
+                    <option value="all">全部</option>
+                    <option value="token">Token 转账</option>
+                    <option value="bnb">BNB 转账</option>
+                </select>
+            </div>
+            <div class="filter-item">
+                <label>每页显示:</label>
+                <select id="pageSize" onchange="applyFilters()">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="500">500</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- 状态消息 -->
+        <div id="message" class="status-message" style="display: none;"></div>
+
+        <!-- 统计信息 -->
+        <div id="stats" class="stats" style="display: none;"></div>
+
+        <!-- 数据表格 -->
+        <div id="tableContainer" class="table-container" style="display: none;"></div>
+
+        <!-- 分页 -->
+        <div id="pagination" class="pagination" style="display: none;"></div>
+
+        <!-- 加载中 -->
+        <div id="loading" class="loading" style="display: none;">正在查询数据...</div>
+
+        <!-- 空状态 -->
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <p>未找到交易记录</p>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let web3 = null;
+        let allTransactions = [];
+        let filteredTransactions = [];
+        let currentPage = 1;
+        let pageSize = 100;
+
+        // ERC20 Transfer 事件签名
+        const TRANSFER_EVENT_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+        // ERC20 ABI（简化版）
+        const ERC20_ABI = [
+            {
+                "constant": true,
+                "inputs": [],
+                "name": "name",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [],
+                "name": "symbol",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [],
+                "name": "decimals",
+                "outputs": [{"name": "", "type": "uint8"}],
+                "type": "function"
+            }
+        ];
+
+        // 初始化 Web3
+        function initWeb3() {
+            const rpcUrl = document.getElementById('rpcUrl').value.trim() || 'https://bsc-dataseed1.binance.org/';
+            try {
+                web3 = new Web3(rpcUrl);
+                return true;
+            } catch (error) {
+                showMessage('Web3 初始化失败: ' + error.message, 'error');
+                return false;
+            }
+        }
+
+        // 显示消息
+        function showMessage(text, type = 'info') {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = 'status-message ' + type;
+            messageEl.style.display = 'block';
+            
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    messageEl.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // 格式化时间
+        function formatTime(timestamp) {
+            if (!timestamp) return 'N/A';
+            const date = new Date(parseInt(timestamp) * 1000);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // 格式化金额
+        function formatAmount(tx) {
+            if (tx.type === 'bnb') {
+                const value = BigInt(tx.value) / BigInt(10 ** 18);
+                return `${(Number(value) / 1e18).toFixed(6)} BNB`;
+            } else {
+                const decimals = parseInt(tx.tokenDecimal || 18);
+                const value = BigInt(tx.value) / BigInt(10 ** decimals);
+                return `${(Number(value) / Math.pow(10, decimals)).toFixed(6)} ${tx.tokenSymbol || 'Token'}`;
+            }
+        }
+
+        // 判断是否转出
+        function isOutgoing(tx, address) {
+            return tx.from.toLowerCase() === address.toLowerCase();
+        }
+
+        // 缩短地址
+        function shortenAddress(address) {
+            if (!address) return 'N/A';
+            return `${address.slice(0, 6)}...${address.slice(-4)}`;
+        }
+
+        // 缩短哈希
+        function shortenHash(hash) {
+            if (!hash) return 'N/A';
+            return `${hash.slice(0, 10)}...${hash.slice(-8)}`;
+        }
+
+        // 获取 Token 信息
+        async function getTokenInfo(contractAddress) {
+            try {
+                const contract = new web3.eth.Contract(ERC20_ABI, contractAddress);
+                const [name, symbol, decimals] = await Promise.all([
+                    contract.methods.name().call().catch(() => 'Unknown'),
+                    contract.methods.symbol().call().catch(() => 'Unknown'),
+                    contract.methods.decimals().call().catch(() => 18)
+                ]);
+                return { name, symbol, decimals: parseInt(decimals) };
+            } catch (error) {
+                return { name: 'Unknown', symbol: 'Unknown', decimals: 18 };
+            }
+        }
+
+        // 查询 Token 转账
+        async function getTokenTransfers(address, startBlock = 0, endBlock = null) {
+            try {
+                if (!endBlock) {
+                    endBlock = await web3.eth.getBlockNumber();
+                }
+
+                address = web3.utils.toChecksumAddress(address);
+
+                // 查询 from 是该地址的 Transfer 事件
+                const fromFilter = {
+                    fromBlock: startBlock,
+                    toBlock: endBlock,
+                    topics: [
+                        TRANSFER_EVENT_TOPIC,
+                        [address],
+                        null
+                    ]
+                };
+
+                // 查询 to 是该地址的 Transfer 事件
+                const toFilter = {
+                    fromBlock: startBlock,
+                    toBlock: endBlock,
+                    topics: [
+                        TRANSFER_EVENT_TOPIC,
+                        null,
+                        [address]
+                    ]
+                };
+
+                const [fromLogs, toLogs] = await Promise.all([
+                    web3.eth.getPastLogs(fromFilter),
+                    web3.eth.getPastLogs(toFilter)
+                ]);
+
+                // 合并并去重
+                const seenHashes = new Set();
+                const logs = [];
+                for (const log of [...fromLogs, ...toLogs]) {
+                    const txHash = log.transactionHash;
+                    if (!seenHashes.has(txHash)) {
+                        seenHashes.add(txHash);
+                        logs.push(log);
+                    }
+                }
+
+                const transfers = [];
+                const tokenInfoCache = {};
+
+                for (const log of logs.slice(0, 1000)) {
+                    try {
+                        const fromAddress = '0x' + log.topics[1].slice(26);
+                        const toAddress = '0x' + log.topics[2].slice(26);
+                        const value = log.data;
+                        const contractAddress = log.address;
+
+                        if (fromAddress.toLowerCase() !== address.toLowerCase() && 
+                            toAddress.toLowerCase() !== address.toLowerCase()) {
+                            continue;
+                        }
+
+                        // 获取 Token 信息（带缓存）
+                        if (!tokenInfoCache[contractAddress]) {
+                            tokenInfoCache[contractAddress] = await getTokenInfo(contractAddress);
+                        }
+
+                        const tokenInfo = tokenInfoCache[contractAddress];
+                        const txHash = log.transactionHash;
+                        const [tx, txReceipt, block] = await Promise.all([
+                            web3.eth.getTransaction(txHash),
+                            web3.eth.getTransactionReceipt(txHash),
+                            web3.eth.getBlock(log.blockNumber)
+                        ]);
+
+                        transfers.push({
+                            blockNumber: log.blockNumber.toString(),
+                            timeStamp: block.timestamp.toString(),
+                            hash: txHash,
+                            transactionHash: txHash,
+                            from: fromAddress,
+                            to: toAddress,
+                            value: value,
+                            contractAddress: contractAddress,
+                            tokenName: tokenInfo.name,
+                            tokenSymbol: tokenInfo.symbol,
+                            tokenDecimal: tokenInfo.decimals.toString(),
+                            gas: tx.gas.toString(),
+                            gasPrice: tx.gasPrice.toString(),
+                            gasUsed: txReceipt.gasUsed.toString(),
+                            type: 'token'
+                        });
+                    } catch (error) {
+                        console.error('处理日志失败:', error);
+                        continue;
+                    }
+                }
+
+                transfers.sort((a, b) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
+                return transfers;
+            } catch (error) {
+                throw new Error('查询 Token 转账失败: ' + error.message);
+            }
+        }
+
+        // 查询 BNB 转账（简化版，只查询最近区块）
+        async function getBNBTransfers(address, limit = 100) {
+            try {
+                address = web3.utils.toChecksumAddress(address);
+                const latestBlock = await web3.eth.getBlockNumber();
+                const startBlock = Math.max(0, latestBlock - 10000); // 只查询最近 10000 个区块
+
+                const transactions = [];
+                let checkedBlocks = 0;
+                const maxBlocks = 5000; // 最多检查 5000 个区块
+
+                for (let blockNum = latestBlock; blockNum >= startBlock && transactions.length < limit && checkedBlocks < maxBlocks; blockNum--) {
+                    try {
+                        const block = await web3.eth.getBlock(blockNum, true);
+                        if (!block || !block.transactions) continue;
+
+                        for (const tx of block.transactions) {
+                            if (transactions.length >= limit) break;
+
+                            if (tx.from && tx.from.toLowerCase() === address.toLowerCase()) {
+                                const txReceipt = await web3.eth.getTransactionReceipt(tx.hash);
+                                transactions.push({
+                                    blockNumber: tx.blockNumber.toString(),
+                                    timeStamp: block.timestamp.toString(),
+                                    hash: tx.hash,
+                                    transactionHash: tx.hash,
+                                    from: tx.from,
+                                    to: tx.to || '',
+                                    value: tx.value.toString(),
+                                    gas: tx.gas.toString(),
+                                    gasPrice: tx.gasPrice.toString(),
+                                    gasUsed: txReceipt.gasUsed.toString(),
+                                    type: 'bnb'
+                                });
+                            } else if (tx.to && tx.to.toLowerCase() === address.toLowerCase() && BigInt(tx.value) > 0) {
+                                const txReceipt = await web3.eth.getTransactionReceipt(tx.hash);
+                                transactions.push({
+                                    blockNumber: tx.blockNumber.toString(),
+                                    timeStamp: block.timestamp.toString(),
+                                    hash: tx.hash,
+                                    transactionHash: tx.hash,
+                                    from: tx.from,
+                                    to: tx.to,
+                                    value: tx.value.toString(),
+                                    gas: tx.gas.toString(),
+                                    gasPrice: tx.gasPrice.toString(),
+                                    gasUsed: txReceipt.gasUsed.toString(),
+                                    type: 'bnb'
+                                });
+                            }
+                        }
+                        checkedBlocks++;
+                    } catch (error) {
+                        console.error(`处理区块 ${blockNum} 失败:`, error);
+                        checkedBlocks++;
+                        continue;
+                    }
+                }
+
+                transactions.sort((a, b) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
+                return transactions;
+            } catch (error) {
+                throw new Error('查询 BNB 转账失败: ' + error.message);
+            }
+        }
+
+        // 搜索
+        async function search() {
+            const address = document.getElementById('searchAddress').value.trim();
+            
+            if (!address) {
+                showMessage('请输入地址', 'error');
+                return;
+            }
+
+            if (!address.startsWith('0x') || address.length !== 42) {
+                showMessage('无效的地址格式，BSC 地址应为 0x 开头的 42 位字符串', 'error');
+                return;
+            }
+
+            if (!initWeb3()) {
+                return;
+            }
+
+            // 显示加载状态
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('tableContainer').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+            document.getElementById('pagination').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('filterBox').style.display = 'none';
+            document.getElementById('searchBtn').disabled = true;
+
+            try {
+                showMessage('正在查询数据，请稍候...', 'info');
+
+                // 并行查询 Token 转账和 BNB 转账
+                const [tokenTransfers, bnbTransfers] = await Promise.all([
+                    getTokenTransfers(address).catch(err => {
+                        console.error('Token 转账查询失败:', err);
+                        return [];
+                    }),
+                    getBNBTransfers(address, 100).catch(err => {
+                        console.error('BNB 转账查询失败:', err);
+                        return [];
+                    })
+                ]);
+
+                allTransactions = [...tokenTransfers, ...bnbTransfers];
+                allTransactions.sort((a, b) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
+
+                currentPage = 1;
+                applyFilters();
+
+                if (allTransactions.length > 0) {
+                    showMessage(`成功获取 ${allTransactions.length} 条交易记录`, 'success');
+                } else {
+                    showMessage('未找到交易记录', 'info');
+                    document.getElementById('emptyState').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('查询错误:', error);
+                showMessage('查询失败: ' + error.message, 'error');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('searchBtn').disabled = false;
+            }
+        }
+
+        // 应用筛选
+        function applyFilters() {
+            const filterType = document.getElementById('filterType').value;
+            pageSize = parseInt(document.getElementById('pageSize').value);
+
+            filteredTransactions = allTransactions.filter(tx => {
+                if (filterType === 'all') return true;
+                return tx.type === filterType;
+            });
+
+            currentPage = 1;
+            renderTable();
+            renderStats();
+            renderPagination();
+        }
+
+        // 渲染统计信息
+        function renderStats() {
+            const statsEl = document.getElementById('stats');
+            if (filteredTransactions.length === 0) {
+                statsEl.style.display = 'none';
+                return;
+            }
+
+            const tokenCount = filteredTransactions.filter(tx => tx.type === 'token').length;
+            const bnbCount = filteredTransactions.filter(tx => tx.type === 'bnb').length;
+            const totalPages = Math.ceil(filteredTransactions.length / pageSize);
+
+            statsEl.innerHTML = `
+                <div class="stat-card">
+                    <h3>总交易数</h3>
+                    <div class="value">${filteredTransactions.length}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Token 转账</h3>
+                    <div class="value">${tokenCount}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>BNB 转账</h3>
+                    <div class="value">${bnbCount}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>当前页</h3>
+                    <div class="value">${currentPage} / ${totalPages}</div>
+                </div>
+            `;
+            statsEl.style.display = 'grid';
+        }
+
+        // 渲染表格
+        function renderTable() {
+            const tableContainer = document.getElementById('tableContainer');
+            if (filteredTransactions.length === 0) {
+                tableContainer.style.display = 'none';
+                return;
+            }
+
+            const start = (currentPage - 1) * pageSize;
+            const end = start + pageSize;
+            const pageData = filteredTransactions.slice(start, end);
+            const searchAddress = document.getElementById('searchAddress').value.trim();
+
+            let tableHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>类型</th>
+                            <th>时间</th>
+                            <th>交易哈希</th>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Token</th>
+                            <th>数量</th>
+                            <th>区块号</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const tx of pageData) {
+                const isOut = isOutgoing(tx, searchAddress);
+                tableHTML += `
+                    <tr>
+                        <td>
+                            <span class="type-badge ${tx.type}">
+                                ${tx.type === 'token' ? 'Token' : 'BNB'}
+                            </span>
+                        </td>
+                        <td>${formatTime(tx.timeStamp)}</td>
+                        <td>
+                            <a href="https://bscscan.com/tx/${tx.hash}" target="_blank" class="hash-link">
+                                ${shortenHash(tx.hash)}
+                            </a>
+                        </td>
+                        <td>
+                            <a href="https://bscscan.com/address/${tx.from}" target="_blank" class="address-link">
+                                ${shortenAddress(tx.from)}
+                            </a>
+                        </td>
+                        <td>
+                            <a href="https://bscscan.com/address/${tx.to}" target="_blank" class="address-link">
+                                ${shortenAddress(tx.to)}
+                            </a>
+                        </td>
+                        <td>
+                            ${tx.type === 'token' ? 
+                                (tx.tokenSymbol ? 
+                                    `<a href="https://bscscan.com/token/${tx.contractAddress}" target="_blank" class="address-link">${tx.tokenSymbol}</a>` :
+                                    shortenAddress(tx.contractAddress || 'N/A')
+                                ) : 
+                                'BNB'
+                            }
+                        </td>
+                        <td>
+                            <span class="amount ${isOut ? 'negative' : 'positive'}">
+                                ${isOut ? '-' : '+'}${formatAmount(tx)}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="https://bscscan.com/block/${tx.blockNumber}" target="_blank" class="hash-link">
+                                ${tx.blockNumber}
+                            </a>
+                        </td>
+                    </tr>
+                `;
+            }
+
+            tableHTML += `
+                    </tbody>
+                </table>
+            `;
+
+            tableContainer.innerHTML = tableHTML;
+            tableContainer.style.display = 'block';
+            document.getElementById('filterBox').style.display = 'flex';
+        }
+
+        // 渲染分页
+        function renderPagination() {
+            const paginationEl = document.getElementById('pagination');
+            const totalPages = Math.ceil(filteredTransactions.length / pageSize);
+
+            if (totalPages <= 1) {
+                paginationEl.style.display = 'none';
+                return;
+            }
+
+            paginationEl.innerHTML = `
+                <button onclick="prevPage()" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>
+                <span class="current-page">${currentPage} / ${totalPages}</span>
+                <button onclick="nextPage()" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>
+            `;
+            paginationEl.style.display = 'flex';
+        }
+
+        // 上一页
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderTable();
+                renderPagination();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+
+        // 下一页
+        function nextPage() {
+            const totalPages = Math.ceil(filteredTransactions.length / pageSize);
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderTable();
+                renderPagination();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+    </script>
+</body>
+</html>
+

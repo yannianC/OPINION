@@ -259,14 +259,25 @@
               📊 总日志
             </button>
             
-            <button 
-              class="btn btn-success btn-sm" 
-              @click="randomGetAvailableTopic"
-              :disabled="isRandomGetting"
-              title="随机获取一个可用的主题"
-            >
-              {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
-            </button>
+            <div style="display: inline-flex; align-items: center; gap: 8px;">
+              <input 
+                type="number" 
+                v-model.number="randomGetCount" 
+                min="1" 
+                max="50"
+                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="isRandomGetting"
+                title="输入要获取的主题数量"
+              />
+              <button 
+                class="btn btn-success btn-sm" 
+                @click="randomGetAvailableTopic"
+                :disabled="isRandomGetting"
+                title="随机获取可用的主题"
+              >
+                {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
+              </button>
+            </div>
           </div>
           
           <div class="trending-list">
@@ -1364,6 +1375,7 @@ const autoHedgeInterval = ref(null)
 const activeConfigs = ref([])  // 启用的配置列表
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
+const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
 
 // 订单薄API配置
@@ -3231,8 +3243,11 @@ const closeConfigTask = async (config) => {
 const randomGetAvailableTopic = async () => {
   if (isRandomGetting.value) return
   
+  // 获取目标数量，确保至少为1
+  const targetCount = Math.max(1, Math.floor(randomGetCount.value) || 1)
+  
   isRandomGetting.value = true
-  showToast('正在随机获取可用主题...', 'info')
+  showToast(`正在随机获取 ${targetCount} 个可用主题...`, 'info')
   
   try {
     // 如果是平仓模式，先获取持仓数据
@@ -3284,18 +3299,26 @@ const randomGetAvailableTopic = async () => {
     
     console.log(`找到 ${closedConfigs.length} 个关闭的主题，开始随机测试...`)
     
-    // 3. 打乱顺序（测试所有主题，直到找到一个符合条件的）
+    // 3. 打乱顺序（测试所有主题，直到找到指定数量的符合条件的）
     const shuffled = [...closedConfigs].sort(() => Math.random() - 0.5)
     
-    console.log(`将测试所有 ${shuffled.length} 个主题，直到找到符合条件的`)
+    console.log(`将测试所有 ${shuffled.length} 个主题，直到找到 ${targetCount} 个符合条件的`)
     
-    // 4. 遍历测试每个主题
+    // 4. 遍历测试每个主题，收集符合条件的主题
     let testedCount = 0
+    let foundCount = 0
+    const foundConfigs = []
+    
     for (const config of shuffled) {
+      // 如果已经找到足够数量的主题，停止查找
+      if (foundCount >= targetCount) {
+        break
+      }
+      
       testedCount++
       try {
-        console.log(`[${testedCount}/${shuffled.length}] 测试主题: ${config.trending}`)
-        showToast(`正在测试 ${testedCount}/${shuffled.length}: ${config.trending.substring(0, 30)}...`, 'info')
+        console.log(`[${testedCount}/${shuffled.length}] 测试主题: ${config.trending} (已找到: ${foundCount}/${targetCount})`)
+        showToast(`正在测试 ${testedCount}/${shuffled.length} (已找到: ${foundCount}/${targetCount}): ${config.trending.substring(0, 30)}...`, 'info')
         
         // 请求订单薄数据
         const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
@@ -3318,12 +3341,16 @@ const randomGetAvailableTopic = async () => {
             }
           }
           
-          console.log(`✅ 主题 ${config.trending} 满足对冲条件！`)
-          showToast(`✅ 找到可用主题: ${config.trending}`, 'success')
+          console.log(`✅ 主题 ${config.trending} 满足对冲条件！ (${foundCount + 1}/${targetCount})`)
+          foundConfigs.push(config)
+          foundCount++
           
           // 打开这个主题
           await openConfigTask(config)
-          return  // 找到就立即返回
+          
+          if (foundCount < targetCount) {
+            showToast(`✅ 已找到 ${foundCount}/${targetCount} 个可用主题，继续查找...`, 'success')
+          }
         } else {
           console.log(`❌ 主题 ${config.trending} 不满足对冲条件，继续寻找...`)
         }
@@ -3336,8 +3363,12 @@ const randomGetAvailableTopic = async () => {
       await new Promise(resolve => setTimeout(resolve, 300))
     }
     
-    // 如果所有测试的主题都不满足条件
-    showToast(`测试了所有 ${testedCount} 个主题，未找到满足对冲条件的主题`, 'warning')
+    // 显示最终结果
+    if (foundCount > 0) {
+      showToast(`✅ 成功获取 ${foundCount}/${targetCount} 个可用主题`, 'success')
+    } else {
+      showToast(`测试了所有 ${testedCount} 个主题，未找到满足对冲条件的主题`, 'warning')
+    }
     
   } catch (error) {
     console.error('随机获取主题失败:', error)
