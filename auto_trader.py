@@ -1595,7 +1595,78 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                 parent.click()
                 log_print(f"[{serial_number}] [OP] ✓ 已点击提交订单按钮")
                 
-                time.sleep(2)
+                # 在3秒内检查是否有"Unusual Limit Price"提示
+                log_print(f"[{serial_number}] [OP] 检查限价提示...")
+                start_time = time.time()
+                unusual_limit_found = False
+                
+                while time.time() - start_time < 3:
+                    try:
+                        # 查找所有h2标签
+                        h2_tags = driver.find_elements(By.TAG_NAME, "h2")
+                        for h2 in h2_tags:
+                            h2_text = h2.text.strip()
+                            if "Unusual Limit Price" in h2_text:
+                                unusual_limit_found = True
+                                log_print(f"[{serial_number}] [OP] ✗ 检测到限价提示: {h2_text}")
+                                break
+                        if unusual_limit_found:
+                            break
+                        time.sleep(0.2)  # 短暂等待后重试
+                    except Exception as e:
+                        # 查找过程中出现异常，继续尝试
+                        time.sleep(0.2)
+                        continue
+                
+                if unusual_limit_found:
+                    log_print(f"[{serial_number}] [OP] ✗ 限价距离市价差距过大")
+                    return False, "限价距离市价差距过大"
+                
+                log_print(f"[{serial_number}] [OP] ✓ 未检测到限价提示，继续执行...")
+                
+                # 检查是否需要点击 Confirm 按钮
+                log_print(f"[{serial_number}] [OP] 检查是否需要点击 Confirm 按钮...")
+                confirm_clicked = False
+                start_time_confirm = time.time()
+                
+                while time.time() - start_time_confirm < 4:
+                    try:
+                        # 查找所有 h2、div、p 标签
+                        all_elements = []
+                        all_elements.extend(driver.find_elements(By.TAG_NAME, "h2"))
+                        all_elements.extend(driver.find_elements(By.TAG_NAME, "div"))
+                        all_elements.extend(driver.find_elements(By.TAG_NAME, "p"))
+                        
+                        found_secure_trade = False
+                        for element in all_elements:
+                            element_text = element.text.strip()
+                            if "Securely trade on opinion.trade on" in element_text:
+                                found_secure_trade = True
+                                log_print(f"[{serial_number}] [OP] ✓ 检测到安全交易提示")
+                                break
+                        
+                        if found_secure_trade:
+                            # 查找内容等于 "Confirm" 的 button
+                            all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                            for button in all_buttons:
+                                if button.text.strip() == "Confirm":
+                                    log_print(f"[{serial_number}] [OP] ✓ 找到 Confirm 按钮，点击...")
+                                    button.click()
+                                    confirm_clicked = True
+                                    log_print(f"[{serial_number}] [OP] ✓ 已点击 Confirm 按钮")
+                                    break
+                            
+                            if confirm_clicked:
+                                break
+                        
+                        time.sleep(0.2)
+                    except Exception as e:
+                        log_print(f"[{serial_number}] [OP] ⚠ 检查 Confirm 按钮时出现异常: {str(e)}")
+                        time.sleep(0.2)
+                        continue
+                
+                if not confirm_clicked:
+                    log_print(f"[{serial_number}] [OP] ✓ 未检测到需要点击 Confirm 的情况")
                 
                 # 切换到OKX页面
                 log_print(f"[{serial_number}] [OP] 切换到 OKX 钱包页面...")
@@ -1610,6 +1681,61 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         # 解锁
                         unlock_okx_wallet(driver, serial_number, browser_id)
                         
+                        # 如果之前点击了 Confirm，需要先点击两次第二个按钮（带检查逻辑）
+                        if confirm_clicked:
+                            log_print(f"[{serial_number}] [OP] 检测到已点击 Confirm，执行特殊按钮点击逻辑...")
+                            click_count = 0
+                            max_clicks = 2
+                            start_time_okx = time.time()
+                            
+                            while click_count < max_clicks and time.time() - start_time_okx < 10:
+                                try:
+                                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                                    
+                                    if len(buttons) >= 2:
+                                        # 检查是否需要跳过点击
+                                        should_skip = False
+                                        try:
+                                            # 查找内容为 "primaryType" 的 div
+                                            all_divs = driver.find_elements(By.TAG_NAME, "div")
+                                            primary_type_div = None
+                                            for div in all_divs:
+                                                if div.text.strip() == "primaryType":
+                                                    primary_type_div = div
+                                                    break
+                                            
+                                            if primary_type_div:
+                                                # 找到父节点
+                                                parent = primary_type_div.find_element(By.XPATH, "..")
+                                                # 找到父节点下的所有子 div
+                                                child_divs = parent.find_elements(By.TAG_NAME, "div")
+                                                
+                                                if len(child_divs) >= 2:
+                                                    second_child = child_divs[1]
+                                                    if second_child.text.strip() == "Order":
+                                                        should_skip = True
+                                                        log_print(f"[{serial_number}] [OP] ✓ 检测到 Order，跳过点击")
+                                        except Exception as e:
+                                            log_print(f"[{serial_number}] [OP] ⚠ 检查 Order 时出现异常: {str(e)}，继续点击")
+                                        
+                                        if not should_skip:
+                                            confirm_button = buttons[1]
+                                            log_print(f"[{serial_number}] [OP] 点击第 {click_count + 1} 次第二个按钮...")
+                                            confirm_button.click()
+                                            click_count += 1
+                                            log_print(f"[{serial_number}] [OP] ✓ 已点击第 {click_count} 次")
+                                        
+                                        # 等待1秒后继续
+                                        time.sleep(1)
+                                    else:
+                                        time.sleep(0.5)
+                                except Exception as e:
+                                    log_print(f"[{serial_number}] [OP] ⚠ 点击按钮时出现异常: {str(e)}")
+                                    time.sleep(0.5)
+                                    continue
+                            
+                            log_print(f"[{serial_number}] [OP] ✓ 特殊按钮点击逻辑完成，共点击 {click_count} 次")
+                        
                         # 点击确认按钮
                         log_print(f"[{serial_number}] [OP] 查找确认按钮...")
                         time.sleep(3)
@@ -1621,7 +1747,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             button_class = confirm_button.get_attribute("class") or ""
                             if "btn-disabled" in button_class:
                                 log_print(f"[{serial_number}] [OP] ✗ OKX确认按钮被禁用，class: {button_class}")
-                                return False, "okx确认交易按钮不能点击"
+                                return False, "okx确认交易按钮不能点击,检查okx是否正常"
                             
                             # Type 5 任务需要同步机制
                             mission = task_data.get('mission', {}) if task_data else {}
@@ -2223,8 +2349,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         
                         if is_task1:
                             # 任务一检测到变化
-                            if current_status == 9:
-                                # 任务一状态已经是9，改为10
+                            if current_status == 11:
+                                # 任务一状态已经是11，改为10
                                 log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
                                 save_mission_result(target_mission_id, 10)
                             else:
@@ -2240,7 +2366,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             else:
                                 # 任务二检测到变化，改为9
                                 log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
-                                save_mission_result(target_mission_id, 9)
+                                save_mission_result(target_mission_id, 11)
                         
                         break
             else:
@@ -2262,8 +2388,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         
                         if is_task1:
                             # 任务一检测到变化
-                            if current_status == 9:
-                                # 任务一状态已经是9，改为10
+                            if current_status == 11:
+                                # 任务一状态已经是11，改为10
                                 log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
                                 save_mission_result(target_mission_id, 10)
                             else:
@@ -2279,7 +2405,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             else:
                                 # 任务二检测到变化，改为9
                                 log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
-                                save_mission_result(target_mission_id, 9)
+                                save_mission_result(target_mission_id, 11)
                         
                         break
             
@@ -3297,7 +3423,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 except:
                     pass
                 close_adspower_browser(browser_id)
-                time.sleep(2)
+                time.sleep(15)
                 
                 # 2. 强制更换IP
                 log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
@@ -3322,7 +3448,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                         return False, "更新代理失败"
                 
                 log_print(f"[{browser_id}] ✓ 代理配置已更新")
-                time.sleep(2)
+                time.sleep(10)
                 
                 # 4. 递归重试任务（retry_count+1）
                 log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
@@ -3845,7 +3971,38 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
         
         if not trade_box:
-            return False, "页面加载失败"
+            return False, "NEED_IP_RETRY"
+        
+        # 5.5 检查地区限制（Trading is not available）
+        log_print(f"[{browser_id}] 步骤5.5: 检查地区限制（Trading is not available）...")
+        try:
+            start_time = time.time()
+            trading_restricted = False
+            while time.time() - start_time < 3:
+                try:
+                    # 查找所有p标签
+                    p_tags = driver.find_elements(By.TAG_NAME, "p")
+                    for p in p_tags:
+                        p_text = p.text.strip()
+                        if "Trading is not available to persons located in the" in p_text:
+                            trading_restricted = True
+                            log_print(f"[{browser_id}] ✗ 检测到地区限制提示: {p_text[:100]}...")
+                            break
+                    if trading_restricted:
+                        break
+                    time.sleep(0.2)  # 短暂等待后重试
+                except Exception as e:
+                    # 查找过程中出现异常，继续尝试
+                    time.sleep(0.2)
+                    continue
+            
+            if trading_restricted:
+                log_print(f"[{browser_id}] ✗ 检测到地区限制，需要换IP")
+                return False, "NEED_IP_RETRY"
+            else:
+                log_print(f"[{browser_id}] ✓ 未检测到地区限制")
+        except Exception as e:
+            log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
         
         # 6. 预打开OKX钱包并连接（仅在新启动的浏览器时执行）
         if is_new_browser:
@@ -3857,6 +4014,37 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         # 6.1 检查并连接钱包
         log_print(f"[{browser_id}] 步骤6.1: 检查并连接钱包...")
         connect_wallet_if_needed(driver, browser_id)
+        
+        # 6.1.2 检查地区限制
+        log_print(f"[{browser_id}] 步骤6.1.2: 检查地区限制...")
+        try:
+            start_time = time.time()
+            region_restricted = False
+            while time.time() - start_time < 3:
+                try:
+                    # 查找所有div元素
+                    all_divs = driver.find_elements(By.TAG_NAME, "div")
+                    for div in all_divs:
+                        div_text = div.text
+                        if "API is not available to persons located in the" in div_text:
+                            region_restricted = True
+                            log_print(f"[{browser_id}] ✗ 检测到地区限制提示: {div_text[:100]}...")
+                            break
+                    if region_restricted:
+                        break
+                    time.sleep(0.2)  # 短暂等待后重试
+                except Exception as e:
+                    # 查找过程中出现异常，继续尝试
+                    time.sleep(0.2)
+                    continue
+            
+            if region_restricted:
+                log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
+                return False, "NEED_IP_RETRY"
+            else:
+                log_print(f"[{browser_id}] ✓ 未检测到地区限制")
+        except Exception as e:
+            log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
         
         # 6.1.5 等待Position按钮出现（带重试机制）
         log_print(f"[{browser_id}] 步骤6.1.5: 等待Position按钮出现...")
@@ -3922,6 +4110,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         # 重试机制：第7-12步最多重试2次（总共3次尝试）
         max_retry_attempts = 2
         retry_count = 0
+        last_failure_step = None  # 跟踪最后失败的步骤
         
         while retry_count <= max_retry_attempts:
             try:
@@ -3934,6 +4123,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
                     if not trade_box:
                         log_print(f"[{browser_id}] ✗ 页面重新加载失败")
+                        last_failure_step = "页面重新加载失败"
                         retry_count += 1
                         continue
                     
@@ -3945,6 +4135,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     log_print(f"[{browser_id}] 重新等待Position按钮...")
                     if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
                         log_print(f"[{browser_id}] ✗ Position按钮未出现")
+                        last_failure_step = "Position按钮未出现"
                         retry_count += 1
                         continue
                     
@@ -3958,6 +4149,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] 步骤7: 选择买卖类型 {trade_type}...")
                 if not click_opinion_trade_type_button(trade_box, trade_type, browser_id):
                     log_print(f"[{browser_id}] ✗ 未找到{trade_type}按钮")
+                    last_failure_step = f"选择买卖类型{trade_type}失败"
                     retry_count += 1
                     continue
                 
@@ -3965,6 +4157,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] 步骤8: 选择价格类型 {price_type}...")
                 if not select_opinion_price_type(trade_box, price_type, browser_id):
                     log_print(f"[{browser_id}] ✗ 选择价格类型{price_type}失败")
+                    last_failure_step = f"选择价格类型{price_type}失败"
                     retry_count += 1
                     continue
                 
@@ -3973,7 +4166,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
                 if not trade_box_divs:
                     log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
-                    return False, None
+                    return False, "未找到 trade-box div"
                 
                 trade_box = trade_box_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 trade-box div")
@@ -3985,7 +4178,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 
                 if not tabs_content_divs:
                     log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
-                    return False, None
+                    return False, "未找到 tabs content div"
                 
                 tabs_content = tabs_content_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 tabs content div")
@@ -3994,6 +4187,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
                 if not select_opinion_option_type(tabs_content, option_type, browser_id):
                     log_print(f"[{browser_id}] ✗ 选择种类{option_type}失败")
+                    last_failure_step = f"选择种类{option_type}失败"
                     retry_count += 1
                     continue
                 
@@ -4010,6 +4204,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 fill_price = None if price_type == "Market" else price
                 if not fill_opinion_price_and_amount(tabs_content, fill_price, amount, browser_id):
                     log_print(f"[{browser_id}] ✗ 填入价格/数量失败")
+                    last_failure_step = "填入价格/数量失败"
                     retry_count += 1
                     continue
                 
@@ -4021,11 +4216,12 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     if not should_retry:
                         # type=5点击取消按钮，不应重试
                         log_print(f"[{browser_id}] ✗ Type 5 任务已取消，不进行重试")
-                        return False, "Type 5 任务已取消"
+                        return False, "另一个任务已失败"
                     elif isinstance(should_retry, str):
                         # should_retry是字符串，表示具体的失败原因
                         log_print(f"[{browser_id}] ✗ Type 5 任务失败: {should_retry}")
                         return False, should_retry
+                    last_failure_step = "提交订单失败"
                     retry_count += 1
                     continue
                 
@@ -4035,14 +4231,18 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 
             except Exception as e:
                 log_print(f"[{browser_id}] ✗ 步骤7-12执行异常: {str(e)}")
+                last_failure_step = f"执行异常: {str(e)}"
                 retry_count += 1
                 if retry_count > max_retry_attempts:
-                    return False, f"执行异常: {str(e)}"
+                    return False, last_failure_step
                 continue
         
         # 检查是否所有重试都失败了
         if retry_count > max_retry_attempts:
-            return False, f"执行步骤7-12失败，已重试{max_retry_attempts}次"
+            if last_failure_step:
+                return False, f"{last_failure_step}"
+            else:
+                return False, f"执行步骤7-12失败"
         
         # 13. 等待订单成功
         # Type 5 任务使用特殊的等待和数据收集逻辑
@@ -4432,17 +4632,110 @@ def get_opinion_balance_value(driver, serial_number):
 
 def click_opinion_position_and_get_data(driver, serial_number):
     """
-    点击 Opinion Trade Position 按钮并获取数据
+    点击 Opinion Trade Position 按钮并获取数据，返回标准格式字符串（支持分页）
     
     Args:
         driver: Selenium WebDriver对象
         serial_number: 浏览器序列号
         
     Returns:
-        tuple: (p标签内容列表, 是否需要刷新重试)
-            - 如果正常获取数据或找到"No data yet": (data, False)
-            - 如果超时且没有"No data yet": ([], True)
+        tuple: (标准格式字符串, 是否需要刷新重试)
+            - 如果正常获取数据或找到"No data yet": (标准格式字符串, False)
+            - 如果超时且没有"No data yet": ("", True)
+            标准格式: "唯一标题|||方向|||数量|||均价;唯一标题|||方向|||数量|||均价"
     """
+    
+    def parse_tbody_data(position_div, serial_number):
+        """
+        解析当前页的tbody数据
+        
+        Args:
+            position_div: Position div元素
+            serial_number: 浏览器序列号
+            
+        Returns:
+            tuple: (解析后的仓位字符串列表, 是否是无数据标记)
+        """
+        result_parts = []
+        
+        # 先检查是否有"No data yet"
+        all_p_tags_in_div = position_div.find_elements(By.TAG_NAME, "p")
+        for p in all_p_tags_in_div:
+            if "No data yet" in p.text:
+                log_print(f"[{serial_number}] [OP] ✓ Position 发现 'No data yet'，无数据")
+                return result_parts, True  # 返回空列表和"无数据"标记
+        
+        # 再找这个 div 下的 tbody
+        tbody = position_div.find_element(By.TAG_NAME, "tbody")
+        tr_tags = tbody.find_elements(By.TAG_NAME, "tr")
+        
+        if len(tr_tags) == 0:
+            return result_parts, False  # 返回空列表，但不是"No data yet"
+        
+        log_print(f"[{serial_number}] [OP] ✓ 当前页找到 {len(tr_tags)} 个 tr 标签")
+        
+        # 解析tr标签数据
+        current_main_title = None
+        
+        for tr in tr_tags:
+            try:
+                td_tags = tr.find_elements(By.TAG_NAME, "td")
+                
+                if len(td_tags) == 1:
+                    # 只有一个td，这是主标题
+                    p_text = get_p_tag_text_from_element(td_tags[0])
+                    if p_text:
+                        current_main_title = p_text.strip()
+                        log_print(f"[{serial_number}] [OP] 找到主标题: {current_main_title}")
+                
+                elif len(td_tags) >= 4 and current_main_title:
+                    # 多个td，这是仓位信息
+                    # 第一个td：子标题-方向 或 方向
+                    first_td_p = get_p_tag_text_from_element(td_tags[0])
+                    if not first_td_p:
+                        continue
+                    
+                    # 解析第一个td的内容
+                    if " - " in first_td_p:
+                        # 有子标题，例如 "Kendrick Lamar - YES"
+                        parts = first_td_p.split(" - ", 1)
+                        sub_title = parts[0].strip()
+                        direction = parts[1].strip()
+                        unique_title = f"{current_main_title}###{sub_title}"
+                    else:
+                        # 没有子标题，直接是方向
+                        direction = first_td_p.strip()
+                        unique_title = current_main_title
+                    
+                    # 第二个td：数量
+                    second_td_p = get_p_tag_text_from_element(td_tags[1])
+                    if not second_td_p:
+                        continue
+                    
+                    amount_str = second_td_p.strip()
+                    # 根据方向添加正负号
+                    if direction.upper() == "YES":
+                        amount = f"+{amount_str}"
+                    elif direction.upper() == "NO":
+                        amount = f"-{amount_str}"
+                    else:
+                        amount = amount_str
+                    
+                    # 第四个td：均价
+                    fourth_td_p = get_p_tag_text_from_element(td_tags[3])
+                    avg_price = fourth_td_p.strip() if fourth_td_p else ""
+                    
+                    # 拼接标准格式：唯一标题|||方向|||数量|||均价
+                    position_str = f"{unique_title}|||{direction}|||{amount}|||{avg_price}"
+                    result_parts.append(position_str)
+                    log_print(f"[{serial_number}] [OP] 解析仓位: {position_str}")
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
+                continue
+        
+        return result_parts, False  # 返回解析结果，不是"No data yet"
+    
     try:
         log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Position 按钮...")
         
@@ -4469,56 +4762,85 @@ def click_opinion_position_and_get_data(driver, serial_number):
         
         if not position_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Position 按钮")
-            return [], False
+            return "", False
         
         time.sleep(3)
         
         try:
-            # 先找到 ID 以 content-position 结尾的 div
-            log_print(f"[{serial_number}] [OP] 查找 Position 内容区域...")
-            position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
-            log_print(f"[{serial_number}] [OP] ✓ 找到 Position 内容区域 (ID: {position_div.get_attribute('id')})")
-            
-            # 在180秒内多次查找p标签，如果数量为0则等待5秒后重试
+            # 在180秒内多次查找tbody和tr标签，如果数量为0则等待5秒后重试
             max_retry_time = 180
             retry_start_time = time.time()
-            p_contents = []
+            
+            # 所有页面的结果
+            all_result_parts = []
+            page_num = 1
             
             while time.time() - retry_start_time < max_retry_time:
                 try:
-                    # 先检查是否有"No data yet"
-                    all_p_tags_in_div = position_div.find_elements(By.TAG_NAME, "p")
-                    for p in all_p_tags_in_div:
-                        if "No data yet" in p.text:
-                            log_print(f"[{serial_number}] [OP] ✓ Position 发现 'No data yet'，无数据")
-                            return [], False
+                    # 重新获取 position_div（因为分页后内容会刷新）
+                    log_print(f"[{serial_number}] [OP] 查找 Position 内容区域（第 {page_num} 页）...")
+                    position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                    log_print(f"[{serial_number}] [OP] ✓ 找到 Position 内容区域 (ID: {position_div.get_attribute('id')})")
                     
-                    # 再找这个 div 下的 tbody
-                    tbody = position_div.find_element(By.TAG_NAME, "tbody")
-                    p_tags = tbody.find_elements(By.TAG_NAME, "p")
-                    p_contents = [p.text.strip() for p in p_tags if p.text.strip()]
+                    # 解析当前页数据
+                    page_result_parts, is_no_data = parse_tbody_data(position_div, serial_number)
                     
-                    if len(p_contents) > 0:
-                        log_print(f"[{serial_number}] [OP] ✓ Position tbody 中找到 {len(p_contents)} 个 p 标签")
-                        return p_contents, False
+                    if is_no_data:
+                        # 如果是"No data yet"，直接返回
+                        if len(all_result_parts) == 0:
+                            return "", False
+                        else:
+                            # 已经有数据了，说明之前有数据，现在没数据了，返回已有数据
+                            break
+                    
+                    if len(page_result_parts) > 0:
+                        all_result_parts.extend(page_result_parts)
+                        log_print(f"[{serial_number}] [OP] ✓ 第 {page_num} 页解析完成，共 {len(page_result_parts)} 个仓位，累计 {len(all_result_parts)} 个仓位")
                     else:
                         elapsed = int(time.time() - retry_start_time)
-                        log_print(f"[{serial_number}] [OP] ⚠ Position p标签数量为0，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
-                        time.sleep(5)
+                        log_print(f"[{serial_number}] [OP] ⚠ 第 {page_num} 页解析后无有效仓位数据")
+                    
+                    # 检查是否有下一页（即使当前页没有数据，也可能有下一页）
+                    try:
+                        next_page_button = position_div.find_element(By.CSS_SELECTOR, 'button[aria-label="next page"]')
+                        is_disabled = next_page_button.get_attribute("disabled") is not None
+                        
+                        if is_disabled:
+                            log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面数据获取完成")
+                            break
+                        else:
+                            log_print(f"[{serial_number}] [OP] 发现下一页，点击下一页按钮...")
+                            next_page_button.click()
+                            time.sleep(3)  # 等待页面加载
+                            page_num += 1
+                            retry_start_time = time.time()  # 重置超时时间，因为开始新的一页
+                            continue
+                    except Exception as e:
+                        # 找不到下一页按钮，说明没有分页或已经是最后一页
+                        log_print(f"[{serial_number}] [OP] ✓ 未找到下一页按钮，所有页面数据获取完成")
+                        break
+                    
                 except Exception as e:
-                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Position p标签异常: {str(e)}，等待5秒后重试...")
+                    elapsed = int(time.time() - retry_start_time)
+                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Position 数据异常: {str(e)}，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
                     time.sleep(5)
             
-            log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Position 数据且无'No data yet'，需要刷新重试")
-            return [], True
+            # 返回所有页面的结果
+            if len(all_result_parts) > 0:
+                result_str = ";".join(all_result_parts)
+                log_print(f"[{serial_number}] [OP] ✓ Position 所有页面解析完成，共 {len(all_result_parts)} 个仓位")
+                return result_str, False
+            else:
+                log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Position 数据且无'No data yet'，需要刷新重试")
+                return "", True
             
         except Exception as e:
-            log_print(f"[{serial_number}] [OP] ⚠ 获取 Position tbody 失败: {str(e)}")
-            return [], False
+            log_print(f"[{serial_number}] [OP] ⚠ 获取 Position 数据失败: {str(e)}")
+            return "", True
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 点击 Position 按钮失败: {str(e)}")
-        return [], False
+        return "", False
 
 
 def get_p_tag_text_from_element(element):
@@ -4557,7 +4879,7 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         tuple: (标准格式字符串, 是否需要刷新重试)
             - 如果正常获取数据或找到"No data yet": (标准格式字符串, False)
             - 如果超时且没有"No data yet": ("", True)
-            标准格式: "唯一标题|||方向|||数量|||均价;唯一标题|||方向|||数量|||均价"
+            标准格式: "唯一标题|||买卖方向|||选项|||价格|||进度;唯一标题|||买卖方向|||选项|||价格|||进度"
     """
     
     def parse_tbody_data(open_orders_div, serial_number):
@@ -4607,54 +4929,60 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
                     i += 1
                     continue
                 
-                # 如果有多个td，这是仓位信息
-                if len(td_list) >= 4 and current_main_title:
-                    # 第一个td: (子标题-)方向
+                # 如果有多个td，这是挂单仓位信息
+                if len(td_list) >= 6 and current_main_title:
+                    # 第一个td: 买卖方向（"Buy"或"Sell"）
                     first_td_text = get_p_tag_text_from_element(td_list[0]).strip()
                     if not first_td_text:
                         i += 1
                         continue
                     
-                    # 解析方向和子标题
-                    direction = ""
-                    sub_title = ""
-                    unique_title = current_main_title
+                    buy_sell_direction = first_td_text  # "Buy" 或 "Sell"
                     
-                    if " - " in first_td_text:
-                        # 有子标题，例如 "Kendrick Lamar - YES"
-                        parts = first_td_text.split(" - ", 1)
-                        if len(parts) == 2:
-                            sub_title = parts[0].strip()
-                            direction = parts[1].strip()
-                            unique_title = f"{current_main_title}###{sub_title}"
-                    else:
-                        # 没有子标题，直接是方向
-                        direction = first_td_text
-                    
-                    # 第二个td: 数量
+                    # 第二个td: 选项（可能有子标题，例如"90,000 - YES"或"YES"/"NO"）
                     second_td_text = get_p_tag_text_from_element(td_list[1]).strip()
                     if not second_td_text:
                         i += 1
                         continue
                     
-                    # 根据方向添加正负号（如果数量本身没有正负号）
-                    quantity = second_td_text
-                    if not quantity.startswith(('+', '-')):
-                        if direction.upper() == "YES":
-                            quantity = f"+{quantity}"
-                        elif direction.upper() == "NO":
-                            quantity = f"-{quantity}"
+                    # 解析选项和子标题
+                    option = ""
+                    sub_title = ""
+                    unique_title = current_main_title
                     
-                    # 第4个td: 均价
+                    if " - " in second_td_text:
+                        # 有子标题，例如 "90,000 - YES"
+                        parts = second_td_text.split(" - ", 1)
+                        if len(parts) == 2:
+                            sub_title = parts[0].strip()
+                            option = parts[1].strip()
+                            unique_title = f"{current_main_title}###{sub_title}"
+                    else:
+                        # 没有子标题，直接是选项（"YES"或"NO"）
+                        option = second_td_text
+                    
+                    # 第四个td: 价格
                     fourth_td_text = get_p_tag_text_from_element(td_list[3]).strip()
                     if not fourth_td_text:
                         i += 1
                         continue
                     
-                    # 拼接标准格式: 唯一标题|||方向|||数量|||均价
-                    order_str = f"{unique_title}|||{direction}|||{quantity}|||{fourth_td_text}"
+                    price = fourth_td_text
+                    
+                    # 第六个td: 所有p标签内容相连，得到进度
+                    sixth_td = td_list[5]
+                    p_tags_in_sixth = sixth_td.find_elements(By.TAG_NAME, "p")
+                    progress_parts = []
+                    for p in p_tags_in_sixth:
+                        p_text = p.text.strip()
+                        if p_text:
+                            progress_parts.append(p_text)
+                    progress = "".join(progress_parts) if progress_parts else ""
+                    
+                    # 拼接标准格式: 唯一标题|||买卖方向|||选项|||价格|||进度
+                    order_str = f"{unique_title}|||{buy_sell_direction}|||{option}|||{price}|||{progress}"
                     result_parts.append(order_str)
-                    log_print(f"[{serial_number}] [OP] 解析到仓位: {order_str}")
+                    log_print(f"[{serial_number}] [OP] 解析到挂单: {order_str}")
                 
                 i += 1
             except Exception as e:
@@ -4947,16 +5275,74 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
 # Type 2 任务 - 数据处理和格式化函数
 # ============================================================================
 
+def parse_position_string_to_list(position_string):
+    """
+    将标准格式的 Position 字符串转换为列表格式
+    
+    Args:
+        position_string: str，标准格式字符串，例如 "唯一标题|||方向|||数量|||均价;唯一标题|||方向|||数量|||均价"
+        
+    Returns:
+        list: 格式化后的数据，每项为 {"title": 标题, "option": 选项, "amount": ±数量, "avg_price": 平均价格}
+    """
+    if not position_string or position_string.strip() == "":
+        return []
+    
+    result = []
+    # 按分号分割每个仓位
+    positions = position_string.split(';')
+    
+    for pos_str in positions:
+        if not pos_str.strip():
+            continue
+        
+        # 按 ||| 分割
+        parts = pos_str.split('|||')
+        if len(parts) >= 4:
+            unique_title = parts[0].strip()
+            direction = parts[1].strip()
+            amount_str = parts[2].strip()
+            avg_price = parts[3].strip()
+            
+            # 解析数量（可能已经带正负号）
+            try:
+                # 如果数量字符串已经带正负号，直接转换
+                if amount_str.startswith('+') or amount_str.startswith('-'):
+                    amount = float(amount_str.replace(',', ''))
+                else:
+                    # 如果没有正负号，根据方向添加
+                    amount = float(amount_str.replace(',', ''))
+                    if direction.upper() == "NO":
+                        amount = -amount
+            except:
+                continue
+            
+            result.append({
+                "title": unique_title,
+                "option": direction,
+                "amount": amount,
+                "avg_price": avg_price
+            })
+    
+    return result
+
+
 def process_op_position_data(position_data):
     """
     处理 OP Position 数据，格式化为标准格式
     
     Args:
-        position_data: list，原始的p标签内容列表
+        position_data: list，原始的p标签内容列表（旧格式，已废弃）
+                     或 str，标准格式字符串（新格式）
         
     Returns:
         list: 格式化后的数据，每项为 {"title": 标题, "option": 选项, "amount": ±数量, "avg_price": 平均价格}
     """
+    # 如果输入是字符串，使用新的解析函数
+    if isinstance(position_data, str):
+        return parse_position_string_to_list(position_data)
+    
+    # 以下是旧的解析逻辑（保留用于兼容）
     processed = {}  # 使用字典来存储每个标题+选项的数据 {(title, option): {"amount": x, "avg_price": "y"}}
     current_title = None  # 记录当前标题
     i = 0
@@ -5714,13 +6100,28 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         
         # 3. 格式化 open orders 数据（使用 ||| 作为字段分隔符，避免标题中的逗号）
         open_orders = collected_data.get('open_orders', [])
-        open_orders_str_list = []
-        for order in open_orders:
-            title = order['title']
-            price = order['price']
-            progress = order['progress']
-            open_orders_str_list.append(f"{title}|||{price}|||{progress}")
-        open_orders_str = ";".join(open_orders_str_list)
+        
+        # 判断 open_orders 的类型：OP 返回的是字符串，Polymarket 返回的是列表
+        if isinstance(open_orders, str):
+            # OP 交易所：已经是标准格式字符串，直接使用
+            open_orders_str = open_orders
+            log_print(f"[{browser_id}] Open Orders 数据已经是字符串格式，直接使用")
+        elif isinstance(open_orders, list):
+            # Polymarket：需要转换为字符串格式
+            open_orders_str_list = []
+            for order in open_orders:
+                if isinstance(order, dict):
+                    title = order.get('title', '')
+                    price = order.get('price', '')
+                    progress = order.get('progress', '')
+                    open_orders_str_list.append(f"{title}|||{price}|||{progress}")
+                else:
+                    log_print(f"[{browser_id}] ⚠ Open Orders 列表项不是字典格式，跳过")
+            open_orders_str = ";".join(open_orders_str_list)
+        else:
+            # 其他类型，设为空字符串
+            open_orders_str = ""
+            log_print(f"[{browser_id}] ⚠ Open Orders 数据类型未知: {type(open_orders)}")
         
         # 4. 获取 balance 和 portfolio
         # Polymarket 使用 cash，OP 使用 balance
@@ -7060,8 +7461,14 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"\n[{browser_id}] ========== 原始数据 ==========")
             log_print(f"[{browser_id}] Portfolio (原始): {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance (原始): {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 原始数据 ({len(position_data)} 项):")
-            log_print(f"[{browser_id}]   {position_data}")
+            log_print(f"[{browser_id}] Position 原始数据 (标准格式字符串):")
+            if position_data:
+                # 按分号分割显示每个仓位
+                positions = position_data.split(';')
+                for i, pos in enumerate(positions, 1):
+                    log_print(f"[{browser_id}]   {i}. {pos}")
+            else:
+                log_print(f"[{browser_id}]   (空)")
             log_print(f"[{browser_id}] Open Orders 原始数据 ({len(open_orders_data)} 项):")
             log_print(f"[{browser_id}]   {open_orders_data}")
             log_print(f"[{browser_id}] Transactions 原始数据 ({len(transactions_data)} 项):")
@@ -7383,7 +7790,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                         6: "任务1任务2订单已准备",
                         7: "任务1已点击下单",
                         8: "任务一仓位已变化",
-                        9: "任务二仓位已变化",
+                        11: "任务二仓位已变化",
                         10: "双方仓位都已变化"
                     }
                     log_print(f"[{browser_id}] Type 5 任务二失败，检查任务一状态...")

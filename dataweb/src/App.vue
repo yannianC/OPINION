@@ -295,8 +295,29 @@
             >
               <div class="position-title">{{ order.title }}</div>
               <div class="position-details">
-                <span class="position-price">{{ order.price }}</span>
-                <span class="position-amount">{{ order.progress }}</span>
+                <!-- 新格式：显示买卖方向和选项 -->
+                <template v-if="order.buySellDirection !== undefined">
+                  <el-tag 
+                    :type="order.buySellDirection === 'Buy' ? 'success' : 'danger'" 
+                    size="small"
+                  >
+                    {{ order.buySellDirection }}
+                  </el-tag>
+                  <el-tag 
+                    :type="order.option === 'YES' ? 'success' : 'danger'" 
+                    size="small"
+                    style="margin-left: 4px;"
+                  >
+                    {{ order.option }}
+                  </el-tag>
+                  <span class="position-price" style="margin-left: 8px;">价格: {{ order.price }}</span>
+                  <span class="position-amount" style="margin-left: 8px;">进度: {{ order.progress }}</span>
+                </template>
+                <!-- 兼容旧格式：只显示价格和进度 -->
+                <template v-else>
+                  <span class="position-price">{{ order.price }}</span>
+                  <span class="position-amount">{{ order.progress }}</span>
+                </template>
               </div>
             </div>
           </div>
@@ -1143,8 +1164,9 @@ const parsePositions = (posStr) => {
 
 /**
  * 解析挂单数据字符串（带缓存优化）
- * 格式: "标题1|||价格1|||进度1;标题2|||价格2|||进度2"
- * 兼容旧格式: "标题1,价格1,进度1;标题2,价格2,进度2"
+ * 新格式: "唯一标题|||买卖方向|||选项|||价格|||进度;唯一标题|||买卖方向|||选项|||价格|||进度"
+ * 兼容旧格式: "标题1|||价格1|||进度1;标题2|||价格2|||进度2"
+ * 兼容更旧格式: "标题1,价格1,进度1;标题2,价格2,进度2"
  */
 const parseOpenOrders = (ordersStr) => {
   if (!ordersStr) return []
@@ -1159,10 +1181,22 @@ const parseOpenOrders = (ordersStr) => {
     const orders = []
     const items = ordersStr.split(';')
     for (const item of items) {
-      // 优先尝试新格式（|||分隔符）
+      if (!item.trim()) continue
+      
+      // 优先尝试新格式（5个字段：唯一标题|||买卖方向|||选项|||价格|||进度）
       if (item.includes('|||')) {
         const parts = item.split('|||')
-        if (parts.length >= 3) {
+        if (parts.length >= 5) {
+          // 新格式：唯一标题|||买卖方向|||选项|||价格|||进度
+          orders.push({
+            title: parts[0].trim(),
+            buySellDirection: parts[1].trim(), // "Buy" 或 "Sell"
+            option: parts[2].trim(), // "YES" 或 "NO"
+            price: parts[3].trim(),
+            progress: parts[4].trim()
+          })
+        } else if (parts.length >= 3) {
+          // 兼容旧格式（3个字段：标题|||价格|||进度）
           orders.push({
             title: parts[0].trim(),
             price: parts[1].trim(),
@@ -1170,7 +1204,7 @@ const parseOpenOrders = (ordersStr) => {
           })
         }
       } else {
-        // 兼容旧格式（逗号分隔符）
+        // 兼容更旧格式（逗号分隔符）
         const parts = item.split(',')
         if (parts.length >= 3) {
           orders.push({
