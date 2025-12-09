@@ -1,9 +1,27 @@
 <template>
   <div class="app-container">
-    <h1 class="app-title">OP数据</h1>
-    
-    <!-- 顶部操作按钮 -->
-    <div class="toolbar">
+    <!-- 页面导航 -->
+    <div class="page-navigation">
+      <el-button 
+        :type="currentPage === 'list' ? 'primary' : 'default'"
+        @click="currentPage = 'list'"
+      >
+        数据列表
+      </el-button>
+      <el-button 
+        :type="currentPage === 'summary' ? 'primary' : 'default'"
+        @click="currentPage = 'summary'"
+      >
+        数据总计
+      </el-button>
+    </div>
+
+    <!-- 数据列表页面 -->
+    <div v-if="currentPage === 'list'">
+      <h1 class="app-title">OP数据</h1>
+      
+      <!-- 顶部操作按钮 -->
+      <div class="toolbar">
       <el-button type="primary" @click="addRows(1)">增加一行</el-button>
       <el-button type="primary" @click="addRows(10)">增加十行</el-button>
       <el-button type="success" @click="saveAll" :loading="saving">保存所有数据</el-button>
@@ -32,12 +50,6 @@
         刷新变红仓位
       </el-button>
       <span class="red-count-label">变红仓位数量：<strong>{{ redPositionCount }}</strong></span>
-      
-      <!-- 异步解析进度提示 -->
-      <div v-if="isAsyncParsing" class="parsing-progress">
-        <el-icon class="is-loading"><Loading /></el-icon>
-        <span>正在解析持仓数据...</span>
-      </div>
     </div>
     
     <!-- 批量添加区域 -->
@@ -136,59 +148,10 @@
         </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
-      </div>
-    </div>
-
-    <!-- 总计信息 -->
-    <div class="summary-container" :class="{ 'collapsed': summaryCollapsed }">
-      <div class="summary-header">
-        <h3 class="summary-title">
-          📊 数据总计
-          <span v-if="summaryCollapsed" class="summary-hint">（点击展开查看）</span>
-        </h3>
-        <el-button 
-          :icon="summaryCollapsed ? ArrowDown : ArrowUp" 
-          circle 
-          size="small"
-          @click="summaryCollapsed = !summaryCollapsed"
-          class="collapse-btn"
-        >
+        <el-button type="warning" size="small" @click="parseAllRows" :loading="parsingAll">
+          全部解析
         </el-button>
       </div>
-      
-      <transition name="summary-collapse">
-        <div v-show="!summaryCollapsed" class="summary-content">
-          <div class="summary-item">
-            <span class="summary-label">余额总计:</span>
-            <span class="summary-value">{{ summaryData.totalBalance }}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Portfolio总计:</span>
-            <span class="summary-value">{{ summaryData.totalPortfolio }}</span>
-          </div>
-          <div class="summary-item summary-positions">
-            <span class="summary-label">持有仓位总计:</span>
-            <div class="summary-positions-list" v-memo="[summaryData.positionSummary.length]">
-              <div v-if="summaryData.positionSummary.length === 0" class="empty-summary">
-                无持仓
-              </div>
-              <div 
-                v-for="(pos, idx) in summaryData.positionSummary" 
-                :key="`summary-${pos.title}-${idx}`" 
-                class="summary-position-item"
-              >
-                <span class="position-title-summary">{{ pos.title }}</span>
-                <el-tag 
-                  :type="parseFloat(pos.amount) >= 0 ? 'success' : 'danger'" 
-                  size="small"
-                >
-                  {{ pos.amount }}
-                </el-tag>
-              </div>
-            </div>
-          </div>
-        </div>
-      </transition>
     </div>
 
     <!-- 数据表格 -->
@@ -253,15 +216,10 @@
 
       <el-table-column label="持有仓位 (a)" width="400">
         <template #default="scope">
-          <!-- 正在解析中显示加载状态 -->
-          <div v-if="!isRowParsed(scope.row)" class="parsing-text">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span>解析中...</span>
-          </div>
-          <!-- 解析完成后显示数据 -->
-          <div v-else-if="scope.row.a" class="position-list" v-memo="[scope.row.a]">
+          <!-- 如果已解析，显示解析后的数据 -->
+          <div v-if="isRowParsed(scope.row) && scope.row.a" class="position-list" v-memo="[scope.row.a, isRowParsed(scope.row)]">
             <div 
-              v-for="(pos, idx) in parsePositions(scope.row.a)" 
+              v-for="(pos, idx) in getCachedPositions(scope.row.a)" 
               :key="`${scope.row.index}-pos-${idx}`" 
               class="position-item"
             >
@@ -275,21 +233,20 @@
               </div>
             </div>
           </div>
+          <!-- 未解析时直接显示原始字符串 -->
+          <div v-else-if="scope.row.a" class="raw-data-text">
+            {{ scope.row.a }}
+          </div>
           <span v-else class="empty-text">暂无数据</span>
         </template>
       </el-table-column>
 
       <el-table-column label="挂单仓位 (b)" width="400">
         <template #default="scope">
-          <!-- 正在解析中显示加载状态 -->
-          <div v-if="!isRowParsed(scope.row)" class="parsing-text">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span>解析中...</span>
-          </div>
-          <!-- 解析完成后显示数据 -->
-          <div v-else-if="scope.row.b" class="position-list" v-memo="[scope.row.b]">
+          <!-- 如果已解析，显示解析后的数据 -->
+          <div v-if="isRowParsed(scope.row) && scope.row.b" class="position-list" v-memo="[scope.row.b, isRowParsed(scope.row)]">
             <div 
-              v-for="(order, idx) in parseOpenOrders(scope.row.b)" 
+              v-for="(order, idx) in getCachedOrders(scope.row.b)" 
               :key="`${scope.row.index}-order-${idx}`" 
               class="position-item"
             >
@@ -321,6 +278,10 @@
               </div>
             </div>
           </div>
+          <!-- 未解析时直接显示原始字符串 -->
+          <div v-else-if="scope.row.b" class="raw-data-text">
+            {{ scope.row.b }}
+          </div>
           <span v-else class="empty-text">暂无数据</span>
         </template>
       </el-table-column>
@@ -343,8 +304,17 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="450" align="center" fixed="right">
+      <el-table-column label="操作" width="520" align="center" fixed="right">
         <template #default="scope">
+          <el-button 
+            type="warning" 
+            size="small"
+            @click="parseRow(scope.row)"
+            :loading="scope.row.parsing"
+            :disabled="isRowParsed(scope.row)"
+          >
+            {{ isRowParsed(scope.row) ? '已解析' : '解析' }}
+          </el-button>
           <el-button 
             type="primary" 
             size="small"
@@ -461,6 +431,10 @@
         </span>
       </template>
     </el-dialog>
+    </div>
+
+    <!-- 数据总计页面 -->
+    <Summary v-if="currentPage === 'summary'" />
   </div>
 </template>
 
@@ -514,13 +488,19 @@
  */
 import { ref, computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Clock, ArrowUp, ArrowDown, Loading } from '@element-plus/icons-vue'
+import { Clock, Loading } from '@element-plus/icons-vue'
 import axios from 'axios'
+import Summary from './Summary.vue'
 
 /**
  * 基础配置
  */
 const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
+
+/**
+ * 页面状态
+ */
+const currentPage = ref('list')  // 'list' 或 'summary'
 
 /**
  * 响应式数据
@@ -529,15 +509,12 @@ const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
 const tableData = shallowRef([])
 const parsedDataCache = new Map()  // 解析数据缓存
 const parsedRowsSet = ref(new Set())  // 已解析的行标识集合
-const isAsyncParsing = ref(false)  // 是否正在异步解析
 const loading = ref(false)
 const saving = ref(false)
 const refreshingAll = ref(false)
 const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
-const summaryCollapsed = ref(true)  // 总计区域折叠状态（默认折叠）
-const shouldCalculateSummary = ref(false)  // 是否需要计算总计数据
+const parsingAll = ref(false)  // 是否正在全部解析
 let nextId = 1
-let asyncParseController = null  // 用于控制异步解析的取消
 
 /**
  * 任务日志相关
@@ -734,71 +711,6 @@ const filteredTableData = computed(() => {
   return [...highlighted, ...normal]
 })
 
-/**
- * 计算总计数据（优化版本 - 仅在展开时计算）
- */
-const summaryData = computed(() => {
-  // 如果折叠状态，返回空数据，避免计算
-  if (!shouldCalculateSummary.value) {
-    return {
-      totalBalance: '0.00',
-      totalPortfolio: '0.00',
-      positionSummary: []
-    }
-  }
-  
-  const filtered = filteredTableData.value
-  
-  let totalBalance = 0
-  let totalPortfolio = 0
-  const positionMap = new Map()
-  
-  // 单次遍历计算所有数据
-  for (const row of filtered) {
-    // 计算余额总计
-    totalBalance += parseFloat(row.balance) || 0
-    
-    // 计算Portfolio总计
-    totalPortfolio += parseFloat(row.c) || 0
-    
-    // 计算持有仓位总计
-    if (row.a) {
-      const positions = parsePositions(row.a)
-      for (const pos of positions) {
-        const title = pos.title
-        const amount = parseFloat(pos.amount) || 0
-        positionMap.set(title, (positionMap.get(title) || 0) + amount)
-      }
-    }
-  }
-  
-  // 过滤掉数量为0的，转换为数组并排序
-  const positionSummary = []
-  for (const [title, amount] of positionMap.entries()) {
-    if (Math.abs(amount) > 0.01) { // 过滤接近0的数量
-      positionSummary.push({ title, amount: amount.toFixed(2) })
-    }
-  }
-  
-  // 排序：按绝对值降序
-  positionSummary.sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount)))
-  
-  return {
-    totalBalance: totalBalance.toFixed(2),
-    totalPortfolio: totalPortfolio.toFixed(2),
-    positionSummary
-  }
-})
-
-/**
- * 监听折叠状态变化
- */
-watch(summaryCollapsed, (newValue) => {
-  // 当展开时（newValue 为 false），才开始计算
-  if (!newValue) {
-    shouldCalculateSummary.value = true
-  }
-})
 
 /**
  * 计算变红仓位数量（打开时间>仓位时间，且不在忽略列表中，且不是监控类型）
@@ -1014,6 +926,22 @@ const isRowParsed = (row) => {
 }
 
 /**
+ * 获取缓存的持仓数据（避免在模板中重复解析）
+ */
+const getCachedPositions = (posStr) => {
+  if (!posStr) return []
+  return parsePositions(posStr)  // parsePositions 内部已经有缓存机制
+}
+
+/**
+ * 获取缓存的挂单数据（避免在模板中重复解析）
+ */
+const getCachedOrders = (ordersStr) => {
+  if (!ordersStr) return []
+  return parseOpenOrders(ordersStr)  // parseOpenOrders 内部已经有缓存机制
+}
+
+/**
  * 标记某行已解析
  */
 const markRowAsParsed = (row) => {
@@ -1027,6 +955,7 @@ const markRowAsParsed = (row) => {
  * 解析持仓数据字符串（带缓存优化）
  * 格式: "标题1|||选项1|||数量1|||均价1;标题2|||选项2|||数量2|||均价2"
  * 兼容旧格式: "标题1,选项1,数量1,均价1;标题2,选项2,数量2,均价2"
+ * 性能优化：使用更高效的字符串处理方法，减少重复代码
  */
 const parsePositions = (posStr) => {
   if (!posStr) return []
@@ -1039,110 +968,69 @@ const parsePositions = (posStr) => {
   
   try {
     const positions = []
+    // 优化：如果字符串很长，使用更高效的分割方式
     const items = posStr.split(';')
-    for (const item of items) {
-      // 优先尝试新格式（|||分隔符）
-      if (item.includes('|||')) {
-        const parts = item.split('|||')
-        if (parts.length >= 4) {
-          let title = parts[0].trim()
-          let option = parts[1].trim()
-          let amount = parts[2].trim()
-          let avgPrice = parts[3].trim()
-          
-          // 特殊处理：First to 5k: Gold or ETH? 市场
-          if (title.includes('First to 5k') && (option === 'ETH' || option === 'GOLD')) {
-            const numAmount = parseFloat(amount)
-            if (!isNaN(numAmount)) {
-              if (option === 'GOLD') {
-                // GOLD改为正数
-                amount = Math.abs(numAmount).toFixed(2)
-              } else if (option === 'ETH') {
-                // ETH改为负数
-                amount = (-Math.abs(numAmount)).toFixed(2)
-              }
-            }
+    const itemsLength = items.length
+    
+    // 优化：预先判断格式类型，避免重复检查
+    const isNewFormat = posStr.includes('|||')
+    const separator = isNewFormat ? '|||' : ','
+    
+    for (let i = 0; i < itemsLength; i++) {
+      const item = items[i]
+      if (!item || !item.trim()) continue
+      
+      const parts = item.split(separator)
+      const partsLength = parts.length
+      
+      if (partsLength >= 4) {
+        let title = parts[0].trim()
+        let option = parts[1].trim()
+        let amount = parts[2].trim()
+        let avgPrice = parts[3].trim()
+        
+        // 特殊处理：First to 5k: Gold or ETH? 市场
+        if (title.includes('First to 5k') && (option === 'ETH' || option === 'GOLD')) {
+          const numAmount = parseFloat(amount)
+          if (!isNaN(numAmount)) {
+            amount = option === 'GOLD' 
+              ? Math.abs(numAmount).toFixed(2)
+              : (-Math.abs(numAmount)).toFixed(2)
           }
-          
-          // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
-          if (title.includes('Monad vs MegaETH') && (option === 'Monad' || option === 'MegaETH')) {
-            const numAmount = parseFloat(amount)
-            if (!isNaN(numAmount)) {
-              if (option === 'Monad') {
-                // Monad改为正数
-                amount = Math.abs(numAmount).toFixed(2)
-              } else if (option === 'MegaETH') {
-                // MegaETH改为负数
-                amount = (-Math.abs(numAmount)).toFixed(2)
-              }
-            }
-          }
-          
-          positions.push({
-            title: title,
-            option: option,
-            amount: amount,
-            avgPrice: avgPrice
-          })
         }
-      } else {
-        // 兼容旧格式（逗号分隔符）
-        const parts = item.split(',')
-        if (parts.length >= 4) {
-          let title = parts[0].trim()
-          let option = parts[1].trim()
-          let amount = parts[2].trim()
-          let avgPrice = parts[3].trim()
-          
-          // 特殊处理：First to 5k: Gold or ETH? 市场
-          if (title.includes('First to 5k') && (option === 'ETH' || option === 'GOLD')) {
-            const numAmount = parseFloat(amount)
-            if (!isNaN(numAmount)) {
-              if (option === 'GOLD') {
-                // GOLD改为正数
-                amount = Math.abs(numAmount).toFixed(2)
-              } else if (option === 'ETH') {
-                // ETH改为负数
-                amount = (-Math.abs(numAmount)).toFixed(2)
-              }
-            }
+        
+        // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
+        if (title.includes('Monad vs MegaETH') && (option === 'Monad' || option === 'MegaETH')) {
+          const numAmount = parseFloat(amount)
+          if (!isNaN(numAmount)) {
+            amount = option === 'Monad'
+              ? Math.abs(numAmount).toFixed(2)
+              : (-Math.abs(numAmount)).toFixed(2)
           }
-          
-          // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
-          if (title.includes('Monad vs MegaETH') && (option === 'Monad' || option === 'MegaETH')) {
-            const numAmount = parseFloat(amount)
-            if (!isNaN(numAmount)) {
-              if (option === 'Monad') {
-                // Monad改为正数
-                amount = Math.abs(numAmount).toFixed(2)
-              } else if (option === 'MegaETH') {
-                // MegaETH改为负数
-                amount = (-Math.abs(numAmount)).toFixed(2)
-              }
-            }
-          }
-          
-          positions.push({
-            title: title,
-            option: option,
-            amount: amount,
-            avgPrice: avgPrice
-          })
-        } else if (parts.length >= 3) {
-          positions.push({
-            title: parts[0].trim(),
-            option: parts[1].trim(),
-            amount: parts[2].trim(),
-            avgPrice: ''
-          })
-        } else if (parts.length >= 2) {
-          positions.push({
-            title: parts[0].trim(),
-            option: '',
-            amount: parts[1].trim(),
-            avgPrice: ''
-          })
         }
+        
+        positions.push({
+          title: title,
+          option: option,
+          amount: amount,
+          avgPrice: avgPrice
+        })
+      } else if (partsLength >= 3 && !isNewFormat) {
+        // 只对旧格式处理3个字段的情况
+        positions.push({
+          title: parts[0].trim(),
+          option: parts[1].trim(),
+          amount: parts[2].trim(),
+          avgPrice: ''
+        })
+      } else if (partsLength >= 2 && !isNewFormat) {
+        // 只对旧格式处理2个字段的情况
+        positions.push({
+          title: parts[0].trim(),
+          option: '',
+          amount: parts[1].trim(),
+          avgPrice: ''
+        })
       }
     }
     
@@ -1263,36 +1151,85 @@ const parseTransactions = (transStr) => {
   }
 }
 
+
 /**
- * 异步解析持仓和订单数据
- * 分批处理，避免阻塞UI
+ * 解析单行数据
  */
-const asyncParsePositionsAndOrders = async () => {
-  // 如果已经在解析中，先取消
-  if (asyncParseController) {
-    asyncParseController.cancelled = true
+const parseRow = async (row) => {
+  if (isRowParsed(row)) {
+    return
   }
   
-  // 创建新的控制器
-  asyncParseController = { cancelled: false }
-  const controller = asyncParseController
+  // 设置解析状态
+  const currentData = [...tableData.value]
+  const rowIndex = currentData.findIndex(r => {
+    if (row.id && r.id) {
+      return r.id === row.id
+    }
+    return r.fingerprintNo === row.fingerprintNo && 
+           r.computeGroup === row.computeGroup
+  })
   
-  isAsyncParsing.value = true
+  if (rowIndex === -1) return
+  
+  currentData[rowIndex] = { ...currentData[rowIndex], parsing: true }
+  tableData.value = currentData
   
   try {
-    const data = tableData.value
-    const batchSize = 20  // 每批处理20行
+    // 解析持仓数据
+    if (row.a) {
+      parsePositions(row.a)
+    }
+    // 解析挂单数据
+    if (row.b) {
+      parseOpenOrders(row.b)
+    }
+    // 标记为已解析
+    markRowAsParsed(row)
     
-    for (let i = 0; i < data.length; i += batchSize) {
-      // 检查是否被取消
-      if (controller.cancelled) {
-        console.log('[异步解析] 已取消')
-        break
+    ElMessage.success('解析完成')
+  } catch (error) {
+    console.error('解析失败:', error)
+    ElMessage.error('解析失败')
+  } finally {
+    // 清除解析状态
+    const updatedData = [...tableData.value]
+    const idx = updatedData.findIndex(r => {
+      if (row.id && r.id) {
+        return r.id === row.id
       }
+      return r.fingerprintNo === row.fingerprintNo && 
+             r.computeGroup === row.computeGroup
+    })
+    if (idx !== -1) {
+      updatedData[idx] = { ...updatedData[idx], parsing: false }
+      tableData.value = updatedData
+    }
+  }
+}
+
+/**
+ * 解析所有行数据（分批处理，避免阻塞UI）
+ */
+const parseAllRows = async () => {
+  const data = tableData.value
+  const unparsedRows = data.filter(row => !isRowParsed(row))
+  
+  if (unparsedRows.length === 0) {
+    ElMessage.info('所有数据已解析')
+    return
+  }
+  
+  parsingAll.value = true
+  ElMessage.info(`开始解析 ${unparsedRows.length} 行数据...`)
+  
+  try {
+    const batchSize = 5  // 每批处理5行
+    
+    for (let i = 0; i < unparsedRows.length; i += batchSize) {
+      const batch = unparsedRows.slice(i, Math.min(i + batchSize, unparsedRows.length))
       
-      const batch = data.slice(i, Math.min(i + batchSize, data.length))
-      
-      // 预解析这批数据（填充缓存）
+      // 解析这批数据
       for (const row of batch) {
         if (row.a) {
           parsePositions(row.a)
@@ -1300,30 +1237,25 @@ const asyncParsePositionsAndOrders = async () => {
         if (row.b) {
           parseOpenOrders(row.b)
         }
-        // 标记为已解析
         markRowAsParsed(row)
       }
       
-      // 使用 requestIdleCallback 或 setTimeout 让出主线程
+      // 让出主线程，避免阻塞UI
       await new Promise(resolve => {
         if (typeof requestIdleCallback !== 'undefined') {
-          requestIdleCallback(() => resolve(), { timeout: 100 })
+          requestIdleCallback(() => resolve(), { timeout: 200 })
         } else {
-          setTimeout(resolve, 10)
+          setTimeout(resolve, 50)
         }
       })
     }
     
-    if (!controller.cancelled) {
-      console.log('[异步解析] 完成，共解析 ' + data.length + ' 行数据')
-    }
+    ElMessage.success(`解析完成，共解析 ${unparsedRows.length} 行数据`)
   } catch (error) {
-    console.error('[异步解析] 错误:', error)
+    console.error('全部解析失败:', error)
+    ElMessage.error('解析过程中出现错误')
   } finally {
-    if (!controller.cancelled) {
-      isAsyncParsing.value = false
-      asyncParseController = null
-    }
+    parsingAll.value = false
   }
 }
 
@@ -1409,11 +1341,7 @@ const loadData = async (silent = false) => {
         console.log('数据静默刷新成功')
       }
       
-      // 异步解析持仓和订单数据
-      // 使用 nextTick 确保表格先渲染出来
-      setTimeout(() => {
-        asyncParsePositionsAndOrders()
-      }, 100)
+      // 不再自动解析，由用户手动触发
     }
   } catch (error) {
     console.error('加载数据失败:', error)
@@ -2243,6 +2171,11 @@ onMounted(() => {
   } catch (error) {
     console.error('加载忽略浏览器配置失败:', error)
   }
+  
+  // 监听导航事件
+  window.addEventListener('navigate-to-list', () => {
+    currentPage.value = 'list'
+  })
 })
 
 /**
@@ -2263,12 +2196,6 @@ onUnmounted(() => {
   }
   saveRowTimers.clear()
   
-  // 取消异步解析
-  if (asyncParseController) {
-    asyncParseController.cancelled = true
-    asyncParseController = null
-  }
-  
   // 清理缓存
   parsedDataCache.clear()
   parsedRowsSet.value.clear()
@@ -2280,6 +2207,16 @@ onUnmounted(() => {
   padding: 20px;
   background-color: #f5f5f5;
   min-height: 100vh;
+}
+
+.page-navigation {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  display: flex;
+  gap: 10px;
 }
 
 .app-title {
@@ -2615,6 +2552,20 @@ onUnmounted(() => {
 .empty-text {
   color: #999;
   font-size: 12px;
+}
+
+.raw-data-text {
+  font-size: 12px;
+  color: #606266;
+  word-break: break-all;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  line-height: 1.5;
 }
 
 .parsing-text {

@@ -4645,16 +4645,132 @@ def click_opinion_position_and_get_data(driver, serial_number):
             标准格式: "唯一标题|||方向|||数量|||均价;唯一标题|||方向|||数量|||均价"
     """
     
-    def parse_tbody_data(position_div, serial_number):
+    def handle_claim_buttons(driver, serial_number):
+        """
+        处理Claim按钮：点击第一个Claim按钮，切换到OKX页面点击第二个按钮，循环直到没有Claim按钮
+        
+        Args:
+            driver: Selenium WebDriver对象
+            serial_number: 浏览器序列号
+        """
+        while True:
+            try:
+                # 重新获取position_div（因为页面可能已更新）
+                position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                
+                # 在position_div下查找所有内容等于"Claim"的button
+                claim_buttons = []
+                all_buttons = position_div.find_elements(By.TAG_NAME, "button")
+                for button in all_buttons:
+                    if button.text.strip() == "Claim":
+                        claim_buttons.append(button)
+                
+                if len(claim_buttons) == 0:
+                    # 没有Claim按钮了，退出循环
+                    log_print(f"[{serial_number}] [OP] ✓ 没有找到 Claim 按钮，处理完成")
+                    break
+                
+                # 点击第一个Claim按钮
+                log_print(f"[{serial_number}] [OP] 找到 {len(claim_buttons)} 个 Claim 按钮，点击第一个...")
+                claim_buttons[0].click()
+                log_print(f"[{serial_number}] [OP] ✓ 已点击第一个 Claim 按钮")
+                
+                # 等待3秒
+                time.sleep(3)
+                
+                # 切换到OKX页面
+                log_print(f"[{serial_number}] [OP] 切换到 OKX 钱包页面...")
+                all_windows = driver.window_handles
+                main_window = None
+                okx_window = None
+                
+                # 先找到主窗口
+                for window in all_windows:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "app.opinion.trade" in current_url:
+                        main_window = window
+                        break
+                
+                # 再找OKX窗口
+                for window in all_windows:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
+                        okx_window = window
+                        log_print(f"[{serial_number}] [OP] ✓ 已切换到 OKX 页面")
+                        break
+                
+                if not okx_window:
+                    log_print(f"[{serial_number}] [OP] ⚠ 未找到 OKX 页面，跳过本次Claim处理")
+                    if main_window:
+                        driver.switch_to.window(main_window)
+                    break
+                
+                # 在10秒内查找并点击第二个按钮
+                log_print(f"[{serial_number}] [OP] 在10秒内查找 data-testid='okd-button' 的第二个按钮...")
+                button_clicked = False
+                button_start_time = time.time()
+                
+                while time.time() - button_start_time < 10:
+                    try:
+                        buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                        if len(buttons) >= 2:
+                            buttons[1].click()
+                            log_print(f"[{serial_number}] [OP] ✓ 已点击第二个按钮")
+                            button_clicked = True
+                            break
+                        else:
+                            time.sleep(0.5)
+                    except Exception as e:
+                        log_print(f"[{serial_number}] [OP] ⚠ 查找按钮时出错: {str(e)}")
+                        time.sleep(0.5)
+                
+                if not button_clicked:
+                    log_print(f"[{serial_number}] [OP] ⚠ 10秒内未找到足够的按钮或超时")
+                
+                # 切换回主界面
+                log_print(f"[{serial_number}] [OP] 切换回主界面...")
+                if main_window:
+                    driver.switch_to.window(main_window)
+                    log_print(f"[{serial_number}] [OP] ✓ 已切换回主界面")
+                else:
+                    # 如果没找到主窗口，尝试通过URL查找
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "app.opinion.trade" in current_url:
+                            log_print(f"[{serial_number}] [OP] ✓ 已切换回主界面")
+                            break
+                
+                # 等待3秒
+                time.sleep(3)
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 处理 Claim 按钮时出错: {str(e)}")
+                # 尝试切换回主界面
+                try:
+                    all_windows = driver.window_handles
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "app.opinion.trade" in current_url:
+                            break
+                except:
+                    pass
+                break
+    
+    def parse_tbody_data(position_div, driver, serial_number):
         """
         解析当前页的tbody数据
         
         Args:
             position_div: Position div元素
+            driver: Selenium WebDriver对象
             serial_number: 浏览器序列号
             
         Returns:
-            tuple: (解析后的仓位字符串列表, 是否是无数据标记)
+            tuple: (解析后的仓位字符串列表, 是否是无数据标记, 是否需要重试)
         """
         result_parts = []
         
@@ -4663,16 +4779,32 @@ def click_opinion_position_and_get_data(driver, serial_number):
         for p in all_p_tags_in_div:
             if "No data yet" in p.text:
                 log_print(f"[{serial_number}] [OP] ✓ Position 发现 'No data yet'，无数据")
-                return result_parts, True  # 返回空列表和"无数据"标记
+                return result_parts, True, False  # 返回空列表和"无数据"标记，不需要重试
         
         # 再找这个 div 下的 tbody
         tbody = position_div.find_element(By.TAG_NAME, "tbody")
         tr_tags = tbody.find_elements(By.TAG_NAME, "tr")
         
         if len(tr_tags) == 0:
-            return result_parts, False  # 返回空列表，但不是"No data yet"
+            # 既没有"No data yet"也没有数据，需要重试
+            log_print(f"[{serial_number}] [OP] ⚠ Position 既没有 'No data yet' 也没有数据，需要重试")
+            return result_parts, False, True  # 返回空列表，不是"No data yet"，但需要重试
         
         log_print(f"[{serial_number}] [OP] ✓ 当前页找到 {len(tr_tags)} 个 tr 标签")
+        
+        # 如果tr的个数不等于0，处理Claim按钮
+        log_print(f"[{serial_number}] [OP] 开始处理 Claim 按钮...")
+        handle_claim_buttons(driver, serial_number)
+        
+        # 处理完Claim按钮后，重新获取position_div（因为页面可能已更新）
+        try:
+            position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+            # 重新获取tbody和tr_tags
+            tbody = position_div.find_element(By.TAG_NAME, "tbody")
+            tr_tags = tbody.find_elements(By.TAG_NAME, "tr")
+            log_print(f"[{serial_number}] [OP] 处理Claim后，重新找到 {len(tr_tags)} 个 tr 标签")
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 重新获取position_div失败: {str(e)}")
         
         # 解析tr标签数据
         current_main_title = None
@@ -4734,7 +4866,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
                 log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
                 continue
         
-        return result_parts, False  # 返回解析结果，不是"No data yet"
+        return result_parts, False, False  # 返回解析结果，不是"No data yet"，不需要重试
     
     try:
         log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Position 按钮...")
@@ -4782,8 +4914,31 @@ def click_opinion_position_and_get_data(driver, serial_number):
                     position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
                     log_print(f"[{serial_number}] [OP] ✓ 找到 Position 内容区域 (ID: {position_div.get_attribute('id')})")
                     
-                    # 解析当前页数据
-                    page_result_parts, is_no_data = parse_tbody_data(position_div, serial_number)
+                    # 解析当前页数据，支持重试逻辑（最多3次）
+                    retry_count = 0
+                    max_parse_retries = 3
+                    page_result_parts = []
+                    is_no_data = False
+                    need_retry = False
+                    
+                    while retry_count < max_parse_retries:
+                        page_result_parts, is_no_data, need_retry = parse_tbody_data(position_div, driver, serial_number)
+                        
+                        if not need_retry:
+                            # 不需要重试，跳出重试循环
+                            break
+                        
+                        # 需要重试，等待5秒后重新获取position_div
+                        retry_count += 1
+                        if retry_count < max_parse_retries:
+                            log_print(f"[{serial_number}] [OP] ⚠ 第 {retry_count} 次重试：等待5秒后重新获取 Position 数据...")
+                            time.sleep(5)
+                            # 重新获取 position_div
+                            position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                        else:
+                            # 超过3次重试，返回任务失败
+                            log_print(f"[{serial_number}] [OP] ✗ 重试 {max_parse_retries} 次后仍无数据，返回任务失败")
+                            return "", True  # 返回空字符串和需要刷新重试标记
                     
                     if is_no_data:
                         # 如果是"No data yet"，直接返回
