@@ -4681,6 +4681,17 @@ const formatTaskMsg = (msg) => {
       // Type 5 部分成交：有挂单
       let result = `⚠️ 部分成交`
       
+      // 辅助函数：移除逗号并解析数字
+      const parseNumber = (value) => {
+        if (!value) return 0
+        if (typeof value === 'string') {
+          if (value.includes('<')) return 0
+          // 移除逗号（千位分隔符）后再解析
+          return parseFloat(value.replace(/,/g, '')) || 0
+        }
+        return parseFloat(value) || 0
+      }
+      
       // 处理初始数量
       if (data.initial_filled_amount) {
         result += ` | 初始数量: ${data.initial_filled_amount}`
@@ -4695,13 +4706,8 @@ const formatTaskMsg = (msg) => {
       
       // 计算并显示交易额
       if (data.initial_filled_amount && data.filled_amount) {
-        const initialAmount = parseFloat(data.initial_filled_amount) || 0
-        let filledAmount = 0
-        if (typeof data.filled_amount === 'string' && data.filled_amount.includes('<')) {
-          filledAmount = 0
-        } else {
-          filledAmount = parseFloat(data.filled_amount) || 0
-        }
+        const initialAmount = parseNumber(data.initial_filled_amount)
+        const filledAmount = parseNumber(data.filled_amount)
         const tradeAmount = filledAmount - initialAmount
         result += ` | 交易额: ${tradeAmount.toFixed(2)}`
       }

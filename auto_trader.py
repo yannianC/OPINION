@@ -4413,12 +4413,24 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         mission_type = mission.get('type')
         
         if mission_type == 5:
-         
             
             # Type 5 任务：检查是否有 "order failed" 并进行重试
             max_order_retry = 3  # 最多重试3次
             order_retry_count = 0
             
+            # 切换回主页面
+            try:
+                    all_windows = driver.window_handles
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "app.opinion.trade" in current_url:
+                            log_print(f"[{browser_id}] ✓ 已切换回主页面")
+                            break
+            except Exception as e:
+                    log_print(f"[{browser_id}] ⚠ 切换回主页面失败: {str(e)}")
+                    
+                    
             while order_retry_count < max_order_retry:
                 # 在10秒内检查是否有包含 "order failed" 和 "Please try again" 的div
                 log_print(f"[{browser_id}] 检查是否存在 'order failed' 提示（10秒超时）...")
@@ -4454,6 +4466,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 # 检测到订单失败，进行重试
                 order_retry_count += 1
                 log_print(f"[{browser_id}] ⚠ 订单失败，进行第 {order_retry_count}/{max_order_retry} 次重试...")
+                
+        
+                    # 继续尝试重试，不因为切换失败而终止
                 
                 try:
                     # 重新获取 trade_box 并找到提交按钮（不需要同步机制）
@@ -4561,7 +4576,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             # 检查是否超过最大重试次数
             if order_retry_count >= max_order_retry:
                 log_print(f"[{browser_id}] ========== Type 5 任务失败: 订单失败重试{max_order_retry}次仍未成功 ==========\n")
-                return False, f"订单失败重试{max_order_retry}次仍未成功"
+                return False, f"订单失败重试{max_order_retry}次仍未成功，另一单已挂单"
             
             log_print(f"[{browser_id}] 步骤13: Type 5 任务 - 等待订单确认并收集数据...")
             success, msg = wait_for_type5_order_and_collect_data(
