@@ -3401,7 +3401,62 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         
         # 5. 打开目标页面
         log_print(f"[{browser_id}] 步骤5: 打开目标页面")
-        driver.get(target_url)
+        try:
+            driver.get(target_url)
+        except WebDriverException as e:
+            error_msg = str(e)
+            # 检查是否是代理连接错误
+            if "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg:
+                log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
+                # 如果是代理错误且未重试过，执行换IP重试（仅type=5任务）
+                mission_type = mission.get("type")
+                if mission_type == 5 and retry_count == 0:
+                    log_print(f"[{browser_id}] Type=5 任务检测到代理连接失败，需要换IP重试，开始执行重试流程...")
+                    
+                    # 1. 关闭浏览器
+                    log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                    try:
+                        if driver:
+                            driver.quit()
+                    except:
+                        pass
+                    close_adspower_browser(browser_id)
+                    time.sleep(15)
+                    
+                    # 2. 强制更换IP
+                    log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
+                    proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                    
+                    if not proxy_config:
+                        log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                        if keep_browser_open:
+                            return False, "换IP失败", None, None, None
+                        else:
+                            return False, "换IP失败"
+                    
+                    log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                    
+                    # 3. 更新代理配置
+                    log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                    if not update_adspower_proxy(browser_id, proxy_config):
+                        log_print(f"[{browser_id}] ✗ 更新代理失败")
+                        if keep_browser_open:
+                            return False, "更新代理失败", None, None, None
+                        else:
+                            return False, "更新代理失败"
+                    
+                    log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                    time.sleep(10)
+                    
+                    # 4. 递归重试任务（retry_count+1）
+                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
+                    return process_trading_mission(task_data, keep_browser_open, retry_count=1)
+                else:
+                    # 不是type=5任务或已重试过，直接抛出错误
+                    raise
+            else:
+                # 其他类型的错误，直接抛出
+                raise
         
         # 5.5 检查并点击 "I Understand and Agree" p标签（如果存在）
         log_print(f"[{browser_id}] 步骤5.5: 检查是否存在 'I Understand and Agree' p标签...")
@@ -7527,8 +7582,56 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] 步骤4: 交易所为 OP，进入 profile 页面...")
             
             profile_url = "https://app.opinion.trade/profile"
-            driver.get(profile_url)
-            log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+            try:
+                driver.get(profile_url)
+                log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+            except WebDriverException as e:
+                error_msg = str(e)
+                # 检查是否是代理连接错误
+                if "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg:
+                    log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
+                    # 如果是代理错误且未重试过，执行换IP重试
+                    if retry_count == 0:
+                        log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试，开始执行重试流程...")
+                        
+                        # 1. 关闭浏览器
+                        log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                        try:
+                            if driver:
+                                driver.quit()
+                        except:
+                            pass
+                        close_adspower_browser(browser_id)
+                        time.sleep(15)
+                        
+                        # 2. 强制更换IP
+                        log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
+                        proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                        
+                        if not proxy_config:
+                            log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                            return False, "换IP失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                        
+                        # 3. 更新代理配置
+                        log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                        if not update_adspower_proxy(browser_id, proxy_config):
+                            log_print(f"[{browser_id}] ✗ 更新代理失败")
+                            return False, "更新代理失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                        time.sleep(10)
+                        
+                        # 4. 递归重试任务（retry_count+1）
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
+                        return process_type2_mission(task_data, retry_count=1)
+                    else:
+                        log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
+                        return False, "代理连接失败且已重试", collected_data
+                else:
+                    # 其他类型的错误，直接抛出
+                    raise
             
             time.sleep(2)
             
@@ -7833,8 +7936,56 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] 步骤4: 交易所为 Ploy，进入 Polymarket portfolio 页面...")
             
             portfolio_url = "https://polymarket.com/portfolio?tab=positions"
-            driver.get(portfolio_url)
-            log_print(f"[{browser_id}] ✓ 已打开页面: {portfolio_url}")
+            try:
+                driver.get(portfolio_url)
+                log_print(f"[{browser_id}] ✓ 已打开页面: {portfolio_url}")
+            except WebDriverException as e:
+                error_msg = str(e)
+                # 检查是否是代理连接错误
+                if "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg:
+                    log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
+                    # 如果是代理错误且未重试过，执行换IP重试
+                    if retry_count == 0:
+                        log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试，开始执行重试流程...")
+                        
+                        # 1. 关闭浏览器
+                        log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                        try:
+                            if driver:
+                                driver.quit()
+                        except:
+                            pass
+                        close_adspower_browser(browser_id)
+                        time.sleep(15)
+                        
+                        # 2. 强制更换IP
+                        log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
+                        proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                        
+                        if not proxy_config:
+                            log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                            return False, "换IP失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                        
+                        # 3. 更新代理配置
+                        log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                        if not update_adspower_proxy(browser_id, proxy_config):
+                            log_print(f"[{browser_id}] ✗ 更新代理失败")
+                            return False, "更新代理失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                        time.sleep(10)
+                        
+                        # 4. 递归重试任务（retry_count+1）
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
+                        return process_type2_mission(task_data, retry_count=1)
+                    else:
+                        log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
+                        return False, "代理连接失败且已重试", collected_data
+                else:
+                    # 其他类型的错误，直接抛出
+                    raise
             
             time.sleep(2)
             

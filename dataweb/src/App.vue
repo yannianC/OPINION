@@ -49,6 +49,9 @@
       <el-button type="danger" @click="refreshRedPositions" :loading="refreshingRed">
         刷新变红仓位
       </el-button>
+      <el-button type="danger" @click="refreshRedPositionsOld" :loading="refreshingRedOld">
+        刷新变红且超过30分钟仓位
+      </el-button>
       <span class="red-count-label">变红仓位数量：<strong>{{ redPositionCount }}</strong></span>
     </div>
     
@@ -513,6 +516,7 @@ const loading = ref(false)
 const saving = ref(false)
 const refreshingAll = ref(false)
 const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
+const refreshingRedOld = ref(false)  // 刷新变红且超过30分钟仓位的加载状态
 const parsingAll = ref(false)  // 是否正在全部解析
 let nextId = 1
 
@@ -1912,6 +1916,96 @@ const refreshRedPositions = async () => {
     ElMessage.error('刷新变红仓位失败: ' + (error.message || '网络错误'))
   } finally {
     refreshingRed.value = false
+  }
+}
+
+/**
+ * 刷新变红且超过30分钟仓位（打开时间>仓位时间，且打开时间距离现在超过30分钟）
+ */
+const refreshRedPositionsOld = async () => {
+  // 获取所有背景标红且打开时间超过30分钟的行
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const now = Date.now()
+  const thirtyMinutesAgo = now - (30 * 60 * 1000)  // 30分钟前的毫秒时间戳
+
+  const redOldRows = tableData.value.filter(row =>
+    row.fingerprintNo &&
+    row.computeGroup &&
+    row.platform &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row) &&
+    row.f // 确保有打开时间
+  ).filter(row => {
+    // 检查打开时间距离现在是否超过30分钟
+    const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+    return openTime <= thirtyMinutesAgo
+  })
+
+  if (redOldRows.length === 0) {
+    ElMessage.warning('没有需要刷新的变红且超过30分钟的仓位')
+    return
+  }
+
+  refreshingRedOld.value = true
+  ElMessage.info(`开始刷新 ${redOldRows.length} 个变红且超过30分钟的仓位，请稍候...`)
+
+  let successCount = 0
+  let failCount = 0
+
+  try {
+    // 提交所有 type=2 任务
+    const taskPromises = redOldRows.map(async (row) => {
+      try {
+        if (row.platform == 'OP'){
+          const taskData = {
+            groupNo: row.computeGroup,
+            numberList: parseInt(row.fingerprintNo),
+            type: 2,
+            exchangeName: row.platform === 'OP' ? 'OP' : '监控'
+          }
+
+          const response = await axios.post(
+            `${API_BASE_URL}/mission/add`,
+            taskData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          )
+
+          // 保存最新的任务ID（只保留最后一个）
+          if (response.data && response.data.data && response.data.data.id) {
+            latestMissionId.value = response.data.data.id
+          }
+
+          console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+          successCount++
+
+        }
+
+      } catch (error) {
+        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
+        failCount++
+      }
+    })
+
+    await Promise.all(taskPromises)
+
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+
+    // 等待 70 秒后自动刷新列表
+    ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
+    setTimeout(async () => {
+      await loadData(true)  // 静默刷新
+      ElMessage.success('数据已自动更新')
+    }, 70000)
+
+  } catch (error) {
+    console.error('刷新变红且超过30分钟仓位失败:', error)
+    ElMessage.error('刷新变红且超过30分钟仓位失败: ' + (error.message || '网络错误'))
+  } finally {
+    refreshingRedOld.value = false
   }
 }
 
