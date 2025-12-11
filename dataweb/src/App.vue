@@ -217,6 +217,20 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="地址 (h)" width="300" align="center">
+        <template #default="scope">
+          <span 
+            v-if="scope.row.h" 
+            class="address-text" 
+            :title="scope.row.h"
+            @click="copyAddress(scope.row.h)"
+          >
+            {{ scope.row.h }}
+          </span>
+          <span v-else class="empty-text">暂无地址</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="持有仓位 (a)" width="400">
         <template #default="scope">
           <!-- 如果已解析，显示解析后的数据 -->
@@ -764,6 +778,32 @@ const formatNumber = (value) => {
  * 格式化相对时间
  * 将时间戳转换为 "刚刚"、"几分钟前"、"几小时前"、"几天前"
  */
+/**
+ * 复制地址到剪切板
+ */
+const copyAddress = async (address) => {
+  try {
+    await navigator.clipboard.writeText(address)
+    ElMessage.success('地址已复制到剪切板')
+  } catch (error) {
+    // 如果 clipboard API 不可用，使用备用方法
+    try {
+      const textArea = document.createElement('textarea')
+      textArea.value = address
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-999999px'
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      ElMessage.success('地址已复制到剪切板')
+    } catch (err) {
+      ElMessage.error('复制失败，请手动复制')
+      console.error('复制地址失败:', err)
+    }
+  }
+}
+
 const formatRelativeTime = (timestamp) => {
   if (!timestamp) return '未采集'
   
@@ -2646,6 +2686,25 @@ onUnmounted(() => {
 .empty-text {
   color: #999;
   font-size: 12px;
+}
+
+.address-text {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #409eff;
+  word-break: break-all;
+  cursor: pointer;
+  user-select: all;
+  padding: 4px 8px;
+  background-color: #f0f9ff;
+  border-radius: 4px;
+  display: inline-block;
+  max-width: 100%;
+  transition: background-color 0.2s;
+}
+
+.address-text:hover {
+  background-color: #e0f2fe;
 }
 
 .raw-data-text {

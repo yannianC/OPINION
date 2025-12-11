@@ -4808,6 +4808,115 @@ def get_opinion_balance_value(driver, serial_number):
         return None, False
 
 
+def get_balance_spot_address(driver, browser_id):
+    """
+    获取 Balance Spot 的地址（通过点击按钮并读取剪切板）
+    
+    Args:
+        driver: Selenium WebDriver对象
+        browser_id: 浏览器ID
+        
+    Returns:
+        tuple: (地址字符串, 是否成功)
+            - 如果成功获取到0x开头的地址: (address, True)
+            - 如果失败: (None, False)
+    """
+    try:
+        log_print(f"[{browser_id}] 查找包含 'Balance Spot' 的 P 标签...")
+        
+        # 1. 找到包含 "Balance Spot" 的 P 标签
+        p_tags = driver.find_elements(By.TAG_NAME, "p")
+        target_p = None
+        
+        for p in p_tags:
+            if "Balance Spot" in p.text.strip():
+                target_p = p
+                log_print(f"[{browser_id}] ✓ 找到包含 'Balance Spot' 的 P 标签")
+                break
+        
+        if not target_p:
+            log_print(f"[{browser_id}] ⚠ 未找到包含 'Balance Spot' 的 P 标签")
+            return None, False
+        
+        # 2. 找到 P 标签的父节点
+        parent = target_p.find_element(By.XPATH, "..")
+        log_print(f"[{browser_id}] ✓ 找到父节点")
+        
+        # 3. 从父节点中找到 button
+        buttons = parent.find_elements(By.TAG_NAME, "button")
+        if not buttons:
+            log_print(f"[{browser_id}] ⚠ 父节点中未找到 button")
+            return None, False
+        
+        target_button = buttons[0]
+        log_print(f"[{browser_id}] ✓ 找到 button，准备点击...")
+        
+        # 4. 点击 button
+        target_button.click()
+        log_print(f"[{browser_id}] ✓ 已点击 button")
+        
+        # 5. 等待一小段时间，确保剪切板内容已更新
+        time.sleep(0.5)
+        
+        # 6. 获取剪切板内容
+        clipboard_content = None
+        try:
+            # 优先尝试使用 pyperclip
+            try:
+                import pyperclip
+                clipboard_content = pyperclip.paste()
+                log_print(f"[{browser_id}] ✓ 使用 pyperclip 获取剪切板内容")
+            except ImportError:
+                # 如果没有 pyperclip，尝试使用 Windows API
+                try:
+                    import win32clipboard
+                    win32clipboard.OpenClipboard()
+                    try:
+                        clipboard_content = win32clipboard.GetClipboardData(win32clipboard.CF_TEXT)
+                        if isinstance(clipboard_content, bytes):
+                            clipboard_content = clipboard_content.decode('utf-8', errors='ignore')
+                        log_print(f"[{browser_id}] ✓ 使用 win32clipboard 获取剪切板内容")
+                    finally:
+                        win32clipboard.CloseClipboard()
+                except ImportError:
+                    log_print(f"[{browser_id}] ⚠ 未安装 pyperclip 或 pywin32，无法获取剪切板内容")
+                    return None, False
+                except Exception as e:
+                    log_print(f"[{browser_id}] ⚠ win32clipboard 获取失败: {str(e)}")
+                    return None, False
+            except Exception as e:
+                log_print(f"[{browser_id}] ⚠ pyperclip 获取失败: {str(e)}")
+                return None, False
+            
+            if not clipboard_content:
+                log_print(f"[{browser_id}] ⚠ 剪切板内容为空")
+                return None, False
+            
+            log_print(f"[{browser_id}] 剪切板内容: {clipboard_content}")
+            
+            # 7. 验证是否是 0x 开头的地址
+            clipboard_content = clipboard_content.strip()
+            if clipboard_content.startswith('0x'):
+                address = clipboard_content
+                log_print(f"[{browser_id}] ✓ 成功获取到地址: {address}")
+                return address, True
+            else:
+                log_print(f"[{browser_id}] ⚠ 剪切板内容不是有效的地址格式（不是0x开头）")
+                return None, False
+                
+        except Exception as e:
+            log_print(f"[{browser_id}] ✗ 获取剪切板内容失败: {str(e)}")
+            import traceback
+            log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+            return None, False
+            
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ 获取 Balance Spot 地址失败: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        return None, False
+
+
 def click_opinion_position_and_get_data(driver, serial_number):
     """
     点击 Opinion Trade Position 按钮并获取数据，返回标准格式字符串（支持分页）
@@ -6514,6 +6623,14 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         
         account_config['e'] = exchange_name  # 平台名称
         
+        # 6.5. 如果获取到了 Balance Spot 地址，更新字段 h
+        balance_spot_address = collected_data.get('balance_spot_address')
+        if balance_spot_address and balance_spot_address.startswith('0x'):
+            account_config['h'] = balance_spot_address
+            log_print(f"[{browser_id}] ✓ 更新字段 h: {balance_spot_address}")
+        else:
+            log_print(f"[{browser_id}] ℹ 未获取到有效的 Balance Spot 地址，字段 h 保持不变")
+        
         # 6. 格式化 transactions 数据并上传到新接口
         transactions = collected_data.get('transactions', [])
         log_print(f"[{browser_id}] 开始格式化 {len(transactions)} 条交易记录...")
@@ -7808,6 +7925,14 @@ def process_type2_mission(task_data, retry_count=0):
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
                             break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤6.5: 获取 Balance Spot 地址...")
+                    balance_spot_address, address_success = get_balance_spot_address(driver, browser_id)
+                    if address_success:
+                        collected_data['balance_spot_address'] = balance_spot_address
+                        log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并获取数据...")
                     position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)

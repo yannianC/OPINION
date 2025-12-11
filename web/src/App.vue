@@ -2229,7 +2229,7 @@ const syncConfigFromMarkets = async () => {
     
     // 1. 并行请求两个接口
     const [marketsResponse, configResponse] = await Promise.all([
-      axios.get('http://43.165.186.117:10001/api/markets'),
+      axios.get('http://opinionanalytics.xyz:10001/api/markets'),
       axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     ])
     
