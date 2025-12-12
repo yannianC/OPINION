@@ -463,12 +463,12 @@ const loadChainStats = async () => {
     console.log('[事件异常] 开始加载链上数据...')
     const response = await axios.get(CHAIN_STATS_API_URL)
     
-    if (response.data && response.data.items && Array.isArray(response.data.items)) {
+    if (response.data && response.data.markets && Array.isArray(response.data.markets)) {
       const chainDataMap = new Map()
       
       // 处理每个市场的数据，按完整title存储（包括###后面的部分）
       // 如果同一个完整title出现多次，则累加数据
-      for (const item of response.data.items) {
+      for (const item of response.data.markets) {
         if (item.title) {
           const fullTitle = item.title.trim()
           const yesTotal = parseFloat(item.yes_total || 0)

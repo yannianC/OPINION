@@ -278,6 +278,31 @@
                 {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
               </button>
             </div>
+            
+            <div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 16px;">
+              <span style="font-size: 14px;">主题数量：{{ filteredActiveConfigs.length }}</span>
+              <label style="font-size: 14px; margin-left: 8px;">每一批的个数：</label>
+              <input 
+                type="number" 
+                v-model.number="batchSize" 
+                min="1" 
+                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="输入每一批要处理的主题数量"
+              />
+              <label style="font-size: 14px; margin-left: 8px;">每一批的执行时间（分钟）：</label>
+              <input 
+                type="number" 
+                v-model.number="batchExecutionTime" 
+                min="1" 
+                style="width: 80px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="输入每一批的执行时间（分钟）"
+              />
+              <span v-if="autoHedgeRunning" style="font-size: 14px; margin-left: 8px; color: #007bff; font-weight: bold;">
+                当前执行批次：{{ currentBatchIndex + 1 }}/{{ Math.ceil(filteredActiveConfigs.length / batchSize) }}
+              </span>
+            </div>
           </div>
           
           <div class="trending-list">
@@ -1074,6 +1099,23 @@
               placeholder="输入 Trending 关键词筛选"
             />
           </div>
+          <div class="trending-filter">
+            <label>当前状态:</label>
+            <select v-model="editConfigStatusFilter" class="filter-select">
+              <option value="">全部</option>
+              <option value="已拉黑">已拉黑</option>
+              <option value="未添加">未添加</option>
+              <option value="待执行">待执行</option>
+              <option value="进行中">进行中</option>
+            </select>
+          </div>
+          <div class="trending-filter">
+            <label>所属批次:</label>
+            <select v-model="editConfigBatchFilter" class="filter-select">
+              <option value="">全部</option>
+              <option v-for="batch in availableBatches" :key="batch" :value="batch">{{ batch }}</option>
+            </select>
+          </div>
           <button type="button" class="btn btn-danger btn-sm" @click="disableAllConfigs">
             全部禁用
           </button>
@@ -1083,60 +1125,116 @@
           <button type="button" class="btn btn-secondary btn-sm" @click="hideAllConfigs">
             全部隐藏
           </button>
+          <button type="button" class="btn btn-success btn-sm" @click="showOnlyValidOrderbooks" :class="{ 'btn-active': showOnlyValid }">
+            {{ showOnlyValid ? '显示全部' : '只显示符合对冲条件的' }}
+          </button>
+          <button type="button" class="btn btn-info btn-sm" @click="fetchAllOrderbooks" :disabled="isFetchingOrderbooks">
+            {{ isFetchingOrderbooks ? '获取中...' : '获取主题订单薄' }}
+          </button>
         </div>
         <div class="config-list">
           <div v-if="filteredEditConfigList.length === 0" class="empty">{{ editConfigList.length === 0 ? '暂无配置' : '没有匹配的配置' }}</div>
-          <div v-else class="config-items">
-            <div v-for="(config, index) in filteredEditConfigList" :key="index" class="config-item">
-              <div class="config-item-header">
-                <span class="config-index">{{ index + 1 }}</span>
-                <label class="switch-label">
-                  <input 
-                    type="checkbox" 
-                    v-model="config.enabled" 
-                    class="switch-checkbox"
-                  />
-                  <span class="switch-slider"></span>
-                  <span class="switch-text">{{ config.enabled ? '启用' : '禁用' }}</span>
-                </label>
-                <label class="switch-label" style="margin-left: 15px;">
-                  <input 
-                    type="checkbox" 
-                    v-model="config.visible" 
-                    class="switch-checkbox"
-                  />
-                  <span class="switch-slider"></span>
-                  <span class="switch-text">{{ config.visible ? '显示' : '隐藏' }}</span>
-                </label>
-                <!-- <button type="button" class="btn-remove" @click="removeConfigItem(index)">删除</button> -->
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>Trending *</label>
-                  <input v-model="config.trending" type="text" required />
-                </div>
-                <!-- <div class="form-group">
-                  <label>子主题</label>
-                  <input v-model="config.trendingPart1" type="text" placeholder="选填" />
-                </div> -->
-              </div>
-              <div class="form-group">
-                <label>OP Topic ID *</label>
-                <input v-model="config.opTopicId" type="text" required />
-              </div>
-              <div class="form-group">
-                <label>Opinion Trade URL *</label>
-                <input v-model="config.opUrl" type="text" required />
-              </div>
-              <div class="form-group">
-                <label>Polymarket URL *</label>
-                <input v-model="config.polyUrl" type="text" required />
-              </div>
-              <div class="form-group">
-                <label>权重 *</label>
-                <input v-model.number="config.weight" type="number" required placeholder="请输入权重" min="0" />
-              </div>
-            </div>
+          <div v-else class="config-table-wrapper">
+            <table class="config-table">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">序号</th>
+                  <th style="width: 100px;">启用</th>
+                  <th style="width: 100px;">显示</th>
+                  <th style="width: 400px;">Trending *</th>
+                  <th style="width: 300px;">Opinion Trade URL *</th>
+                  <th style="width: 100px;">权重 *</th>
+                  <th style="width: 100px;">所属批次</th>
+                  <th style="width: 100px;">是否拉黑</th>
+                  <th style="width: 100px;">当前状态</th>
+                  <th style="width: 200px;">当前订单薄</th>
+                  <th style="width: 100px;">评分</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(config, index) in filteredEditConfigList" :key="index" class="config-table-row">
+                  <td class="config-index">{{ index + 1 }}</td>
+                  <td>
+                    <label class="switch-label">
+                      <input 
+                        type="checkbox" 
+                        v-model="config.enabled" 
+                        class="switch-checkbox"
+                      />
+                      <span class="switch-slider"></span>
+                      <span class="switch-text">{{ config.enabled ? '启用' : '禁用' }}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <label class="switch-label">
+                      <input 
+                        type="checkbox" 
+                        v-model="config.visible" 
+                        class="switch-checkbox"
+                      />
+                      <span class="switch-slider"></span>
+                      <span class="switch-text">{{ config.visible ? '显示' : '隐藏' }}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <input v-model="config.trending" type="text" required class="table-input" />
+                  </td>
+                  <td>
+                    <input v-model="config.opUrl" type="text" required class="table-input" />
+                  </td>
+                  <td>
+                    <input v-model.number="config.weight" type="number" required placeholder="权重" min="0" class="table-input" />
+                  </td>
+                  <td>
+                    <span>{{ getConfigBatch(config) || '-' }}</span>
+                  </td>
+                  <td>
+                    <label class="switch-label">
+                      <input 
+                        type="checkbox" 
+                        v-model="config.isBlacklisted" 
+                        class="switch-checkbox"
+                        @change="saveConfigBlacklist(config)"
+                      />
+                      <span class="switch-slider"></span>
+                      <span class="switch-text">{{ config.isBlacklisted ? '已拉黑' : '未拉黑' }}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <span :class="getConfigStatusClass(config)">{{ getConfigStatus(config) }}</span>
+                  </td>
+                  <td>
+                    <div v-if="config.orderbookInfo" 
+                         :class="['orderbook-display', config.orderbookInfo.meetsCondition ? 'orderbook-valid' : 'orderbook-invalid']">
+                      <div class="orderbook-line">
+                        <span class="orderbook-label">先挂:</span>
+                        <span>{{ config.orderbookInfo.firstSide }}</span>
+                      </div>
+                      <div class="orderbook-line">
+                        <span class="orderbook-label">买一:</span>
+                        <span>{{ config.orderbookInfo.price1.toFixed(2) }}¢</span>
+                        <span class="orderbook-depth">({{ config.orderbookInfo.depth1.toFixed(2) }})</span>
+                      </div>
+                      <div class="orderbook-line">
+                        <span class="orderbook-label">卖一:</span>
+                        <span>{{ config.orderbookInfo.price2.toFixed(2) }}¢</span>
+                        <span class="orderbook-depth">({{ config.orderbookInfo.depth2.toFixed(2) }})</span>
+                      </div>
+                    </div>
+                    <div v-else class="orderbook-empty">未获取</div>
+                  </td>
+                  <td>
+                    <input 
+                      v-model.number="config.rating" 
+                      type="number" 
+                      placeholder="评分" 
+                      class="table-input" 
+                      @blur="saveConfigRating(config)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
         <div class="modal-actions">
@@ -1331,10 +1429,14 @@ const showAddConfig = ref(false)
 const showEditConfig = ref(false)
 const editConfigList = ref([])
 const originalConfigList = ref([])  // 保存原始配置数据，用于比较是否修改
+const isFetchingOrderbooks = ref(false)  // 是否正在获取订单薄
 
 // 配置筛选
 const autoHedgeFilter = ref('')  // 自动对冲功能块的筛选
 const editConfigFilter = ref('')  // 修改配置弹窗的筛选
+const showOnlyValid = ref(false)  // 是否只显示符合对冲条件的
+const editConfigStatusFilter = ref('')  // 修改配置弹窗的状态筛选
+const editConfigBatchFilter = ref('')  // 修改配置弹窗的批次筛选
 
 // 新配置数据
 const newConfig = reactive({
@@ -1377,6 +1479,12 @@ const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
+
+// 分批执行相关
+const batchSize = ref(10)  // 每一批的个数
+const batchExecutionTime = ref(1)  // 每一批的执行时间（分钟），默认1分钟
+const currentBatchIndex = ref(0)  // 当前执行批次索引
+const batchTimer = ref(null)  // 批次定时器
 
 // 订单薄API配置
 const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
@@ -2464,6 +2572,17 @@ const showEditConfigDialog = () => {
   // 加载显示状态
   editConfigList.value = loadConfigVisibleStatus(baseList)
   
+  // 初始化订单薄信息字段
+  editConfigList.value.forEach(config => {
+    config.orderbookInfo = null
+  })
+  
+  // 加载评分数据
+  loadConfigRatings()
+  
+  // 加载拉黑状态
+  // loadConfigBlacklist()
+  
   // 保存原始配置数据的副本，用于比较是否修改
   originalConfigList.value = JSON.parse(JSON.stringify(editConfigList.value))
   
@@ -2477,6 +2596,9 @@ const closeEditConfigDialog = () => {
   showEditConfig.value = false
   // 关闭时清空筛选
   editConfigFilter.value = ''
+  editConfigStatusFilter.value = ''
+  editConfigBatchFilter.value = ''
+  showOnlyValid.value = false
   // 清空原始配置数据
   originalConfigList.value = []
 }
@@ -2518,11 +2640,329 @@ const hideAllConfigs = () => {
 }
 
 /**
+ * 只显示符合对冲条件的配置
+ */
+const showOnlyValidOrderbooks = () => {
+  showOnlyValid.value = !showOnlyValid.value
+}
+
+/**
  * 删除配置项
  */
 const removeConfigItem = (index) => {
   if (confirm('确定要删除这个配置吗？')) {
     editConfigList.value.splice(index, 1)
+  }
+}
+
+/**
+ * 加载配置评分数据
+ */
+const loadConfigRatings = () => {
+  try {
+    const ratingsStr = localStorage.getItem('configRatings')
+    if (ratingsStr) {
+      const ratings = JSON.parse(ratingsStr)
+      editConfigList.value.forEach(config => {
+        if (ratings[config.trending]) {
+          config.rating = ratings[config.trending]
+        }
+      })
+    }
+  } catch (error) {
+    console.error('加载评分数据失败:', error)
+  }
+}
+
+/**
+ * 保存配置评分
+ */
+const saveConfigRating = (config) => {
+  try {
+    const ratingsStr = localStorage.getItem('configRatings')
+    const ratings = ratingsStr ? JSON.parse(ratingsStr) : {}
+    
+    if (config.rating !== undefined && config.rating !== null && config.rating !== '') {
+      ratings[config.trending] = config.rating
+    } else {
+      delete ratings[config.trending]
+    }
+    
+    localStorage.setItem('configRatings', JSON.stringify(ratings))
+  } catch (error) {
+    console.error('保存评分数据失败:', error)
+  }
+}
+
+/**
+ * 根据订单薄数据计算评分
+ */
+const calculateRating = (orderbookInfo) => {
+  if (!orderbookInfo) {
+    return null
+  }
+  
+  const diff = orderbookInfo.diff
+  
+  let baseRating
+  
+  // 价差 >= 0.3：10分
+  if (diff >= 0.3) {
+    baseRating = 10
+  }
+  // 价差 = 0.2：9分
+  else if (Math.abs(diff - 0.2) < 0.01) {
+    baseRating = 9
+  }
+  // 价差 <= 0.11：根据深度评分
+  else if (diff <= 0.11) {
+    // 使用先挂方的深度（开仓用卖一深度depth2，平仓用买一深度depth1）
+    // 为了简化，使用depth1（买一深度）
+    const depth = orderbookInfo.depth1
+    
+    if (depth < 100) {
+      baseRating = 7
+    } else if (depth < 500) {
+      baseRating = 6
+    } else if (depth < 1000) {
+      baseRating = 5
+    } else if (depth < 2000) {
+      baseRating = 4
+    } else if (depth < 5000) {
+      baseRating = 3
+    } else if (depth < 10000) {
+      baseRating = 2
+    } else {
+      baseRating = 1
+    }
+  }
+  // 其他情况（0.11 < diff < 0.2）：根据深度评分
+  else {
+    const depth = orderbookInfo.depth1
+    
+    if (depth < 100) {
+      baseRating = 7
+    } else if (depth < 500) {
+      baseRating = 6
+    } else if (depth < 1000) {
+      baseRating = 5
+    } else if (depth < 2000) {
+      baseRating = 4
+    } else if (depth < 5000) {
+      baseRating = 3
+    } else if (depth < 10000) {
+      baseRating = 2
+    } else {
+      baseRating = 1
+    }
+  }
+  
+  // 检查订单薄的数量：如果两边都小于3组，则扣4分
+  const yesBidsCount = orderbookInfo.yesBidsCount || 0
+  const yesAsksCount = orderbookInfo.yesAsksCount || 0
+  const noBidsCount = orderbookInfo.noBidsCount || 0
+  const noAsksCount = orderbookInfo.noAsksCount || 0
+  
+  // 判断YES方和NO方是否都小于3组
+  const yesLessThan3 = yesBidsCount < 3 && yesAsksCount < 3
+  const noLessThan3 = noBidsCount < 3 && noAsksCount < 3
+  
+  // 如果两边都小于3组，扣4分
+  if (yesLessThan3 && noLessThan3) {
+    baseRating = Math.max(1, baseRating - 4)  // 最低为1
+  }
+  
+  return baseRating
+}
+
+/**
+ * 计算配置所属批次
+ */
+const getConfigBatch = (config) => {
+  // 只有启用和显示都开启的配置才会在任务列表中
+  if (!config.enabled || !config.visible) {
+    return null
+  }
+  
+  // 需要检查是否有tokenId
+  if (!config.trendingPart1 || !config.trendingPart2) {
+    return null
+  }
+  
+  // 获取所有符合条件的配置（与activeConfigs逻辑一致）
+  const validConfigs = activeConfigs.value.filter(c => 
+    c.trendingPart1 && c.trendingPart2
+  )
+  
+  // 找到当前配置在列表中的索引
+  const configIndex = validConfigs.findIndex(c => c.id === config.id || c.trending === config.trending)
+  
+  if (configIndex === -1) {
+    return null
+  }
+  
+  // 计算批次（从1开始）
+  const batch = Math.floor(configIndex / batchSize.value) + 1
+  const totalBatches = Math.ceil(validConfigs.length / batchSize.value)
+  
+  return `${batch}/${totalBatches}`
+}
+
+/**
+ * 获取配置状态
+ */
+const getConfigStatus = (config) => {
+  // 已拉黑
+  if (config.isBlacklisted) {
+    return '已拉黑'
+  }
+  
+  // 未添加：启用和显示有任意一个没有开启
+  if (!config.enabled || !config.visible) {
+    return '未添加'
+  }
+  
+  // 需要检查是否有tokenId
+  if (!config.trendingPart1 || !config.trendingPart2) {
+    return '未添加'
+  }
+  
+  // 检查是否在任务列表中
+  const validConfigs = activeConfigs.value.filter(c => 
+    c.trendingPart1 && c.trendingPart2
+  )
+  
+  const configIndex = validConfigs.findIndex(c => c.id === config.id || c.trending === config.trending)
+  
+  if (configIndex === -1) {
+    return '未添加'
+  }
+  
+  // 计算批次索引（从0开始）
+  const batchIndex = Math.floor(configIndex / batchSize.value)
+  
+  // 如果自动分配没有运行，返回待执行
+  if (!autoHedgeRunning.value) {
+    return '待执行'
+  }
+  
+  // 检查是否是当前运行的批次
+  if (batchIndex === currentBatchIndex.value) {
+    return '进行中'
+  }
+  
+  return '待执行'
+}
+
+/**
+ * 获取配置状态样式类
+ */
+const getConfigStatusClass = (config) => {
+  const status = getConfigStatus(config)
+  const classMap = {
+    '未添加': 'status-pending',
+    '待执行': 'status-waiting',
+    '进行中': 'status-running',
+    '已拉黑': 'status-blacklisted'
+  }
+  return classMap[status] || ''
+}
+
+/**
+ * 获取所有主题的订单薄数据
+ */
+const fetchAllOrderbooks = async () => {
+  if (isFetchingOrderbooks.value) return
+  
+  isFetchingOrderbooks.value = true
+  showToast('开始获取所有主题的订单薄数据...', 'info')
+  
+  try {
+    // 筛选出有tokenId的配置
+    const validConfigs = filteredEditConfigList.value.filter(c => c.trendingPart1 && c.trendingPart2)
+    
+    if (validConfigs.length === 0) {
+      showToast('没有配置tokenId的主题', 'warning')
+      return
+    }
+    
+    console.log(`开始获取 ${validConfigs.length} 个主题的订单薄数据`)
+    
+    let successCount = 0
+    let failCount = 0
+    
+    for (let i = 0; i < validConfigs.length; i++) {
+      const config = validConfigs[i]
+      
+      try {
+        showToast(`正在获取 ${i + 1}/${validConfigs.length}: ${config.trending.substring(0, 30)}...`, 'info')
+        
+        // 使用fetchOrderbookBasic获取基本订单薄数据（不进行条件检查）
+        const basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+        
+        if (basicInfo) {
+          // 尝试使用parseOrderbookData进行完整检查，判断是否符合条件
+          let meetsCondition = false
+          try {
+            const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+            if (priceInfo) {
+              meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+            }
+          } catch (error) {
+            // 如果parseOrderbookData失败，说明不符合条件，但依然显示基本数据
+            meetsCondition = false
+            console.log(`⚠️ ${config.trending}: 不符合完整条件，但显示基本数据`)
+          }
+          
+          // 计算自动评分
+          const rating = calculateRating(basicInfo)
+          
+          // 保存订单薄信息到config（无论是否符合条件都显示）
+          config.orderbookInfo = {
+            firstSide: basicInfo.firstSide,
+            price1: basicInfo.price1,
+            price2: basicInfo.price2,
+            depth1: basicInfo.depth1,
+            depth2: basicInfo.depth2,
+            diff: basicInfo.diff,
+            meetsCondition: meetsCondition,
+            yesBidsCount: basicInfo.yesBidsCount,
+            yesAsksCount: basicInfo.yesAsksCount,
+            noBidsCount: basicInfo.noBidsCount,
+            noAsksCount: basicInfo.noAsksCount
+          }
+          
+          // 保存自动计算的评分
+          if (rating !== null) {
+            config.rating = rating
+            saveConfigRating(config)
+          }
+          
+          successCount++
+          console.log(`✅ ${config.trending}: 获取成功，符合条件: ${meetsCondition}, 评分: ${rating}`)
+        } else {
+          config.orderbookInfo = null
+          failCount++
+          console.log(`❌ ${config.trending}: 获取失败`)
+        }
+      } catch (error) {
+        config.orderbookInfo = null
+        failCount++
+        console.error(`获取 ${config.trending} 订单薄失败:`, error)
+      }
+      
+      // 添加延迟，避免请求过快
+      if (i < validConfigs.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+    }
+    
+    showToast(`订单薄获取完成: 成功 ${successCount} 个，失败 ${failCount} 个`, 'success')
+  } catch (error) {
+    console.error('获取订单薄数据失败:', error)
+    showToast(`获取失败: ${error.message}`, 'error')
+  } finally {
+    isFetchingOrderbooks.value = false
   }
 }
 
@@ -2646,18 +3086,61 @@ const filteredActiveConfigs = computed(() => {
 })
 
 /**
+ * 获取所有可用的批次列表（用于下拉选择）
+ */
+const availableBatches = computed(() => {
+  const batches = new Set()
+  editConfigList.value.forEach(config => {
+    const batch = getConfigBatch(config)
+    if (batch) {
+      batches.add(batch)
+    }
+  })
+  return Array.from(batches).sort((a, b) => {
+    // 按批次排序，例如 "1/5" < "2/5"
+    const [aNum] = a.split('/').map(Number)
+    const [bNum] = b.split('/').map(Number)
+    return aNum - bNum
+  })
+})
+
+/**
  * 筛选后的编辑配置列表（用于修改配置弹窗显示）
  */
 const filteredEditConfigList = computed(() => {
-  if (!editConfigFilter.value || !editConfigFilter.value.trim()) {
-    return editConfigList.value
+  let result = editConfigList.value
+  
+  // 先根据关键词筛选
+  if (editConfigFilter.value && editConfigFilter.value.trim()) {
+    const keyword = editConfigFilter.value.trim().toLowerCase()
+    result = result.filter(config => {
+      const trending = (config.trending || '').toLowerCase()
+      return trending.includes(keyword)
+    })
   }
   
-  const keyword = editConfigFilter.value.trim().toLowerCase()
-  return editConfigList.value.filter(config => {
-    const trending = (config.trending || '').toLowerCase()
-    return trending.includes(keyword)
-  })
+  // 根据当前状态筛选
+  if (editConfigStatusFilter.value) {
+    result = result.filter(config => {
+      return getConfigStatus(config) === editConfigStatusFilter.value
+    })
+  }
+  
+  // 根据所属批次筛选
+  if (editConfigBatchFilter.value) {
+    result = result.filter(config => {
+      return getConfigBatch(config) === editConfigBatchFilter.value
+    })
+  }
+  
+  // 如果开启了"只显示符合对冲条件的"筛选
+  if (showOnlyValid.value) {
+    result = result.filter(config => {
+      return config.orderbookInfo && config.orderbookInfo.meetsCondition === true
+    })
+  }
+  
+  return result
 })
 
 /**
@@ -2683,9 +3166,14 @@ const updateActiveConfigs = () => {
   // 先加载显示状态
   const configsWithVisible = loadConfigVisibleStatus(configList.value)
   
+  // 加载拉黑状态
+  const blacklistStr = localStorage.getItem('configBlacklist')
+  const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
+  
   activeConfigs.value = configsWithVisible
     .filter(config => config.isOpen === 1 || config.enabled === true)  // 启用的配置
     .filter(config => config.visible !== false)  // 显示开关打开的配置
+    .filter(config => !blacklist[config.trending])  // 过滤掉拉黑的配置
     .map(config => ({
       ...config,
       orderbookData: config.orderbookData || null,  // 订单薄数据
@@ -2727,16 +3215,22 @@ const startAutoHedge = () => {
     return
   }
   
+  // 验证批次设置
+  if (batchSize.value < 1) {
+    alert('每一批的个数必须大于0')
+    return
+  }
+  if (batchExecutionTime.value < 1) {
+    alert('每一批的执行时间必须大于0')
+    return
+  }
+  
   autoHedgeRunning.value = true
-  console.log('开始自动对冲')
+  currentBatchIndex.value = 0  // 重置批次索引
+  console.log('开始自动对冲（分批执行模式）')
   
-  // 立即执行一次
-  executeAutoHedgeTasks()
-  
-  // 每10秒检查一次任务状态
-  autoHedgeInterval.value = setInterval(() => {
-    executeAutoHedgeTasks()
-  }, 10000)
+  // 立即执行第一批
+  executeBatch()
 }
 
 /**
@@ -2744,9 +3238,15 @@ const startAutoHedge = () => {
  */
 const stopAutoHedge = () => {
   autoHedgeRunning.value = false
+  
+  // 清除定时器
   if (autoHedgeInterval.value) {
     clearInterval(autoHedgeInterval.value)
     autoHedgeInterval.value = null
+  }
+  if (batchTimer.value) {
+    clearTimeout(batchTimer.value)
+    batchTimer.value = null
   }
   
   // 清除所有配置的状态
@@ -2758,7 +3258,209 @@ const stopAutoHedge = () => {
     console.log(`配置 ${config.id} - 清除状态`)
   }
   
+  currentBatchIndex.value = 0
   console.log('停止自动对冲')
+}
+
+/**
+ * 执行当前批次
+ */
+const executeBatch = async () => {
+  if (!autoHedgeRunning.value) {
+    return
+  }
+  
+  // 获取当前批次的主题列表
+  const validConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+  const totalBatches = Math.ceil(validConfigs.length / batchSize.value)
+  
+  if (totalBatches === 0) {
+    console.log('没有有效的主题配置')
+    return
+  }
+  
+  // 计算当前批次的起始和结束索引
+  const startIndex = currentBatchIndex.value * batchSize.value
+  const endIndex = Math.min(startIndex + batchSize.value, validConfigs.length)
+  const currentBatchConfigs = validConfigs.slice(startIndex, endIndex)
+  
+  console.log(`开始执行第 ${currentBatchIndex.value + 1}/${totalBatches} 批，包含 ${currentBatchConfigs.length} 个主题`)
+  
+  // 记录批次开始时间
+  const batchStartTime = Date.now()
+  
+  // 执行当前批次的任务
+  await executeAutoHedgeTasksForBatch(currentBatchConfigs)
+  
+  // 计算剩余时间（将分钟转换为毫秒）
+  const elapsed = Date.now() - batchStartTime
+  const remainingTime = Math.max(0, batchExecutionTime.value * 60 * 1000 - elapsed)
+  
+  if (remainingTime > 0) {
+    console.log(`批次执行完成，等待 ${remainingTime}ms 后切换到下一批`)
+    batchTimer.value = setTimeout(() => {
+      moveToNextBatch()
+    }, remainingTime)
+  } else {
+    // 如果已经超时，立即切换到下一批
+    moveToNextBatch()
+  }
+}
+
+/**
+ * 切换到下一批
+ */
+const moveToNextBatch = () => {
+  if (!autoHedgeRunning.value) {
+    return
+  }
+  
+  const validConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+  const totalBatches = Math.ceil(validConfigs.length / batchSize.value)
+  
+  if (totalBatches === 0) {
+    console.log('没有有效的主题配置，停止执行')
+    return
+  }
+  
+  // 移动到下一批（循环执行）
+  currentBatchIndex.value = (currentBatchIndex.value + 1) % totalBatches
+  
+  console.log(`切换到第 ${currentBatchIndex.value + 1}/${totalBatches} 批`)
+  
+  // 执行下一批
+  executeBatch()
+}
+
+/**
+ * 执行指定批次的主题任务
+ */
+const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
+  console.log(`执行批次任务，包含 ${batchConfigs.length} 个主题`)
+  
+  // 检查是否可以下发新的对冲任务
+  const canStartNewHedge = !(hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0)
+  if (!canStartNewHedge) {
+    console.log('对冲数量已满或总数量为0，不下发新对冲任务')
+  }
+  
+  for (const config of batchConfigs) {
+    try {
+      // 检查该主题是否正在执行对冲
+      if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
+        const startTime = new Date(config.currentHedge.startTime)
+        const now = new Date()
+        const elapsed = (now - startTime) / 1000 / 60
+        
+        if (elapsed >= 20) {
+          console.log(`配置 ${config.id} 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
+          config.currentHedge.finalStatus = 'timeout'
+          finishHedge(config, config.currentHedge)
+          // 清空错误信息和无法对冲时间
+          config.errorMessage = null
+          config.noHedgeSince = null
+          // 继续执行，可以开始新的对冲
+        } else {
+          console.log(`配置 ${config.id} 正在执行对冲（${elapsed.toFixed(1)}/20分钟），跳过订单薄请求`)
+          continue
+        }
+      }
+      
+      // 检查是否正在请求中
+      if (config.isFetching) {
+        console.log(`配置 ${config.id} - 正在请求订单薄中，跳过`)
+        continue
+      }
+      
+      // 检查是否需要请求订单薄
+      const now = Date.now()
+      const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
+      
+      if (!shouldFetch) {
+        const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
+        console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
+        continue
+      }
+      
+      // 开始请求订单薄
+      config.isFetching = true
+      config.lastRequestTime = now
+      
+      try {
+        console.log(`配置 ${config.id} - 开始请求订单薄...`)
+        
+        // 解析订单薄数据
+        const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        
+        if (!priceInfo) {
+          throw new Error('解析订单薄数据失败')
+        }
+        
+        // 保存订单薄数据
+        config.orderbookData = priceInfo
+        config.retryCount = 0  // 重置重试次数
+        config.errorMessage = null  // 清除错误信息
+        
+        console.log(`配置 ${config.id} - 订单薄数据:`, {
+          先挂方: priceInfo.firstSide,
+          先挂价格: priceInfo.price1,
+          后挂价格: priceInfo.price2,
+          价差: priceInfo.diff
+        })
+        
+        // 只有在可以开始新对冲时才判断是否执行对冲
+        if (canStartNewHedge) {
+          // 检查是否满足对冲条件
+          if (checkOrderbookHedgeCondition(priceInfo)) {
+            console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
+            
+            // 清空无法对冲时间
+            config.noHedgeSince = null
+            
+            // 执行对冲
+            await executeHedgeFromOrderbook(config, priceInfo)
+            
+            // 记录对冲时间
+            config.lastHedgeTime = Date.now()
+          } else {
+            console.log(`配置 ${config.id} - 不满足对冲条件`)
+            
+            // 记录开始无法对冲的时间
+            if (!config.noHedgeSince) {
+              config.noHedgeSince = Date.now()
+            } else {
+              // 检查是否超过5分钟都无法对冲
+              const noHedgeElapsed = (Date.now() - config.noHedgeSince) / 1000 / 60
+              if (noHedgeElapsed >= 5) {
+                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲`
+                console.warn(`配置 ${config.id} - ${config.errorMessage}`)
+              }
+            }
+          }
+        }
+        
+      } catch (error) {
+        console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
+        config.retryCount++
+        
+        // 随机1-3秒后重试
+        const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
+        console.log(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
+        
+        setTimeout(() => {
+          config.isFetching = false
+          config.lastRequestTime = Date.now() - 20000  // 立即允许重试
+        }, retryDelay)
+        
+        continue
+      } finally {
+        config.isFetching = false
+      }
+      
+    } catch (error) {
+      console.error(`配置 ${config.id} - 处理失败:`, error)
+    }
+  }
 }
 
 /**
@@ -2783,6 +3485,96 @@ const fetchOrderbook = async (tokenId) => {
   } catch (error) {
     console.error('获取订单薄失败:', error)
     throw error
+  }
+}
+
+/**
+ * 获取订单薄基本数据（不进行条件检查，用于显示）
+ */
+const fetchOrderbookBasic = async (config, isClose) => {
+  try {
+    // 获取yes和no的订单薄数据
+    const [yesOrderbook, noOrderbook] = await Promise.all([
+      fetchOrderbook(config.trendingPart1),
+      fetchOrderbook(config.trendingPart2)
+    ])
+    
+    // 获取YES的买一价和卖一价
+    const yesBids = yesOrderbook.bids || []
+    const yesAsks = yesOrderbook.asks || []
+    const noBids = noOrderbook.bids || []
+    const noAsks = noOrderbook.asks || []
+    
+    // 基本数据检查
+    if (yesBids.length === 0 || yesAsks.length === 0 || 
+        noBids.length === 0 || noAsks.length === 0) {
+      return null
+    }
+    
+    // 对 bids 和 asks 进行排序（确保顺序正确）
+    yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    
+    // 获取YES方的买一和卖一
+    const yesBid = yesBids[0]
+    const yesAsk = yesAsks[0]
+    
+    // 获取NO方的买一和卖一  
+    const noBid = noBids[0]
+    const noAsk = noAsks[0]
+    
+    // 转换为百分比格式（API返回的是小数，需要乘以100）
+    const yesBidPrice = parseFloat(yesBid.price) * 100
+    const yesAskPrice = parseFloat(yesAsk.price) * 100
+    const noBidPrice = parseFloat(noBid.price) * 100
+    const noAskPrice = parseFloat(noAsk.price) * 100
+    
+    const yesBidDepth = parseFloat(yesBid.size)
+    const yesAskDepth = parseFloat(yesAsk.size)
+    const noBidDepth = parseFloat(noBid.size)
+    const noAskDepth = parseFloat(noAsk.size)
+    
+    // 确定先挂方：根据开仓/平仓判断
+    let firstSide, price1, price2, depth1, depth2
+    
+    if (isClose) {
+      // 平仓：买一价更高的为先挂方
+      firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
+    } else {
+      // 开仓：卖一价更高的为先挂方
+      firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
+    }
+    
+    // 获取先挂方的买一价和卖一价
+    if (firstSide === 'YES') {
+      price1 = yesBidPrice  // 先挂方的买一价
+      price2 = yesAskPrice  // 先挂方的卖一价
+      depth1 = yesBidDepth  // 先挂方的买一深度
+      depth2 = yesAskDepth  // 先挂方的卖一深度
+    } else {
+      price1 = noBidPrice   // 先挂方的买一价
+      price2 = noAskPrice   // 先挂方的卖一价
+      depth1 = noBidDepth   // 先挂方的买一深度
+      depth2 = noAskDepth   // 先挂方的卖一深度
+    }
+    
+    return {
+      firstSide,
+      price1,           // 先挂方的买一价
+      price2,           // 先挂方的卖一价
+      depth1,           // 先挂方的买一深度
+      depth2,           // 先挂方的卖一深度
+      diff: Math.abs(price1 - price2),  // 先挂方买卖价差
+      yesBidsCount: yesBids.length,     // YES方的买单组数
+      yesAsksCount: yesAsks.length,     // YES方的卖单组数
+      noBidsCount: noBids.length,        // NO方的买单组数
+      noAsksCount: noAsks.length         // NO方的卖单组数
+    }
+  } catch (error) {
+    console.error('获取订单薄基本数据失败:', error)
+    return null
   }
 }
 
@@ -6237,6 +7029,13 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
 }
 
+.btn-active {
+  background: #28a745 !important;
+  border-color: #28a745 !important;
+  box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.5);
+  font-weight: bold;
+}
+
 /* 单选框样式 */
 .radio-group {
   display: flex;
@@ -6339,6 +7138,16 @@ onUnmounted(() => {
 .status-running {
   background: #d1ecf1;
   color: #0c5460;
+}
+
+.status-waiting {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-blacklisted {
+  background: #f8d7da;
+  color: #721c24;
 }
 
 .status-completed {
@@ -6506,7 +7315,7 @@ onUnmounted(() => {
 }
 
 .modal-content.large {
-  max-width: 900px;
+  max-width: 2000px;
 }
 
 .modal-content.extra-large {
@@ -6595,10 +7404,148 @@ onUnmounted(() => {
   border-color: #007bff;
 }
 
+.config-filter-toolbar .filter-select {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 150px;
+  background: white;
+  cursor: pointer;
+}
+
+.config-filter-toolbar .filter-select:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
 .config-list {
   padding: 2rem;
   max-height: 60vh;
   overflow-y: auto;
+}
+
+.config-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.config-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.config-table thead {
+  background: #f8f9fa;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.config-table th {
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #dee2e6;
+  font-size: 14px;
+}
+
+.config-table tbody tr {
+  border-bottom: 1px solid #e0e0e0;
+  transition: background-color 0.2s;
+}
+
+.config-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+.config-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.config-table td {
+  padding: 12px;
+  vertical-align: middle;
+  font-size: 14px;
+}
+
+.config-table td .switch-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.orderbook-display {
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.orderbook-valid {
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  color: #155724;
+}
+
+.orderbook-invalid {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.orderbook-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.orderbook-line:last-child {
+  margin-bottom: 0;
+}
+
+.orderbook-label {
+  font-weight: 600;
+  min-width: 35px;
+}
+
+.orderbook-depth {
+  color: #666;
+  font-size: 11px;
+}
+
+.orderbook-empty {
+  color: #999;
+  font-size: 12px;
+  text-align: center;
+  padding: 8px;
+}
+
+.config-table-row .config-index {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #667eea;
+  text-align: center;
+}
+
+.table-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.table-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
 .config-items {
@@ -6618,12 +7565,6 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
-}
-
-.config-index {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #667eea;
 }
 
 .switch-label-row {

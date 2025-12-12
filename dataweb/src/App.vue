@@ -250,15 +250,12 @@
 
       <el-table-column label="地址 (h)" width="300" align="center">
         <template #default="scope">
-          <span 
-            v-if="scope.row.h" 
-            class="address-text" 
-            :title="scope.row.h"
-            @click="copyAddress(scope.row.h)"
-          >
-            {{ scope.row.h }}
-          </span>
-          <span v-else class="empty-text">暂无地址</span>
+          <el-input 
+            v-model="scope.row.h" 
+            placeholder="地址"
+            size="small"
+            @blur="saveRowData(scope.row)"
+          />
         </template>
       </el-table-column>
 
