@@ -2,6 +2,7 @@ import time
 import random
 import requests
 import threading
+import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from selenium import webdriver
@@ -24,9 +25,39 @@ def log_print(*args, **kwargs):
     print(f"[{timestamp}]", *args, **kwargs)
 
 
+def read_computer_group():
+    """
+    从同级目录下的 COMPUTER.txt 文件读取电脑组号
+    
+    Returns:
+        str: 电脑组号，如果读取失败则返回 "0"
+    """
+    try:
+        # 获取脚本所在目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        computer_file = os.path.join(script_dir, "COMPUTER.txt")
+        
+        if os.path.exists(computer_file):
+            with open(computer_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:
+                    log_print(f"[系统] 从 COMPUTER.txt 读取到电脑组: {content}")
+                    return content
+                else:
+                    log_print(f"[系统] ⚠ COMPUTER.txt 文件为空，使用默认电脑组: 0")
+                    return "0"
+        else:
+            log_print(f"[系统] ⚠ 未找到 COMPUTER.txt 文件，使用默认电脑组: 0")
+            return "0"
+    except Exception as e:
+        log_print(f"[系统] ⚠ 读取 COMPUTER.txt 失败: {str(e)}，使用默认电脑组: 0")
+        return "0"
+
+
 def get_browser_password(browser_id):
     """
     根据浏览器ID获取对应的密码
+    优先级：特定浏览器密码 > 电脑组默认密码
     
     Args:
         browser_id: 浏览器编号（int 或 str）
@@ -35,52 +66,134 @@ def get_browser_password(browser_id):
         str: 对应的密码
     """
     browser_id_str = str(browser_id)
-    else_password = None
     
-    # 遍历密码映射
-    for password, browser_ids_str in PASSWORD_MAP.items():
-        # 检查是否是 "else" 默认配置
-        if browser_ids_str.strip().lower() == "else":
-            else_password = password
-            continue
-        
-        # 解析浏览器ID列表
-        browser_ids = [bid.strip() for bid in browser_ids_str.split(',')]
-        
-        # 检查当前浏览器ID是否在列表中
-        if browser_id_str in browser_ids:
-            log_print(f"[{browser_id}] 使用特定密码配置")
-            return password
+    # 首先检查是否有特定浏览器ID的密码配置
+    if browser_id_str in SPECIFIC_BROWSER_PASSWORDS:
+        password = SPECIFIC_BROWSER_PASSWORDS[browser_id_str]
+        log_print(f"[{browser_id}] 使用特定浏览器密码配置")
+        return password
     
-    # 如果没有匹配，使用 "else" 密码
-    if else_password:
-        log_print(f"[{browser_id}] 使用 else 默认密码")
-        return else_password
+    # 如果没有特定配置，使用电脑组对应的默认密码
+    group_password = GROUP_PASSWORDS.get(COMPUTER_GROUP)
+    if group_password:
+        log_print(f"[{browser_id}] 使用电脑组 {COMPUTER_GROUP} 的默认密码")
+        return group_password
     
-    # 最后使用全局默认密码
-    log_print(f"[{browser_id}] 使用全局默认密码")
-    return PWD
+    # 如果电脑组也没有配置，使用全局默认密码
+    log_print(f"[{browser_id}] ⚠ 电脑组 {COMPUTER_GROUP} 未配置密码，使用全局默认密码")
+    return DEFAULT_PASSWORD
 
 
-# 电脑组
-COMPUTER_GROUP = "0"
+# ============================================================================
+# 配置区域
+# ============================================================================
 
-# 密码配置（密码 -> 浏览器ID列表）
-# 格式：密码: "浏览器ID1,浏览器ID2,浏览器ID3,..."
-# 特殊值 "else" 表示其他所有未匹配的浏览器使用此密码
-PASSWORD_MAP = {
-    # 示例 1：为特定浏览器配置不同密码
-    # "ywj000805*": "11,22,33,44,5566,77,88",
-    # "tnpxxx": "1,2,3,4,5,6",
-    # "another_password": "100,200,300",
+# 电脑组（从 COMPUTER.txt 文件读取）
+COMPUTER_GROUP = read_computer_group()
+
+# 特定浏览器ID的密码配置
+# 格式：浏览器ID: 密码
+# 这些浏览器将使用指定的密码，不受电脑组影响
+SPECIFIC_BROWSER_PASSWORDS = {
+    # 电脑组23的特定浏览器配置
+    "1": "mj@w2ndJ*kX0g8!rnsf",  # 电脑组23的浏览器1,2,3,4
+    "2": "mj@w2ndJ*kX0g8!rnsf",
+    "3": "mj@w2ndJ*kX0g8!rnsf",
+    "4": "mj@w2ndJ*kX0g8!rnsf",
     
-    # 示例 2：所有浏览器使用同一个密码（此时 PWD 不会被使用）
-    # "your_password": "else",
+    # 电脑组9的特定浏览器配置
+    "941": "cx142359.",  # 电脑组9的浏览器941-1000
+    "942": "cx142359.",
+    "943": "cx142359.",
+    "944": "cx142359.",
+    "945": "cx142359.",
+    "946": "cx142359.",
+    "947": "cx142359.",
+    "948": "cx142359.",
+    "949": "cx142359.",
+    "950": "cx142359.",
+    "951": "cx142359.",
+    "952": "cx142359.",
+    "953": "cx142359.",
+    "954": "cx142359.",
+    "955": "cx142359.",
+    "956": "cx142359.",
+    "957": "cx142359.",
+    "958": "cx142359.",
+    "959": "cx142359.",
+    "960": "cx142359.",
+    "961": "cx142359.",
+    "962": "cx142359.",
+    "963": "cx142359.",
+    "964": "cx142359.",
+    "965": "cx142359.",
+    "966": "cx142359.",
+    "967": "cx142359.",
+    "968": "cx142359.",
+    "969": "cx142359.",
+    "970": "cx142359.",
+    "971": "cx142359.",
+    "972": "cx142359.",
+    "973": "cx142359.",
+    "974": "cx142359.",
+    "975": "cx142359.",
+    "976": "cx142359.",
+    "977": "cx142359.",
+    "978": "cx142359.",
+    "979": "cx142359.",
+    "980": "cx142359.",
+    "981": "cx142359.",
+    "982": "cx142359.",
+    "983": "cx142359.",
+    "984": "cx142359.",
+    "985": "cx142359.",
+    "986": "cx142359.",
+    "987": "cx142359.",
+    "988": "cx142359.",
+    "989": "cx142359.",
+    "990": "cx142359.",
+    "991": "cx142359.",
+    "992": "cx142359.",
+    "993": "cx142359.",
+    "994": "cx142359.",
+    "995": "cx142359.",
+    "996": "cx142359.",
+    "997": "cx142359.",
+    "998": "cx142359.",
+    "999": "cx142359.",
+    "1000": "cx142359.",
 }
 
-# 默认密码（仅当 PASSWORD_MAP 为空或没有 "else" 配置时使用）
-# 如果您使用了 PASSWORD_MAP = {"your_password": "else"}，则此值不会被使用
-PWD = "Ok123456"
+# 电脑组对应的默认密码配置
+# 格式：电脑组号: 密码
+# 除了在 SPECIFIC_BROWSER_PASSWORDS 中指定的浏览器外，其他浏览器使用对应电脑组的密码
+GROUP_PASSWORDS = {
+    "0": "Ok123456",  # 电脑组0的密码
+    "1": "qwer1234",  # 电脑组1的密码
+    "2": "ywj000805*",  # 电脑组2的密码
+    "3": "Qrfv*Fjh87gg",  # 电脑组3的密码
+    "4": "@#nsgaSBF224",  # 电脑组4的密码
+    "5": "Qsst-455fgdf8",  # 电脑组5的密码
+    "6": "zxcvbnm123#",  # 电脑组6的密码
+    "7": "cx142359.",  # 电脑组7的密码
+    "8": "ywj000805*",  # 电脑组8的密码
+    "9": "Qwer009qaz`",  # 电脑组9的密码（浏览器941-1000使用特定密码，其他使用此密码）
+    "10": "yhCHG^&145",
+    "11": "jhJ89891",  # 电脑组11的密码
+    "12": "Hhgj*liu-khHy5",  # 电脑组12的密码
+    "13": "shdjjeG@^68Jhg",  # 电脑组13的密码
+    "14": "gkj^&HGkhh45",  # 电脑组14的密码
+    "15": " kaznb3969*m%",  # 电脑组15的密码（注意前面有空格）
+    "16": "ggTG*h785Wunj",  # 电脑组16的密码
+    "21": "kjakln3*zhjql3",  # 电脑组21的密码
+    "22": "ttRo451YU*58",  # 电脑组22的密码
+    "23": "mj@w2ndJ*kX0g8!rns",  # 电脑组23的密码（浏览器1,2,3,4使用特定密码）
+    "24": "5cx2Wsn#0kQnj*w240",  # 电脑组24的密码
+    "27": "kiIH78hjfi.*+*",  # 电脑组27的密码
+}
+
+# 全局默认密码（仅当电脑组未在 GROUP_PASSWORDS 中配置时使用）
+DEFAULT_PASSWORD = "Ok123456"
 
 # 服务器API配置
 SERVER_BASE_URL = "https://sg.bicoin.com.cn/99l"
