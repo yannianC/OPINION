@@ -52,6 +52,9 @@
       <el-button type="danger" @click="refreshRedPositionsOld" :loading="refreshingRedOld">
         刷新变红且超过30分钟仓位
       </el-button>
+      <el-button type="success" @click="deduplicateAddresses" :loading="deduplicating">
+        地址去重
+      </el-button>
       <span class="red-count-label">变红仓位数量：<strong>{{ redPositionCount }}</strong></span>
     </div>
     
@@ -70,6 +73,24 @@
           确认添加
         </el-button>
         <span class="batch-add-tip">（电脑组,浏览器ID;电脑组,浏览器ID...）</span>
+      </div>
+    </div>
+
+    <!-- 批量删除区域 -->
+    <div class="batch-add-container">
+      <div class="batch-add-row">
+        <label>批量删除:</label>
+        <el-input 
+          v-model="batchDeleteInput" 
+          placeholder="格式: 4001,4002,4003 或 4001;4002;4003"
+          clearable
+          size="small"
+          style="width: 500px"
+        />
+        <el-button type="danger" size="small" @click="batchDeleteAccounts" :loading="batchDeleting">
+          确认删除
+        </el-button>
+        <span class="batch-add-tip">（浏览器ID，逗号或分号分隔）</span>
       </div>
     </div>
 
@@ -149,6 +170,16 @@
             style="width: 250px"
           />
         </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showNoAddress" @change="applyFilters">
+            显示无地址
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showDuplicateAddress" @change="applyFilters">
+            显示地址重复
+          </el-checkbox>
+        </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
         <el-button type="warning" size="small" @click="parseAllRows" :loading="parsingAll">
@@ -159,12 +190,12 @@
 
     <!-- 数据表格 -->
     <el-table 
-      :data="filteredTableData" 
+      :data="paginatedTableData" 
       border 
       style="width: 100%"
       v-loading="loading"
       :row-class-name="getRowClassName"
-      height="calc(100vh - 450px)"
+      height="calc(100vh - 520px)"
       :scrollbar-always-on="true"
     >
       <el-table-column prop="index" label="序号" width="80" align="center" fixed />
@@ -234,7 +265,12 @@
       <el-table-column label="持有仓位 (a)" width="400">
         <template #default="scope">
           <!-- 如果已解析，显示解析后的数据 -->
-          <div v-if="isRowParsed(scope.row) && scope.row.a" class="position-list" v-memo="[scope.row.a, isRowParsed(scope.row)]">
+          <div 
+            v-if="isRowParsed(scope.row) && scope.row.a" 
+            class="position-list" 
+            :class="{ 'position-mismatch': isPositionMismatched(scope.row) }"
+            v-memo="[scope.row.a, isRowParsed(scope.row), isPositionMismatched(scope.row)]"
+          >
             <div 
               v-for="(pos, idx) in getCachedPositions(scope.row.a)" 
               :key="`${scope.row.index}-pos-${idx}`" 
@@ -251,8 +287,39 @@
             </div>
           </div>
           <!-- 未解析时直接显示原始字符串 -->
-          <div v-else-if="scope.row.a" class="raw-data-text">
+          <div 
+            v-else-if="scope.row.a" 
+            class="raw-data-text"
+            :class="{ 'position-mismatch': isPositionMismatched(scope.row) }"
+          >
             {{ scope.row.a }}
+          </div>
+          <span v-else class="empty-text">暂无数据</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="链上信息" width="400">
+        <template #default="scope">
+          <!-- 如果已解析，显示解析后的数据 -->
+          <div v-if="isRowParsed(scope.row) && getChainInfo(scope.row)" class="position-list" v-memo="[getChainInfo(scope.row), isRowParsed(scope.row)]">
+            <div 
+              v-for="(pos, idx) in getCachedPositions(getChainInfo(scope.row))" 
+              :key="`${scope.row.index}-chain-${idx}`" 
+              class="position-item"
+            >
+              <div class="position-title">{{ pos.title }}</div>
+              <div class="position-details">
+                <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                  {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                </el-tag>
+                <span class="position-amount">数量: {{ pos.amount }}</span>
+                <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- 未解析时直接显示原始字符串 -->
+          <div v-else-if="getChainInfo(scope.row)" class="raw-data-text">
+            {{ getChainInfo(scope.row) }}
           </div>
           <span v-else class="empty-text">暂无数据</span>
         </template>
@@ -367,6 +434,17 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 分页组件 -->
+    <div class="pagination-container">
+      <el-pagination
+        v-model:current-page="currentPageNum"
+        :page-size="pageSize"
+        :total="filteredTableData.length"
+        layout="total, prev, pager, next, jumper"
+        @current-change="handlePageChange"
+      />
+    </div>
 
     <!-- 交易记录弹窗 -->
     <el-dialog 
@@ -504,7 +582,7 @@
  * ====================================================
  */
 import { ref, computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, Loading } from '@element-plus/icons-vue'
 import axios from 'axios'
 import Summary from './Summary.vue'
@@ -513,6 +591,7 @@ import Summary from './Summary.vue'
  * 基础配置
  */
 const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
+const CHAIN_DATA_API_URL = 'https://enstudyai.fatedreamer.com/t3/api/positions/summary/trades'
 
 /**
  * 页面状态
@@ -532,7 +611,15 @@ const refreshingAll = ref(false)
 const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
 const refreshingRedOld = ref(false)  // 刷新变红且超过30分钟仓位的加载状态
 const parsingAll = ref(false)  // 是否正在全部解析
+const deduplicating = ref(false)  // 地址去重的加载状态
+const chainDataMap = ref(new Map())  // 链上信息数据映射，key为wallet_address（小写），value为链上信息字符串
 let nextId = 1
+
+/**
+ * 分页相关
+ */
+const currentPageNum = ref(1)
+const pageSize = 50
 
 /**
  * 任务日志相关
@@ -566,6 +653,12 @@ let autoRefreshTimer = null
 const batchAddInput = ref('')
 
 /**
+ * 批量删除相关
+ */
+const batchDeleteInput = ref('')
+const batchDeleting = ref(false)
+
+/**
  * 本地新增的行（未保存到服务器的）
  */
 const localNewRows = ref(new Set())
@@ -577,14 +670,18 @@ const filters = ref({
   computeGroup: '',
   fingerprintNo: '',
   platform: '',
-  positionSearch: ''  // 新增：仓位搜索
+  positionSearch: '',  // 新增：仓位搜索
+  showNoAddress: false,  // 显示无地址
+  showDuplicateAddress: false  // 显示地址重复
 })
 
 const activeFilters = ref({
   computeGroup: [],
   fingerprintNo: [],
   platform: '',
-  positionSearch: ''  // 新增：仓位搜索
+  positionSearch: '',  // 新增：仓位搜索
+  showNoAddress: false,  // 显示无地址
+  showDuplicateAddress: false  // 显示地址重复
 })
 
 /**
@@ -633,7 +730,9 @@ const applyFilters = () => {
     computeGroup: parseInputValues(filters.value.computeGroup),
     fingerprintNo: parseInputValues(filters.value.fingerprintNo),
     platform: filters.value.platform,
-    positionSearch: filters.value.positionSearch.trim()
+    positionSearch: filters.value.positionSearch.trim(),
+    showNoAddress: filters.value.showNoAddress,
+    showDuplicateAddress: filters.value.showDuplicateAddress
   }
   ElMessage.success('筛选已应用')
 }
@@ -646,13 +745,17 @@ const clearFilters = () => {
     computeGroup: '',
     fingerprintNo: '',
     platform: '',
-    positionSearch: ''
+    positionSearch: '',
+    showNoAddress: false,
+    showDuplicateAddress: false
   }
   activeFilters.value = {
     computeGroup: [],
     fingerprintNo: [],
     platform: '',
-    positionSearch: ''
+    positionSearch: '',
+    showNoAddress: false,
+    showDuplicateAddress: false
   }
   ElMessage.info('筛选已清除')
 }
@@ -664,11 +767,24 @@ const filteredTableData = computed(() => {
   const data = tableData.value
   const filters = activeFilters.value
   
+  // 计算地址重复情况（用于地址重复筛选）
+  const addressCountMap = new Map()
+  if (filters.showDuplicateAddress) {
+    for (const row of data) {
+      if (row.h && row.h.trim()) {
+        const address = row.h.trim()
+        addressCountMap.set(address, (addressCountMap.get(address) || 0) + 1)
+      }
+    }
+  }
+  
   // 无筛选条件时，只进行排序
   const hasFilters = filters.computeGroup.length > 0 || 
                     filters.fingerprintNo.length > 0 || 
                     filters.platform || 
-                    filters.positionSearch
+                    filters.positionSearch ||
+                    filters.showNoAddress ||
+                    filters.showDuplicateAddress
   
   let result = data
   
@@ -695,12 +811,33 @@ const filteredTableData = computed(() => {
         return false
       }
       
-      // 仓位搜索筛选
+      // 仓位搜索筛选（包含持有仓位、挂单仓位和链上信息）
       if (searchTerm) {
+        const chainInfo = getChainInfo(row)
         const hasMatch = (row.a && row.a.toLowerCase().includes(searchTerm)) ||
-                        (row.b && row.b.toLowerCase().includes(searchTerm))
+                        (row.b && row.b.toLowerCase().includes(searchTerm)) ||
+                        (chainInfo && chainInfo.toLowerCase().includes(searchTerm))
         if (!hasMatch) {
           return false
+        }
+      }
+      
+      // 显示无地址筛选
+      if (filters.showNoAddress) {
+        if (row.h && row.h.trim()) {
+          return false  // 有地址，不显示
+        }
+      }
+      
+      // 显示地址重复筛选
+      if (filters.showDuplicateAddress) {
+        if (!row.h || !row.h.trim()) {
+          return false  // 没有地址，不显示
+        }
+        const address = row.h.trim()
+        const count = addressCountMap.get(address) || 0
+        if (count <= 1) {
+          return false  // 地址不重复，不显示
         }
       }
       
@@ -727,6 +864,23 @@ const filteredTableData = computed(() => {
   }
   
   return [...highlighted, ...normal]
+})
+
+/**
+ * 分页后的表格数据
+ */
+const paginatedTableData = computed(() => {
+  const filtered = filteredTableData.value
+  const start = (currentPageNum.value - 1) * pageSize
+  const end = start + pageSize
+  return filtered.slice(start, end)
+})
+
+/**
+ * 总页数
+ */
+const totalPages = computed(() => {
+  return Math.ceil(filteredTableData.value.length / pageSize)
 })
 
 
@@ -996,6 +1150,153 @@ const markRowAsParsed = (row) => {
 }
 
 /**
+ * 格式化链上信息的Markets数据
+ * 将markets数组格式化为 "title|||YES/NO|||amount" 格式
+ * 判断YES的数量多还是NO的数量多，YES的数量多则为YES，第三个值为 yes_amount - no_amount
+ * 当 yes_amount - no_amount 的绝对值小于0.01的时候，不记录
+ */
+const formatChainMarkets = (markets) => {
+  if (!markets || !Array.isArray(markets)) return ''
+  
+  const formattedItems = []
+  
+  for (const market of markets) {
+    const yesAmount = parseFloat(market.yes_amount || 0)
+    const noAmount = parseFloat(market.no_amount || 0)
+    const diff = yesAmount - noAmount
+    
+    // 当绝对值小于0.01时，不记录
+    if (Math.abs(diff) < 0.01) {
+      continue
+    }
+    
+    // 判断YES的数量多还是NO的数量多
+    const option = yesAmount > noAmount ? 'YES' : 'NO'
+    // diff = yesAmount - noAmount
+    // 当YES多时，diff为正数；当NO多时，diff为负数
+    // 所以直接使用diff即可，不需要再转换
+    const amount = diff.toFixed(2)
+    
+    formattedItems.push(`${market.title}|||${option}|||${amount}`)
+  }
+  
+  return formattedItems.join(';')
+}
+
+/**
+ * 加载链上数据
+ */
+const loadChainData = async () => {
+  try {
+    const response = await axios.get(CHAIN_DATA_API_URL)
+    
+    if (response.data && response.data.items && Array.isArray(response.data.items)) {
+      const newChainDataMap = new Map()
+      
+      for (const item of response.data.items) {
+        if (item.wallet_address && item.markets) {
+          const address = item.wallet_address.trim().toLowerCase()
+          const formattedMarkets = formatChainMarkets(item.markets)
+          if (formattedMarkets) {
+            newChainDataMap.set(address, formattedMarkets)
+          }
+        }
+      }
+      
+      chainDataMap.value = newChainDataMap
+      console.log(`已加载 ${newChainDataMap.size} 个地址的链上信息`)
+    }
+  } catch (error) {
+    console.error('加载链上数据失败:', error)
+    ElMessage.warning('加载链上数据失败: ' + (error.message || '网络错误'))
+  }
+}
+
+/**
+ * 分页变化处理
+ */
+const handlePageChange = (page) => {
+  currentPageNum.value = page
+  // 滚动到表格顶部
+  const tableEl = document.querySelector('.el-table__body-wrapper')
+  if (tableEl) {
+    tableEl.scrollTop = 0
+  }
+}
+
+/**
+ * 比较持有仓位和链上信息是否匹配
+ * 链上信息会多一个价格部分（在分号后面），不需要比较价格部分
+ * 比较时，需要去掉价格部分（最后一个|||后面的内容）
+ * 数量比较时需要考虑数值精度（保留2位小数比较）
+ */
+const comparePositionsWithChain = (positionStr, chainStr) => {
+  if (!positionStr && !chainStr) return true
+  if (!positionStr || !chainStr) return false
+  
+  // 解析持有仓位数据，只保留 title|||option|||amount 部分
+  const parsePositionForCompare = (str) => {
+    if (!str) return []
+    const items = str.split(';').filter(item => item.trim())
+    return items.map(item => {
+      const parts = item.split('|||')
+      if (parts.length >= 3) {
+        const title = parts[0].trim()
+        const option = parts[1].trim()
+        let amount = parts[2].trim()
+        
+        // 处理数量格式，向下取整后比较
+        const numAmount = parseFloat(amount)
+        if (!isNaN(numAmount)) {
+          // 向下取整（对于负数，Math.floor会向下取整，例如 -1.5 -> -2）
+          amount = Math.floor(numAmount).toString()
+        }
+        
+        // 只取前3部分：title|||option|||amount（忽略价格部分）
+        return `${title}|||${option}|||${amount}`
+      }
+      return item.trim()
+    }).sort()  // 排序以便比较
+  }
+  
+  const positionItems = parsePositionForCompare(positionStr)
+  const chainItems = parsePositionForCompare(chainStr)
+  
+  // 如果数量不同，则不匹配
+  if (positionItems.length !== chainItems.length) {
+    return false
+  }
+  
+  // 逐个比较
+  for (let i = 0; i < positionItems.length; i++) {
+    if (positionItems[i] !== chainItems[i]) {
+      return false
+    }
+  }
+  
+  return true
+}
+
+/**
+ * 获取行的链上信息
+ */
+const getChainInfo = (row) => {
+  if (!row.h) return ''
+  const address = row.h.trim().toLowerCase()
+  return chainDataMap.value.get(address) || ''
+}
+
+/**
+ * 检查持有仓位是否与链上信息匹配
+ */
+const isPositionMismatched = (row) => {
+  if (!row.a) return false
+  const chainInfo = getChainInfo(row)
+  if (!chainInfo) return false
+  return !comparePositionsWithChain(row.a, chainInfo)
+}
+
+/**
  * 解析持仓数据字符串（带缓存优化）
  * 格式: "标题1|||选项1|||数量1|||均价1;标题2|||选项2|||数量2|||均价2"
  * 兼容旧格式: "标题1,选项1,数量1,均价1;标题2,选项2,数量2,均价2"
@@ -1058,6 +1359,18 @@ const parsePositions = (posStr) => {
           option: option,
           amount: amount,
           avgPrice: avgPrice
+        })
+      } else if (partsLength >= 3 && isNewFormat) {
+        // 新格式的3个字段：title|||option|||amount（链上信息格式，无价格）
+        let title = parts[0].trim()
+        let option = parts[1].trim()
+        let amount = parts[2].trim()
+        
+        positions.push({
+          title: title,
+          option: option,
+          amount: amount,
+          avgPrice: ''  // 链上信息没有价格
         })
       } else if (partsLength >= 3 && !isNewFormat) {
         // 只对旧格式处理3个字段的情况
@@ -1782,6 +2095,7 @@ const startAutoRefresh = () => {
     autoRefreshTimer = setInterval(() => {
       console.log('自动刷新数据...')
       loadData(true)  // 静默刷新
+      loadChainData()  // 同时刷新链上数据
     }, autoRefresh.value.interval * 1000)
   }
 }
@@ -2139,6 +2453,128 @@ const refreshMissionStatus = async () => {
 }
 
 /**
+ * 地址去重
+ * 检测数据中地址(h)是否有重复，将没有重复的数据的字段 i 更新为"1"
+ */
+const deduplicateAddresses = async () => {
+  deduplicating.value = true
+  
+  try {
+    const data = tableData.value
+    
+    // 统计每个地址出现的次数
+    const addressCountMap = new Map()
+    
+    for (const row of data) {
+      if (row.h && row.h.trim()) {
+        const address = row.h.trim()
+        addressCountMap.set(address, (addressCountMap.get(address) || 0) + 1)
+      }
+    }
+    
+    // 找出只出现一次的地址（没有重复的）
+    const uniqueAddresses = new Set()
+    for (const [address, count] of addressCountMap.entries()) {
+      if (count === 1) {
+        uniqueAddresses.add(address)
+      }
+    }
+    
+    if (uniqueAddresses.size === 0) {
+      ElMessage.warning('没有找到唯一的地址（所有地址都有重复）')
+      return
+    }
+    
+    // 更新没有重复的数据的字段 i 为"1"（如果原本不是"1"）
+    const updatedData = [...tableData.value]
+    let updateCount = 0
+    const updatedRowKeys = new Set()  // 记录被更新的行的唯一标识
+    
+    for (let i = 0; i < updatedData.length; i++) {
+      const row = updatedData[i]
+      if (row.h && row.h.trim() && uniqueAddresses.has(row.h.trim())) {
+        // 先检查原本是不是"1"，如果是就不需要更新
+        if (row.i !== '1') {
+          updatedData[i] = { ...row, i: '1' }
+          updateCount++
+          // 记录被更新的行的唯一标识（优先使用id，否则使用fingerprintNo）
+          const rowKey = row.id || row.fingerprintNo
+          if (rowKey) {
+            updatedRowKeys.add(rowKey)
+          }
+        }
+      }
+    }
+    
+    if (updateCount === 0) {
+      ElMessage.warning('没有需要更新的数据（所有唯一地址的字段 i 都已经是"1"）')
+      return
+    }
+    
+    // 更新表格数据
+    tableData.value = updatedData
+    
+    // 保存更新后的数据
+    ElMessage.info(`发现 ${uniqueAddresses.size} 个唯一地址，正在更新 ${updateCount} 条数据...`)
+    
+    // 批量保存更新后的数据（只保存实际被更新的数据）
+    const dataToSave = updatedData
+      .filter(row => {
+        const rowKey = row.id || row.fingerprintNo
+        return rowKey && updatedRowKeys.has(rowKey)
+      })
+      .map(row => {
+        const saveData = { ...row }
+        saveData.e = saveData.platform
+        delete saveData.index
+        delete saveData.refreshing
+        if (!saveData.id) {
+          delete saveData.id
+        }
+        return saveData
+      })
+    
+    // 分批保存，避免请求过大
+    const batchSize = 10
+    let successCount = 0
+    let failCount = 0
+    
+    for (let i = 0; i < dataToSave.length; i += batchSize) {
+      const batch = dataToSave.slice(i, Math.min(i + batchSize, dataToSave.length))
+      
+      try {
+        await axios.post(`${API_BASE_URL}/boost/addAccountConfig`, batch)
+        successCount += batch.length
+        console.log(`已保存 ${successCount}/${dataToSave.length} 条数据`)
+      } catch (error) {
+        failCount += batch.length
+        console.error(`保存批次失败:`, error)
+      }
+      
+      // 避免请求过快
+      if (i + batchSize < dataToSave.length) {
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+    }
+    
+    if (failCount === 0) {
+      ElMessage.success(`地址去重完成：已更新 ${updateCount} 条数据的字段 i 为"1"，全部保存成功`)
+    } else {
+      ElMessage.warning(`地址去重完成：已更新 ${updateCount} 条数据，成功保存 ${successCount} 条，失败 ${failCount} 条`)
+    }
+    
+    // 重新加载数据以确保同步
+    await loadData(true)
+    
+  } catch (error) {
+    console.error('地址去重失败:', error)
+    ElMessage.error('地址去重失败: ' + (error.message || '网络错误'))
+  } finally {
+    deduplicating.value = false
+  }
+}
+
+/**
  * 批量添加账户
  */
 const batchAddAccounts = async () => {
@@ -2286,10 +2722,111 @@ const batchAddAccounts = async () => {
 }
 
 /**
+ * 批量删除账户
+ */
+const batchDeleteAccounts = async () => {
+  if (!batchDeleteInput.value || !batchDeleteInput.value.trim()) {
+    ElMessage.warning('请输入要删除的浏览器ID')
+    return
+  }
+  
+  batchDeleting.value = true
+  
+  try {
+    const input = batchDeleteInput.value.trim()
+    // 支持逗号和分号分隔
+    const browserIds = input.split(/[,;]/).map(id => id.trim()).filter(id => id)
+    
+    if (browserIds.length === 0) {
+      ElMessage.warning('输入格式错误，请输入浏览器ID')
+      return
+    }
+    
+    // 从表格数据中查找对应的行
+    const rowsToDelete = []
+    const notFoundIds = []
+    
+    for (const browserId of browserIds) {
+      const row = tableData.value.find(r => String(r.fingerprintNo) === String(browserId))
+      if (row && row.id) {
+        rowsToDelete.push(row)
+      } else {
+        notFoundIds.push(browserId)
+      }
+    }
+    
+    if (rowsToDelete.length === 0) {
+      ElMessage.warning('没有找到可删除的数据（所有浏览器ID都没有对应的数据或没有ID）')
+      if (notFoundIds.length > 0) {
+        ElMessage.info(`未找到的浏览器ID: ${notFoundIds.join(', ')}`)
+      }
+      return
+    }
+    
+    // 确认删除
+    try {
+      await ElMessageBox.confirm(
+        `确定要删除 ${rowsToDelete.length} 个账户吗？\n浏览器ID: ${rowsToDelete.map(r => r.fingerprintNo).join(', ')}`,
+        '批量删除确认',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+    } catch {
+      ElMessage.info('已取消删除')
+      return
+    }
+    
+    ElMessage.info(`开始删除 ${rowsToDelete.length} 个账户...`)
+    
+    // 逐个删除账户
+    let successCount = 0
+    let failCount = 0
+    
+    for (const row of rowsToDelete) {
+      try {
+        await axios.post(`${API_BASE_URL}/boost/deleteAccountConfig`, {
+          id: row.id
+        })
+        successCount++
+        console.log(`账户 ${row.fingerprintNo} (ID: ${row.id}) 删除成功`)
+      } catch (error) {
+        failCount++
+        console.error(`账户 ${row.fingerprintNo} (ID: ${row.id}) 删除失败:`, error)
+      }
+      
+      // 避免请求过快
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    
+    if (notFoundIds.length > 0) {
+      ElMessage.warning(`删除完成：成功删除 ${successCount} 个账户${failCount > 0 ? `，失败 ${failCount} 个` : ''}。未找到的浏览器ID: ${notFoundIds.join(', ')}`)
+    } else {
+      ElMessage.success(`删除完成：成功删除 ${successCount} 个账户${failCount > 0 ? `，失败 ${failCount} 个` : ''}`)
+    }
+    
+    // 清空输入框
+    batchDeleteInput.value = ''
+    
+    // 重新加载数据
+    await loadData()
+    
+  } catch (error) {
+    console.error('批量删除失败:', error)
+    ElMessage.error('批量删除失败: ' + (error.message || '网络错误'))
+  } finally {
+    batchDeleting.value = false
+  }
+}
+
+/**
  * 组件挂载时加载数据
  */
 onMounted(() => {
   loadData()
+  loadChainData()  // 加载链上数据
   
   // 如果自动刷新已启用，启动定时器
   if (autoRefresh.value.enabled) {
@@ -2784,6 +3321,34 @@ onUnmounted(() => {
 
 :deep(.el-table__row.highlight-row:hover > td) {
   background-color: #fdd !important;
+}
+
+/* 持有仓位不匹配时的黄色背景 */
+.position-mismatch {
+  background-color: #fffacd !important;
+}
+
+.raw-data-text.position-mismatch {
+  background-color: #fffacd !important;
+}
+
+.position-list.position-mismatch {
+  background-color: #fffacd !important;
+}
+
+.position-list.position-mismatch .position-item {
+  background-color: #fffacd !important;
+}
+
+/* 分页容器 */
+.pagination-container {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 /* 任务日志弹窗样式 */

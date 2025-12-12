@@ -2309,9 +2309,9 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     else:
         log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
     
-    phase1_timeout = 600  # 10分钟
+    phase1_timeout = 700  # 10分钟
     check_interval = 20 if trade_type == "Sell" else 60  # Sell每20秒检查，Buy每60秒检查
-    refresh_interval = 180  # 每3分钟刷新一次
+    refresh_interval = 120  # 每2分钟刷新一次
     
     phase1_start_time = time.time()
     last_refresh_time = phase1_start_time
@@ -2323,8 +2323,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             elapsed = int(time.time() - phase1_start_time)
             log_print(f"[{serial_number}] [{task_label}] 检查Position（已用时 {elapsed}秒）...")
             
-            # 对于Buy类型，每3分钟刷新；Sell类型不刷新
-            if trade_type == "Buy" and time.time() - last_refresh_time >= refresh_interval:
+            # 对于Buy和Sell类型，每3分钟刷新
+            if time.time() - last_refresh_time >= refresh_interval:
                 log_print(f"[{serial_number}] [{task_label}] 3分钟无变化，刷新页面...")
                 driver.refresh()
                 time.sleep(5)
@@ -2417,11 +2417,138 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     
     if not position_changed:
         log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
-        return False, "Position未检测到变化超时"
+        log_print(f"[{serial_number}] [{task_label}] 开始检查并取消挂单...")
+        
+        try:
+            # 点击Open Orders按钮
+            log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
+            open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in open_orders_buttons:
+                if btn.text.strip() == "Open Orders":
+                    btn.click()
+                    time.sleep(7)
+                    break
+            
+            # 获取Open Orders数据
+            log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
+            
+            # 查找 Open Orders div
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            open_orders_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'open orders' in div_id.lower():
+                    open_orders_div = div
+                    break
+            
+            if not open_orders_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
+                return False, "Position未检测到变化超时"
+            
+            # 获取 tbody 和 tr
+            try:
+                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            except:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
+                return False, "Position未检测到变化超时"
+            
+            if not tr_list or len(tr_list) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
+                return False, "Position未检测到变化超时"
+            
+            # 有挂单，需要取消
+            log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，开始取消...")
+            
+            # 找到第一个tr的最后一个td下的svg并点击
+            first_tr = tr_list[0]
+            tds = first_tr.find_elements(By.TAG_NAME, "td")
+            if len(tds) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
+                return False, "Position未检测到变化超时"
+            
+            last_td = tds[-1]  # 最后一个td
+            svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
+            
+            if not svg_elements or len(svg_elements) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
+                return False, "Position未检测到变化超时"
+            
+            log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
+            svg_elements[0].click()
+            time.sleep(2)
+            
+            # 在10秒内找到"Confirm"按钮并点击
+            log_print(f"[{serial_number}] [{task_label}] 查找Confirm按钮...")
+            confirm_found = False
+            confirm_timeout = 10
+            confirm_start_time = time.time()
+            
+            while time.time() - confirm_start_time < confirm_timeout:
+                try:
+                    all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for btn in all_buttons:
+                        if btn.text.strip() == "Confirm":
+                            log_print(f"[{serial_number}] [{task_label}] ✓ 找到Confirm按钮，点击...")
+                            btn.click()
+                            confirm_found = True
+                            break
+                    
+                    if confirm_found:
+                        break
+                    
+                    time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 查找Confirm按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not confirm_found:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
+                return False, "Position未检测到变化超时"
+            
+            # 等待10秒
+            log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
+            time.sleep(10)
+            
+            # 重新获取open_orders_div
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            open_orders_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'open orders' in div_id.lower():
+                    open_orders_div = div
+                    break
+            
+            if not open_orders_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 重新获取时未找到Open Orders div")
+                return False, "吃单失败，有挂单，已取消挂单"
+            
+            # 重新获取tbody和tr
+            try:
+                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            except:
+                # 没有tbody或tr，说明挂单已取消
+                log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tbody/tr）")
+                return False, "吃单失败，有挂单，已取消挂单"
+            
+            if not tr_list or len(tr_list) == 0:
+                # 没有tr，说明挂单已取消
+                log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tr）")
+                return False, "吃单失败，有挂单，已取消挂单"
+            else:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
+                return False, "Position未检测到变化超时"
+                
+        except Exception as e:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
+            import traceback
+            log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
+            return False, "Position未检测到变化超时"
     
     # 第二阶段：轮询任务一状态，等待状态变为10（10分钟超时，每10秒检查一次）
     log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：轮询任务状态 ==========")
-    phase2_timeout = 600  # 10分钟
+    phase2_timeout = 800  # 10分钟
     phase2_check_interval = 10  # 每10秒检查一次
     phase2_start_time = time.time()
     status_is_10 = False
@@ -4430,153 +4557,6 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             except Exception as e:
                     log_print(f"[{browser_id}] ⚠ 切换回主页面失败: {str(e)}")
                     
-                    
-            while order_retry_count < max_order_retry:
-                # 在10秒内检查是否有包含 "order failed" 和 "Please try again" 的div
-                log_print(f"[{browser_id}] 检查是否存在 'order failed' 提示（10秒超时）...")
-                order_failed_detected = False
-                check_start_time = time.time()
-                
-                while time.time() - check_start_time < 10:
-                    try:
-                        # 查找所有div元素
-                        divs = driver.find_elements(By.TAG_NAME, "div")
-                        for div in divs:
-                            try:
-                                div_text = div.text.lower()
-                                if "order failed" in div_text and "please try again" in div_text:
-                                    order_failed_detected = True
-                                    log_print(f"[{browser_id}] ⚠ 检测到订单失败提示！")
-                                    break
-                            except:
-                                continue
-                        
-                        if order_failed_detected:
-                            break
-                        time.sleep(1)
-                    except Exception as e:
-                        log_print(f"[{browser_id}] ⚠ 检查订单失败提示时出错: {str(e)}")
-                        time.sleep(1)
-                
-                if not order_failed_detected:
-                    # 没有检测到订单失败，退出循环
-                    log_print(f"[{browser_id}] ✓ 未检测到 'order failed' 提示")
-                    break
-                
-                # 检测到订单失败，进行重试
-                order_retry_count += 1
-                log_print(f"[{browser_id}] ⚠ 订单失败，进行第 {order_retry_count}/{max_order_retry} 次重试...")
-                
-        
-                    # 继续尝试重试，不因为切换失败而终止
-                
-                try:
-                    # 重新获取 trade_box 并找到提交按钮（不需要同步机制）
-                    log_print(f"[{browser_id}] → 重新查找 trade-box...")
-                    trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
-                    
-                    if not trade_box_divs:
-                        log_print(f"[{browser_id}] ✗ 未找到 trade-box div")
-                        continue
-                    
-                    trade_box = trade_box_divs[0]
-                    
-                    # 查找 tabs content div
-                    tabs_content_divs = trade_box.find_elements(By.CSS_SELECTOR, 
-                        'div[data-scope="tabs"][data-part="content"][data-state="open"]')
-                    
-                    if not tabs_content_divs:
-                        log_print(f"[{browser_id}] ✗ 未找到 tabs content div")
-                        continue
-                    
-                    tabs_content = tabs_content_divs[0]
-                    
-                    # 查找并点击提交按钮
-                    log_print(f"[{browser_id}] → 查找提交订单按钮...")
-                    p_tags = tabs_content.find_elements(By.TAG_NAME, "p")
-                    submit_clicked = False
-                    
-                    for p in p_tags:
-                        try:
-                            text = p.text.strip()
-                            if trade_type in text and option_type in text:
-                                log_print(f"[{browser_id}] ✓ 找到提交按钮，文本: {text}")
-                                parent = p.find_element(By.XPATH, "..")
-                                parent.click()
-                                log_print(f"[{browser_id}] ✓ 已点击提交订单按钮")
-                                submit_clicked = True
-                                break
-                        except:
-                            continue
-                    
-                    if not submit_clicked:
-                        log_print(f"[{browser_id}] ✗ 未找到提交按钮")
-                        continue
-                    
-                    time.sleep(2)
-                    
-                    # 切换到OKX页面
-                    log_print(f"[{browser_id}] → 切换到 OKX 钱包页面...")
-                    all_windows = driver.window_handles
-                    okx_window_found = False
-                    
-                    for window in all_windows:
-                        driver.switch_to.window(window)
-                        current_url = driver.current_url
-                        if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
-                            log_print(f"[{browser_id}] ✓ 已切换到 OKX 页面")
-                            okx_window_found = True
-                            break
-                    
-                    if not okx_window_found:
-                        log_print(f"[{browser_id}] ✗ 未找到 OKX 钱包窗口")
-                        continue
-                    
-                    # 解锁钱包
-                    log_print(f"[{browser_id}] → 解锁 OKX 钱包...")
-                    unlock_okx_wallet(driver, browser_id, browser_id)
-                    
-                    # 在5秒内查找并点击第二个确认按钮
-                    log_print(f"[{browser_id}] → 查找确认按钮（5秒超时）...")
-                    button_clicked = False
-                    button_start_time = time.time()
-                    
-                    while time.time() - button_start_time < 5:
-                        try:
-                            confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
-                            if len(confirm_buttons) >= 2:
-                                confirm_buttons[1].click()
-                                log_print(f"[{browser_id}] ✓ 已点击确认按钮（第二个）")
-                                button_clicked = True
-                                break
-                            else:
-                                time.sleep(0.5)
-                        except Exception as e:
-                            log_print(f"[{browser_id}] ⚠ 查找按钮时出错: {str(e)}")
-                            time.sleep(0.5)
-                    
-                    if not button_clicked:
-                        log_print(f"[{browser_id}] ⚠ 未找到足够的确认按钮或超时")
-                    
-                    # 切换回主页面
-                    log_print(f"[{browser_id}] → 切换回主页面...")
-                    for window in all_windows:
-                        driver.switch_to.window(window)
-                        current_url = driver.current_url
-                        if "app.opinion.trade" in current_url:
-                            log_print(f"[{browser_id}] ✓ 已切换回主页面")
-                            break
-                    
-                    time.sleep(3)  # 等待页面响应
-                    
-                except Exception as e:
-                    log_print(f"[{browser_id}] ✗ 重试过程出错: {str(e)}")
-                    continue
-            
-            # 检查是否超过最大重试次数
-            if order_retry_count >= max_order_retry:
-                log_print(f"[{browser_id}] ========== Type 5 任务失败: 订单失败重试{max_order_retry}次仍未成功 ==========\n")
-                return False, f"订单失败重试{max_order_retry}次仍未成功，另一单已挂单"
             
             log_print(f"[{browser_id}] 步骤13: Type 5 任务 - 等待订单确认并收集数据...")
             success, msg = wait_for_type5_order_and_collect_data(
@@ -6625,7 +6605,7 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         
         # 6.5. 如果获取到了 Balance Spot 地址，更新字段 h
         balance_spot_address = collected_data.get('balance_spot_address')
-        if balance_spot_address and balance_spot_address.startswith('0x'):
+        if balance_spot_address and balance_spot_address.startswith('0x') and account_config['i'] != "1":
             account_config['h'] = balance_spot_address
             log_print(f"[{browser_id}] ✓ 更新字段 h: {balance_spot_address}")
         else:
@@ -7491,6 +7471,14 @@ def collect_position_data(driver, browser_id, exchange_name):
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
                             break
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Balance Spot 地址...")
+                    balance_spot_address, address_success = get_balance_spot_address(driver, browser_id)
+                    if address_success:
+                        collected_data['balance_spot_address'] = balance_spot_address
+                        log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并获取数据...")
                     position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
@@ -8738,7 +8726,1107 @@ def initialize_fingerprint_mapping():
     global FINGERPRINT_TO_USERID
     
     # 映射数据
-    mapping_data = """2000	k15jmeql
+    mapping_data = """3100	k15mek1c
+3099	k15mek1b
+3098	k15mek19
+3097	k15mek18
+3096	k15mek17
+3095	k15mek16
+3094	k15mek15
+3093	k15mek14
+3092	k15mek13
+3091	k15mek12
+3090	k15mek11
+3089	k15mek10
+3088	k15mek0x
+3087	k15mek0w
+3086	k15mek0v
+3085	k15mek0u
+3084	k15mek0t
+3083	k15mek0s
+3082	k15mek0r
+3081	k15mek0q
+3080	k15mek0p
+3079	k15mek0o
+3078	k15mek0m
+3077	k15mek0l
+3076	k15mek0k
+3075	k15mek0j
+3074	k15mek0i
+3073	k15mek0h
+3072	k15mek0g
+3071	k15mek0f
+3070	k15mek0e
+3069	k15mek0d
+3068	k15mek0c
+3067	k15mek0b
+3066	k15mek0a
+3065	k15mek09
+3064	k15mek08
+3063	k15mek07
+3062	k15mek06
+3061	k15mek04
+3060	k15mek03
+3059	k15mek02
+3058	k15mek00
+3057	k15mejyy
+3056	k15mejyx
+3055	k15mejyv
+3054	k15mejyu
+3053	k15mejyt
+3052	k15mejys
+3051	k15mejyr
+3050	k15mejyq
+3049	k15mejyp
+3048	k15mejyo
+3047	k15mejyn
+3046	k15mejym
+3045	k15mejyl
+3044	k15mejyk
+3043	k15mejyj
+3042	k15mejyi
+3041	k15mejyh
+3040	k15mejyg
+3039	k15mejyf
+3038	k15mejye
+3037	k15mejyd
+3036	k15mejyc
+3035	k15mejyb
+3034	k15mejya
+3033	k15mejy9
+3032	k15mejy8
+3031	k15mejy7
+3030	k15mejy6
+3029	k15mejy5
+3028	k15mejy3
+3027	k15mejy0
+3026	k15mejxx
+3025	k15mejxw
+3024	k15mejxv
+3023	k15mejxt
+3022	k15mejxs
+3021	k15mejxr
+3020	k15mejxq
+3019	k15mejxp
+3018	k15mejxo
+3017	k15mejxn
+3016	k15mejxl
+3015	k15mejxk
+3014	k15mejxi
+3013	k15mejxh
+3012	k15mejxg
+3011	k15mejxf
+3010	k15mejxe
+3009	k15mejxd
+3008	k15mejxc
+3007	k15mejxb
+3006	k15mejxa
+3005	k15mejx9
+3004	k15mejx8
+3003	k15mejx7
+3002	k15mejx6
+3001	k15mejx5
+3000	k15mejx4
+2999	k15mejx3
+2998	k15mejx2
+2997	k15mejx1
+2996	k15mejx0
+2995	k15mejwy
+2994	k15mejwx
+2993	k15mejww
+2992	k15mejwv
+2991	k15mejwu
+2990	k15mejwt
+2989	k15mejws
+2988	k15mejwr
+2987	k15mejwq
+2986	k15mejwp
+2985	k15mejwo
+2984	k15mejwn
+2983	k15mejwm
+2982	k15mejwl
+2981	k15mejwk
+2980	k15mejwj
+2979	k15mejwi
+2978	k15mejwh
+2977	k15mejwg
+2976	k15mejwf
+2975	k15mejwe
+2974	k15mejwd
+2973	k15mejwc
+2972	k15mejwb
+2971	k15mejwa
+2970	k15mejw9
+2969	k15mejw8
+2968	k15mejw7
+2967	k15mejw6
+2966	k15mejw5
+2965	k15mejw4
+2964	k15mejw3
+2963	k15mejw1
+2962	k15mejvy
+2961	k15mejvx
+2960	k15mejvv
+2959	k15mejvu
+2958	k15mejvt
+2957	k15mejvs
+2956	k15mejvr
+2955	k15mejvq
+2954	k15mejvp
+2953	k15mejvo
+2952	k15mejvm
+2951	k15mejvl
+2950	k15mejvk
+2949	k15mejvj
+2948	k15mejvh
+2947	k15mejvg
+2946	k15mejvf
+2945	k15mejve
+2944	k15mejvd
+2943	k15mejvb
+2942	k15mejva
+2941	k15mejv9
+2940	k15mejv8
+2939	k15mejv7
+2938	k15mejv6
+2937	k15mejv5
+2936	k15mejv3
+2935	k15mejv2
+2934	k15mejv1
+2933	k15mejv0
+2932	k15mejuy
+2931	k15mejux
+2930	k15mejuw
+2929	k15mejuv
+2928	k15mejuu
+2927	k15mejut
+2926	k15mejus
+2925	k15mejur
+2924	k15mejuq
+2923	k15mejup
+2922	k15mejuo
+2921	k15mejum
+2920	k15mejul
+2919	k15mejuk
+2918	k15mejuj
+2917	k15mejui
+2916	k15mejuh
+2915	k15mejug
+2914	k15mejuf
+2913	k15mejue
+2912	k15mejud
+2911	k15mejuc
+2910	k15mejub
+2909	k15mejua
+2908	k15meju9
+2907	k15meju6
+2906	k15meju5
+2905	k15meju4
+2904	k15meju2
+2903	k15meju0
+2902	k15mejtx
+2901	k15mejtv
+2900	k15mejtu
+2899	k15mejts
+2898	k15mejtr
+2897	k15mejtq
+2896	k15mejtp
+2895	k15mejto
+2894	k15mejtn
+2893	k15mejtm
+2892	k15mejtl
+2891	k15mejtk
+2890	k15mejtj
+2889	k15mejti
+2888	k15mejth
+2887	k15mejtf
+2886	k15mejte
+2885	k15mejtd
+2884	k15mejtc
+2883	k15mejta
+2882	k15mejt9
+2881	k15mejt8
+2880	k15mejt7
+2879	k15mejt6
+2878	k15mejt5
+2877	k15mejt2
+2876	k15mejt0
+2875	k15mejsy
+2874	k15mejsx
+2873	k15mejsv
+2872	k15mejsu
+2871	k15mejss
+2870	k15mejsr
+2869	k15mejsq
+2868	k15mejsp
+2867	k15mejso
+2866	k15mejsn
+2865	k15mejsl
+2864	k15mejsk
+2863	k15mejsj
+2862	k15mejsi
+2861	k15mejsh
+2860	k15mejsg
+2859	k15mejsf
+2858	k15mejse
+2857	k15mejsd
+2856	k15mejsc
+2855	k15mejsb
+2854	k15mejsa
+2853	k15mejs9
+2852	k15mejs7
+2851	k15mejs6
+2850	k15mejs4
+2849	k15mejs3
+2848	k15mejs2
+2847	k15mejs1
+2846	k15mejs0
+2845	k15mejry
+2844	k15mejrx
+2843	k15mejru
+2842	k15mejrs
+2841	k15mejrp
+2840	k15mejro
+2839	k15mejrn
+2838	k15mejrm
+2837	k15mejrl
+2836	k15mejrk
+2835	k15mejrj
+2834	k15mejri
+2833	k15mejrh
+2832	k15mejrg
+2831	k15mejrf
+2830	k15mejre
+2829	k15mejrd
+2828	k15mejrb
+2827	k15mejra
+2826	k15mejr9
+2825	k15mejr8
+2824	k15mejr7
+2823	k15mejr6
+2822	k15mejr4
+2821	k15mejr2
+2820	k15mejr1
+2819	k15mejr0
+2818	k15mejqy
+2817	k15mejqx
+2816	k15mejqv
+2815	k15mejqt
+2814	k15mejqs
+2813	k15mejqr
+2812	k15mejqq
+2811	k15mejqp
+2810	k15mejqn
+2809	k15mejqm
+2808	k15mejql
+2807	k15mejqk
+2806	k15mejqj
+2805	k15mejqi
+2804	k15mejqh
+2803	k15mejqg
+2802	k15mejqf
+2801	k15mejqd
+2800	k15mejqc
+2799	k15mejqb
+2798	k15mejqa
+2797	k15mejq9
+2796	k15mejq7
+2795	k15mejq6
+2794	k15mejq5
+2793	k15mejq4
+2792	k15mejq3
+2791	k15mejq2
+2790	k15mejq1
+2789	k15mejq0
+2788	k15mejpy
+2787	k15mejpx
+2786	k15mejpw
+2785	k15mejpv
+2784	k15mejpu
+2783	k15mejpt
+2782	k15mejps
+2781	k15mejpr
+2780	k15mejpq
+2779	k15mejpo
+2778	k15mejpn
+2777	k15mejpm
+2776	k15mejpl
+2775	k15mejpj
+2774	k15mejph
+2773	k15mejpg
+2772	k15mejpf
+2771	k15mejpd
+2770	k15mejpc
+2769	k15mejpb
+2768	k15mejpa
+2767	k15mejp9
+2766	k15mejp8
+2765	k15mejp6
+2764	k15mejp5
+2763	k15mejp4
+2762	k15mejp3
+2761	k15mejp2
+2760	k15mejp1
+2759	k15mejp0
+2758	k15mejoy
+2757	k15mejox
+2756	k15mejow
+2755	k15mejov
+2754	k15mejou
+2753	k15mejos
+2752	k15mejor
+2751	k15mejoq
+2750	k15mejoo
+2749	k15mejon
+2748	k15mejom
+2747	k15mejol
+2746	k15mejok
+2745	k15mejoj
+2744	k15mejoh
+2743	k15mejof
+2742	k15mejoe
+2741	k15mejod
+2740	k15mejoc
+2739	k15mejob
+2738	k15mejoa
+2737	k15mejo9
+2736	k15mejo6
+2735	k15mejo5
+2734	k15mejo3
+2733	k15mejo2
+2732	k15mejo1
+2731	k15mejny
+2730	k15mejnw
+2729	k15mejnv
+2728	k15mejnu
+2727	k15mejnt
+2726	k15mejns
+2725	k15mejnr
+2724	k15mejno
+2723	k15mejnn
+2722	k15mejnm
+2721	k15mejnl
+2720	k15mejnk
+2719	k15mejnj
+2718	k15mejni
+2717	k15mejnh
+2716	k15mejnf
+2715	k15mejne
+2714	k15mejnd
+2713	k15mejnb
+2712	k15mejna
+2711	k15mejn9
+2710	k15mejn8
+2709	k15mejn7
+2708	k15mejn6
+2707	k15mejn5
+2706	k15mejn4
+2705	k15mejn3
+2704	k15mejn2
+2703	k15mejn1
+2702	k15mejn0
+2701	k15mejmy
+2700	k15mejmx
+2699	k15mejmw
+2698	k15mejmv
+2697	k15mejmu
+2696	k15mejmt
+2695	k15mejms
+2694	k15mejmr
+2693	k15mejmq
+2692	k15mejmp
+2691	k15mejmn
+2690	k15mejmm
+2689	k15mejml
+2688	k15mejmk
+2687	k15mejmi
+2686	k15mejmh
+2685	k15mejmf
+2684	k15mejme
+2683	k15mejmd
+2682	k15mejmc
+2681	k15mejmb
+2680	k15mejma
+2679	k15mejm9
+2678	k15mejm8
+2677	k15mejm7
+2676	k15mejm5
+2675	k15mejm4
+2674	k15mejm3
+2673	k15mejm2
+2672	k15mejm1
+2671	k15mejm0
+2670	k15mejly
+2669	k15mejlx
+2668	k15mejlw
+2667	k15mejlv
+2666	k15mejlu
+2665	k15mejlt
+2664	k15mejls
+2663	k15mejlr
+2662	k15mejlq
+2661	k15mejlp
+2660	k15mejlo
+2659	k15mejln
+2658	k15mejlm
+2657	k15mejll
+2656	k15mejlk
+2655	k15mejli
+2654	k15mejlh
+2653	k15mejlg
+2652	k15mejle
+2651	k15mejld
+2650	k15mejlc
+2649	k15mejlb
+2648	k15mejl9
+2647	k15mejl7
+2646	k15mejl6
+2645	k15mejl5
+2644	k15mejl4
+2643	k15mejl3
+2642	k15mejl1
+2641	k15mejl0
+2640	k15mejky
+2639	k15mejkx
+2638	k15mejkw
+2637	k15mejkv
+2636	k15mejku
+2635	k15mejkt
+2634	k15mejks
+2633	k15mejkr
+2632	k15mejkq
+2631	k15mejkp
+2630	k15mejko
+2629	k15mejkn
+2628	k15mejkm
+2627	k15mejkl
+2626	k15mejkk
+2625	k15mejki
+2624	k15mejkf
+2623	k15mejkd
+2622	k15mejka
+2621	k15mejk7
+2620	k15mejk5
+2619	k15mejk3
+2618	k15mejk1
+2617	k15mejjy
+2616	k15mejjw
+2615	k15mejjv
+2614	k15mejju
+2613	k15mejjt
+2612	k15mejjr
+2611	k15mejjq
+2610	k15mejjp
+2609	k15mejjn
+2608	k15mejjl
+2607	k15mejjk
+2606	k15mejjj
+2605	k15mejjh
+2604	k15mejjg
+2603	k15mejjf
+2602	k15mejjd
+2601	k15mejjc
+2600	k15ma7sx
+2599	k15ma7sw
+2598	k15ma7sv
+2597	k15ma7su
+2596	k15ma7st
+2595	k15ma7ss
+2594	k15ma7sq
+2593	k15ma7sp
+2592	k15ma7so
+2591	k15ma7sn
+2590	k15ma7sm
+2589	k15ma7sl
+2588	k15ma7sk
+2587	k15ma7si
+2586	k15ma7sh
+2585	k15ma7sg
+2584	k15ma7sf
+2583	k15ma7se
+2582	k15ma7sd
+2581	k15ma7sc
+2580	k15ma7sb
+2579	k15ma7sa
+2578	k15ma7s9
+2577	k15ma7s8
+2576	k15ma7s7
+2575	k15ma7s6
+2574	k15ma7s4
+2573	k15ma7s3
+2572	k15ma7s2
+2571	k15ma7s1
+2570	k15ma7ry
+2569	k15ma7rx
+2568	k15ma7rw
+2567	k15ma7rv
+2566	k15ma7ru
+2565	k15ma7rt
+2564	k15ma7rs
+2563	k15ma7rq
+2562	k15ma7rp
+2561	k15ma7ro
+2560	k15ma7rn
+2559	k15ma7rm
+2558	k15ma7rl
+2557	k15ma7rk
+2556	k15ma7rj
+2555	k15ma7ri
+2554	k15ma7rh
+2553	k15ma7rg
+2552	k15ma7rf
+2551	k15ma7re
+2550	k15ma7rd
+2549	k15ma7rc
+2548	k15ma7rb
+2547	k15ma7ra
+2546	k15ma7r9
+2545	k15ma7r8
+2544	k15ma7r7
+2543	k15ma7r6
+2542	k15ma7r5
+2541	k15ma7r3
+2540	k15ma7r1
+2539	k15ma7r0
+2538	k15ma7qy
+2537	k15ma7qx
+2536	k15ma7qw
+2535	k15ma7qv
+2534	k15ma7qu
+2533	k15ma7qt
+2532	k15ma7qs
+2531	k15ma7qr
+2530	k15ma7qq
+2529	k15ma7qp
+2528	k15ma7qo
+2527	k15ma7qn
+2526	k15ma7qm
+2525	k15ma7ql
+2524	k15ma7qk
+2523	k15ma7qj
+2522	k15ma7qi
+2521	k15ma7qh
+2520	k15ma7qg
+2519	k15ma7qf
+2518	k15ma7qe
+2517	k15ma7qd
+2516	k15ma7qc
+2515	k15ma7qb
+2514	k15ma7q9
+2513	k15ma7q8
+2512	k15ma7q7
+2511	k15ma7q6
+2510	k15ma7q5
+2509	k15ma7q4
+2508	k15ma7q3
+2507	k15ma7q2
+2506	k15ma7q1
+2505	k15ma7q0
+2504	k15ma7py
+2503	k15ma7px
+2502	k15ma7pw
+2501	k15ma7pv
+2500	k15ma7pu
+2499	k15ma7pt
+2498	k15ma7ps
+2497	k15ma7pr
+2496	k15ma7pq
+2495	k15ma7pp
+2494	k15ma7po
+2493	k15ma7pn
+2492	k15ma7pm
+2491	k15ma7pl
+2490	k15ma7pi
+2489	k15ma7ph
+2488	k15ma7pg
+2487	k15ma7pf
+2486	k15ma7pe
+2485	k15ma7pd
+2484	k15ma7pc
+2483	k15ma7pb
+2482	k15ma7pa
+2481	k15ma7p9
+2480	k15ma7p8
+2479	k15ma7p7
+2478	k15ma7p6
+2477	k15ma7p5
+2476	k15ma7p4
+2475	k15ma7p3
+2474	k15ma7p2
+2473	k15ma7p1
+2472	k15ma7oy
+2471	k15ma7ow
+2470	k15ma7ou
+2469	k15ma7os
+2468	k15ma7op
+2467	k15ma7on
+2466	k15ma7ol
+2465	k15ma7oj
+2464	k15ma7og
+2463	k15ma7of
+2462	k15ma7od
+2461	k15ma7oa
+2460	k15ma7o9
+2459	k15ma7o8
+2458	k15ma7o7
+2457	k15ma7o6
+2456	k15ma7o5
+2455	k15ma7o4
+2454	k15ma7o3
+2453	k15ma7o2
+2452	k15ma7o1
+2451	k15ma7o0
+2450	k15ma7ny
+2449	k15ma7nx
+2448	k15ma7nw
+2447	k15ma7nu
+2446	k15ma7ns
+2445	k15ma7nr
+2444	k15ma7nq
+2443	k15ma7np
+2442	k15ma7no
+2441	k15ma7nn
+2440	k15ma7nm
+2439	k15ma7nl
+2438	k15ma7nk
+2437	k15ma7nj
+2436	k15ma7ni
+2435	k15ma7nh
+2434	k15ma7ng
+2433	k15ma7nf
+2432	k15ma7ne
+2431	k15ma7nd
+2430	k15ma7nb
+2429	k15ma7na
+2428	k15ma7n9
+2427	k15ma7n8
+2426	k15ma7n7
+2425	k15ma7n6
+2424	k15ma7n5
+2423	k15ma7n4
+2422	k15ma7n3
+2421	k15ma7n2
+2420	k15ma7n0
+2419	k15ma7my
+2418	k15ma7mx
+2417	k15ma7mw
+2416	k15ma7mv
+2415	k15ma7mu
+2414	k15ma7mt
+2413	k15ma7mq
+2412	k15ma7mp
+2411	k15ma7mo
+2410	k15ma7mn
+2409	k15ma7ml
+2408	k15ma7mk
+2407	k15ma7mj
+2406	k15ma7mh
+2405	k15ma7mf
+2404	k15ma7me
+2403	k15ma7md
+2402	k15ma7mc
+2401	k15ma7mb
+2400	k15ma6ji
+2399	k15ma6jh
+2398	k15ma6jg
+2397	k15ma6jf
+2396	k15ma6je
+2395	k15ma6jd
+2394	k15ma6jc
+2393	k15ma6jb
+2392	k15ma6ja
+2391	k15ma6j9
+2390	k15ma6j8
+2389	k15ma6j7
+2388	k15ma6j6
+2387	k15ma6j5
+2386	k15ma6j4
+2385	k15ma6j3
+2384	k15ma6j2
+2383	k15ma6j1
+2382	k15ma6j0
+2381	k15ma6iy
+2380	k15ma6ix
+2379	k15ma6iw
+2378	k15ma6iv
+2377	k15ma6iu
+2376	k15ma6it
+2375	k15ma6is
+2374	k15ma6ir
+2373	k15ma6iq
+2372	k15ma6ip
+2371	k15ma6in
+2370	k15ma6im
+2369	k15ma6il
+2368	k15ma6ik
+2367	k15ma6ij
+2366	k15ma6ii
+2365	k15ma6ih
+2364	k15ma6ig
+2363	k15ma6if
+2362	k15ma6ie
+2361	k15ma6id
+2360	k15ma6ic
+2359	k15ma6ib
+2358	k15ma6i9
+2357	k15ma6i8
+2356	k15ma6i7
+2355	k15ma6i6
+2354	k15ma6i5
+2353	k15ma6i4
+2352	k15ma6i3
+2351	k15ma6i2
+2350	k15ma6i0
+2349	k15ma6hy
+2348	k15ma6hx
+2347	k15ma6hw
+2346	k15ma6hv
+2345	k15ma6hu
+2344	k15ma6ht
+2343	k15ma6hs
+2342	k15ma6hr
+2341	k15ma6hq
+2340	k15ma6ho
+2339	k15ma6hn
+2338	k15ma6hm
+2337	k15ma6hl
+2336	k15ma6hk
+2335	k15ma6hj
+2334	k15ma6hi
+2333	k15ma6hh
+2332	k15ma6hf
+2331	k15ma6he
+2330	k15ma6hd
+2329	k15ma6hb
+2328	k15ma6ha
+2327	k15ma6h9
+2326	k15ma6h8
+2325	k15ma6h6
+2324	k15ma6h5
+2323	k15ma6h4
+2322	k15ma6h3
+2321	k15ma6h2
+2320	k15ma6h1
+2319	k15ma6h0
+2318	k15ma6gy
+2317	k15ma6gx
+2316	k15ma6gw
+2315	k15ma6gu
+2314	k15ma6gt
+2313	k15ma6gs
+2312	k15ma6gr
+2311	k15ma6gq
+2310	k15ma6gp
+2309	k15ma6go
+2308	k15ma6gn
+2307	k15ma6gm
+2306	k15ma6gl
+2305	k15ma6gk
+2304	k15ma6gj
+2303	k15ma6gi
+2302	k15ma6gh
+2301	k15ma6gg
+2300	k15ma6gf
+2299	k15ma6ge
+2298	k15ma6gd
+2297	k15ma6gc
+2296	k15ma6ga
+2295	k15ma6g9
+2294	k15ma6g8
+2293	k15ma6g7
+2292	k15ma6g6
+2291	k15ma6g5
+2290	k15ma6g4
+2289	k15ma6g3
+2288	k15ma6g2
+2287	k15ma6g0
+2286	k15ma6fy
+2285	k15ma6fx
+2284	k15ma6fv
+2283	k15ma6fu
+2282	k15ma6ft
+2281	k15ma6fs
+2280	k15ma6fr
+2279	k15ma6fq
+2278	k15ma6fp
+2277	k15ma6fo
+2276	k15ma6fm
+2275	k15ma6fl
+2274	k15ma6fk
+2273	k15ma6fj
+2272	k15ma6fi
+2271	k15ma6fh
+2270	k15ma6fg
+2269	k15ma6ff
+2268	k15ma6fe
+2267	k15ma6fd
+2266	k15ma6fc
+2265	k15ma6fb
+2264	k15ma6fa
+2263	k15ma6f9
+2262	k15ma6f8
+2261	k15ma6f6
+2260	k15ma6f5
+2259	k15ma6f4
+2258	k15ma6f3
+2257	k15ma6f2
+2256	k15ma6f1
+2255	k15ma6ey
+2254	k15ma6ew
+2253	k15ma6ev
+2252	k15ma6eu
+2251	k15ma6et
+2250	k15ma6er
+2249	k15ma6ep
+2248	k15ma6eo
+2247	k15ma6en
+2246	k15ma6em
+2245	k15ma6el
+2244	k15ma6ek
+2243	k15ma6ej
+2242	k15ma6ei
+2241	k15ma6eh
+2240	k15ma6eg
+2239	k15ma6ef
+2238	k15ma6ee
+2237	k15ma6ed
+2236	k15ma6eb
+2235	k15ma6ea
+2234	k15ma6e9
+2233	k15ma6e8
+2232	k15ma6e7
+2231	k15ma6e6
+2230	k15ma6e5
+2229	k15ma6e4
+2228	k15ma6e3
+2227	k15ma6e1
+2226	k15ma6e0
+2225	k15ma6dy
+2224	k15ma6dx
+2223	k15ma6dw
+2222	k15ma6dv
+2221	k15ma6du
+2220	k15ma6dt
+2219	k15ma6ds
+2218	k15ma6dr
+2217	k15ma6dq
+2216	k15ma6dp
+2215	k15ma6do
+2214	k15ma6dn
+2213	k15ma6dm
+2212	k15ma6dl
+2211	k15ma6dk
+2210	k15ma6di
+2209	k15ma6dh
+2208	k15ma6dg
+2207	k15ma6df
+2206	k15ma6de
+2205	k15ma6dd
+2204	k15ma6dc
+2203	k15ma6da
+2202	k15ma6d9
+2201	k15ma6d8
+2200	k15jmeyu
+2199	k15jmeys
+2198	k15jmeyq
+2197	k15jmeyn
+2196	k15jmeyl
+2195	k15jmeyj
+2194	k15jmeyh
+2193	k15jmeyf
+2192	k15jmeyd
+2191	k15jmeyb
+2190	k15jmey9
+2189	k15jmey7
+2188	k15jmey6
+2187	k15jmey5
+2186	k15jmey4
+2185	k15jmey3
+2184	k15jmey2
+2183	k15jmey1
+2182	k15jmey0
+2181	k15jmexy
+2180	k15jmexw
+2179	k15jmexv
+2178	k15jmexu
+2177	k15jmexs
+2176	k15jmexr
+2175	k15jmexq
+2174	k15jmexp
+2173	k15jmexo
+2172	k15jmexm
+2171	k15jmexl
+2170	k15jmexj
+2169	k15jmexh
+2168	k15jmexg
+2167	k15jmexf
+2166	k15jmexd
+2165	k15jmexb
+2164	k15jmexa
+2163	k15jmex9
+2162	k15jmex8
+2161	k15jmex7
+2160	k15jmex6
+2159	k15jmex4
+2158	k15jmex3
+2157	k15jmex1
+2156	k15jmewx
+2155	k15jmeww
+2154	k15jmewv
+2153	k15jmewu
+2152	k15jmewt
+2151	k15jmews
+2150	k15jmewr
+2149	k15jmewq
+2148	k15jmewp
+2147	k15jmewo
+2146	k15jmewn
+2145	k15jmewm
+2144	k15jmewl
+2143	k15jmewk
+2142	k15jmewi
+2141	k15jmewh
+2140	k15jmewg
+2139	k15jmewf
+2138	k15jmewe
+2137	k15jmewd
+2136	k15jmewc
+2135	k15jmewb
+2134	k15jmewa
+2133	k15jmew9
+2132	k15jmew8
+2131	k15jmew7
+2130	k15jmew6
+2129	k15jmew5
+2128	k15jmew4
+2127	k15jmew2
+2126	k15jmew0
+2125	k15jmevy
+2124	k15jmevx
+2123	k15jmevw
+2122	k15jmevv
+2121	k15jmevu
+2120	k15jmevt
+2119	k15jmevs
+2118	k15jmevr
+2117	k15jmevq
+2116	k15jmevo
+2115	k15jmevm
+2114	k15jmevl
+2113	k15jmevk
+2112	k15jmevj
+2111	k15jmevi
+2110	k15jmevh
+2109	k15jmevg
+2108	k15jmevf
+2107	k15jmeve
+2106	k15jmevd
+2105	k15jmevc
+2104	k15jmevb
+2103	k15jmeva
+2102	k15jmev9
+2101	k15jmev8
+2100	k15jmev7
+2099	k15jmev6
+2098	k15jmev5
+2097	k15jmev4
+2096	k15jmev3
+2095	k15jmev2
+2094	k15jmev1
+2093	k15jmev0
+2092	k15jmeux
+2091	k15jmeuw
+2090	k15jmeuv
+2089	k15jmeuu
+2088	k15jmeut
+2087	k15jmeus
+2086	k15jmeuq
+2085	k15jmeup
+2084	k15jmeuo
+2083	k15jmeun
+2082	k15jmeum
+2081	k15jmeul
+2080	k15jmeuj
+2079	k15jmeui
+2078	k15jmeug
+2077	k15jmeuf
+2076	k15jmeue
+2075	k15jmeud
+2074	k15jmeub
+2073	k15jmeu9
+2072	k15jmeu8
+2071	k15jmeu7
+2070	k15jmeu6
+2069	k15jmeu5
+2068	k15jmeu3
+2067	k15jmeu2
+2066	k15jmeu1
+2065	k15jmeu0
+2064	k15jmety
+2063	k15jmetx
+2062	k15jmetw
+2061	k15jmetu
+2060	k15jmett
+2059	k15jmets
+2058	k15jmetq
+2057	k15jmetp
+2056	k15jmeto
+2055	k15jmetn
+2054	k15jmetm
+2053	k15jmetl
+2052	k15jmetk
+2051	k15jmetj
+2050	k15jmeti
+2049	k15jmeth
+2048	k15jmetg
+2047	k15jmetf
+2046	k15jmete
+2045	k15jmetc
+2044	k15jmeta
+2043	k15jmet7
+2042	k15jmet4
+2041	k15jmet1
+2040	k15jmesx
+2039	k15jmesu
+2038	k15jmess
+2037	k15jmesp
+2036	k15jmesm
+2035	k15jmesk
+2034	k15jmesh
+2033	k15jmesd
+2032	k15jmesa
+2031	k15jmes6
+2030	k15jmes3
+2029	k15jmery
+2028	k15jmeru
+2027	k15jmerr
+2026	k15jmero
+2025	k15jmerl
+2024	k15jmeri
+2023	k15jmerg
+2022	k15jmerd
+2021	k15jmera
+2020	k15jmer8
+2019	k15jmer7
+2018	k15jmer6
+2017	k15jmer5
+2016	k15jmer4
+2015	k15jmer3
+2014	k15jmer2
+2013	k15jmer1
+2012	k15jmer0
+2011	k15jmeqy
+2010	k15jmeqx
+2009	k15jmeqw
+2008	k15jmeqv
+2007	k15jmequ
+2006	k15jmeqt
+2005	k15jmeqr
+2004	k15jmeqq
+2003	k15jmeqp
+2002	k15jmeqo
+2001	k15jmeqn
+2000	k15jmeql
 1999	k15jmeqk
 1998	k15jmeqj
 1997	k15jmeqi

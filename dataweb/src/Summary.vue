@@ -118,6 +118,50 @@
     <div v-else class="no-saved-data">
       <el-empty description="暂无保存的总计数据，点击保存按钮保存当前总计" />
     </div>
+
+    <!-- 链上数据总计 -->
+    <div class="summary-section chain-section">
+      <h2 class="section-title">
+        🔗 链上数据总计
+        <span v-if="chainSummary.updateTime" class="update-time">
+          （更新时间：{{ formatTime(chainSummary.updateTime) }}）
+        </span>
+        <el-button 
+          type="primary" 
+          size="small" 
+          @click="loadChainStats" 
+          :loading="loadingChainData"
+          style="margin-left: 15px;"
+        >
+          刷新链上数据
+        </el-button>
+      </h2>
+      
+      <div class="summary-content">
+        <div class="summary-item summary-positions">
+          <span class="summary-label">链上持仓总计:</span>
+          <div class="summary-positions-list">
+            <div v-if="chainSummary.positionSummary.length === 0" class="empty-summary">
+              <span v-if="loadingChainData">正在加载...</span>
+              <span v-else>无链上持仓数据</span>
+            </div>
+            <div 
+              v-for="(pos, idx) in chainSummary.positionSummary" 
+              :key="`chain-${pos.title}-${idx}`" 
+              class="summary-position-item"
+            >
+              <span class="position-title-summary">{{ pos.title }}</span>
+              <el-tag 
+                :type="parseFloat(pos.amount) >= 0 ? 'success' : 'danger'" 
+                size="small"
+              >
+                {{ pos.amount }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -127,6 +171,7 @@ import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
+const CHAIN_STATS_API_URL = 'https://enstudyai.fatedreamer.com/t3/api/markets/stats'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -137,6 +182,12 @@ const currentSummary = ref({
   positionSummary: []
 })
 const savedSummary = ref(null)
+const chainSummary = ref({
+  positionSummary: [],
+  updateTime: null,
+  participantCount: 0
+})
+const loadingChainData = ref(false)
 
 /**
  * 解析持仓数据字符串
@@ -386,6 +437,78 @@ const formatTime = (timestamp) => {
 }
 
 /**
+ * 加载链上数据总计
+ */
+const loadChainStats = async () => {
+  loadingChainData.value = true
+  
+  try {
+    console.log('[链上数据总计] 开始加载链上数据...')
+    const response = await axios.get(CHAIN_STATS_API_URL)
+    
+    if (response.data && response.data.items && Array.isArray(response.data.items)) {
+      const positionMap = new Map()
+      
+      // 处理每个市场的数据
+      // 如果有相同的基础title（去除###后的部分），则累加数据
+      for (const item of response.data.items) {
+        if (item.title) {
+          const fullTitle = item.title.trim()
+          const titleKey = fullTitle.split('###')[0].trim()  // 去除 ### 后面的部分作为key
+          const yesTotal = parseFloat(item.yes_total || 0)
+          const noTotal = parseFloat(item.no_total || 0)
+          const amount = yesTotal - noTotal
+          
+          // 只记录数量不为0的市场
+          if (Math.abs(amount) > 0.01) {
+            // 检查是否已有相同的基础title（去除###后的部分）
+            let found = false
+            for (const [key, value] of positionMap.entries()) {
+              const existingKey = key.split('###')[0].trim()
+              if (existingKey === titleKey) {
+                // 找到相同基础title的，累加数据
+                positionMap.set(key, value + amount)
+                found = true
+                break
+              }
+            }
+            
+            if (!found) {
+              // 新建条目，使用完整title作为key
+              positionMap.set(fullTitle, amount)
+            }
+          }
+        }
+      }
+      
+      // 转换为数组并排序
+      const positionSummary = []
+      for (const [title, amount] of positionMap.entries()) {
+        positionSummary.push({ title, amount: amount.toFixed(2) })
+      }
+      
+      positionSummary.sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount)))
+      
+      chainSummary.value = {
+        positionSummary,
+        updateTime: Date.now()
+      }
+      
+      console.log('[链上数据总计] 加载完成，共处理', positionSummary.length, '个市场')
+      console.log('[链上数据总计] 链上数据示例:', positionSummary.slice(0, 3))
+      ElMessage.success(`链上数据加载完成，共 ${positionSummary.length} 个市场`)
+    } else {
+      ElMessage.warning('未获取到链上数据')
+    }
+  } catch (error) {
+    console.error('[链上数据总计] 加载失败:', error)
+    ElMessage.error('加载链上数据失败: ' + (error.message || '网络错误'))
+  } finally {
+    loadingChainData.value = false
+  }
+}
+
+/**
  * 返回列表页面
  */
 const goBack = () => {
@@ -402,6 +525,7 @@ onMounted(() => {
   // 延迟一下，确保页面渲染完成
   setTimeout(() => {
     loadAndCalculate()
+    loadChainStats()  // 同时加载链上数据
   }, 100)
 })
 </script>
@@ -445,6 +569,10 @@ onMounted(() => {
 
 .saved-section {
   background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.chain-section {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
 }
 
 .section-title {
