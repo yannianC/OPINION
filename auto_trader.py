@@ -189,6 +189,8 @@ GROUP_PASSWORDS = {
     "22": "ttRo451YU*58",  # 电脑组22的密码
     "23": "mj@w2ndJ*kX0g8!rns",  # 电脑组23的密码（浏览器1,2,3,4使用特定密码）
     "24": "5cx2Wsn#0kQnj*w240",  # 电脑组24的密码
+    "25":"kashg2*dk2F",
+    "26":"cxknwlJK&*f8",
     "27": "kiIH78hjfi.*+*",  # 电脑组27的密码
 }
 
@@ -2530,6 +2532,29 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     
     if not position_changed:
         log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
+        
+        # 在取消挂单前，先检查任务一状态，判断另一个任务是否已经变化
+        log_print(f"[{serial_number}] [{task_label}] 检查任务一状态，判断另一个任务是否已变化...")
+        current_status = get_mission_status(target_mission_id)
+        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+        
+        # 判断另一个任务是否已经变化
+        other_task_changed = False
+        if is_task1:
+            # 当前是任务一，检查任务一状态是否为11（表示任务二已经变化）
+            if current_status == 11:
+                other_task_changed = True
+                log_print(f"[{serial_number}] [{task_label}] 检测到任务二已变化（任务一状态为11），保留挂单")
+        else:
+            # 当前是任务二，检查任务一状态是否为8（表示任务一已经变化）
+            if current_status == 8:
+                other_task_changed = True
+                log_print(f"[{serial_number}] [{task_label}] 检测到任务一已变化（任务一状态为8），保留挂单")
+        
+        if other_task_changed:
+            log_print(f"[{serial_number}] [{task_label}] Position未检测到变化超时，但对方已变化，保留挂单")
+            return False, "Position未检测到变化超时，但对方已变化，保留挂单"
+        
         log_print(f"[{serial_number}] [{task_label}] 开始检查并取消挂单...")
         
         try:
@@ -2564,11 +2589,11 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 tr_list = tbody.find_elements(By.TAG_NAME, "tr")
             except:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时,未找到挂单"
             
             if not tr_list or len(tr_list) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时,未找到挂单"
             
             # 有挂单，需要取消
             log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，开始取消...")
@@ -2578,7 +2603,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             tds = first_tr.find_elements(By.TAG_NAME, "td")
             if len(tds) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时,未找到挂单"
             
             last_td = tds[-1]  # 最后一个td
             svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
@@ -2651,13 +2676,13 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 return False, "吃单失败，有挂单，已取消挂单"
             else:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时,且取消挂单失败"
                 
         except Exception as e:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
             import traceback
             log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-            return False, "Position未检测到变化超时"
+            return False, "Position未检测到变化超时,且取消挂单出错"
     
     # 第二阶段：轮询任务一状态，等待状态变为10（10分钟超时，每10秒检查一次）
     log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：轮询任务状态 ==========")
@@ -5806,6 +5831,166 @@ def click_opinion_transactions_and_get_data(driver, serial_number):
         return [], False
 
 
+def get_points_history_data(driver, serial_number):
+    """
+    获取 Points History 数据
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        
+    Returns:
+        str: Points History 数据字符串，如果没有数据或获取失败则返回 "0" 或空字符串
+    """
+    try:
+        log_print(f"[{serial_number}] [OP] 步骤10: 进入 Points 页面获取 Points History 数据...")
+        
+        # 1. 进入 https://app.opinion.trade/points 页面
+        points_url = "https://app.opinion.trade/points"
+        log_print(f"[{serial_number}] [OP] 导航到 {points_url}...")
+        driver.get(points_url)
+        time.sleep(3)
+        
+        # 2. 等待页面加载完成后，在20s内找到是否有内容为 'Your Points History' 的p标签存在
+        log_print(f"[{serial_number}] [OP] 在20秒内查找 'Your Points History' p标签...")
+        points_history_p = None
+        start_time = time.time()
+        
+        while time.time() - start_time < 20:
+            try:
+                all_p_tags = driver.find_elements(By.TAG_NAME, "p")
+                for p in all_p_tags:
+                    if p.text.strip() == "Your Points History":
+                        points_history_p = p
+                        log_print(f"[{serial_number}] [OP] ✓ 找到 'Your Points History' p标签")
+                        break
+                
+                if points_history_p:
+                    break
+                
+                time.sleep(0.5)
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 查找 p 标签时出错: {str(e)}")
+                time.sleep(0.5)
+        
+        if not points_history_p:
+            log_print(f"[{serial_number}] [OP] ⚠ 20秒内未找到 'Your Points History' p标签，不记录该数据")
+            return ""
+        
+        # 3. 点击 p标签的父节点的父节点
+        try:
+            parent = points_history_p.find_element(By.XPATH, "..")
+            grandparent = parent.find_element(By.XPATH, "..")
+            log_print(f"[{serial_number}] [OP] 点击 p标签的父节点的父节点...")
+            grandparent.click()
+            time.sleep(5)
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 点击父节点的父节点失败: {str(e)}")
+            return ""
+        
+        # 4. 等待5s后，找到内容为'Your Points History'的p标签，并检查 data-sentry-source-file="pointsHistoryModal.tsx"
+        log_print(f"[{serial_number}] [OP] 等待5秒后重新查找 'Your Points History' p标签（需包含 data-sentry-source-file='pointsHistoryModal.tsx'）...")
+        time.sleep(5)
+        
+        points_history_p_after = None
+        try:
+            all_p_tags = driver.find_elements(By.TAG_NAME, "p")
+            for p in all_p_tags:
+                if p.text.strip() == "Your Points History":
+                    # 检查 data-sentry-source-file 属性
+                    data_sentry_source_file = p.get_attribute("data-sentry-source-file")
+                    if data_sentry_source_file == "pointsHistoryModal.tsx":
+                        points_history_p_after = p
+                        log_print(f"[{serial_number}] [OP] ✓ 重新找到 'Your Points History' p标签（包含 data-sentry-source-file='pointsHistoryModal.tsx'）")
+                        break
+                    else:
+                        log_print(f"[{serial_number}] [OP] ⚠ 找到 p 标签但 data-sentry-source-file 不匹配: {data_sentry_source_file}")
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 重新查找 p 标签时出错: {str(e)}")
+            return ""
+        
+        if not points_history_p_after:
+            log_print(f"[{serial_number}] [OP] ⚠ 未找到 'Your Points History' p标签")
+            return ""
+        
+        # 5. 找到 p标签的上一级父节点
+        try:
+            parent_after = points_history_p_after.find_element(By.XPATH, "..")
+            
+            # 6. 找到父节点下的下一级div子节点，即找到与p标签同级的div标签（A）
+            div_children = parent_after.find_elements(By.TAG_NAME, "div")
+            div_a = None
+            for div in div_children:
+                # 检查这个div是否是p标签的兄弟节点（同级的div）
+                if div != points_history_p_after:
+                    div_a = div
+                    log_print(f"[{serial_number}] [OP] ✓ 找到与p标签同级的div标签（A）")
+                    break
+            
+            if not div_a:
+                log_print(f"[{serial_number}] [OP] ⚠ 未找到与p标签同级的div标签")
+                return ""
+            
+            # 7. 找到这个div（A）标签下的子div
+            div_a_children = div_a.find_elements(By.TAG_NAME, "div")
+            
+            # 如果A下面的子div的数量不足2个，则判断是否有内容为 "No points history found"的p标签存在
+            if len(div_a_children) < 2:
+                log_print(f"[{serial_number}] [OP] ⚠ div A 下的子div数量不足2个（共{len(div_a_children)}个），检查是否有 'No points history found'...")
+                try:
+                    all_p_in_div_a = div_a.find_elements(By.TAG_NAME, "p")
+                    for p in all_p_in_div_a:
+                        if "No points history found" in p.text.strip():
+                            log_print(f"[{serial_number}] [OP] ✓ 找到 'No points history found'，返回 '0'")
+                            return "0"
+                except:
+                    pass
+                log_print(f"[{serial_number}] [OP] ⚠ 未找到 'No points history found'，返回空字符串")
+                return ""
+            
+            # 8. 从第二个div开始，获取div中的所有p标签内容
+            result_parts = []
+            for div_idx in range(1, len(div_a_children)):  # 从第二个div开始（索引1）
+                div_child = div_a_children[div_idx]
+                try:
+                    p_tags_in_div = div_child.find_elements(By.TAG_NAME, "p")
+                    p_contents = []
+                    for p in p_tags_in_div:
+                        p_text = p.text.strip()
+                        if p_text:
+                            p_contents.append(p_text)
+                    
+                    # 多个p标签的内容用 ||| 分割拼接
+                    if p_contents:
+                        div_content = "|||".join(p_contents)
+                        result_parts.append(div_content)
+                        log_print(f"[{serial_number}] [OP] Div {div_idx + 1}: {div_content[:100]}...")
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 处理 div {div_idx + 1} 时出错: {str(e)}")
+                    continue
+            
+            # 9. 将每个div的内容用分号拼接，得到最终内容
+            if result_parts:
+                final_result = ";".join(result_parts)
+                log_print(f"[{serial_number}] [OP] ✓ Points History 数据获取成功，共 {len(result_parts)} 条记录")
+                return final_result
+            else:
+                log_print(f"[{serial_number}] [OP] ⚠ 未获取到有效的 Points History 数据")
+                return ""
+                
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 处理 Points History 数据时出错: {str(e)}")
+            import traceback
+            log_print(f"[{serial_number}] [OP] 错误详情:\n{traceback.format_exc()}")
+            return ""
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [OP] ✗ 获取 Points History 数据失败: {str(e)}")
+        import traceback
+        log_print(f"[{serial_number}] [OP] 错误详情:\n{traceback.format_exc()}")
+        return ""
+
+
 # ============================================================================
 # Type 2 任务 - 数据处理和格式化函数
 # ============================================================================
@@ -6716,7 +6901,27 @@ def upload_type2_data(browser_id, collected_data, exchange_name=''):
         
         account_config['e'] = exchange_name  # 平台名称
         
-        # 6.5. 如果获取到了 Balance Spot 地址，更新字段 h
+        # 6.5. 处理 Points History 数据（字段 k）
+        points_history_data = collected_data.get('k', '')
+        if points_history_data:
+            # 如果返回的数据是"0"，则判断原本的"k"字段是否包含"|||"
+            if points_history_data == "0":
+                original_k = account_config.get('k', '')
+                if original_k and '|||' in original_k:
+                    # 服务器有有效数据，不更新无效数据
+                    log_print(f"[{browser_id}] ℹ Points History 数据为 '0'，但服务器已有有效数据（包含|||），不更新字段 k")
+                else:
+                    # 服务器没有有效数据，更新为"0"
+                    account_config['k'] = "0"
+                    log_print(f"[{browser_id}] ✓ 更新字段 k: 0（无数据）")
+            else:
+                # 有有效数据，直接更新
+                account_config['k'] = points_history_data
+                log_print(f"[{browser_id}] ✓ 更新字段 k: {points_history_data[:100]}...")
+        else:
+            log_print(f"[{browser_id}] ℹ 未获取到 Points History 数据，字段 k 保持不变")
+        
+        # 6.6. 如果获取到了 Balance Spot 地址，更新字段 h
         balance_spot_address = collected_data.get('balance_spot_address')
         if balance_spot_address and balance_spot_address.startswith('0x') and account_config['i'] != "1":
             account_config['h'] = balance_spot_address
@@ -7645,6 +7850,15 @@ def collect_position_data(driver, browser_id, exchange_name):
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
                             break
                     
+                    # 获取 Points History 数据
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Points History 数据...")
+                    points_history_data = get_points_history_data(driver, browser_id)
+                    if points_history_data:
+                        collected_data['k'] = points_history_data
+                        log_print(f"[{browser_id}] ✓ Points History 数据已保存: {points_history_data[:100]}...")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Points History 数据获取失败或为空，继续执行后续步骤")
+                    
                     # 全部成功，跳出重试循环
                     log_print(f"[{browser_id}] ✓ 所有数据获取成功")
                     break
@@ -8089,6 +8303,15 @@ def process_type2_mission(task_data, retry_count=0):
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
                             break
+                    
+                    # 步骤10: 获取 Points History 数据
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤10: 获取 Points History 数据...")
+                    points_history_data = get_points_history_data(driver, browser_id)
+                    if points_history_data:
+                        collected_data['k'] = points_history_data
+                        log_print(f"[{browser_id}] ✓ Points History 数据已保存: {points_history_data[:100]}...")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Points History 数据获取失败或为空，继续执行后续步骤")
                     
                     # 全部成功，跳出重试循环
                     log_print(f"[{browser_id}] ✓ 所有数据获取成功")

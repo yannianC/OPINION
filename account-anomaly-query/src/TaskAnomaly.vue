@@ -53,82 +53,111 @@
       </section>
 
       <!-- 结果区域 -->
-      <section class="results-section" v-if="results.length > 0">
-        <h2>查询结果 (共 {{ results.length }} 个异常浏览器)</h2>
-        
-        <div class="browser-list">
-          <div 
-            v-for="(browser, index) in results" 
-            :key="index"
-            class="browser-item"
-          >
-            <div class="browser-header">
-              <div class="browser-info">
-                <span class="label">浏览器ID:</span>
-                <span class="value">{{ browser.browserId }}</span>
-              </div>
-              <div class="browser-info">
-                <span class="label">电脑组:</span>
-                <span class="value">{{ browser.groupNo }}</span>
-              </div>
-              <div class="browser-info">
-                <span class="label">失败任务数:</span>
-                <span class="value error">{{ browser.tasks.length }}</span>
+      <section class="results-section" v-if="Object.keys(results).length > 0">
+        <div class="results-header">
+          <h2>查询结果 (共 {{ Object.keys(results).length }} 个任务组)</h2>
+          
+          <!-- 筛选区域 -->
+          <div class="filter-section">
+            <div class="filter-input-wrapper">
+              <input 
+                v-model="filterKeyword" 
+                type="text" 
+                class="filter-input"
+                placeholder="输入失败原因关键词进行筛选"
+                @keyup.enter="applyFilter"
+              />
+              <!-- 筛选历史 -->
+              <div class="filter-history" v-if="filterHistory.length > 0">
+                <span class="history-label">历史:</span>
+                <span 
+                  v-for="(history, index) in filterHistory" 
+                  :key="index"
+                  class="history-item"
+                  @click="selectHistory(history)"
+                  :title="history"
+                >
+                  {{ history }}
+                </span>
               </div>
             </div>
-
-            <div class="tasks-container">
-              <table class="tasks-table">
-                <thead>
-                  <tr>
-                    <th>主题</th>
-                    <th>失败原因</th>
-                    <th>任务ID</th>
-                    <th>同组任务ID</th>
-                    <th>方向</th>
-                    <th>数量</th>
-                    <th>价格</th>
-                    <th>选项</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(task, taskIndex) in browser.tasks" :key="taskIndex">
-                    <td class="trending-cell">{{ task.trending }}</td>
-                    <td class="msg-cell">{{ task.msg || '无' }}</td>
-                    <td>{{ task.id }}</td>
-                    <td>{{ task.tp1 || '-' }}</td>
-                    <td>
-                      <span :class="task.side === 1 ? 'buy' : 'sell'">
-                        {{ task.side === 1 ? '买入' : '卖出' }}
-                      </span>
-                    </td>
-                    <td>{{ task.amt }}</td>
-                    <td>{{ task.price }}</td>
-                    <td>
-                      <span :class="task.psSide === 1 ? 'yes' : 'no'">
-                        {{ task.psSide === 1 ? 'YES' : 'NO' }}
-                      </span>
-                    </td>
-                    <td>
-                      <a 
-                        :href="task.opUrl" 
-                        target="_blank" 
-                        class="link-btn"
-                      >
-                        查看
-                      </a>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <button 
+              class="filter-btn" 
+              @click="applyFilter"
+            >
+              筛选
+            </button>
+            <button 
+              v-if="filterKeyword" 
+              class="clear-filter-btn" 
+              @click="clearFilter"
+            >
+              清除
+            </button>
+          </div>
+        </div>
+        
+        <div class="tasks-container">
+          <div class="task-groups-list">
+            <div 
+              v-for="(item, itemIndex) in taskGroupsWithIndex" 
+              :key="item.groupKey"
+              :class="['task-group-card', `group-color-${item.colorIndex}`]"
+            >
+              <!-- <div class="group-header">
+                <div class="group-title">
+                  <span class="group-label">任务组</span>
+                  <span class="group-id">{{ item.group.groupId }}</span>
+                </div>
+                <div class="group-task-count">共 {{ item.group.tasks.length }} 个任务</div>
+              </div> -->
+              
+              <div class="tasks-list">
+                <div 
+                  v-for="(task, taskIndex) in item.group.tasks" 
+                  :key="taskIndex"
+                  class="task-item"
+                >
+                  <div class="task-line">
+                    <span class="task-id">{{ task.id }}</span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">{{ task.trending }}</span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">{{ formatDateTime(task.createTime) }}</span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">{{ formatDateTime(task.updateTime) }}</span>
+                    <span class="task-separator">|</span>
+                    <span :class="['task-info', task.side === 1 ? 'buy' : 'sell']">
+                      {{ task.side === 1 ? '买入' : '卖出' }}
+                    </span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">{{ task.amt }}</span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">{{ task.price }}</span>
+                    <span class="task-separator">|</span>
+                    <span :class="['task-info', task.psSide === 1 ? 'yes' : 'no']">
+                      {{ task.psSide === 1 ? 'YES' : 'NO' }}
+                    </span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
+                    <span class="task-separator">|</span>
+                    <a 
+                      :href="task.opUrl" 
+                      target="_blank" 
+                      class="link-btn"
+                    >
+                      查看
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       <!-- 空状态 -->
-      <section class="empty-section" v-if="!loading && results.length === 0 && hasQueried">
+      <section class="empty-section" v-if="!loading && Object.keys(results).length === 0 && hasQueried">
         <p>未找到异常账号</p>
       </section>
     </div>
@@ -153,8 +182,10 @@ export default {
       },
       recentHours: 1, // 默认查询最近1小时
       loading: false,
-      results: [],
+      results: {},
       hasQueried: false,
+      filterKeyword: '', // 筛选关键词
+      filterHistory: [], // 筛选历史
       toast: {
         show: false,
         message: '',
@@ -162,7 +193,200 @@ export default {
       }
     }
   },
+  mounted() {
+    // 从本地存储加载筛选历史
+    this.loadFilterHistory()
+  },
+  computed: {
+    // 过滤后的结果
+    filteredResults() {
+      if (!this.filterKeyword || this.filterKeyword.trim() === '') {
+        return this.results
+      }
+      
+      const keyword = this.filterKeyword.trim().toLowerCase()
+      const filtered = {}
+      
+      // 过滤每个任务组：如果组内任何一个任务匹配关键词，就显示整个组
+      Object.keys(this.results).forEach(groupKey => {
+        const group = this.results[groupKey]
+        
+        // 检查组内是否有任何任务匹配关键词
+        const hasMatch = group.tasks.some(task => {
+          // 检查失败原因是否包含关键词（同时检查原始和格式化后的文本）
+          const originalMsg = (task.msg || '').toLowerCase()
+          const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
+          return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
+        })
+        
+        // 如果有匹配，返回整个组（包含所有任务）
+        if (hasMatch) {
+          filtered[groupKey] = {
+            ...group,
+            tasks: group.tasks // 返回所有任务，而不是只返回匹配的任务
+          }
+        }
+      })
+      
+      return filtered
+    },
+    
+    // 获取带索引的任务组列表，用于颜色循环
+    taskGroupsWithIndex() {
+      // 对组键进行排序，确保顺序稳定
+      const sortedKeys = Object.keys(this.filteredResults).sort((a, b) => {
+        // 先按groupId排序，确保同组任务颜色一致
+        const groupA = this.filteredResults[a].groupId
+        const groupB = this.filteredResults[b].groupId
+        if (groupA < groupB) return -1
+        if (groupA > groupB) return 1
+        return 0
+      })
+      
+      // 创建internalGroupId到colorIndex的映射，确保同组任务使用相同颜色
+      const groupIdColorMap = new Map()
+      sortedKeys.forEach((groupKey, index) => {
+        const group = this.filteredResults[groupKey]
+        const colorIndex = index % 4
+        // 使用internalGroupId作为key，确保同组任务使用相同颜色
+        const internalGroupId = group.internalGroupId || group.groupId
+        groupIdColorMap.set(internalGroupId, colorIndex)
+      })
+      
+      return sortedKeys.map((groupKey) => {
+        const group = this.filteredResults[groupKey]
+        const internalGroupId = group.internalGroupId || group.groupId
+        return {
+          groupKey,
+          group: group,
+          colorIndex: groupIdColorMap.get(internalGroupId) || 0
+        }
+      })
+    }
+  },
   methods: {
+    // 格式化日期时间
+    formatDateTime(dateTimeStr) {
+      if (!dateTimeStr) return '-'
+      try {
+        const date = new Date(dateTimeStr)
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const hours = String(date.getHours()).padStart(2, '0')
+        const minutes = String(date.getMinutes()).padStart(2, '0')
+        const seconds = String(date.getSeconds()).padStart(2, '0')
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+      } catch (e) {
+        return dateTimeStr
+      }
+    },
+    
+    // 格式化任务消息
+    formatTaskMsg(msg) {
+      if (!msg) return ''
+      
+      // 如果包含"执行异常"，直接返回"执行异常"
+      if (msg.includes('执行异常')) {
+        return '执行异常'
+      }
+      
+      // 尝试解析JSON格式的Type 5消息
+      try {
+        const data = JSON.parse(msg)
+        
+        if (data.type === 'TYPE5_SUCCESS') {
+          // Type 5 成功：全部成交
+          let result = `✅ 全部成交`
+          
+          // 处理初始数量
+          if (data.initial_filled_amount) {
+            result += ` | 初始数量: ${data.initial_filled_amount}`
+          }
+          
+          // 处理现有数量，如果是"<0.01"则显示为0
+          let currentAmount = data.filled_amount
+          if (typeof currentAmount === 'string' && currentAmount.includes('<')) {
+            currentAmount = '0'
+          }
+          result += ` | 现有数量: ${currentAmount}`
+          
+          // 计算并显示交易额（现有数量 - 初始数量）
+          if (data.initial_filled_amount && data.filled_amount) {
+            // 去除千位分隔符（逗号）后再解析
+            const initialAmountStr = String(data.initial_filled_amount).replace(/,/g, '')
+            const initialAmount = parseFloat(initialAmountStr) || 0
+            
+            let filledAmount = 0
+            if (typeof data.filled_amount === 'string' && data.filled_amount.includes('<')) {
+              filledAmount = 0
+            } else {
+              const filledAmountStr = String(data.filled_amount).replace(/,/g, '')
+              filledAmount = parseFloat(filledAmountStr) || 0
+            }
+            const tradeAmount = filledAmount - initialAmount
+            result += ` | 交易额: ${tradeAmount.toFixed(2)}`
+          }
+          
+          // 显示价格
+          result += ` | 价格: ${data.filled_price}`
+          
+          // 显示交易费
+          if (data.transaction_fee) {
+            result += ` | 交易费: ${data.transaction_fee}`
+          }
+          
+          return result
+        } else if (data.type === 'TYPE5_PARTIAL') {
+          // Type 5 部分成交：有挂单
+          let result = `⚠️ 部分成交`
+          
+          // 辅助函数：移除逗号并解析数字
+          const parseNumber = (value) => {
+            if (!value) return 0
+            if (typeof value === 'string') {
+              if (value.includes('<')) return 0
+              // 移除逗号（千位分隔符）后再解析
+              return parseFloat(value.replace(/,/g, '')) || 0
+            }
+            return parseFloat(value) || 0
+          }
+          
+          // 处理初始数量
+          if (data.initial_filled_amount) {
+            result += ` | 初始数量: ${data.initial_filled_amount}`
+          }
+          
+          // 处理现有数量
+          let currentAmount = data.filled_amount
+          if (typeof currentAmount === 'string' && currentAmount.includes('<')) {
+            currentAmount = '0'
+          }
+          result += ` | 现有数量: ${currentAmount}`
+          
+          // 计算并显示交易额
+          if (data.initial_filled_amount && data.filled_amount) {
+            const initialAmount = parseNumber(data.initial_filled_amount)
+            const filledAmount = parseNumber(data.filled_amount)
+            const tradeAmount = filledAmount - initialAmount
+            result += ` | 交易额: ${tradeAmount.toFixed(2)}`
+          }
+          
+          result += ` | 成交价格: ${data.filled_price} | 挂单价格: ${data.pending_price} | 进度: ${data.progress}`
+          
+          if (data.transaction_fee) {
+            result += ` | 交易费: ${data.transaction_fee}`
+          }
+          return result
+        }
+      } catch (e) {
+        // 不是JSON格式，返回原始消息
+      }
+      
+      // 返回原始消息
+      return msg
+    },
+    
     showToast(message, type = 'info') {
       this.toast = {
         show: true,
@@ -234,28 +458,69 @@ export default {
         if (response.data && response.data.code === 0) {
           const missions = response.data.data.list || []
           
-          // 处理数据：过滤任务，按浏览器ID分组
-          // 过滤规则：
-          // 1. status === 2：跳过（成功任务）
-          // 2. status === 3：直接显示（失败任务）
-          // 3. status !== 2 && status !== 3：检查 createTime，如果距离现在超过20分钟才显示
-          const browserMap = new Map()
+          // 处理数据：先收集所有任务，建立任务1和任务2的映射关系
+          const allTasksMap = new Map() // id -> task (所有任务，包括成功的)
+          const task2ToTask1Map = new Map() // task2Id -> task1Id (任务2的id -> 任务1的id)
+          const task1ToTask2Map = new Map() // task1Id -> task2Id (任务1的id -> 任务2的id)
           const now = new Date().getTime()
           const twentyMinutes = 20 * 60 * 1000 // 20分钟的毫秒数
           
+          // 第一步：收集所有任务，建立任务1和任务2的映射关系
+          // 统一将id和tp1转换为字符串，避免类型不一致导致查找失败
           missions.forEach(item => {
             const mission = item.mission
             const exchangeConfig = item.exchangeConfig
             
+            const browserId = mission.numberList
+            const groupNo = mission.groupNo
+            
+            // 统一转换为字符串
+            const taskId = String(mission.id)
+            const tp1Id = mission.tp1 ? String(mission.tp1) : null
+            
+            const task = {
+              id: taskId,
+              tp1: tp1Id,
+              msg: mission.msg,
+              browserId: browserId,
+              groupNo: groupNo,
+              trending: exchangeConfig.trending,
+              opUrl: exchangeConfig.opUrl,
+              side: mission.side,
+              amt: mission.amt,
+              price: mission.price,
+              psSide: mission.psSide,
+              createTime: mission.createTime,
+              updateTime: mission.updateTime,
+              status: mission.status // 保存状态，用于判断是否失败
+            }
+            
+            // 记录所有任务（使用字符串作为key）
+            allTasksMap.set(taskId, task)
+            
+            // 建立任务2到任务1的映射（如果任务的tp1存在，说明它是任务2，tp1是任务1的id）
+            if (tp1Id) {
+              task2ToTask1Map.set(taskId, tp1Id)
+              task1ToTask2Map.set(tp1Id, taskId)
+            }
+          })
+          
+          // 第二步：过滤出失败的任务
+          // 过滤规则：
+          // 1. status === 2：跳过（成功任务）
+          // 2. status === 3：直接显示（失败任务）
+          // 3. status !== 2 && status !== 3：检查 createTime，如果距离现在超过20分钟才显示
+          const failedTasks = []
+          allTasksMap.forEach((task, taskId) => {
             // 跳过状态为2（成功）的任务
-            if (mission.status === 2) {
+            if (task.status === 2) {
               return
             }
             
             // 如果 status !== 3，需要检查创建时间是否超过20分钟
-            if (mission.status !== 3) {
-              if (mission.createTime) {
-                const createTime = new Date(mission.createTime).getTime()
+            if (task.status !== 3) {
+              if (task.createTime) {
+                const createTime = new Date(task.createTime).getTime()
                 const timeDiff = now - createTime
                 
                 // 如果创建时间距离现在不超过20分钟，跳过（可能是正在执行的任务）
@@ -268,40 +533,134 @@ export default {
               }
             }
             
-            const browserId = mission.numberList
-            const groupNo = mission.groupNo
+            failedTasks.push(task)
+          })
+          
+          // 第三步：对失败任务进行分组
+          // 先建立任务组关系：每个任务组包含任务1和任务2
+          const taskGroupMap = new Map() // taskId -> groupId
+          const groupMap = new Map() // groupId -> { tasks: [], groupId: string, task1CreateTime: number }
+          const processedGroups = new Set() // 已处理的组（用任务1的id标识）
+          let groupCounter = 0
+          
+          // 辅助函数：获取任务的创建时间戳
+          const getCreateTime = (task) => {
+            if (!task.createTime) return 0
+            return new Date(task.createTime).getTime()
+          }
+          
+          // 遍历失败任务，为每个失败任务找到它的组
+          failedTasks.forEach(failedTask => {
+            // 确定这个失败任务属于哪个组（任务1的id）
+            let task1Id = null
             
-            // 如果该浏览器ID还没有记录，创建新记录
-            if (!browserMap.has(browserId)) {
-              browserMap.set(browserId, {
-                browserId,
-                groupNo,
-                tasks: []
-              })
+            // 如果失败任务有tp1，说明它是任务2，tp1就是任务1的id
+            if (failedTask.tp1) {
+              task1Id = failedTask.tp1
+            } else {
+              // 如果失败任务没有tp1，说明它是任务1
+              task1Id = failedTask.id
             }
             
-            // 添加任务信息
-            const browser = browserMap.get(browserId)
-            browser.tasks.push({
-              id: mission.id,
-              tp1: mission.tp1,
-              msg: mission.msg,
-              trending: exchangeConfig.trending,
-              opUrl: exchangeConfig.opUrl,
-              side: mission.side,
-              amt: mission.amt,
-              price: mission.price,
-              psSide: mission.psSide
+            // 如果这个组已经处理过，跳过
+            if (processedGroups.has(task1Id)) {
+              return
+            }
+            
+            // 标记这个组已处理
+            processedGroups.add(task1Id)
+            
+            // 获取任务1和任务2
+            const task1 = allTasksMap.get(task1Id)
+            if (!task1) {
+              // 如果任务1不存在，跳过（不应该发生，但做保护性检查）
+              return
+            }
+            
+            const task2Id = task1ToTask2Map.get(task1Id)
+            const task2 = task2Id ? allTasksMap.get(task2Id) : null
+            
+            // 创建新组
+            const groupId = `group-${groupCounter++}`
+            const group = {
+              groupId: groupId,
+              tasks: [],
+              task1CreateTime: getCreateTime(task1)
+            }
+            groupMap.set(groupId, group)
+            
+            // 将任务1加入组（无论是否失败）
+            group.tasks.push(task1)
+            taskGroupMap.set(task1.id, groupId)
+            
+            // 将任务2加入组（如果存在，无论是否失败）
+            if (task2) {
+              group.tasks.push(task2)
+              taskGroupMap.set(task2.id, groupId)
+            }
+          })
+          
+          // 第四步：为每个任务计算同组任务ID，并转换为对象格式用于显示
+          // 先转换为数组，然后按照任务1的开始时间排序
+          const groupsArray = []
+          groupMap.forEach((group, internalGroupId) => {
+            // 为组内每个任务计算同组任务ID
+            const tasksWithGroupId = group.tasks.map(task => {
+              let groupTaskId = null
+              
+              // 如果任务有tp1，说明它是任务2，同组任务ID就是tp1（任务1的id）
+              if (task.tp1) {
+                groupTaskId = task.tp1
+              } else {
+                // 如果任务没有tp1，说明它是任务1，查找任务2的id
+                const task2Id = task1ToTask2Map.get(task.id)
+                if (task2Id) {
+                  groupTaskId = task2Id
+                } else {
+                  // 如果没有找到，说明这个任务没有同组任务，显示自己的ID
+                  groupTaskId = task.id
+                }
+              }
+              
+              return {
+                ...task,
+                groupTaskId: groupTaskId
+              }
+            })
+            
+            // 确定任务1用于显示标识（任务1是没有tp1的那个）
+            const task1 = tasksWithGroupId.find(t => !t.tp1)
+            const displayKey = task1 ? task1.id : group.tasks[0].id
+            
+            groupsArray.push({
+              groupId: displayKey, // 用于显示
+              internalGroupId: internalGroupId, // 用于颜色计算，确保同组任务使用相同颜色
+              tasks: tasksWithGroupId,
+              task1CreateTime: group.task1CreateTime
             })
           })
           
-          // 转换为数组并按浏览器ID排序
-          this.results = Array.from(browserMap.values()).sort((a, b) => {
-            return a.browserId.localeCompare(b.browserId)
+          // 按照任务1的开始时间排序（从早到晚）
+          groupsArray.sort((a, b) => {
+            return a.task1CreateTime - b.task1CreateTime
           })
           
+          // 转换为对象格式，使用排序后的顺序
+          const sortedGroups = {}
+          groupsArray.forEach((group, index) => {
+            // 使用排序后的索引作为key，确保顺序稳定
+            sortedGroups[`group-${index}`] = {
+              groupId: group.groupId,
+              internalGroupId: group.internalGroupId,
+              tasks: group.tasks
+            }
+          })
+          
+          this.results = sortedGroups
+          
+          const totalGroups = Object.keys(sortedGroups).length
           this.hasQueried = true
-          this.showToast(`查询成功，共 ${this.results.length} 个异常浏览器`, 'success')
+          this.showToast(`查询成功，共 ${totalGroups} 个任务组`, 'success')
         } else {
           this.showToast('查询失败', 'error')
         }
@@ -311,6 +670,78 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+    
+    // 应用筛选
+    applyFilter() {
+      if (!this.filterKeyword || this.filterKeyword.trim() === '') {
+        this.showToast('请输入筛选关键词', 'warning')
+        return
+      }
+      
+      // 保存筛选历史
+      this.saveFilterHistory(this.filterKeyword.trim())
+      
+      const filteredCount = Object.values(this.filteredResults).reduce((sum, group) => sum + group.tasks.length, 0)
+      if (filteredCount === 0) {
+        this.showToast('未找到匹配的任务', 'warning')
+      } else {
+        this.showToast(`筛选完成，找到 ${filteredCount} 个匹配的任务`, 'success')
+      }
+    },
+    
+    // 清除筛选
+    clearFilter() {
+      this.filterKeyword = ''
+      this.showToast('筛选已清除', 'info')
+    },
+    
+    // 从本地存储加载筛选历史
+    loadFilterHistory() {
+      try {
+        const history = localStorage.getItem('taskAnomaly_filterHistory')
+        if (history) {
+          this.filterHistory = JSON.parse(history)
+        }
+      } catch (e) {
+        console.error('加载筛选历史失败:', e)
+        this.filterHistory = []
+      }
+    },
+    
+    // 保存筛选历史到本地存储
+    saveFilterHistory(keyword) {
+      if (!keyword || keyword.trim() === '') {
+        return
+      }
+      
+      try {
+        // 移除重复项
+        let history = [...this.filterHistory]
+        const index = history.indexOf(keyword)
+        if (index > -1) {
+          // 如果已存在，先移除
+          history.splice(index, 1)
+        }
+        // 添加到最前面
+        history.unshift(keyword)
+        // 最多保存10条历史
+        if (history.length > 10) {
+          history = history.slice(0, 10)
+        }
+        
+        this.filterHistory = history
+        localStorage.setItem('taskAnomaly_filterHistory', JSON.stringify(history))
+      } catch (e) {
+        console.error('保存筛选历史失败:', e)
+      }
+    },
+    
+    // 选择历史记录
+    selectHistory(keyword) {
+      this.filterKeyword = keyword
+      // 自动执行筛选
+      this.applyFilter()
     }
   }
 }
@@ -462,106 +893,236 @@ export default {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.results-section h2 {
+.results-header {
   margin-bottom: 20px;
+}
+
+.results-section h2 {
+  margin-bottom: 15px;
   color: #333;
   font-size: 20px;
 }
 
-.browser-list {
+/* 筛选区域 */
+.filter-section {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.filter-input-wrapper {
+  flex: 1;
+  min-width: 250px;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-input {
+  padding: 10px 15px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  width: 100%;
+  transition: border-color 0.3s;
+}
+
+.filter-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+/* 筛选历史 */
+.filter-history {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.history-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.history-item {
+  padding: 4px 10px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  color: #667eea;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item:hover {
+  background: #667eea;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.filter-btn {
+  padding: 10px 25px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  white-space: nowrap;
+}
+
+.filter-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.clear-filter-btn {
+  padding: 10px 20px;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  white-space: nowrap;
+}
+
+.clear-filter-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(149, 165, 166, 0.4);
+  background: #7f8c8d;
+}
+
+.tasks-container {
+  padding: 0;
+  background: transparent;
+}
+
+.task-groups-list {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-.browser-item {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fafafa;
-}
-
-.browser-header {
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  padding: 15px 20px;
-  display: flex;
-  gap: 30px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.browser-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.browser-info .label {
-  font-weight: 500;
-  color: #666;
-}
-
-.browser-info .value {
-  font-weight: 600;
-  color: #333;
-  font-size: 16px;
-}
-
-.browser-info .value.error {
-  color: #e74c3c;
-}
-
-.tasks-container {
-  padding: 20px;
-  overflow-x: auto;
-}
-
-.tasks-table {
-  width: 100%;
-  border-collapse: collapse;
+/* 任务组卡片 */
+.task-group-card {
   background: white;
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  transition: box-shadow 0.3s;
 }
 
-.tasks-table thead {
-  background: #667eea;
+.task-group-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 任务组背景颜色循环 */
+.task-group-card.group-color-0 {
+  border-left: 4px solid #667eea;
+}
+
+.task-group-card.group-color-1 {
+  border-left: 4px solid #f093fb;
+}
+
+.task-group-card.group-color-2 {
+  border-left: 4px solid #4facfe;
+}
+
+.task-group-card.group-color-3 {
+  border-left: 4px solid #43e97b;
+}
+
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
 }
 
-.tasks-table th {
-  padding: 12px 10px;
-  text-align: left;
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-label {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.group-id {
+  font-size: 16px;
   font-weight: 600;
-  font-size: 14px;
-  white-space: nowrap;
 }
 
-.tasks-table td {
-  padding: 12px 10px;
+.group-task-count {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.task-item {
+  padding: 12px 20px;
   border-bottom: 1px solid #e0e0e0;
-  font-size: 14px;
+  transition: background-color 0.2s;
 }
 
-.tasks-table tbody tr:hover {
-  background-color: #f8f9fa;
-}
-
-.tasks-table tbody tr:last-child td {
+.task-item:last-child {
   border-bottom: none;
 }
 
-.trending-cell {
-  max-width: 300px;
-  word-break: break-word;
-  color: #555;
+.task-item:hover {
+  background-color: #f8f9fa;
 }
 
-.msg-cell {
-  max-width: 200px;
-  word-break: break-word;
+.task-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.task-id {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 15px;
+}
+
+.task-separator {
+  color: #ccc;
+  font-weight: 300;
+}
+
+.task-info {
+  color: #333;
+}
+
+.task-info.msg-value {
   color: #e74c3c;
   font-weight: 500;
+  max-width: 400px;
+  word-break: break-word;
 }
 
 .buy {
@@ -684,18 +1245,48 @@ export default {
     width: 100%;
   }
   
-  .tasks-container {
-    overflow-x: scroll;
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
   }
   
-  .tasks-table {
-    min-width: 1000px;
+  .filter-input-wrapper {
+    width: 100%;
+    max-width: 100%;
   }
   
-  .browser-header {
+  .filter-input {
+    width: 100%;
+    max-width: 100%;
+  }
+  
+  .filter-btn,
+  .clear-filter-btn {
+    width: 100%;
+  }
+  
+  .history-item {
+    max-width: 120px;
+  }
+  
+  .group-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
+  }
+  
+  .task-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .task-separator {
+    display: none;
+  }
+  
+  .task-info.msg-value {
+    max-width: 100%;
   }
 }
 </style>

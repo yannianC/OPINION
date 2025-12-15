@@ -1633,6 +1633,21 @@ const showTransactions = (row) => {
 
 
 /**
+ * 下载文本文件
+ */
+const downloadTextFile = (content, filename) => {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+/**
  * 加载数据列表（支持静默刷新）
  */
 const loadData = async (silent = false) => {
@@ -1645,6 +1660,30 @@ const loadData = async (silent = false) => {
     
     if (response.data && response.data.data) {
       const serverData = response.data.data
+      
+      // 提取所有的 fingerprintNo 并保存到 txt 文件
+      const fingerprintNos = []
+      serverData.forEach(item => {
+        if (item.fingerprintNo) {
+          fingerprintNos.push(String(item.fingerprintNo))
+        }
+      })
+      
+      // 保存到 txt 文件（每行一个 fingerprintNo，先从小到大排序）
+      // if (fingerprintNos.length > 0) {
+      //   // 按数字大小排序（从小到大）
+      //   fingerprintNos.sort((a, b) => {
+      //     const numA = parseInt(a) || 0
+      //     const numB = parseInt(b) || 0
+      //     return numA - numB
+      //   })
+        
+      //   const content = fingerprintNos.join('\n')
+      //   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+      //   const filename = `fingerprintNo_${timestamp}.txt`
+      //   downloadTextFile(content, filename)
+      //   console.log(`已保存 ${fingerprintNos.length} 个 fingerprintNo 到 ${filename}`)
+      // }
       
       // 保存本地新增的行（没有 id 的）
       const localRows = tableData.value.filter(row => !row.id)
@@ -2451,7 +2490,9 @@ const refreshMissionStatus = async () => {
 
 /**
  * 地址去重
- * 检测数据中地址(h)是否有重复，将没有重复的数据的字段 i 更新为"1"
+ * 检测数据中地址(h)是否有重复：
+ * - 如果地址没有重复的，将字段 i 更新为"1"
+ * - 如果地址有重复的，将字段 i 更新为""
  */
 const deduplicateAddresses = async () => {
   deduplicating.value = true
@@ -2469,30 +2510,55 @@ const deduplicateAddresses = async () => {
       }
     }
     
-    // 找出只出现一次的地址（没有重复的）
-    const uniqueAddresses = new Set()
+    // 找出只出现一次的地址（没有重复的）和出现多次的地址（有重复的）
+    const uniqueAddresses = new Set()  // 唯一地址
+    const duplicateAddresses = new Set()  // 重复地址
+    
     for (const [address, count] of addressCountMap.entries()) {
       if (count === 1) {
         uniqueAddresses.add(address)
+      } else if (count > 1) {
+        duplicateAddresses.add(address)
       }
     }
     
-    if (uniqueAddresses.size === 0) {
-      ElMessage.warning('没有找到唯一的地址（所有地址都有重复）')
+    if (uniqueAddresses.size === 0 && duplicateAddresses.size === 0) {
+      ElMessage.warning('没有找到有效的地址')
       return
     }
     
-    // 更新没有重复的数据的字段 i 为"1"（如果原本不是"1"）
+    // 更新数据：唯一地址的字段 i 为"1"，重复地址的字段 i 为""
     const updatedData = [...tableData.value]
     let updateCount = 0
     const updatedRowKeys = new Set()  // 记录被更新的行的唯一标识
     
     for (let i = 0; i < updatedData.length; i++) {
       const row = updatedData[i]
-      if (row.h && row.h.trim() && uniqueAddresses.has(row.h.trim())) {
-        // 先检查原本是不是"1"，如果是就不需要更新
-        if (row.i !== '1') {
-          updatedData[i] = { ...row, i: '1' }
+      if (row.h && row.h.trim()) {
+        const address = row.h.trim()
+        let shouldUpdate = false
+        let newValue = null
+        
+        // 获取当前 i 字段的值（处理 null、undefined 等情况）
+        const currentI = row.i === null || row.i === undefined ? '' : String(row.i)
+        
+        if (uniqueAddresses.has(address)) {
+          // 唯一地址：设置为"1"（只有当原本不是"1"时才更新）
+          if (currentI !== '1') {
+            newValue = '1'
+            shouldUpdate = true
+          }
+        } else if (duplicateAddresses.has(address)) {
+          // 重复地址：设置为""（只有当原本不是""时才更新）
+          if (currentI !== '') {
+            newValue = ''
+            shouldUpdate = true
+          }
+        }
+        
+        // 只有当值真正需要改变时才更新
+        if (shouldUpdate) {
+          updatedData[i] = { ...row, i: newValue }
           updateCount++
           // 记录被更新的行的唯一标识（优先使用id，否则使用fingerprintNo）
           const rowKey = row.id || row.fingerprintNo
@@ -2504,7 +2570,7 @@ const deduplicateAddresses = async () => {
     }
     
     if (updateCount === 0) {
-      ElMessage.warning('没有需要更新的数据（所有唯一地址的字段 i 都已经是"1"）')
+      ElMessage.warning('没有需要更新的数据')
       return
     }
     
@@ -2512,7 +2578,7 @@ const deduplicateAddresses = async () => {
     tableData.value = updatedData
     
     // 保存更新后的数据
-    ElMessage.info(`发现 ${uniqueAddresses.size} 个唯一地址，正在更新 ${updateCount} 条数据...`)
+    ElMessage.info(`发现 ${uniqueAddresses.size} 个唯一地址，${duplicateAddresses.size} 个重复地址，正在更新 ${updateCount} 条数据...`)
     
     // 批量保存更新后的数据（只保存实际被更新的数据）
     const dataToSave = updatedData
@@ -2555,7 +2621,7 @@ const deduplicateAddresses = async () => {
     }
     
     if (failCount === 0) {
-      ElMessage.success(`地址去重完成：已更新 ${updateCount} 条数据的字段 i 为"1"，全部保存成功`)
+      ElMessage.success(`地址去重完成：已更新 ${updateCount} 条数据（唯一地址设为"1"，重复地址设为""），全部保存成功`)
     } else {
       ElMessage.warning(`地址去重完成：已更新 ${updateCount} 条数据，成功保存 ${successCount} 条，失败 ${failCount} 条`)
     }

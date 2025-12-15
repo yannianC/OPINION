@@ -277,31 +277,52 @@
               >
                 {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
               </button>
+              <label style="font-size: 14px; margin-left: 8px;">一个主题同时任务个数：</label>
+              <input 
+                type="number" 
+                v-model.number="hedgeTasksPerTopic" 
+                min="1" 
+                max="10"
+                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="输入一个主题同时执行的对冲任务数量"
+              />
             </div>
             
             <div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 16px;">
               <span style="font-size: 14px;">主题数量：{{ filteredActiveConfigs.length }}</span>
-              <label style="font-size: 14px; margin-left: 8px;">每一批的个数：</label>
-              <input 
-                type="number" 
-                v-model.number="batchSize" 
-                min="1" 
-                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
-                :disabled="autoHedgeRunning"
-                title="输入每一批要处理的主题数量"
-              />
-              <label style="font-size: 14px; margin-left: 8px;">每一批的执行时间（分钟）：</label>
-              <input 
-                type="number" 
-                v-model.number="batchExecutionTime" 
-                min="1" 
-                style="width: 80px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
-                :disabled="autoHedgeRunning"
-                title="输入每一批的执行时间（分钟）"
-              />
-              <span v-if="autoHedgeRunning" style="font-size: 14px; margin-left: 8px; color: #007bff; font-weight: bold;">
-                当前执行批次：{{ currentBatchIndex + 1 }}/{{ Math.ceil(filteredActiveConfigs.length / batchSize) }}
-              </span>
+              <label style="font-size: 14px; margin-left: 8px; display: flex; align-items: center; gap: 4px;">
+                <input 
+                  type="checkbox" 
+                  v-model="enableBatchMode"
+                  :disabled="autoHedgeRunning"
+                  title="勾选后启用分批执行模式"
+                />
+                <span>分批执行</span>
+              </label>
+              <template v-if="enableBatchMode">
+                <label style="font-size: 14px; margin-left: 8px;">每一批的个数：</label>
+                <input 
+                  type="number" 
+                  v-model.number="batchSize" 
+                  min="1" 
+                  style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                  :disabled="autoHedgeRunning"
+                  title="输入每一批要处理的主题数量"
+                />
+                <label style="font-size: 14px; margin-left: 8px;">每一批的执行时间（分钟）：</label>
+                <input 
+                  type="number" 
+                  v-model.number="batchExecutionTime" 
+                  min="1" 
+                  style="width: 80px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                  :disabled="autoHedgeRunning"
+                  title="输入每一批的执行时间（分钟）"
+                />
+                <span v-if="autoHedgeRunning" style="font-size: 14px; margin-left: 8px; color: #007bff; font-weight: bold;">
+                  当前执行批次：{{ currentBatchIndex + 1 }}/{{ Math.ceil(filteredActiveConfigs.length / batchSize) }}
+                </span>
+              </template>
             </div>
           </div>
           
@@ -383,140 +404,147 @@
                   <!-- 右侧：对冲信息 -->
                   <div class="hedge-info-section">
                     <div class="section-title">对冲信息</div>
-                    <div v-if="config.currentHedge" class="hedge-info">
-                      <div class="hedge-status-row">
-                        <span class="hedge-label">对冲 #{{ config.currentHedge.id }}</span>
-                        <span 
-                          class="hedge-status-badge"
-                          :class="getHedgeStatusClass(config.currentHedge)"
-                        >
-                          {{ getHedgeStatusText(config.currentHedge) }}
-                        </span>
-                      </div>
-                      
-                      <!-- 任务一 -->
-                      <div class="hedge-task-section">
-                        <div class="task-title">
-                          任务一 - {{ config.currentHedge.firstSide }}
-                          <span class="task-amount">x{{ config.currentHedge.share }}</span>
+                    <div v-if="config.currentHedges && config.currentHedges.length > 0" class="hedge-info-list">
+                      <div 
+                        v-for="(hedge, index) in config.currentHedges.filter(h => h.finalStatus === 'running')" 
+                        :key="hedge.id"
+                        class="hedge-info"
+                        :style="{ marginBottom: index < config.currentHedges.filter(h => h.finalStatus === 'running').length - 1 ? '16px' : '0' }"
+                      >
+                        <div class="hedge-status-row">
+                          <span class="hedge-label">对冲 #{{ hedge.id }} ({{ index + 1 }}/{{ config.currentHedges.filter(h => h.finalStatus === 'running').length }})</span>
+                          <span 
+                            class="hedge-status-badge"
+                            :class="getHedgeStatusClass(hedge)"
+                          >
+                            {{ getHedgeStatusText(hedge) }}
+                          </span>
                         </div>
-                        <div class="hedge-task-details-grid">
-                          <div class="hedge-detail-row">
-                            <span>任务ID:</span>
-                            <span :class="getTaskStatusClass(
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.yesStatus 
-                                : config.currentHedge.noStatus
-                            )">
-                              {{ 
-                                config.currentHedge.firstSide === 'YES' 
-                                  ? (config.currentHedge.yesTaskId || '待提交') 
-                                  : (config.currentHedge.noTaskId || '待提交') 
-                              }}
-                            </span>
+                        
+                        <!-- 任务一 -->
+                        <div class="hedge-task-section">
+                          <div class="task-title">
+                            任务一 - {{ hedge.firstSide }}
+                            <span class="task-amount">x{{ hedge.share }}</span>
                           </div>
-                          <div class="hedge-detail-row">
-                            <span>浏览器:</span>
-                            <span>{{ 
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.yesNumber 
-                                : config.currentHedge.noNumber 
-                            }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>电脑组:</span>
-                            <span>{{ 
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.yesGroupNo 
-                                : config.currentHedge.noGroupNo 
-                            }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>买/卖:</span>
-                            <span>{{ config.currentHedge.side === 1 ? '买入' : '卖出' }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>方向:</span>
-                            <span>{{ config.currentHedge.firstSide }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>价格:</span>
-                            <span>{{ 
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.yesPrice 
-                                : config.currentHedge.noPrice 
-                            }}¢</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>数量:</span>
-                            <span>{{ config.currentHedge.share }}</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <!-- 任务二 -->
-                      <div class="hedge-task-section">
-                        <div class="task-title">
-                          任务二 - {{ config.currentHedge.firstSide === 'YES' ? 'NO' : 'YES' }}
-                          <span class="task-amount">x{{ config.currentHedge.share }}</span>
-                        </div>
-                        <div class="hedge-task-details-grid">
-                          <div class="hedge-detail-row">
-                            <span>任务ID:</span>
-                            <span :class="getTaskStatusClass(
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.noStatus 
-                                : config.currentHedge.yesStatus
-                            )">
-                              {{ 
-                                config.currentHedge.firstSide === 'YES' 
-                                  ? (config.currentHedge.noTaskId || '待提交') 
-                                  : (config.currentHedge.yesTaskId || '待提交') 
-                              }}
-                            </span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>浏览器:</span>
-                            <span>{{ 
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.noNumber 
-                                : config.currentHedge.yesNumber 
-                            }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>电脑组:</span>
-                            <span>{{ 
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.noGroupNo 
-                                : config.currentHedge.yesGroupNo 
-                            }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>买/卖:</span>
-                            <span>{{ config.currentHedge.side === 1 ? '买入' : '卖出' }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>方向:</span>
-                            <span>{{ config.currentHedge.firstSide === 'YES' ? 'NO' : 'YES' }}</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>价格:</span>
-                            <span>{{ 
-                              config.currentHedge.firstSide === 'YES' 
-                                ? config.currentHedge.noPrice 
-                                : config.currentHedge.yesPrice 
-                            }}¢</span>
-                          </div>
-                          <div class="hedge-detail-row">
-                            <span>数量:</span>
-                            <span>{{ config.currentHedge.share }}</span>
+                          <div class="hedge-task-details-grid">
+                            <div class="hedge-detail-row">
+                              <span>任务ID:</span>
+                              <span :class="getTaskStatusClass(
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.yesStatus 
+                                  : hedge.noStatus
+                              )">
+                                {{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? (hedge.yesTaskId || '待提交') 
+                                    : (hedge.noTaskId || '待提交') 
+                                }}
+                              </span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>浏览器:</span>
+                              <span>{{ 
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.yesNumber 
+                                  : hedge.noNumber 
+                              }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>电脑组:</span>
+                              <span>{{ 
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.yesGroupNo 
+                                  : hedge.noGroupNo 
+                              }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>买/卖:</span>
+                              <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>方向:</span>
+                              <span>{{ hedge.firstSide }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>价格:</span>
+                              <span>{{ 
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.yesPrice 
+                                  : hedge.noPrice 
+                              }}¢</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>数量:</span>
+                              <span>{{ hedge.share }}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      
-                      <div class="hedge-summary">
-                        <span>{{ config.currentHedge.isClose ? '卖出' : '买入' }} @ {{ config.currentHedge.price }}¢</span>
-                        <span>{{ formatTime(config.currentHedge.startTime) }}</span>
+                        
+                        <!-- 任务二 -->
+                        <div class="hedge-task-section">
+                          <div class="task-title">
+                            任务二 - {{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}
+                            <span class="task-amount">x{{ hedge.share }}</span>
+                          </div>
+                          <div class="hedge-task-details-grid">
+                            <div class="hedge-detail-row">
+                              <span>任务ID:</span>
+                              <span :class="getTaskStatusClass(
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.noStatus 
+                                  : hedge.yesStatus
+                              )">
+                                {{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? (hedge.noTaskId || '待提交') 
+                                    : (hedge.yesTaskId || '待提交') 
+                                }}
+                              </span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>浏览器:</span>
+                              <span>{{ 
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.noNumber 
+                                  : hedge.yesNumber 
+                              }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>电脑组:</span>
+                              <span>{{ 
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.noGroupNo 
+                                  : hedge.yesGroupNo 
+                              }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>买/卖:</span>
+                              <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>方向:</span>
+                              <span>{{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>价格:</span>
+                              <span>{{ 
+                                hedge.firstSide === 'YES' 
+                                  ? hedge.noPrice 
+                                  : hedge.yesPrice 
+                              }}¢</span>
+                            </div>
+                            <div class="hedge-detail-row">
+                              <span>数量:</span>
+                              <span>{{ hedge.share }}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div class="hedge-summary">
+                          <span>{{ hedge.isClose ? '卖出' : '买入' }} @ {{ hedge.price }}¢</span>
+                          <span>{{ formatTime(hedge.startTime) }}</span>
+                        </div>
                       </div>
                     </div>
                     <div v-else class="no-data">暂无对冲</div>
@@ -1479,8 +1507,10 @@ const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
+const hedgeTasksPerTopic = ref(2)  // 一个主题同时执行的对冲任务数量，默认为2
 
 // 分批执行相关
+const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
 const batchSize = ref(10)  // 每一批的个数
 const batchExecutionTime = ref(1)  // 每一批的执行时间（分钟），默认1分钟
 const currentBatchIndex = ref(0)  // 当前执行批次索引
@@ -3163,6 +3193,19 @@ const paginatedAllHedgeLogs = computed(() => {
  * 更新活动配置列表（启用的配置）
  */
 const updateActiveConfigs = () => {
+  // 先保存当前活动配置的对冲信息（避免被清空）
+  const hedgeInfoMap = new Map()
+  for (const config of activeConfigs.value) {
+    if (config.currentHedges || config.currentHedge) {
+      hedgeInfoMap.set(config.id, {
+        currentHedges: config.currentHedges || [],
+        currentHedge: config.currentHedge || null,
+        lastValidOrderbookTime: config.lastValidOrderbookTime || null,
+        needsReplacement: config.needsReplacement || false
+      })
+    }
+  }
+  
   // 先加载显示状态
   const configsWithVisible = loadConfigVisibleStatus(configList.value)
   
@@ -3174,18 +3217,26 @@ const updateActiveConfigs = () => {
     .filter(config => config.isOpen === 1 || config.enabled === true)  // 启用的配置
     .filter(config => config.visible !== false)  // 显示开关打开的配置
     .filter(config => !blacklist[config.trending])  // 过滤掉拉黑的配置
-    .map(config => ({
-      ...config,
-      orderbookData: config.orderbookData || null,  // 订单薄数据
-      weight: config.weight || 0,
-      currentHedge: config.currentHedge || null,  // 当前对冲任务
-      lastRequestTime: config.lastRequestTime || null,  // 上次请求时间
-      lastHedgeTime: config.lastHedgeTime || null,  // 上次对冲时间
-      noHedgeSince: config.noHedgeSince || null,  // 开始无法对冲的时间
-      isFetching: config.isFetching || false,  // 是否正在请求中
-      retryCount: config.retryCount || 0,  // 重试次数
-      errorMessage: config.errorMessage || null  // 错误信息
-    }))
+    .map(config => {
+      // 恢复保存的对冲信息
+      const savedInfo = hedgeInfoMap.get(config.id)
+      
+      return {
+        ...config,
+        orderbookData: config.orderbookData || null,  // 订单薄数据
+        weight: config.weight || 0,
+        currentHedges: savedInfo ? savedInfo.currentHedges : (config.currentHedges || []),  // 恢复对冲任务数组
+        currentHedge: savedInfo ? savedInfo.currentHedge : (config.currentHedge || null),  // 当前对冲任务
+        lastRequestTime: config.lastRequestTime || null,  // 上次请求时间
+        lastHedgeTime: config.lastHedgeTime || null,  // 上次对冲时间
+        lastValidOrderbookTime: savedInfo ? savedInfo.lastValidOrderbookTime : (config.lastValidOrderbookTime || null),  // 上次订单薄符合条件的时间
+        needsReplacement: savedInfo ? savedInfo.needsReplacement : (config.needsReplacement || false),  // 是否需要替换
+        noHedgeSince: config.noHedgeSince || null,  // 开始无法对冲的时间
+        isFetching: config.isFetching || false,  // 是否正在请求中
+        retryCount: config.retryCount || 0,  // 重试次数
+        errorMessage: config.errorMessage || null  // 错误信息
+      }
+    })
 }
 
 /**
@@ -3215,22 +3266,31 @@ const startAutoHedge = () => {
     return
   }
   
-  // 验证批次设置
-  if (batchSize.value < 1) {
-    alert('每一批的个数必须大于0')
-    return
-  }
-  if (batchExecutionTime.value < 1) {
-    alert('每一批的执行时间必须大于0')
-    return
-  }
-  
   autoHedgeRunning.value = true
   currentBatchIndex.value = 0  // 重置批次索引
-  console.log('开始自动对冲（分批执行模式）')
   
-  // 立即执行第一批
-  executeBatch()
+  // 如果启用了分批模式
+  if (enableBatchMode.value) {
+    // 验证批次设置
+    if (batchSize.value < 1) {
+      alert('每一批的个数必须大于0')
+      autoHedgeRunning.value = false
+      return
+    }
+    if (batchExecutionTime.value < 1) {
+      alert('每一批的执行时间必须大于0')
+      autoHedgeRunning.value = false
+      return
+    }
+    
+    console.log('开始自动对冲（分批执行模式）')
+    // 立即执行第一批
+    executeBatch()
+  } else {
+    // 不分批，直接执行所有主题
+    console.log('开始自动对冲（全部同时执行模式）')
+    executeAllTopics()
+  }
 }
 
 /**
@@ -3263,6 +3323,48 @@ const stopAutoHedge = () => {
 }
 
 /**
+ * 执行所有主题（不分批模式）
+ */
+const executeAllTopics = async () => {
+  if (!autoHedgeRunning.value) {
+    return
+  }
+  
+  // 获取所有有效的主题列表
+  const validConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+  
+  if (validConfigs.length === 0) {
+    console.log('没有有效的主题配置')
+    return
+  }
+  
+  console.log(`开始执行所有 ${validConfigs.length} 个主题（不分批模式）`)
+  
+  // 执行所有主题的任务
+  await executeAutoHedgeTasksForBatch(validConfigs)
+  
+  // 检查并执行自动替换
+  await checkAndReplaceTopics()
+  
+  // 设置定时器，定期执行（每20秒执行一次）
+  if (autoHedgeRunning.value) {
+    autoHedgeInterval.value = setInterval(async () => {
+      if (!autoHedgeRunning.value) {
+        return
+      }
+      
+      // 重新获取有效的主题列表（因为可能有替换）
+      const currentValidConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+      
+      if (currentValidConfigs.length > 0) {
+        await executeAutoHedgeTasksForBatch(currentValidConfigs)
+        await checkAndReplaceTopics()
+      }
+    }, 20000)  // 20秒执行一次
+  }
+}
+
+/**
  * 执行当前批次
  */
 const executeBatch = async () => {
@@ -3291,6 +3393,9 @@ const executeBatch = async () => {
   
   // 执行当前批次的任务
   await executeAutoHedgeTasksForBatch(currentBatchConfigs)
+  
+  // 检查并执行自动替换
+  await checkAndReplaceTopics()
   
   // 计算剩余时间（将分钟转换为毫秒）
   const elapsed = Date.now() - batchStartTime
@@ -3347,21 +3452,36 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   for (const config of batchConfigs) {
     try {
       // 检查该主题是否正在执行对冲
-      if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-        const startTime = new Date(config.currentHedge.startTime)
+      const currentHedges = config.currentHedges || []
+      const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
+      
+      if (runningHedges.length > 0) {
+        // 检查是否有超时的任务
         const now = new Date()
-        const elapsed = (now - startTime) / 1000 / 60
+        let hasTimeout = false
+        for (const hedge of runningHedges) {
+          const startTime = new Date(hedge.startTime)
+          const elapsed = (now - startTime) / 1000 / 60
+          if (elapsed >= 20) {
+            console.log(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
+            hedge.finalStatus = 'timeout'
+            finishHedge(config, hedge)
+            hasTimeout = true
+          }
+        }
         
-        if (elapsed >= 20) {
-          console.log(`配置 ${config.id} 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
-          config.currentHedge.finalStatus = 'timeout'
-          finishHedge(config, config.currentHedge)
+        if (hasTimeout) {
           // 清空错误信息和无法对冲时间
           config.errorMessage = null
           config.noHedgeSince = null
-          // 继续执行，可以开始新的对冲
-        } else {
-          console.log(`配置 ${config.id} 正在执行对冲（${elapsed.toFixed(1)}/20分钟），跳过订单薄请求`)
+        }
+        
+        // 检查是否还有运行中的任务，如果有且未达到最大任务数，可以继续
+        const remainingRunning = (config.currentHedges || []).filter(h => h.finalStatus === 'running').length
+        const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+        
+        if (remainingRunning >= maxTasks) {
+          console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
           continue
         }
       }
@@ -3414,8 +3534,12 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           if (checkOrderbookHedgeCondition(priceInfo)) {
             console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
-            // 清空无法对冲时间
+            // 清空无法对冲时间和标记
             config.noHedgeSince = null
+            config.needsReplacement = false  // 清除需要替换的标记
+            
+            // 记录订单薄符合条件的时间（用于自动替换机制）
+            config.lastValidOrderbookTime = Date.now()
             
             // 执行对冲
             await executeHedgeFromOrderbook(config, priceInfo)
@@ -3434,6 +3558,21 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
               if (noHedgeElapsed >= 5) {
                 config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲`
                 console.warn(`配置 ${config.id} - ${config.errorMessage}`)
+              }
+            }
+            
+            // 检查是否超过10分钟都没有符合条件的订单薄（用于自动替换）
+            if (config.lastValidOrderbookTime) {
+              const noValidElapsed = (Date.now() - config.lastValidOrderbookTime) / 1000 / 60
+              if (noValidElapsed >= 10) {
+                config.needsReplacement = true
+                console.warn(`配置 ${config.id} - 已连续 ${Math.floor(noValidElapsed)} 分钟没有符合条件的订单薄，标记为需要替换`)
+              }
+            } else {
+              // 如果没有记录过符合条件的时间，且当前不符合条件，记录当前时间作为起始时间
+              // 但只有在自动对冲运行时才记录
+              if (autoHedgeRunning.value) {
+                config.lastValidOrderbookTime = Date.now()
               }
             }
           }
@@ -3874,6 +4013,7 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
  * 从订单薄数据执行对冲
  * price1: 先挂方的买一价
  * price2: 先挂方的卖一价
+ * 支持同时执行多个对冲任务
  */
 const executeHedgeFromOrderbook = async (config, priceInfo) => {
   try {
@@ -3902,47 +4042,76 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     const trendingIds = activeConfigs.value.map(c => c.id).join(',')
     console.log(`当前打开显示的主题: ${trendingIds}`)
     
-    // 调用服务器接口获取对冲双方
-    const response = await axios.post(
-      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV3',
-      {
-        trendingId: config.id,
-        isClose: hedgeMode.isClose,
-        currentPrice: orderPrice,
-        priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
-        timePassMin: hedgeMode.timePassMin,
-        minUAmt: hedgeMode.minUAmt,  // 最小开单
-        maxUAmt: hedgeMode.maxUAmt   // 最大开单
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    )
+    // 获取需要执行的任务数量
+    const taskCount = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
     
-    if (response.data && response.data.data) {
-      const hedgeData = response.data.data
-      console.log('获取对冲双方成功:', hedgeData)
-      
-      // 直接执行对冲任务（在 executeHedgeTask 中创建 hedgeRecord）
-      await executeHedgeTask(config, {
-        ...hedgeData,
-        currentPrice: orderPrice,
-        firstSide: priceInfo.firstSide
-      })
-      
-      console.log(`配置 ${config.id} - 对冲任务已提交`)
-    } else {
-      throw new Error('获取对冲双方失败')
+    // 检查当前正在执行的对冲任务数量
+    const currentHedges = config.currentHedges || []
+    const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
+    const availableSlots = taskCount - runningHedges.length
+    
+    if (availableSlots <= 0) {
+      console.log(`配置 ${config.id} - 已达到最大任务数 ${taskCount}，跳过`)
+      return
     }
+    
+    console.log(`配置 ${config.id} - 需要执行 ${availableSlots} 个对冲任务（最大: ${taskCount}, 当前运行: ${runningHedges.length}）`)
+    
+    // 顺序请求多个对冲任务（避免同时请求导致的问题）
+    const hedgeResults = []
+    for (let i = 0; i < availableSlots; i++) {
+      try {
+        console.log(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV3',
+          {
+            trendingId: config.id,
+            isClose: hedgeMode.isClose,
+            currentPrice: orderPrice,
+            priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
+            timePassMin: hedgeMode.timePassMin,
+            minUAmt: hedgeMode.minUAmt,  // 最小开单
+            maxUAmt: hedgeMode.maxUAmt   // 最大开单
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data && response.data.data) {
+          const hedgeData = response.data.data
+          console.log(`配置 ${config.id} - 获取对冲双方成功 (任务 ${i + 1}/${availableSlots}):`, hedgeData)
+          
+          // 执行对冲任务
+          await executeHedgeTask(config, {
+            ...hedgeData,
+            currentPrice: orderPrice,
+            firstSide: priceInfo.firstSide
+          })
+          
+          hedgeResults.push(true)
+          console.log(`配置 ${config.id} - 第 ${i + 1} 个对冲任务已提交成功`)
+        } else {
+          throw new Error('获取对冲双方失败')
+        }
+      } catch (error) {
+        console.error(`配置 ${config.id} - 执行对冲任务 ${i + 1} 失败:`, error)
+        hedgeResults.push(false)
+      }
+      
+      // 添加小延迟，避免请求过快（最后一个不需要延迟）
+      if (i < availableSlots - 1) {
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+    }
+    
+    const successCount = hedgeResults.filter(r => r === true).length
+    console.log(`配置 ${config.id} - 已提交 ${successCount}/${availableSlots} 个对冲任务`)
   } catch (error) {
     console.error(`配置 ${config.id} - 执行对冲失败:`, error)
-    if (config.currentHedge) {
-      config.currentHedge.finalStatus = 'failed'
-      config.currentHedge.error = error.message
-      finishHedge(config, config.currentHedge)
-    }
   }
 }
 
@@ -4026,6 +4195,138 @@ const closeConfigTask = async (config) => {
   } catch (error) {
     console.error('关闭任务失败:', error)
     showToast(`关闭任务失败: ${error.message}`, 'error')
+  }
+}
+
+/**
+ * 检查并执行自动替换主题
+ * 当需要替换的主题大于10个时，自动关闭这些主题并随机获取新主题替换
+ */
+const checkAndReplaceTopics = async () => {
+  if (!autoHedgeRunning.value) {
+    return
+  }
+  
+  try {
+    // 找出所有需要替换的主题（有对冲信息的要保留）
+    const topicsToReplace = activeConfigs.value.filter(config => {
+      // 需要替换的条件：标记为需要替换，且没有正在运行的对冲任务
+      if (!config.needsReplacement) {
+        return false
+      }
+      
+      // 检查是否有正在运行的对冲任务
+      const currentHedges = config.currentHedges || []
+      const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
+      
+      // 如果有正在运行的对冲任务，不替换
+      if (runningHedges.length > 0) {
+        console.log(`配置 ${config.id} - 有正在运行的对冲任务，暂不替换`)
+        return false
+      }
+      
+      return true
+    })
+    
+    console.log(`需要替换的主题数量: ${topicsToReplace.length}`)
+    
+    // 如果需要替换的主题数量大于10个，执行替换
+    if (topicsToReplace.length > 10) {
+      console.log(`开始自动替换 ${topicsToReplace.length} 个主题`)
+      showToast(`开始自动替换 ${topicsToReplace.length} 个主题...`, 'info')
+      
+      // 保存需要保留的对冲信息（用于后续恢复）
+      const hedgeInfoMap = new Map()
+      for (const config of activeConfigs.value) {
+        if (config.currentHedges && config.currentHedges.length > 0) {
+          // 只保留有运行中任务的主题的对冲信息
+          const runningHedges = config.currentHedges.filter(h => h.finalStatus === 'running')
+          if (runningHedges.length > 0) {
+            hedgeInfoMap.set(config.id, {
+              currentHedges: config.currentHedges,
+              currentHedge: config.currentHedge
+            })
+          }
+        }
+      }
+      
+      // 关闭需要替换的主题
+      const closePromises = topicsToReplace.map(async (config) => {
+        try {
+          // 更新服务器配置，将isOpen设为0
+          const updateData = {
+            list: [{
+              id: config.id,
+              trending: config.trending,
+              trendingPart1: config.trendingPart1,
+              trendingPart2: config.trendingPart2,
+              trendingPart3: config.trendingPart3,
+              opUrl: config.opUrl,
+              polyUrl: config.polyUrl,
+              opTopicId: config.opTopicId,
+              weight: config.weight,
+              isOpen: 0  // 关闭任务
+            }]
+          }
+          
+          await axios.post(
+            'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+            updateData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          )
+          
+          // 更新本地配置列表
+          const configInList = configList.value.find(c => c.id === config.id)
+          if (configInList) {
+            configInList.isOpen = 0
+            configInList.enabled = false
+          }
+          
+          console.log(`配置 ${config.id} 已关闭`)
+        } catch (error) {
+          console.error(`关闭配置 ${config.id} 失败:`, error)
+        }
+      })
+      
+      await Promise.all(closePromises)
+      
+      // 更新活动配置列表（这会移除已关闭的主题）
+      updateActiveConfigs()
+      
+      // 恢复保留的对冲信息
+      for (const config of activeConfigs.value) {
+        const savedInfo = hedgeInfoMap.get(config.id)
+        if (savedInfo) {
+          config.currentHedges = savedInfo.currentHedges
+          config.currentHedge = savedInfo.currentHedge
+          console.log(`恢复配置 ${config.id} 的对冲信息`)
+        }
+      }
+      
+      // 随机获取相同数量的新主题
+      const replaceCount = topicsToReplace.length
+      console.log(`开始随机获取 ${replaceCount} 个新主题替换...`)
+      
+      // 临时设置获取数量
+      const originalCount = randomGetCount.value
+      randomGetCount.value = replaceCount
+      
+      try {
+        await randomGetAvailableTopic()
+      } finally {
+        // 恢复原始数量
+        randomGetCount.value = originalCount
+      }
+      
+      showToast(`✅ 已自动替换 ${replaceCount} 个主题`, 'success')
+    }
+  } catch (error) {
+    console.error('自动替换主题失败:', error)
+    showToast(`自动替换失败: ${error.message}`, 'error')
   }
 }
 
@@ -4624,7 +4925,17 @@ const executeHedgeTask = async (config, hedgeData) => {
     finalStatus: 'running'  // running, success, failed
   }
   
+  // 初始化 currentHedges 数组（如果不存在）
+  if (!config.currentHedges) {
+    config.currentHedges = []
+  }
+  
+  // 添加到数组中
+  config.currentHedges.push(hedgeRecord)
+  
+  // 为了兼容旧代码，也设置 currentHedge（指向最新的）
   config.currentHedge = hedgeRecord
+  
   pausedType3Tasks.value.add(config.id)
   
   console.log(`开始对冲 ${config.id}:`, hedgeRecord)
@@ -4972,14 +5283,30 @@ const finishHedge = (config, hedgeRecord) => {
   // 保存日志到本地
   saveHedgeLog(hedgeRecord)
   
-  // 解除暂停状态，允许新的对冲任务
-  pausedType3Tasks.value.delete(config.id)
-  
   console.log(`对冲 ${hedgeRecord.id} 已结束，状态: ${hedgeRecord.finalStatus}，用时: ${hedgeRecord.duration}分钟，YES状态: ${hedgeRecord.yesStatus}, NO状态: ${hedgeRecord.noStatus}，日志已保存`)
   
-  // 清除当前对冲记录，允许新的对冲任务开始
-  // 注意：清除后下次循环就可以开始新的对冲了
-  config.currentHedge = null
+  // 从数组中移除已完成的对冲记录
+  if (config.currentHedges) {
+    const index = config.currentHedges.findIndex(h => h.id === hedgeRecord.id)
+    if (index !== -1) {
+      config.currentHedges.splice(index, 1)
+    }
+    
+    // 如果还有运行中的对冲任务，设置 currentHedge 为最新的运行中的任务
+    const runningHedges = config.currentHedges.filter(h => h.finalStatus === 'running')
+    if (runningHedges.length > 0) {
+      config.currentHedge = runningHedges[runningHedges.length - 1]
+    } else {
+      // 如果没有运行中的任务了，清除 currentHedge
+      config.currentHedge = null
+      // 解除暂停状态，允许新的对冲任务
+      pausedType3Tasks.value.delete(config.id)
+    }
+  } else {
+    // 兼容旧代码
+    config.currentHedge = null
+    pausedType3Tasks.value.delete(config.id)
+  }
 }
 
 /**
@@ -5152,21 +5479,36 @@ const executeAutoHedgeTasks = async () => {
       }
       
       // 检查该主题是否正在执行对冲
-      if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-        const startTime = new Date(config.currentHedge.startTime)
+      const currentHedges = config.currentHedges || []
+      const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
+      
+      if (runningHedges.length > 0) {
+        // 检查是否有超时的任务
         const now = new Date()
-        const elapsed = (now - startTime) / 1000 / 60
+        let hasTimeout = false
+        for (const hedge of runningHedges) {
+          const startTime = new Date(hedge.startTime)
+          const elapsed = (now - startTime) / 1000 / 60
+          if (elapsed >= 20) {
+            console.log(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
+            hedge.finalStatus = 'timeout'
+            finishHedge(config, hedge)
+            hasTimeout = true
+          }
+        }
         
-        if (elapsed >= 20) {
-          console.log(`配置 ${config.id} 对冲任务超时（${elapsed.toFixed(1)}分钟），强制结束`)
-          config.currentHedge.finalStatus = 'timeout'
-          finishHedge(config, config.currentHedge)
+        if (hasTimeout) {
           // 清空错误信息和无法对冲时间
           config.errorMessage = null
           config.noHedgeSince = null
-          // 继续执行，可以开始新的对冲
-        } else {
-          console.log(`配置 ${config.id} 正在执行对冲（${elapsed.toFixed(1)}/20分钟），跳过订单薄请求`)
+        }
+        
+        // 检查是否还有运行中的任务，如果有且未达到最大任务数，可以继续
+        const remainingRunning = (config.currentHedges || []).filter(h => h.finalStatus === 'running').length
+        const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+        
+        if (remainingRunning >= maxTasks) {
+          console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
           continue
         }
       }
@@ -5219,8 +5561,12 @@ const executeAutoHedgeTasks = async () => {
           if (checkOrderbookHedgeCondition(priceInfo)) {
             console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
-            // 清空无法对冲时间
+            // 清空无法对冲时间和标记
             config.noHedgeSince = null
+            config.needsReplacement = false  // 清除需要替换的标记
+            
+            // 记录订单薄符合条件的时间（用于自动替换机制）
+            config.lastValidOrderbookTime = Date.now()
             
             // 执行对冲
             await executeHedgeFromOrderbook(config, priceInfo)
@@ -5239,6 +5585,21 @@ const executeAutoHedgeTasks = async () => {
               if (noHedgeElapsed >= 5) {
                 config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲`
                 console.warn(`配置 ${config.id} - ${config.errorMessage}`)
+              }
+            }
+            
+            // 检查是否超过10分钟都没有符合条件的订单薄（用于自动替换）
+            if (config.lastValidOrderbookTime) {
+              const noValidElapsed = (Date.now() - config.lastValidOrderbookTime) / 1000 / 60
+              if (noValidElapsed >= 10) {
+                config.needsReplacement = true
+                console.warn(`配置 ${config.id} - 已连续 ${Math.floor(noValidElapsed)} 分钟没有符合条件的订单薄，标记为需要替换`)
+              }
+            } else {
+              // 如果没有记录过符合条件的时间，且当前不符合条件，记录当前时间作为起始时间
+              // 但只有在自动对冲运行时才记录
+              if (autoHedgeRunning.value) {
+                config.lastValidOrderbookTime = Date.now()
               }
             }
           }
