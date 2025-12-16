@@ -121,6 +121,14 @@
                   <div class="task-line">
                     <span class="task-id">{{ task.id }}</span>
                     <span class="task-separator">|</span>
+                    <span class="task-info">
+                      <span class="field-label">电脑组:</span>{{ task.groupNo || '-' }}
+                    </span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">
+                      <span class="field-label">浏览器编号:</span>{{ task.browserId || '-' }}
+                    </span>
+                    <span class="task-separator">|</span>
                     <span class="task-info">{{ task.trending }}</span>
                     <span class="task-separator">|</span>
                     <span class="task-info">{{ formatDateTime(task.createTime) }}</span>
@@ -137,6 +145,15 @@
                     <span class="task-separator">|</span>
                     <span :class="['task-info', task.psSide === 1 ? 'yes' : 'no']">
                       {{ task.psSide === 1 ? 'YES' : 'NO' }}
+                    </span>
+                    <span class="task-separator">|</span>
+                    <span class="task-info">
+                      <span class="field-label">链上余额:</span>
+                      <span :class="['balance-value', 
+                        !task.onChainBalance ? 'loading' : 
+                        task.onChainBalance === '获取失败' ? 'error' : 'success']">
+                        {{ task.onChainBalance || '加载中...' }}
+                      </span>
                     </span>
                     <span class="task-separator">|</span>
                     <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -265,6 +282,74 @@ export default {
     }
   },
   methods: {
+    // 获取链上余额
+    async getOnChainBalance(fingerprintNo, title, psSide) {
+      if (!fingerprintNo || !title) {
+        return '获取失败'
+      }
+      
+      try {
+        const response = await axios.post('https://enstudyai.fatedreamer.com/t3/api/fingerprint/position', {
+          fingerprintNo: String(fingerprintNo),
+          title: title
+        })
+        
+        // 检查是否有错误信息
+        if (response.data && response.data.detail) {
+          return '获取失败'
+        }
+        
+        // 检查是否有position数据
+        if (response.data && response.data.position) {
+          const position = response.data.position
+          // 根据购买的 YES/NO 返回对应的余额
+          if (psSide === 1) {
+            // YES
+            return position.yes_amount !== undefined ? position.yes_amount.toFixed(8) : '获取失败'
+          } else {
+            // NO
+            return position.no_amount !== undefined ? position.no_amount.toFixed(8) : '获取失败'
+          }
+        }
+        
+        return '获取失败'
+      } catch (error) {
+        console.error('获取链上余额失败:', error)
+        return '获取失败'
+      }
+    },
+    
+    // 为所有任务加载链上余额
+    async loadOnChainBalances(groups) {
+      // 收集所有需要获取余额的任务
+      const tasksToLoad = []
+      Object.keys(groups).forEach(groupKey => {
+        const group = groups[groupKey]
+        group.tasks.forEach((task, taskIndex) => {
+          if (task.browserId && task.trending) {
+            tasksToLoad.push({
+              task: task,
+              groupKey: groupKey,
+              taskIndex: taskIndex
+            })
+          }
+        })
+      })
+      
+      // 为每个任务获取链上余额（使用 Promise.all 并发请求，但限制并发数）
+      const batchSize = 10 // 每批处理10个任务
+      for (let i = 0; i < tasksToLoad.length; i += batchSize) {
+        const batch = tasksToLoad.slice(i, i + batchSize)
+        await Promise.all(batch.map(async ({ task, groupKey, taskIndex }) => {
+          const balance = await this.getOnChainBalance(task.browserId, task.trending, task.psSide)
+          // 更新任务对象的链上余额（Vue 3 直接赋值即可）
+          if (this.results[groupKey] && this.results[groupKey].tasks[taskIndex]) {
+            this.results[groupKey].tasks[taskIndex].onChainBalance = balance
+          }
+        }))
+      }
+    },
+    
     // 格式化日期时间
     formatDateTime(dateTimeStr) {
       if (!dateTimeStr) return '-'
@@ -658,6 +743,9 @@ export default {
           
           this.results = sortedGroups
           
+          // 为每个任务获取链上余额
+          this.loadOnChainBalances(sortedGroups)
+          
           const totalGroups = Object.keys(sortedGroups).length
           this.hasQueried = true
           this.showToast(`查询成功，共 ${totalGroups} 个任务组`, 'success')
@@ -755,7 +843,7 @@ export default {
 }
 
 .container {
-  max-width: 1400px;
+  max-width: 2000px;
   margin: 0 auto;
 }
 
@@ -1116,6 +1204,29 @@ export default {
 
 .task-info {
   color: #333;
+}
+
+.field-label {
+  color: #666;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.balance-value {
+  font-weight: 600;
+}
+
+.balance-value.success {
+  color: #27ae60;
+}
+
+.balance-value.error {
+  color: #e74c3c;
+}
+
+.balance-value.loading {
+  color: #95a5a6;
+  font-style: italic;
 }
 
 .task-info.msg-value {

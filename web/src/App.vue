@@ -1402,6 +1402,14 @@
                     任务{{ log.yesTaskId || '-' }} | 
                     <span :class="getTaskStatusClass(log.yesStatus)">{{ getStatusText(log.yesStatus) }}</span>
                     <span v-if="log.yesTaskMsg" class="task-msg">| {{ formatTaskMsg(log.yesTaskMsg) }}</span>
+                    <span v-if="log.yesNumber && log.trendingName" class="on-chain-balance">
+                      | 链上余额:
+                      <span :class="['balance-value', 
+                        log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? 'loading' : 
+                        log.yesOnChainBalance === '获取失败' ? 'error' : 'success']">
+                        {{ log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? '加载中...' : log.yesOnChainBalance }}
+                      </span>
+                    </span>
                   </span>
                 </div>
                 <div class="compact-task-row">
@@ -1412,6 +1420,14 @@
                     任务{{ log.noTaskId || '-' }} | 
                     <span :class="getTaskStatusClass(log.noStatus)">{{ getStatusText(log.noStatus) }}</span>
                     <span v-if="log.noTaskMsg" class="task-msg">| {{ formatTaskMsg(log.noTaskMsg) }}</span>
+                    <span v-if="log.noNumber && log.trendingName" class="on-chain-balance">
+                      | 链上余额:
+                      <span :class="['balance-value', 
+                        log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? 'loading' : 
+                        log.noOnChainBalance === '获取失败' ? 'error' : 'success']">
+                        {{ log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? '加载中...' : log.noOnChainBalance }}
+                      </span>
+                    </span>
                   </span>
                 </div>
               </div>
@@ -4605,12 +4621,62 @@ const showAllHedgeLogs = async () => {
 }
 
 /**
+ * 获取链上余额
+ */
+const getOnChainBalance = async (fingerprintNo, title, psSide) => {
+  if (!fingerprintNo || !title) {
+    return '获取失败'
+  }
+  
+  try {
+    const response = await axios.post('https://enstudyai.fatedreamer.com/t3/api/fingerprint/position', {
+      fingerprintNo: String(fingerprintNo),
+      title: title
+    })
+    
+    // 检查是否有错误信息
+    if (response.data && response.data.detail) {
+      return '获取失败'
+    }
+    
+    // 检查是否有position数据
+    if (response.data && response.data.position) {
+      const position = response.data.position
+      // 根据购买的 YES/NO 返回对应的余额
+      if (psSide === 1) {
+        // YES
+        return position.yes_amount !== undefined ? position.yes_amount.toFixed(8) : '获取失败'
+      } else {
+        // NO
+        return position.no_amount !== undefined ? position.no_amount.toFixed(8) : '获取失败'
+      }
+    }
+    
+    return '获取失败'
+  } catch (error) {
+    console.error('获取链上余额失败:', error)
+    return '获取失败'
+  }
+}
+
+/**
  * 加载当前页的任务状态
  */
 const loadCurrentPageTaskStatus = async () => {
   const start = (allHedgeLogsCurrentPage.value - 1) * allHedgeLogsPageSize.value
   const end = start + allHedgeLogsPageSize.value
   const currentPageLogs = allHedgeLogs.value.slice(start, end)
+  
+  // 先初始化链上余额字段，显示"加载中..."
+  currentPageLogs.forEach((log, pageIndex) => {
+    const actualIndex = start + pageIndex
+    if (log.yesNumber && log.trendingName && allHedgeLogs.value[actualIndex].yesOnChainBalance === undefined) {
+      allHedgeLogs.value[actualIndex].yesOnChainBalance = '' // 空字符串表示加载中
+    }
+    if (log.noNumber && log.trendingName && allHedgeLogs.value[actualIndex].noOnChainBalance === undefined) {
+      allHedgeLogs.value[actualIndex].noOnChainBalance = '' // 空字符串表示加载中
+    }
+  })
   
   // 异步获取当前页每个日志的任务状态并更新
   currentPageLogs.forEach(async (log, pageIndex) => {
@@ -4639,6 +4705,28 @@ const loadCurrentPageTaskStatus = async () => {
         }
       } catch (e) {
         console.error(`获取NO任务 ${log.noTaskId} 详情失败:`, e)
+      }
+    }
+    
+    // 获取YES任务的链上余额
+    if (log.yesNumber && log.trendingName) {
+      try {
+        const yesBalance = await getOnChainBalance(log.yesNumber, log.trendingName, 1) // YES 的 psSide 是 1
+        allHedgeLogs.value[actualIndex].yesOnChainBalance = yesBalance
+      } catch (e) {
+        console.error(`获取YES任务链上余额失败:`, e)
+        allHedgeLogs.value[actualIndex].yesOnChainBalance = '获取失败'
+      }
+    }
+    
+    // 获取NO任务的链上余额
+    if (log.noNumber && log.trendingName) {
+      try {
+        const noBalance = await getOnChainBalance(log.noNumber, log.trendingName, 2) // NO 的 psSide 是 2
+        allHedgeLogs.value[actualIndex].noOnChainBalance = noBalance
+      } catch (e) {
+        console.error(`获取NO任务链上余额失败:`, e)
+        allHedgeLogs.value[actualIndex].noOnChainBalance = '获取失败'
       }
     }
   })
@@ -7115,6 +7203,29 @@ onUnmounted(() => {
   flex: 1 1 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+.on-chain-balance {
+  color: #495057;
+  font-size: 0.8rem;
+}
+
+.balance-value {
+  font-weight: 600;
+  margin-left: 0.25rem;
+}
+
+.balance-value.success {
+  color: #28a745;
+}
+
+.balance-value.error {
+  color: #dc3545;
+}
+
+.balance-value.loading {
+  color: #6c757d;
+  font-style: italic;
 }
 
 .task-success {

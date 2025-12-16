@@ -235,7 +235,7 @@ def send_fingerprint_monitor_request(browser_id):
         bool: 成功返回True
     """
     try:
-        url = "https://enstudyai.fatedreamer.com/t3/api/monitor/fingerprint"
+        url = "https://enstudyai.fatedreamer.com/t3/api/queue/monitor/submit"
         payload = {
             "fingerprintNo": str(browser_id),
             "count": 3,
@@ -2479,13 +2479,15 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 # Buy类型：检查Position数量是否增加
                 current_position_count = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
                 
-                if current_position_count < 0:
+                if current_position_count == -2:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 检测到对向仓位，跳过本次检查")
+                elif current_position_count < 0:
                     log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取 Position 数量")
                 else:
-                    log_print(f"[{serial_number}] [{task_label}] 当前 Position 数量: {current_position_count} (初始: {initial_position_count})")
+                    log_print(f"[{serial_number}] [{task_label}] 当前持仓数量: {current_position_count} (初始: {initial_position_count})")
                     
                     if current_position_count > initial_position_count:
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Position增加！")
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到持仓数量增加！")
                         position_changed = True
                         
                         # 更新任务一的状态
@@ -3169,20 +3171,22 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
                 log_print(f"[{serial_number}] [OP] 检查 Position...")
                 current_position_count = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
                 
-                if current_position_count < 0:
+                if current_position_count == -2:
+                    log_print(f"[{serial_number}] [OP] ⚠ 检测到对向仓位，跳过本次检查")
+                elif current_position_count < 0:
                     log_print(f"[{serial_number}] [OP] ⚠ 无法获取 Position 数量")
                 else:
-                    log_print(f"[{serial_number}] [OP] 当前 Position 数量: {current_position_count} (初始: {initial_position_count})")
+                    log_print(f"[{serial_number}] [OP] 当前持仓数量: {current_position_count} (初始: {initial_position_count})")
                     
                     if trade_type == "Buy":
-                        # Buy 类型：仓位数量增加即成功
+                        # Buy 类型：持仓数量增加即成功
                         if current_position_count > initial_position_count:
-                            log_print(f"[{serial_number}] [OP] ✓✓✓ Buy 订单成功！Position 从 {initial_position_count} 增加到 {current_position_count}")
+                            log_print(f"[{serial_number}] [OP] ✓✓✓ Buy 订单成功！持仓从 {initial_position_count} 增加到 {current_position_count}")
                             return True
                     else:  # Sell
-                        # Sell 类型：仓位数量减少即成功
+                        # Sell 类型：持仓数量减少即成功
                         if current_position_count < initial_position_count:
-                            log_print(f"[{serial_number}] [OP] ✓✓✓ Sell 订单成功！Position 从 {initial_position_count} 减少到 {current_position_count}")
+                            log_print(f"[{serial_number}] [OP] ✓✓✓ Sell 订单成功！持仓从 {initial_position_count} 减少到 {current_position_count}")
                             return True
                 
                 # 下次检查 Open Orders
@@ -4257,7 +4261,7 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
         option_type: 期权类型，'YES'或'NO'
         
     Returns:
-        int: Buy时返回tr数量，Sell时返回实际持仓数量，失败返回-1
+        int: Buy时返回实际持仓数量，Sell时返回实际持仓数量，失败返回-1，Buy时如果已有对向仓位返回-2
     """
     try:
         log_print(f"[{browser_id}] 检查 Position 仓位...")
@@ -4339,11 +4343,58 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
             if trade_type == 'Sell' and matched_tr:
                 return get_position_amount_from_tr(matched_tr, browser_id, option_type)
             
+            # 如果是Buy，需要检查匹配的tr中是否有对应option_type的p标签
+            if trade_type == 'Buy' and matched_tr:
+                log_print(f"[{browser_id}] Buy类型：检查匹配tr中是否包含 '{option_type}' 的p标签...")
+                p_tags = matched_tr.find_elements(By.TAG_NAME, "p")
+                has_option_type = False
+                for p in p_tags:
+                    p_text = p.text.strip()
+                    if option_type in p_text:
+                        has_option_type = True
+                        log_print(f"[{browser_id}] ✓ 找到包含 '{option_type}' 的p标签: {p_text}")
+                        break
+                
+                if not has_option_type:
+                    log_print(f"[{browser_id}] ⚠ 匹配的tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位")
+                    return -2  # 返回-2表示已有对向仓位
+                
+                # 如果存在匹配的option_type，获取实际持仓数量
+                return get_position_amount_from_tr(matched_tr, browser_id, option_type)
+            
+            # Buy类型但无匹配tr，返回0
+            if trade_type == 'Buy':
+                return 0
+            
             return matched_count
         
         # 如果是Sell且无子标题，获取第一行的实际持仓数量
         if trade_type == 'Sell' and count > 0:
             return get_position_amount_from_tr(tr_list[0], browser_id, option_type)
+        
+        # 如果是Buy且无子标题，检查第一行是否有对应option_type的p标签
+        if trade_type == 'Buy' and count > 0:
+            log_print(f"[{browser_id}] Buy类型（无子标题）：检查第一行tr中是否包含 '{option_type}' 的p标签...")
+            first_tr = tr_list[0]
+            p_tags = first_tr.find_elements(By.TAG_NAME, "p")
+            has_option_type = False
+            for p in p_tags:
+                p_text = p.text.strip()
+                if option_type in p_text:
+                    has_option_type = True
+                    log_print(f"[{browser_id}] ✓ 找到包含 '{option_type}' 的p标签: {p_text}")
+                    break
+            
+            if not has_option_type:
+                log_print(f"[{browser_id}] ⚠ 第一行tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位")
+                return -2  # 返回-2表示已有对向仓位
+            
+            # 如果存在匹配的option_type，获取实际持仓数量
+            return get_position_amount_from_tr(first_tr, browser_id, option_type)
+        
+        # Buy类型但无仓位，返回0
+        if trade_type == 'Buy':
+            return 0
         
         return count
         
@@ -4526,8 +4577,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         log_print(f"[{browser_id}] 步骤6.2: 检查并记录初始仓位和挂单数量...")
         
         # 检查 Position 数量
-        # Buy: 返回tr数量；Sell: 返回实际持仓数量
+        # Buy: 返回实际持仓数量；Sell: 返回实际持仓数量
+        # Buy时如果已有对向仓位返回-2
         initial_position_count = check_position_count(driver, browser_id, trending_part1, trade_type, option_type)
+        
+        # Buy类型：如果返回-2，表示已有对向仓位
+        if trade_type == "Buy" and initial_position_count == -2:
+            return False, f"{browser_id}已有对向仓位"
+        
         if initial_position_count < 0:
             log_print(f"[{browser_id}] ⚠ 无法获取 Position 数量，设为 0")
             initial_position_count = 0
@@ -4535,9 +4592,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         if trade_type == "Sell":
             log_print(f"[{browser_id}] 初始持仓数量: {initial_position_count}")
         else:
-            log_print(f"[{browser_id}] 初始 Position 数量: {initial_position_count}")
+            log_print(f"[{browser_id}] 初始持仓数量: {initial_position_count}")
         
-        # Buy 类型：如果已有仓位则不能下单
+        # Buy 类型：如果已有同向仓位则不能下单（现在返回的是实际持仓数量）
         if trade_type == "Buy" and initial_position_count > 0:
             return False, f"{browser_id}已有仓位"
         
