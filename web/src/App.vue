@@ -110,9 +110,19 @@
                   查询
                 </button>
               </div>
-              <div class="fee-result" v-if="feeQuery.totalFee !== null">
-                <span class="fee-label">总交易费:</span>
-                <span class="fee-value">${{ feeQuery.totalFee.toFixed(2) }}</span>
+              <div class="fee-result" v-if="feeQuery.totalFee !== null || feeQuery.chainFee !== null">
+                <span class="fee-label">本地手续费:</span>
+                <span class="fee-value">${{ (feeQuery.totalFee || 0).toFixed(2) }}</span>
+                <span class="fee-label" style="margin-left: 20px;">链上手续费:</span>
+                <span class="fee-value">${{ (feeQuery.chainFee || 0).toFixed(2) }}</span>
+                <button 
+                  v-if="feeQuery.feeAddresses && feeQuery.feeAddresses.length > 0"
+                  class="btn btn-secondary btn-sm" 
+                  style="margin-left: 15px;"
+                  @click="showFeeDetailDialog = true"
+                >
+                  详情
+                </button>
               </div>
             </div>
             
@@ -1460,6 +1470,44 @@
         </div>
       </div>
     </div>
+    
+    <!-- 交易费详情弹窗 -->
+    <div v-if="showFeeDetailDialog" class="modal-overlay" @click="showFeeDetailDialog = false">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>链上手续费详情</h3>
+          <button class="modal-close" @click="showFeeDetailDialog = false">×</button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+          <table class="data-table" style="width: 100%;">
+            <thead>
+              <tr>
+                <th>浏览器编号</th>
+                <th>电脑组</th>
+                <th>地址</th>
+                <th>手续费</th>
+                <th>交易笔数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(item, index) in sortedFeeAddresses" :key="index">
+                <td>{{ item.fingerprint_no }}</td>
+                <td>{{ getGroupNo(item.fingerprint_no) }}</td>
+                <td style="word-break: break-all; max-width: 300px;">{{ item.wallet_address }}</td>
+                <td>${{ item.total_fee.toFixed(6) }}</td>
+                <td>{{ item.transaction_count }}</td>
+              </tr>
+              <tr v-if="!sortedFeeAddresses || sortedFeeAddresses.length === 0">
+                <td colspan="5" style="text-align: center; padding: 20px;">暂无数据</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="showFeeDetailDialog = false">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1582,7 +1630,9 @@ const hedgeMode = reactive({
 const feeQuery = reactive({
   startTime: '',
   endTime: '',
-  totalFee: null
+  totalFee: null,  // 本地手续费
+  chainFee: null,  // 链上手续费
+  feeAddresses: []  // 地址列表
 })
 
 // 初始化交易费查询的默认时间（最近一小时）
@@ -1612,6 +1662,33 @@ const showAllHedgeLogsDialog = ref(false)  // 总日志弹窗
 const allHedgeLogs = ref([])  // 所有对冲日志
 const allHedgeLogsCurrentPage = ref(1)  // 总日志当前页
 const allHedgeLogsPageSize = ref(10)  // 总日志每页显示数量
+
+// 交易费详情弹窗
+const showFeeDetailDialog = ref(false)
+
+// 排序后的地址列表（按手续费从高到低）
+const sortedFeeAddresses = computed(() => {
+  if (!feeQuery.feeAddresses || feeQuery.feeAddresses.length === 0) {
+    return []
+  }
+  // 按手续费从高到低排序
+  return [...feeQuery.feeAddresses].sort((a, b) => {
+    return (b.total_fee || 0) - (a.total_fee || 0)
+  })
+})
+
+// 获取电脑组号（支持字符串和数字类型的fingerprint_no）
+const getGroupNo = (fingerprintNo) => {
+  if (!fingerprintNo || !browserToGroupMap.value) {
+    return '-'
+  }
+  const fingerprintNoStr = String(fingerprintNo)
+  const fingerprintNoNum = Number(fingerprintNo)
+  // 先尝试字符串，再尝试数字
+  return browserToGroupMap.value[fingerprintNoStr] || 
+         browserToGroupMap.value[fingerprintNoNum] || 
+         '-'
+}
 
 // 本地存储的对冲记录
 const LOCAL_STORAGE_KEY = 'hedge_logs'
@@ -1662,11 +1739,18 @@ const fetchAccountConfig = async () => {
     if (response.data && response.data.data) {
       accountConfigList.value = response.data.data
       
-      // 建立浏览器编号到组号的映射
+      // 建立浏览器编号到组号的映射（同时支持字符串和数字作为key）
       const mapping = {}
       response.data.data.forEach(item => {
         if (item.fingerprintNo && item.computeGroup) {
-          mapping[item.fingerprintNo] = item.computeGroup
+          const fingerprintNo = item.fingerprintNo
+          const fingerprintNoStr = String(fingerprintNo)
+          const fingerprintNoNum = Number(fingerprintNo)
+          // 同时用字符串和数字作为key，确保无论API返回什么类型都能匹配
+          mapping[fingerprintNoStr] = item.computeGroup
+          if (!isNaN(fingerprintNoNum)) {
+            mapping[fingerprintNoNum] = item.computeGroup
+          }
         }
       })
       browserToGroupMap.value = mapping
@@ -4414,11 +4498,13 @@ const randomGetAvailableTopic = async () => {
     console.log(`- isOpen=0 (关闭): ${closedCount} 个`)
     console.log(`- 有tokenId: ${hasTokenCount} 个`)
     
-    // 2. 筛选出isOpen=0且有tokenId的主题
+    // 2. 筛选出isOpen=0且有tokenId的主题，且trending不包含"undefined"
     const closedConfigs = allConfigs.filter(config => 
       config.isOpen === 0 && 
       config.trendingPart1 && 
-      config.trendingPart2
+      config.trendingPart2 &&
+      config.trending && 
+      !config.trending.includes('undefined')
     )
     
     console.log(`符合条件的主题: ${closedConfigs.length} 个`)
@@ -5524,17 +5610,44 @@ const queryTransactionFee = async () => {
       return
     }
     
-    // 调用新的 listPart 接口
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
-      params: {
-        type: 5,
-        startTime: startTimestamp,
-        endTime: endTimestamp
-      }
-    })
+    // 格式化时间为 "YYYY-MM-DD HH:mm:ss" 格式
+    const formatDateTime = (dateStr) => {
+      const date = new Date(dateStr)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+    }
     
-    if (response.data && response.data.code === 0) {
-      const missions = response.data.data.list || []
+    const startTimeStr = formatDateTime(feeQuery.startTime)
+    const endTimeStr = formatDateTime(feeQuery.endTime)
+    
+    // 并行请求本地手续费和链上手续费
+    const [localResponse, chainResponse] = await Promise.all([
+      // 调用本地手续费接口
+      axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
+        params: {
+          type: 5,
+          startTime: startTimestamp,
+          endTime: endTimestamp
+        }
+      }),
+      // 调用链上手续费接口
+      axios.post('https://enstudyai.fatedreamer.com/t3/api/fees/summary', {
+        start_time: startTimeStr,
+        end_time: endTimeStr
+      })
+    ])
+    
+    let missionsCount = 0
+    
+    // 处理本地手续费
+    if (localResponse.data && localResponse.data.code === 0) {
+      const missions = localResponse.data.data.list || []
+      missionsCount = missions.length
       let totalFee = 0
       
       // 遍历所有任务
@@ -5558,13 +5671,30 @@ const queryTransactionFee = async () => {
       })
       
       feeQuery.totalFee = totalFee
-      showToast(`查询成功，共 ${missions.length} 个任务`, 'success')
     } else {
-      showToast('查询失败', 'error')
+      feeQuery.totalFee = null
     }
+    
+    // 处理链上手续费
+    if (chainResponse.data) {
+      const summary = chainResponse.data.summary || {}
+      const addresses = chainResponse.data.addresses || []
+      
+      feeQuery.chainFee = summary.total_fee || 0
+      feeQuery.feeAddresses = addresses
+      
+      showToast(`查询成功，本地: ${missionsCount} 个任务，链上: ${summary.total_addresses || 0} 个地址`, 'success')
+    } else {
+      feeQuery.chainFee = null
+      feeQuery.feeAddresses = []
+    }
+    
   } catch (error) {
     console.error('查询交易费失败:', error)
     showToast('查询交易费失败: ' + (error.message || '未知错误'), 'error')
+    feeQuery.totalFee = null
+    feeQuery.chainFee = null
+    feeQuery.feeAddresses = []
   }
 }
 
