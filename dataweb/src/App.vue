@@ -180,11 +180,33 @@
             显示地址重复
           </el-checkbox>
         </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showNoPoints" @change="applyFilters">
+            显示无积分
+          </el-checkbox>
+        </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
         <el-button type="warning" size="small" @click="parseAllRows" :loading="parsingAll">
           全部解析
         </el-button>
+      </div>
+    </div>
+
+    <!-- 积分总计区域 -->
+    <div class="points-summary-container">
+      <h3 class="points-summary-title">积分总计</h3>
+      <div class="points-summary-content">
+        <div class="points-by-date">
+          <div class="points-date-item" v-for="(item, idx) in pointsSummary.byDescription" :key="`desc-${idx}`">
+            <span class="points-date-label">{{ item.description }}:</span>
+            <span class="points-date-value">{{ item.total.toFixed(3) }} PTS</span>
+          </div>
+        </div>
+        <div class="points-total">
+          <span class="points-total-label">总计:</span>
+          <span class="points-total-value">{{ pointsSummary.total.toFixed(3) }} PTS</span>
+        </div>
       </div>
     </div>
 
@@ -382,6 +404,15 @@
             <el-icon><Clock /></el-icon>
             <span>{{ formatRelativeTime(scope.row.f) }}</span>
           </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="积分 (k)" width="400">
+        <template #default="scope">
+          <div v-if="scope.row.k" class="raw-data-text">
+            {{ scope.row.k }}
+          </div>
+          <span v-else class="empty-text">暂无数据</span>
         </template>
       </el-table-column>
 
@@ -669,7 +700,8 @@ const filters = ref({
   platform: '',
   positionSearch: '',  // 新增：仓位搜索
   showNoAddress: false,  // 显示无地址
-  showDuplicateAddress: false  // 显示地址重复
+  showDuplicateAddress: false,  // 显示地址重复
+  showNoPoints: false  // 显示无积分
 })
 
 const activeFilters = ref({
@@ -678,7 +710,8 @@ const activeFilters = ref({
   platform: '',
   positionSearch: '',  // 新增：仓位搜索
   showNoAddress: false,  // 显示无地址
-  showDuplicateAddress: false  // 显示地址重复
+  showDuplicateAddress: false,  // 显示地址重复
+  showNoPoints: false  // 显示无积分
 })
 
 /**
@@ -729,7 +762,8 @@ const applyFilters = () => {
     platform: filters.value.platform,
     positionSearch: filters.value.positionSearch.trim(),
     showNoAddress: filters.value.showNoAddress,
-    showDuplicateAddress: filters.value.showDuplicateAddress
+    showDuplicateAddress: filters.value.showDuplicateAddress,
+    showNoPoints: filters.value.showNoPoints
   }
   ElMessage.success('筛选已应用')
 }
@@ -744,7 +778,8 @@ const clearFilters = () => {
     platform: '',
     positionSearch: '',
     showNoAddress: false,
-    showDuplicateAddress: false
+    showDuplicateAddress: false,
+    showNoPoints: false
   }
   activeFilters.value = {
     computeGroup: [],
@@ -752,7 +787,8 @@ const clearFilters = () => {
     platform: '',
     positionSearch: '',
     showNoAddress: false,
-    showDuplicateAddress: false
+    showDuplicateAddress: false,
+    showNoPoints: false
   }
   ElMessage.info('筛选已清除')
 }
@@ -781,7 +817,8 @@ const filteredTableData = computed(() => {
                     filters.platform || 
                     filters.positionSearch ||
                     filters.showNoAddress ||
-                    filters.showDuplicateAddress
+                    filters.showDuplicateAddress ||
+                    filters.showNoPoints
   
   let result = data
   
@@ -838,6 +875,13 @@ const filteredTableData = computed(() => {
         }
       }
       
+      // 显示无积分筛选
+      if (filters.showNoPoints) {
+        if (row.k && row.k.trim()) {
+          return false  // 有积分，不显示
+        }
+      }
+      
       return true
     })
   }
@@ -878,6 +922,145 @@ const paginatedTableData = computed(() => {
  */
 const totalPages = computed(() => {
   return Math.ceil(filteredTableData.value.length / pageSize)
+})
+
+/**
+ * 解析积分数据
+ * 格式: "2025-12-14|||Reward for Dec 7 - Dec 14, 2025|||+2.279 PTS;2025-12-07|||Reward for Nov 30 - Dec 7, 2025|||+2.355 PTS"
+ * 分号分隔多个周期，每个周期用 ||| 分隔：时间|||描述|||积分
+ */
+const parsePoints = (pointsStr) => {
+  if (!pointsStr || !pointsStr.trim()) return []
+  
+  try {
+    const periods = pointsStr.split(';').filter(p => p.trim())
+    const result = []
+    
+    for (const period of periods) {
+      const parts = period.split('|||')
+      if (parts.length >= 3) {
+        const date = parts[0].trim()
+        const description = parts[1].trim()
+        const pointsStr = parts[2].trim()  // 例如: "+2.279 PTS"
+        
+        // 提取积分数值（去掉 + 号和 PTS）
+        const pointsMatch = pointsStr.match(/[+-]?(\d+\.?\d*)/)
+        if (pointsMatch) {
+          const points = parseFloat(pointsMatch[0])
+          result.push({
+            date,
+            description,
+            points
+          })
+        }
+      }
+    }
+    
+    return result
+  } catch (error) {
+    console.error('解析积分数据失败:', error)
+    return []
+  }
+}
+
+/**
+ * 将描述转换为数字月份格式
+ * 例如: "Reward for Dec 7 - Dec 14, 2025" -> "12 7 - 12 14, 2025"
+ */
+const convertDescriptionToNumericFormat = (description) => {
+  // 月份名称映射
+  const monthMap = {
+    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+    'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+  }
+  
+  // 匹配格式: "Reward for Dec 7 - Dec 14, 2025"
+  // 提取: 第一个月份、第一个日期、第二个月份（可选）、第二个日期、年份
+  const match = description.match(/(?:Reward for\s+)?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s*-\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)?\s*(\d+),\s*(\d{4})/)
+  
+  if (match) {
+    const month1 = match[1]
+    const day1 = match[2]
+    const month2 = match[3] || month1  // 如果没有第二个月份，使用第一个月份
+    const day2 = match[4]
+    const year = match[5]
+    
+    const monthNum1 = monthMap[month1]
+    const monthNum2 = monthMap[month2]
+    
+    if (monthNum1 && monthNum2) {
+      // 格式: "12 7 - 12 14, 2025"
+      return `${monthNum1} ${day1} - ${monthNum2} ${day2}, ${year}`
+    }
+  }
+  
+  // 如果无法解析，返回原描述
+  return description
+}
+
+/**
+ * 从转换后的格式中提取排序用的日期
+ * 例如: "12 7 - 12 14, 2025" -> 使用结束日期 "2025-12-14" 作为排序键
+ */
+const getSortKeyFromNumericFormat = (numericFormat) => {
+  // 匹配格式: "12 7 - 12 14, 2025"
+  const match = numericFormat.match(/(\d+)\s+(\d+)\s*-\s*(\d+)\s+(\d+),\s*(\d{4})/)
+  
+  if (match) {
+    const month2 = parseInt(match[3])
+    const day2 = parseInt(match[4])
+    const year = parseInt(match[5])
+    
+    // 使用结束日期作为排序键（格式: "2025-12-14"）
+    return `${year}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}`
+  }
+  
+  // 如果无法解析，返回一个很旧的日期
+  return '1900-01-01'
+}
+
+/**
+ * 积分总计（按描述分组，转换为数字月份格式并按时间排序）
+ */
+const pointsSummary = computed(() => {
+  const data = filteredTableData.value
+  const descriptionMap = new Map()  // key: 原始描述, value: 累计积分
+  let total = 0
+  
+  for (const row of data) {
+    if (row.k) {
+      const periods = parsePoints(row.k)
+      for (const period of periods) {
+        const description = period.description
+        const points = period.points
+        
+        // 按描述累加
+        descriptionMap.set(description, (descriptionMap.get(description) || 0) + points)
+        total += points
+      }
+    }
+  }
+  
+  // 转换为数组，转换为数字月份格式，并按时间排序（降序，最新的在前）
+  const byDescription = Array.from(descriptionMap.entries())
+    .map(([description, total]) => {
+      const numericFormat = convertDescriptionToNumericFormat(description)
+      const sortKey = getSortKeyFromNumericFormat(numericFormat)
+      return { 
+        description: numericFormat,  // 显示转换后的格式
+        total,
+        sortKey  // 用于排序
+      }
+    })
+    .sort((a, b) => {
+      // 按时间降序排序（最新的在前）
+      return b.sortKey.localeCompare(a.sortKey)
+    })
+  
+  return {
+    byDescription,
+    total
+  }
 })
 
 
@@ -3075,6 +3258,81 @@ onUnmounted(() => {
   background-color: #fff;
   border-radius: 4px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.points-summary-container {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.points-summary-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.points-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.points-by-date {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: center;
+}
+
+.points-date-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
+.points-date-label {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.points-date-value {
+  font-size: 14px;
+  color: #409eff;
+  font-weight: 600;
+}
+
+.points-total {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 4px;
+  margin-top: 5px;
+}
+
+.points-total-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.points-total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 .filter-row {

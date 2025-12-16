@@ -287,6 +287,24 @@
                 :disabled="autoHedgeRunning"
                 title="输入一个主题同时执行的对冲任务数量"
               />
+              <label style="font-size: 14px; margin-left: 8px;">可加仓时间（小时）：</label>
+              <input 
+                type="number" 
+                v-model.number="hedgeMode.maxOpenHour" 
+                min="1" 
+                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="可加仓时间（小时）"
+              />
+              <label style="font-size: 14px; margin-left: 8px;">可平仓随机区间（小时）：</label>
+              <input 
+                type="text" 
+                v-model="hedgeMode.closeOpenHourArea" 
+                style="width: 80px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="可平仓随机区间（小时），格式：12,36"
+                placeholder="12,36"
+              />
             </div>
             
             <div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 16px;">
@@ -1539,7 +1557,9 @@ const hedgeMode = reactive({
   maxPriceDiff: 15,  // 买1-买3或卖1-卖3的最大价差
   priceRangeMin: 65,  // 先挂方价格区间最小值
   priceRangeMax: 85,  // 先挂方价格区间最大值
-  minTotalDepth: 2000  // 买1-N和卖1-N累加的最小深度
+  minTotalDepth: 2000,  // 买1-N和卖1-N累加的最小深度
+  maxOpenHour: 4,  // 可加仓时间（小时）
+  closeOpenHourArea: '12,36'  // 可平仓随机区间（小时）
 })
 
 // 交易费查询
@@ -4064,7 +4084,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
         console.log(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
         
         const response = await axios.post(
-          'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV3',
+          'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4',
           {
             trendingId: config.id,
             isClose: hedgeMode.isClose,
@@ -4072,7 +4092,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
             timePassMin: hedgeMode.timePassMin,
             minUAmt: hedgeMode.minUAmt,  // 最小开单
-            maxUAmt: hedgeMode.maxUAmt   // 最大开单
+            maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+            maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
+            closeOpenHourArea: hedgeMode.closeOpenHourArea  // 可平仓随机区间（小时）
           },
           {
             headers: {

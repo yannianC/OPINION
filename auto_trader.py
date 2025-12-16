@@ -224,6 +224,36 @@ def get_mission_status(mission_id):
         return None
 
 
+def send_fingerprint_monitor_request(browser_id):
+    """
+    发送 fingerprint 监控请求
+    
+    Args:
+        browser_id: 浏览器ID
+        
+    Returns:
+        bool: 成功返回True
+    """
+    try:
+        url = "https://enstudyai.fatedreamer.com/t3/api/monitor/fingerprint"
+        payload = {
+            "fingerprintNo": str(browser_id),
+            "count": 3,
+            "interval": 120
+        }
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            log_print(f"[{browser_id}] ✓ 发送 fingerprint 监控请求成功")
+            return True
+        else:
+            log_print(f"[{browser_id}] ⚠ 发送 fingerprint 监控请求失败，状态码: {response.status_code}")
+            return False
+    except Exception as e:
+        log_print(f"[{browser_id}] ⚠ 发送 fingerprint 监控请求异常: {str(e)}")
+        return False
+
+
 def save_mission_result(mission_id, status, msg=""):
     """
     保存任务结果（仅更新状态）- 带重试机制
@@ -2493,10 +2523,24 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 else:
                     log_print(f"[{serial_number}] [{task_label}] 当前已成交数量: {current_filled_amount} (初始: {initial_position_count})")
                     
-                    if current_filled_amount != str(initial_position_count):
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到已成交数量变化！")
-                        position_changed = True
-                        
+                    # 处理文本：去掉逗号并转换为数字，与initial_position_count比较
+                    try:
+                        # 移除逗号和其他非数字字符，只保留数字和小数点
+                        amount_str = ''.join(c for c in current_filled_amount if c.isdigit() or c == '.')
+                        if amount_str:
+                            current_filled_amount_float = float(amount_str)
+                            # 与初始值比较（initial_position_count已经是float类型）
+                            if abs(current_filled_amount_float - float(initial_position_count)) > 0.01:  # 允许0.01的误差
+                                log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到已成交数量变化！")
+                                position_changed = True
+                            else:
+                                log_print(f"[{serial_number}] [{task_label}] 已成交数量未变化")
+                        else:
+                            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法从文本中提取数字: {current_filled_amount}")
+                    except (ValueError, TypeError) as e:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 数量转换失败: {current_filled_amount}, 错误: {str(e)}")
+                    
+                    if position_changed:
                         # 更新任务一的状态
                         current_status = get_mission_status(target_mission_id)
                         log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
@@ -2533,29 +2577,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     if not position_changed:
         log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
         
-        # 在取消挂单前，先检查任务一状态，判断另一个任务是否已经变化
-        log_print(f"[{serial_number}] [{task_label}] 检查任务一状态，判断另一个任务是否已变化...")
-        current_status = get_mission_status(target_mission_id)
-        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
-        
-        # 判断另一个任务是否已经变化
-        other_task_changed = False
-        if is_task1:
-            # 当前是任务一，检查任务一状态是否为11（表示任务二已经变化）
-            if current_status == 11:
-                other_task_changed = True
-                log_print(f"[{serial_number}] [{task_label}] 检测到任务二已变化（任务一状态为11），保留挂单")
-        else:
-            # 当前是任务二，检查任务一状态是否为8（表示任务一已经变化）
-            if current_status == 8:
-                other_task_changed = True
-                log_print(f"[{serial_number}] [{task_label}] 检测到任务一已变化（任务一状态为8），保留挂单")
-        
-        if other_task_changed:
-            log_print(f"[{serial_number}] [{task_label}] Position未检测到变化超时，但对方已变化，保留挂单")
-            return False, "Position未检测到变化超时，但对方已变化，保留挂单"
-        
-        log_print(f"[{serial_number}] [{task_label}] 开始检查并取消挂单...")
+        # 先检查Open Orders，看是否有挂单
+        log_print(f"[{serial_number}] [{task_label}] 开始检查Open Orders是否有挂单...")
         
         try:
             # 点击Open Orders按钮
@@ -2581,7 +2604,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not open_orders_div:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时,未找到挂单"
             
             # 获取 tbody 和 tr
             try:
@@ -2595,8 +2618,30 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
                 return False, "Position未检测到变化超时,未找到挂单"
             
-            # 有挂单，需要取消
-            log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，开始取消...")
+            # 有挂单，检查任务一状态，判断另一个任务是否已经变化
+            log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，检查任务一状态，判断另一个任务是否已变化...")
+            current_status = get_mission_status(target_mission_id)
+            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+            
+            # 判断另一个任务是否已经变化
+            other_task_changed = False
+            if is_task1:
+                # 当前是任务一，检查任务一状态是否为11（表示任务二已经变化）
+                if current_status == 11:
+                    other_task_changed = True
+                    log_print(f"[{serial_number}] [{task_label}] 检测到任务二已变化（任务一状态为11），保留挂单")
+            else:
+                # 当前是任务二，检查任务一状态是否为8（表示任务一已经变化）
+                if current_status == 8:
+                    other_task_changed = True
+                    log_print(f"[{serial_number}] [{task_label}] 检测到任务一已变化（任务一状态为8），保留挂单")
+            
+            if other_task_changed:
+                log_print(f"[{serial_number}] [{task_label}] Position未检测到变化超时，但对方已变化，保留挂单")
+                return False, "Position未检测到变化超时，但对方已变化，保留挂单"
+            
+            # 对方未变化，需要取消挂单
+            log_print(f"[{serial_number}] [{task_label}] 对方未变化，开始取消挂单...")
             
             # 找到第一个tr的最后一个td下的svg并点击
             first_tr = tr_list[0]
@@ -8723,6 +8768,11 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                         save_mission_result(tp1, 3, f"任务二失败，任务一原状态: {task1_status}（{status_desc}）")
                     else:
                         log_print(f"[{browser_id}] 任务一状态已是2或3或无法获取，无需修改")
+            
+            # Type 5任务完成后发送 fingerprint 监控请求
+            if mission_type == 5 and task_browser_id:
+                log_print(f"[{browser_id}] Type 5 任务完成，发送 fingerprint 监控请求...")
+                send_fingerprint_monitor_request(task_browser_id)
             
             # Type 1/5任务完成后收集持仓数据（不影响任务结果）
             if driver and task_browser_id and task_exchange_name:
