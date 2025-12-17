@@ -2780,25 +2780,24 @@ const deduplicateAddresses = async () => {
         return saveData
       })
     
-    // 分批保存，避免请求过大
-    const batchSize = 10
+    // 逐个保存，像输入框自动保存一样一个一个传
     let successCount = 0
     let failCount = 0
     
-    for (let i = 0; i < dataToSave.length; i += batchSize) {
-      const batch = dataToSave.slice(i, Math.min(i + batchSize, dataToSave.length))
+    for (let i = 0; i < dataToSave.length; i++) {
+      const saveData = dataToSave[i]
       
       try {
-        await axios.post(`${API_BASE_URL}/boost/addAccountConfig`, batch)
-        successCount += batch.length
+        await axios.post(`${API_BASE_URL}/boost/addAccountConfig`, saveData)
+        successCount++
         console.log(`已保存 ${successCount}/${dataToSave.length} 条数据`)
       } catch (error) {
-        failCount += batch.length
-        console.error(`保存批次失败:`, error)
+        failCount++
+        console.error(`保存数据失败:`, error)
       }
       
-      // 避免请求过快
-      if (i + batchSize < dataToSave.length) {
+      // 避免请求过快，每个请求间隔200ms
+      if (i < dataToSave.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 200))
       }
     }

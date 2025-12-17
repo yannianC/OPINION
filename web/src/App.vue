@@ -5078,6 +5078,13 @@ const getHedgeLogStatusClass = (log) => {
 }
 
 /**
+ * 将数量保留2位小数并向下取整
+ */
+const floorToTwoDecimals = (value) => {
+  return Math.floor(value * 100) / 100
+}
+
+/**
  * 执行对冲任务
  */
 const executeHedgeTask = async (config, hedgeData) => {
@@ -5095,6 +5102,10 @@ const executeHedgeTask = async (config, hedgeData) => {
   const yesPrice = firstSide === 'YES' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
   const noPrice = firstSide === 'NO' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
   
+  // 计算数量并保留2位小数向下取整
+  const calculatedShare = hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100)
+  const roundedShare = floorToTwoDecimals(calculatedShare)
+  
   const hedgeRecord = {
     id: Date.now(),
     trendingId: config.id,
@@ -5103,7 +5114,7 @@ const executeHedgeTask = async (config, hedgeData) => {
     noNumber: hedgeData.noNumber,
     yesGroupNo: yesGroupNo,
     noGroupNo: noGroupNo,
-    share: hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100),  // 开仓*100，平仓用原数据
+    share: roundedShare,  // 保留2位小数向下取整
     price: hedgeData.currentPrice,
     yesPrice: yesPrice,
     noPrice: noPrice,
@@ -5147,7 +5158,7 @@ const executeHedgeTask = async (config, hedgeData) => {
       exchangeName: 'OP',
       side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: firstPsSide,
-      amt: hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100),  // 开仓*100，平仓用原数据
+      amt: roundedShare,  // 保留2位小数向下取整
       price: hedgeData.currentPrice
     }
     
@@ -5392,7 +5403,7 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       exchangeName: 'OP',
       side: hedgeRecord.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: secondPsSide,
-      amt: hedgeRecord.share,
+      amt: floorToTwoDecimals(hedgeRecord.share),  // 保留2位小数向下取整
       price: parseFloat(secondPrice),
       tp1: firstTaskId  // 任务二需要传递任务一的ID
     }
@@ -5643,6 +5654,7 @@ const queryTransactionFee = async () => {
     ])
     
     let missionsCount = 0
+    const listPartBrowserNumbers = new Set() // 存储 listPart 中有手续费的浏览器编号
     
     // 处理本地手续费
     if (localResponse.data && localResponse.data.code === 0) {
@@ -5658,11 +5670,19 @@ const queryTransactionFee = async () => {
           try {
             // 解析 msg JSON
             const msgData = JSON.parse(mission.msg)
-            if (msgData.transaction_fee) {
+            // 检查 transaction_fee 存在且不为 "-"
+            if (msgData.transaction_fee && msgData.transaction_fee !== '-' && +msgData.transaction_fee!=0 ) {
               // 提取交易费数字部分（移除 $ 符号和逗号）
               const feeStr = msgData.transaction_fee.replace(/[$,]/g, '')
               const fee = parseFloat(feeStr) || 0
-              totalFee += fee
+              if (fee > 0) {
+                totalFee += fee
+                
+                // 记录有手续费的浏览器编号
+                if (mission.numberList) {
+                  listPartBrowserNumbers.add(String(mission.numberList))
+                }
+              }
             }
           } catch (error) {
             console.error('解析任务消息失败:', mission.id, error)
@@ -5676,6 +5696,7 @@ const queryTransactionFee = async () => {
     }
     
     // 处理链上手续费
+    const summaryBrowserNumbers = new Set() // 存储 summary 中有手续费的浏览器编号
     if (chainResponse.data) {
       const summary = chainResponse.data.summary || {}
       const addresses = chainResponse.data.addresses || []
@@ -5683,11 +5704,44 @@ const queryTransactionFee = async () => {
       feeQuery.chainFee = summary.total_fee || 0
       feeQuery.feeAddresses = addresses
       
+      // 提取有手续费的浏览器编号（total_fee > 0）
+      addresses.forEach(addr => {
+        if (addr.total_fee && parseFloat(addr.total_fee) > 0 && addr.fingerprint_no) {
+          summaryBrowserNumbers.add(String(addr.fingerprint_no))
+        }
+      })
+      
       showToast(`查询成功，本地: ${missionsCount} 个任务，链上: ${summary.total_addresses || 0} 个地址`, 'success')
     } else {
       feeQuery.chainFee = null
       feeQuery.feeAddresses = []
     }
+    
+    // 对比两边有手续费的浏览器编号
+    console.log('========== 交易费浏览器编号对比 ==========')
+    console.log('listPart 中有手续费的浏览器编号:', Array.from(listPartBrowserNumbers).sort((a, b) => parseInt(a) - parseInt(b)))
+    console.log('summary 中有手续费的浏览器编号:', Array.from(summaryBrowserNumbers).sort((a, b) => parseInt(a) - parseInt(b)))
+    
+    // 找出 listPart 中有但 summary 中没有的（多了哪些）
+    const onlyInListPart = Array.from(listPartBrowserNumbers).filter(num => !summaryBrowserNumbers.has(num))
+    if (onlyInListPart.length > 0) {
+      console.log('⚠️ listPart 中有但 summary 中没有的浏览器编号（多了）:', onlyInListPart.sort((a, b) => parseInt(a) - parseInt(b)))
+    } else {
+      console.log('✅ listPart 中没有多余的浏览器编号')
+    }
+    
+    // 找出 summary 中有但 listPart 中没有的（少了哪些）
+    const onlyInSummary = Array.from(summaryBrowserNumbers).filter(num => !listPartBrowserNumbers.has(num))
+    if (onlyInSummary.length > 0) {
+      console.log('⚠️ summary 中有但 listPart 中没有的浏览器编号（少了）:', onlyInSummary.sort((a, b) => parseInt(a) - parseInt(b)))
+    } else {
+      console.log('✅ summary 中没有缺失的浏览器编号')
+    }
+    
+    // 找出两边都有的
+    const inBoth = Array.from(listPartBrowserNumbers).filter(num => summaryBrowserNumbers.has(num))
+    console.log('✅ 两边都有的浏览器编号:', inBoth.sort((a, b) => parseInt(a) - parseInt(b)))
+    console.log('==========================================')
     
   } catch (error) {
     console.error('查询交易费失败:', error)
