@@ -302,7 +302,7 @@ def save_mission_result(mission_id, status, msg=""):
     return False
 
 # 全局线程池配置
-MAX_WORKERS = 8
+MAX_WORKERS = 10
 global_thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 active_tasks_lock = threading.Lock()
 active_tasks = {}  # {mission_id: {'futures': [], 'results': {}, 'total': 0, 'completed': 0}}
@@ -3711,7 +3711,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         
         # 4.5 等待4秒后再进入目标页面
         log_print(f"[{browser_id}] 等待4秒...")
-        time.sleep(4)
+        time.sleep(15)
         
         # 5. 打开目标页面
         log_print(f"[{browser_id}] 步骤5: 打开目标页面")
@@ -8835,18 +8835,36 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             if driver and task_browser_id and task_exchange_name:
                 try:
                     log_print(f"[{browser_id}] 开始额外收集持仓数据（不影响任务结果）...")
-                    collect_position_data(driver, task_browser_id, task_exchange_name)
+                    collect_position_data(driver, task_browser_id, task_exchange_name, mission_type)
                     log_print(f"[{browser_id}] ✓ 额外持仓数据收集完成")
                 except Exception as e:
                     log_print(f"[{browser_id}] ⚠ 额外数据收集异常: {str(e)}，但不影响任务")
                 finally:
                     log_print(f"[{browser_id}] 关闭浏览器...")
                     close_adspower_browser(task_browser_id)
+                    # Type 5 任务关闭浏览器后调用 removeNumberInUse 接口
+                    if mission_type == 5:
+                        try:
+                            log_print(f"[{browser_id}] Type 5 任务完成，调用 removeNumberInUse 接口...")
+                            remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                            remove_resp = requests.post(remove_url, json={"number": task_browser_id}, timeout=10)
+                            log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
             else:
                 # 如果 driver 等为 None，说明任务失败，尝试关闭浏览器（可能已被关闭）
                 if not success:
                     log_print(f"[{browser_id}] 任务失败且未返回driver，尝试关闭浏览器（兜底）...")
                     close_adspower_browser(browser_id)
+                    # Type 5 任务关闭浏览器后调用 removeNumberInUse 接口
+                    if mission_type == 5:
+                        try:
+                            log_print(f"[{browser_id}] Type 5 任务完成，调用 removeNumberInUse 接口...")
+                            remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                            remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+                            log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
             # Type 1/5 任务结果已经在上面记录了，跳过后面的统一记录
             return
             

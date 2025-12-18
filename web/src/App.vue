@@ -574,6 +574,21 @@
                           <span>{{ formatTime(hedge.startTime) }}</span>
                         </div>
                       </div>
+                      <!-- 显示最新的两条错误信息 -->
+                      <div 
+                        v-for="(hedge, index) in config.currentHedges.filter(h => h.errorMsg).slice(-2)" 
+                        :key="'error-' + hedge.id"
+                        class="hedge-info hedge-error"
+                      >
+                        <div class="hedge-status-row">
+                          <span class="hedge-label">错误</span>
+                          <span class="hedge-status-badge status-failed">失败</span>
+                        </div>
+                        <div class="hedge-error-msg">{{ hedge.errorMsg }}</div>
+                        <div class="hedge-summary">
+                          <span>{{ formatTime(hedge.startTime) }}</span>
+                        </div>
+                      </div>
                     </div>
                     <div v-else class="no-data">暂无对冲</div>
                   </div>
@@ -4216,6 +4231,28 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           
           hedgeResults.push(true)
           console.log(`配置 ${config.id} - 第 ${i + 1} 个对冲任务已提交成功`)
+        } else if (response.data && response.data.msg) {
+          // 服务器返回错误消息，添加到对冲信息中
+          console.warn(`配置 ${config.id} - 对冲任务 ${i + 1} 服务器返回错误:`, response.data.msg)
+          
+          // 初始化 currentHedges 数组（如果不存在）
+          if (!config.currentHedges) {
+            config.currentHedges = []
+          }
+          
+          // 创建一个错误记录
+          const errorRecord = {
+            id: Date.now(),
+            trendingId: config.id,
+            trendingName: config.trending,
+            startTime: new Date().toISOString(),
+            endTime: new Date().toISOString(),
+            finalStatus: 'failed',
+            errorMsg: response.data.msg
+          }
+          config.currentHedges.push(errorRecord)
+          
+          hedgeResults.push(false)
         } else {
           throw new Error('获取对冲双方失败')
         }
@@ -7063,6 +7100,21 @@ onUnmounted(() => {
 /* 对冲信息样式 */
 .hedge-info {
   font-size: 0.875rem;
+}
+
+.hedge-info.hedge-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.hedge-error-msg {
+  color: #ef4444;
+  font-size: 0.875rem;
+  margin: 0.5rem 0;
+  word-break: break-word;
 }
 
 .hedge-status-row {
