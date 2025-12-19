@@ -2502,7 +2502,7 @@ const syncConfigFromMarkets = async () => {
     
     // 1. 并行请求两个接口
     const [marketsResponse, configResponse] = await Promise.all([
-      axios.get('http://opinionanalytics.xyz:10001/api/markets'),
+      axios.get('http://opinion.api.predictscan.dev:10001/api/markets'),
       axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     ])
     
@@ -3401,6 +3401,17 @@ const startAutoHedge = () => {
     return
   }
   
+  // 检查对冲数量状态
+  if (hedgeStatus.amt === 0) {
+    alert('对冲总数量为0，无法开始自动对冲。请先在"总数量"输入框中设置一个大于0的数量，然后点击"更新对冲数量"按钮。')
+    return
+  }
+  
+  if (hedgeStatus.amtSum >= hedgeStatus.amt) {
+    alert(`对冲数量已满！累计对冲数量(${hedgeStatus.amtSum})已达到或超过总数量(${hedgeStatus.amt})。如需继续对冲，请先点击"清空当前已开"按钮，或增加总数量。`)
+    return
+  }
+  
   autoHedgeRunning.value = true
   currentBatchIndex.value = 0  // 重置批次索引
   
@@ -3581,7 +3592,13 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   // 检查是否可以下发新的对冲任务
   const canStartNewHedge = !(hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0)
   if (!canStartNewHedge) {
-    console.log('对冲数量已满或总数量为0，不下发新对冲任务')
+    if (hedgeStatus.amt === 0) {
+      console.log('对冲总数量为0，不下发新对冲任务')
+      showToast('对冲总数量为0，无法对冲。请设置总数量并更新。', 'warning')
+    } else {
+      console.log(`对冲数量已满（${hedgeStatus.amtSum}/${hedgeStatus.amt}），不下发新对冲任务`)
+      showToast(`对冲数量已满（${hedgeStatus.amtSum}/${hedgeStatus.amt}），无法继续对冲`, 'warning')
+    }
   }
   
   for (const config of batchConfigs) {
@@ -3856,9 +3873,217 @@ const fetchOrderbookBasic = async (config, isClose) => {
  * 解析订单薄数据，判断先挂方和价格
  */
 /**
+ * 请求 calLimitOrder API 获取挂单数据
+ */
+const fetchCalLimitOrder = async (trendingId) => {
+  try {
+    const response = await axios.post('https://sg.bicoin.com.cn/99l/hedge/calLimitOrder', {
+      trendingId: trendingId
+    }, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+    
+    if (response.data && response.data.code === 0 && response.data.data) {
+      return response.data.data
+    }
+    
+    throw new Error(response.data?.msg || '获取挂单数据失败')
+  } catch (error) {
+    console.error('请求 calLimitOrder 失败:', error)
+    throw error
+  }
+}
+
+/**
+ * 转换挂单数据（开仓模式：将卖出转换为买入）
+ * 卖出Yes价格为x，数量为y → 买入No价格为1-x，数量为y
+ * 卖出No价格为x，数量为y → 买入Yes价格为1-x，数量为y
+ */
+const convertLimitOrdersForOpen = (limitOrderData) => {
+  const convertedBids = {
+    yes: [],
+    no: []
+  }
+  
+  // 转换 yesSellLimitOrder: 卖出Yes → 买入No
+  if (limitOrderData.yesSellLimitOrder && Array.isArray(limitOrderData.yesSellLimitOrder)) {
+    limitOrderData.yesSellLimitOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedBids.no.push({
+          price: (1 - price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  // 转换 noSellOrder: 卖出No → 买入Yes
+  if (limitOrderData.noSellOrder && Array.isArray(limitOrderData.noSellOrder)) {
+    limitOrderData.noSellOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedBids.yes.push({
+          price: (1 - price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  // 合并原有的买入挂单
+  if (limitOrderData.yesBuyLimitOrder && Array.isArray(limitOrderData.yesBuyLimitOrder)) {
+    limitOrderData.yesBuyLimitOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedBids.yes.push({
+          price: (price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  if (limitOrderData.noBuyOrder && Array.isArray(limitOrderData.noBuyOrder)) {
+    limitOrderData.noBuyOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedBids.no.push({
+          price: (price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  return convertedBids
+}
+
+/**
+ * 转换挂单数据（平仓模式：将买入转换为卖出）
+ * 买入Yes价格为x，数量为y → 卖出No价格为1-x，数量为y
+ * 买入No价格为x，数量为y → 卖出Yes价格为1-x，数量为y
+ */
+const convertLimitOrdersForClose = (limitOrderData) => {
+  const convertedAsks = {
+    yes: [],
+    no: []
+  }
+  
+  // 转换 yesBuyLimitOrder: 买入Yes → 卖出No
+  if (limitOrderData.yesBuyLimitOrder && Array.isArray(limitOrderData.yesBuyLimitOrder)) {
+    limitOrderData.yesBuyLimitOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedAsks.no.push({
+          price: (1 - price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  // 转换 noBuyOrder: 买入No → 卖出Yes
+  if (limitOrderData.noBuyOrder && Array.isArray(limitOrderData.noBuyOrder)) {
+    limitOrderData.noBuyOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedAsks.yes.push({
+          price: (1 - price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  // 合并原有的卖出挂单
+  if (limitOrderData.yesSellLimitOrder && Array.isArray(limitOrderData.yesSellLimitOrder)) {
+    limitOrderData.yesSellLimitOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedAsks.yes.push({
+          price: (price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  if (limitOrderData.noSellOrder && Array.isArray(limitOrderData.noSellOrder)) {
+    limitOrderData.noSellOrder.forEach(order => {
+      const price = parseFloat(order.price)
+      const restAmt = parseFloat(order.restAmt)
+      if (price > 0 && restAmt > 0) {
+        convertedAsks.no.push({
+          price: (price / 100).toFixed(4), // 转换为小数格式
+          size: restAmt
+        })
+      }
+    })
+  }
+  
+  return convertedAsks
+}
+
+/**
+ * 从订单薄中减去挂单数量
+ * @param {Array} orderbook - 订单薄数组（bids 或 asks）
+ * @param {Array} limitOrders - 需要减去的挂单数组
+ * @returns {Array} - 处理后的订单薄数组
+ */
+const subtractLimitOrdersFromOrderbook = (orderbook, limitOrders) => {
+  if (!limitOrders || limitOrders.length === 0) {
+    return orderbook
+  }
+  
+  // 创建价格到数量的映射（使用更精确的价格匹配，允许小的浮点误差）
+  const limitOrderMap = new Map()
+  limitOrders.forEach(order => {
+    const price = parseFloat(order.price)
+    const size = parseFloat(order.size)
+    // 使用价格作为key，允许浮点数匹配
+    const priceKey = price.toFixed(6) // 使用更高精度进行匹配
+    if (limitOrderMap.has(priceKey)) {
+      limitOrderMap.set(priceKey, limitOrderMap.get(priceKey) + size)
+    } else {
+      limitOrderMap.set(priceKey, size)
+    }
+  })
+  
+  // 从订单薄中减去对应价格的数量
+  const result = orderbook.map(item => {
+    const itemPrice = parseFloat(item.price)
+    const priceKey = itemPrice.toFixed(6) // 使用相同精度进行匹配
+    const originalSize = parseFloat(item.size)
+    const subtractSize = limitOrderMap.get(priceKey) || 0
+    const newSize = originalSize - subtractSize
+    
+    return {
+      ...item,
+      size: newSize > 0 ? newSize : 0
+    }
+  }).filter(item => {
+    // 过滤掉数量小于等于0的订单
+    return parseFloat(item.size) > 0
+  })
+  
+  return result
+}
+
+/**
  * 解析订单薄数据，获取先挂方的买一价和卖一价
  * 类似 parseType3Message 的处理方式，直接返回先挂方的数据
  * 增加深度和价差判断
+ * 新增：从订单薄中减去 calLimitOrder 返回的挂单数量
  */
 const parseOrderbookData = async (config, isClose) => {
   try {
@@ -3869,10 +4094,47 @@ const parseOrderbookData = async (config, isClose) => {
     ])
     
     // 获取YES的买一价和卖一价
-    const yesBids = yesOrderbook.bids || []
-    const yesAsks = yesOrderbook.asks || []
-    const noBids = noOrderbook.bids || []
-    const noAsks = noOrderbook.asks || []
+    let yesBids = yesOrderbook.bids || []
+    let yesAsks = yesOrderbook.asks || []
+    let noBids = noOrderbook.bids || []
+    let noAsks = noOrderbook.asks || []
+    
+    // 请求 calLimitOrder API 获取挂单数据
+    try {
+      const limitOrderData = await fetchCalLimitOrder(config.id)
+      console.log(`配置 ${config.id} - 获取到挂单数据:`, limitOrderData)
+      
+      if (isClose) {
+        // 平仓模式：将买入转换为卖出，汇合卖出挂单
+        const convertedAsks = convertLimitOrdersForClose(limitOrderData)
+        
+        // 从订单薄中减去对应的卖出挂单
+        if (convertedAsks.yes.length > 0) {
+          yesAsks = subtractLimitOrdersFromOrderbook(yesAsks, convertedAsks.yes)
+          console.log(`配置 ${config.id} - 从YES卖单中减去 ${convertedAsks.yes.length} 个挂单`)
+        }
+        if (convertedAsks.no.length > 0) {
+          noAsks = subtractLimitOrdersFromOrderbook(noAsks, convertedAsks.no)
+          console.log(`配置 ${config.id} - 从NO卖单中减去 ${convertedAsks.no.length} 个挂单`)
+        }
+      } else {
+        // 开仓模式：将卖出转换为买入，汇合买入挂单
+        const convertedBids = convertLimitOrdersForOpen(limitOrderData)
+        
+        // 从订单薄中减去对应的买入挂单
+        if (convertedBids.yes.length > 0) {
+          yesBids = subtractLimitOrdersFromOrderbook(yesBids, convertedBids.yes)
+          console.log(`配置 ${config.id} - 从YES买单中减去 ${convertedBids.yes.length} 个挂单`)
+        }
+        if (convertedBids.no.length > 0) {
+          noBids = subtractLimitOrdersFromOrderbook(noBids, convertedBids.no)
+          console.log(`配置 ${config.id} - 从NO买单中减去 ${convertedBids.no.length} 个挂单`)
+        }
+      }
+    } catch (error) {
+      console.warn(`配置 ${config.id} - 获取挂单数据失败，继续使用原始订单薄:`, error.message)
+      // 如果获取挂单数据失败，继续使用原始订单薄数据
+    }
     
     // 基本数据检查
     if (yesBids.length === 0 || yesAsks.length === 0 || 
@@ -5798,7 +6060,13 @@ const executeAutoHedgeTasks = async () => {
   // 检查是否可以下发新的对冲任务
   const canStartNewHedge = !(hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0)
   if (!canStartNewHedge) {
-    console.log('对冲数量已满或总数量为0，不下发新对冲任务')
+    if (hedgeStatus.amt === 0) {
+      console.log('对冲总数量为0，不下发新对冲任务')
+      showToast('对冲总数量为0，无法对冲。请设置总数量并更新。', 'warning')
+    } else {
+      console.log(`对冲数量已满（${hedgeStatus.amtSum}/${hedgeStatus.amt}），不下发新对冲任务`)
+      showToast(`对冲数量已满（${hedgeStatus.amtSum}/${hedgeStatus.amt}），无法继续对冲`, 'warning')
+    }
   }
   
   for (const config of activeConfigs.value) {

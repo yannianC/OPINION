@@ -55,6 +55,9 @@
       <el-button type="success" @click="deduplicateAddresses" :loading="deduplicating">
         地址去重
       </el-button>
+      <el-button type="primary" @click="getWalletAddresses" :loading="gettingWalletAddresses">
+        获取钱包地址
+      </el-button>
       <span class="red-count-label">变红仓位数量：<strong>{{ redPositionCount }}</strong></span>
     </div>
     
@@ -91,6 +94,24 @@
           确认删除
         </el-button>
         <span class="batch-add-tip">（浏览器ID，逗号或分号分隔）</span>
+      </div>
+    </div>
+
+    <!-- 导出地址区域 -->
+    <div class="batch-add-container">
+      <div class="batch-add-row">
+        <label>导出地址:</label>
+        <el-input 
+          v-model="exportAddressInput" 
+          placeholder="格式: 4001,4002,4003 或 4001;4002;4003"
+          clearable
+          size="small"
+          style="width: 500px"
+        />
+        <el-button type="primary" size="small" @click="exportAddresses" :loading="exportingAddresses">
+          导出地址
+        </el-button>
+        <span class="batch-add-tip">（浏览器编号，逗号分隔，导出对应的地址(h)到txt文件）</span>
       </div>
     </div>
 
@@ -275,6 +296,17 @@
           <el-input 
             v-model="scope.row.h" 
             placeholder="地址"
+            size="small"
+            @blur="saveRowData(scope.row)"
+          />
+        </template>
+      </el-table-column>
+
+      <el-table-column label="钱包地址 (n)" width="300" align="center">
+        <template #default="scope">
+          <el-input 
+            v-model="scope.row.n" 
+            placeholder="钱包地址"
             size="small"
             @blur="saveRowData(scope.row)"
           />
@@ -640,6 +672,7 @@ const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
 const refreshingRedOld = ref(false)  // 刷新变红且超过30分钟仓位的加载状态
 const parsingAll = ref(false)  // 是否正在全部解析
 const deduplicating = ref(false)  // 地址去重的加载状态
+const gettingWalletAddresses = ref(false)  // 获取钱包地址的加载状态
 const chainDataMap = ref(new Map())  // 链上信息数据映射，key为wallet_address（小写），value为链上信息字符串
 let nextId = 1
 
@@ -685,6 +718,12 @@ const batchAddInput = ref('')
  */
 const batchDeleteInput = ref('')
 const batchDeleting = ref(false)
+
+/**
+ * 导出地址相关
+ */
+const exportAddressInput = ref('')
+const exportingAddresses = ref(false)
 
 /**
  * 本地新增的行（未保存到服务器的）
@@ -2820,6 +2859,305 @@ const deduplicateAddresses = async () => {
 }
 
 /**
+ * 获取浏览器代理配置
+ * 调用 getIp API 获取代理 IP 和配置信息
+ */
+const getProxyConfig = async (browserId) => {
+  try {
+    const url = `${API_BASE_URL}/bro/getIp`
+    const payload = { number: browserId }
+    
+    const response = await axios.post(url, payload, {
+      timeout: 15000
+    })
+    
+    if (response.status === 200) {
+      const result = response.data
+      const code = result?.code
+      
+      if (code === 0) {
+        const data = result.data || {}
+        const ip = data.ip
+        const isMain = data.isMain || 0
+        
+        if (!ip) {
+          console.error(`[${browserId}] 返回数据中没有IP字段`)
+          return null
+        }
+        
+        // 根据 isMain 字段决定如何构建代理配置
+        if (isMain === 1) {
+          const port = data.port
+          const username = data.username
+          const password = data.password
+          
+          if (ip && port && username && password) {
+            return {
+              ip: ip,
+              port: String(port),
+              username: username,
+              password: password,
+              type: 'http',
+              isMain: isMain
+            }
+          } else {
+            console.error(`[${browserId}] isMain=1 但返回数据中缺少必要字段`)
+            return null
+          }
+        } else {
+          // isMain != 1 时使用默认配置
+          return {
+            ip: ip,
+            port: '50101',
+            username: 'nolanwang',
+            password: 'HFVsyegfeyigrfkjb',
+            type: 'socks5',
+            isMain: isMain
+          }
+        }
+      } else {
+        console.error(`[${browserId}] 获取IP失败: code=${code}, msg=${result?.msg}`)
+        return null
+      }
+    } else {
+      console.error(`[${browserId}] 获取IP请求失败: HTTP状态码 ${response.status}`)
+      return null
+    }
+  } catch (error) {
+    console.error(`[${browserId}] 获取代理配置失败:`, error)
+    return null
+  }
+}
+
+/**
+ * 使用代理配置请求 contract-creator API
+ * 直接请求 API，使用代理配置
+ * 
+ * 代理配置：
+ * - type: 固定为 'http'
+ * - port: 固定为 '50100'
+ * - ip, username, password: 使用从服务器获取的数据
+ */
+const getContractCreatorWithProxy = async (address, proxyConfig) => {
+  // 构建代理配置
+  // type 固定为 'http'，port 固定为 '50100'
+  const finalProxyConfig = {
+    ip: proxyConfig.ip,
+    port: '50100',  // 固定端口
+    username: proxyConfig.username,
+    password: proxyConfig.password,
+    type: 'SOCKS5'  // 固定类型
+  }
+  
+  console.log(`[代理请求] 地址: ${address}, 代理: ${finalProxyConfig.ip}:${finalProxyConfig.port} (${finalProxyConfig.type})`)
+  console.log(`[代理配置] IP: ${finalProxyConfig.ip}, Port: ${finalProxyConfig.port}, Username: ${finalProxyConfig.username}, Type: ${finalProxyConfig.type}`)
+  
+  // 直接请求 API
+  // 注意：浏览器无法直接使用 HTTP/SOCKS5 代理，这里先直接请求
+  // 如果需要使用代理，需要通过后端转发或使用其他方式
+  const apiUrl = `http://opinion.api.predictscan.dev:10001/api/user/contract-creator/${address}`
+  
+  try {
+    const response = await axios.get(apiUrl, {
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+      // 注意：axios 在浏览器中无法直接配置代理
+      // 如果需要使用代理，需要通过后端转发
+    })
+    
+    return response
+  } catch (error) {
+    console.error(`[请求失败] 地址: ${address}, 错误:`, error)
+    throw error
+  }
+}
+
+/**
+ * 获取钱包地址
+ * 遍历列表，对于 n 字段为空的记录：
+ * - 如果 h 为空，跳过（或使用内置钱包地址，需要用户提供）
+ * - 如果 h 不为空，先获取代理 IP，然后使用代理请求 API 获取 contractCreator，保存到 n 字段
+ * - 每请求一个就立即更新一个
+ */
+const getWalletAddresses = async () => {
+  gettingWalletAddresses.value = true
+  
+  try {
+    const data = tableData.value
+    
+    // 找出 n 字段为空的记录
+    const rowsToProcess = data.filter(row => {
+      // n 字段为空（null、undefined 或空字符串）
+      const nValue = row.n
+      return !nValue || (typeof nValue === 'string' && !nValue.trim())
+    })
+    
+    if (rowsToProcess.length === 0) {
+      ElMessage.warning('没有需要处理的记录（所有记录的 n 字段都已填写）')
+      return
+    }
+    
+    ElMessage.info(`开始处理 ${rowsToProcess.length} 条记录...`)
+    
+    const updatedData = [...tableData.value]
+    let successCount = 0
+    let failCount = 0
+    let skippedCount = 0  // h 为空跳过的记录数
+    
+    // 内置钱包地址（如果用户需要，可以在这里配置）
+    const DEFAULT_WALLET_ADDRESS = null  // 用户需要提供内置钱包地址
+    
+    for (let i = 0; i < rowsToProcess.length; i++) {
+      const row = rowsToProcess[i]
+      let addressToUse = row.h ? row.h.trim() : ''
+      
+      // 如果 h 为空
+      if (!addressToUse) {
+        // 如果配置了默认钱包地址，使用默认地址
+        if (DEFAULT_WALLET_ADDRESS) {
+          addressToUse = DEFAULT_WALLET_ADDRESS
+          // 更新 h 字段
+          const rowIndex = updatedData.findIndex(r => {
+            if (row.id && r.id) {
+              return r.id === row.id
+            }
+            return r.fingerprintNo === row.fingerprintNo && 
+                   r.computeGroup === row.computeGroup
+          })
+          if (rowIndex !== -1) {
+            updatedData[rowIndex] = { ...updatedData[rowIndex], h: DEFAULT_WALLET_ADDRESS }
+          }
+        } else {
+          // 没有配置默认地址，跳过
+          skippedCount++
+          console.log(`跳过记录 ${row.fingerprintNo || row.index}：h 字段为空且未配置默认钱包地址`)
+          continue
+        }
+      }
+      
+      // 需要浏览器编号来获取代理配置
+      if (!row.fingerprintNo) {
+        skippedCount++
+        console.log(`跳过记录 ${row.index}：缺少浏览器编号`)
+        continue
+      }
+      
+      // 1. 先获取代理配置
+      console.log(`[${row.fingerprintNo}] 正在获取代理配置...`)
+      const proxyConfig = await getProxyConfig(row.fingerprintNo)
+      
+      if (!proxyConfig) {
+        failCount++
+        console.error(`[${row.fingerprintNo}] 获取代理配置失败，跳过`)
+        continue
+      }
+      
+      console.log(`[${row.fingerprintNo}] 代理配置获取成功: IP=${proxyConfig.ip}, Port=${proxyConfig.port}, Type=${proxyConfig.type}`)
+      
+      // 2. 使用代理配置请求 contract-creator
+      try {
+        const response = await getContractCreatorWithProxy(addressToUse, proxyConfig)
+        
+        // 处理后端代理 API 的返回格式
+        let contractCreator = null
+        if (response.data) {
+          // 如果后端代理 API 返回的数据格式与直接请求相同
+          if (response.data.success && response.data.data && response.data.data.contractCreator) {
+            contractCreator = response.data.data.contractCreator
+          }
+          // 如果后端代理 API 直接返回 contractCreator
+          else if (response.data.contractCreator) {
+            contractCreator = response.data.contractCreator
+          }
+          // 如果后端代理 API 返回的数据在 data 字段中
+          else if (response.data.data && typeof response.data.data === 'string') {
+            contractCreator = response.data.data
+          }
+        }
+        
+        if (contractCreator) {
+          
+          // 找到行在数组中的索引
+          const rowIndex = updatedData.findIndex(r => {
+            if (row.id && r.id) {
+              return r.id === row.id
+            }
+            return r.fingerprintNo === row.fingerprintNo && 
+                   r.computeGroup === row.computeGroup
+          })
+          
+          if (rowIndex !== -1) {
+            // 更新 n 字段
+            updatedData[rowIndex] = { ...updatedData[rowIndex], n: contractCreator }
+            tableData.value = updatedData  // 立即更新表格数据
+            
+            // 3. 立即保存到服务器
+            try {
+              const saveData = { ...updatedData[rowIndex] }
+              saveData.e = saveData.platform
+              delete saveData.index
+              delete saveData.refreshing
+              if (!saveData.id) {
+                delete saveData.id
+              }
+              
+              await axios.post(`${API_BASE_URL}/boost/addAccountConfig`, saveData)
+              successCount++
+              console.log(`[${row.fingerprintNo}] ✓ 成功获取并保存钱包地址: ${contractCreator}`)
+            } catch (saveError) {
+              // 即使保存失败，也记录为成功获取（因为已经更新到本地）
+              successCount++
+              console.error(`[${row.fingerprintNo}] 获取成功但保存失败:`, saveError)
+            }
+          }
+        } else {
+          failCount++
+          console.error(`[${row.fingerprintNo}] 获取钱包地址失败：API 返回数据格式不正确`, response.data)
+        }
+      } catch (error) {
+        failCount++
+        let errorMsg = '未知错误'
+        if (error.code === 'ERR_NETWORK') {
+          errorMsg = '网络错误，可能是跨域问题或服务器不可访问'
+        } else if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+          errorMsg = '请求超时'
+        } else if (error.response) {
+          errorMsg = `服务器错误: ${error.response.status} - ${error.response.statusText}`
+        } else if (error.message) {
+          errorMsg = error.message
+        }
+        console.error(`[${row.fingerprintNo}] 获取钱包地址失败，地址: ${addressToUse}，错误: ${errorMsg}`, error)
+      }
+      
+      // 避免请求过快，每个请求间隔500ms
+      if (i < rowsToProcess.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    }
+    
+    // 显示最终结果
+    if (successCount === 0 && failCount === 0 && skippedCount > 0) {
+      ElMessage.warning(`所有记录都因为 h 字段为空而跳过（共 ${skippedCount} 条）`)
+    } else if (successCount > 0) {
+      ElMessage.success(`获取钱包地址完成：成功 ${successCount} 个${skippedCount > 0 ? `，跳过 ${skippedCount} 个` : ''}${failCount > 0 ? `，失败 ${failCount} 个` : ''}`)
+    } else {
+      ElMessage.warning(`获取钱包地址完成：成功 ${successCount} 个，失败 ${failCount} 个${skippedCount > 0 ? `，跳过 ${skippedCount} 个` : ''}`)
+    }
+    
+    // 重新加载数据以确保同步
+    await loadData(true)
+    
+  } catch (error) {
+    console.error('获取钱包地址失败:', error)
+    ElMessage.error('获取钱包地址失败: ' + (error.message || '网络错误'))
+  } finally {
+    gettingWalletAddresses.value = false
+  }
+}
+
+/**
  * 批量添加账户
  */
 const batchAddAccounts = async () => {
@@ -3063,6 +3401,77 @@ const batchDeleteAccounts = async () => {
     ElMessage.error('批量删除失败: ' + (error.message || '网络错误'))
   } finally {
     batchDeleting.value = false
+  }
+}
+
+/**
+ * 导出地址
+ * 根据浏览器编号，导出对应的地址(h)到txt文件
+ */
+const exportAddresses = () => {
+  if (!exportAddressInput.value || !exportAddressInput.value.trim()) {
+    ElMessage.warning('请输入浏览器编号')
+    return
+  }
+  
+  exportingAddresses.value = true
+  
+  try {
+    const input = exportAddressInput.value.trim()
+    // 支持逗号和分号分隔
+    const browserIds = input.split(/[,;]/).map(id => id.trim()).filter(id => id)
+    
+    if (browserIds.length === 0) {
+      ElMessage.warning('输入格式错误，请输入浏览器编号')
+      return
+    }
+    
+    // 从表格数据中查找对应的地址
+    const addresses = []
+    const notFoundIds = []
+    
+    for (const browserId of browserIds) {
+      const row = tableData.value.find(r => String(r.fingerprintNo) === String(browserId))
+      if (row && row.h && row.h.trim()) {
+        addresses.push(row.h.trim())
+      } else {
+        notFoundIds.push(browserId)
+      }
+    }
+    
+    if (addresses.length === 0) {
+      ElMessage.warning('没有找到有效的地址')
+      if (notFoundIds.length > 0) {
+        ElMessage.info(`未找到地址的浏览器编号: ${notFoundIds.join(', ')}`)
+      }
+      return
+    }
+    
+    // 生成文件内容（每行一个地址）
+    const content = addresses.join('\n')
+    
+    // 生成文件名（包含时间戳）
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+    const filename = `addresses_${timestamp}.txt`
+    
+    // 下载文件
+    downloadTextFile(content, filename)
+    
+    // 显示成功消息
+    if (notFoundIds.length > 0) {
+      ElMessage.warning(`已导出 ${addresses.length} 个地址到 ${filename}，未找到地址的浏览器编号: ${notFoundIds.join(', ')}`)
+    } else {
+      ElMessage.success(`已导出 ${addresses.length} 个地址到 ${filename}`)
+    }
+    
+    // 清空输入框
+    exportAddressInput.value = ''
+    
+  } catch (error) {
+    console.error('导出地址失败:', error)
+    ElMessage.error('导出地址失败: ' + (error.message || '未知错误'))
+  } finally {
+    exportingAddresses.value = false
   }
 }
 

@@ -3,6 +3,7 @@ import random
 import requests
 import threading
 import os
+import json
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from selenium import webdriver
@@ -1691,7 +1692,6 @@ def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=Fa
                         p_text = p.text.strip()
                         if trending_part1 in p_text:
                             matched_count += 1
-                            log_print(f"[{serial_number}] [OP] ✓ 找到匹配的订单，p标签内容: {p_text}")
                             break
                 except:
                     continue
@@ -1733,7 +1733,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         
         for p in p_tags:
             text = p.text.strip()
-            if trade_type in text and option_type in text:
+            if trade_type in text:
                 log_print(f"[{serial_number}] [OP] ✓ 找到提交按钮，文本: {text}")
                 
                 parent = p.find_element(By.XPATH, "..")
@@ -4231,8 +4231,14 @@ def get_position_amount_from_tr(tr, browser_id, option_type='YES'):
         
         # 提取数字部分
         try:
-            # 移除逗号和其他非数字字符，只保留数字和小数点
-            amount_str = ''.join(c for c in amount_text if c.isdigit() or c == '.')
+            # 处理 "<0.01" 这种情况
+            if '<' in amount_text:
+                # 提取 < 后面的数字
+                amount_str = ''.join(c for c in amount_text.split('<')[1] if c.isdigit() or c == '.')
+            else:
+                # 移除逗号和其他非数字字符，只保留数字和小数点
+                amount_str = ''.join(c for c in amount_text if c.isdigit() or c == '.')
+            
             if amount_str:
                 amount = float(amount_str)
                 log_print(f"[{browser_id}] ✓ 获取到持仓数量: {amount}")
@@ -4261,7 +4267,7 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
         option_type: 期权类型，'YES'或'NO'
         
     Returns:
-        int: Buy时返回实际持仓数量，Sell时返回实际持仓数量，失败返回-1，Buy时如果已有对向仓位返回-2
+        int: Buy时返回实际持仓数量，Sell时返回实际持仓数量，失败返回-1，Buy时如果已有对向仓位且数量>=10返回-2
     """
     try:
         log_print(f"[{browser_id}] 检查 Position 仓位...")
@@ -4332,7 +4338,6 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
                         if trending_part1 in p_text:
                             matched_count += 1
                             matched_tr = tr
-                            log_print(f"[{browser_id}] ✓ 找到匹配的仓位，p标签内容: {p_text}")
                             break
                 except:
                     continue
@@ -4356,8 +4361,19 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
                         break
                 
                 if not has_option_type:
-                    log_print(f"[{browser_id}] ⚠ 匹配的tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位")
-                    return -2  # 返回-2表示已有对向仓位
+                    log_print(f"[{browser_id}] ⚠ 匹配的tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位，检查对向仓位数量...")
+                    # 获取对向仓位的数量
+                    opposite_amount = get_position_amount_from_tr(matched_tr, browser_id, option_type)
+                    if opposite_amount >= 0:
+                        if opposite_amount < 10:
+                            log_print(f"[{browser_id}] ✓ 对向仓位数量 {opposite_amount} < 10，视为无对向仓位，可以继续执行")
+                            return 0
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 对向仓位数量 {opposite_amount} >= 10，不能继续执行")
+                            return -2  # 返回-2表示已有对向仓位且数量 >= 10
+                    else:
+                        log_print(f"[{browser_id}] ⚠ 无法获取对向仓位数量，返回 -2")
+                        return -2
                 
                 # 如果存在匹配的option_type，获取实际持仓数量
                 return get_position_amount_from_tr(matched_tr, browser_id, option_type)
@@ -4386,8 +4402,19 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
                     break
             
             if not has_option_type:
-                log_print(f"[{browser_id}] ⚠ 第一行tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位")
-                return -2  # 返回-2表示已有对向仓位
+                log_print(f"[{browser_id}] ⚠ 第一行tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位，检查对向仓位数量...")
+                # 获取对向仓位的数量
+                opposite_amount = get_position_amount_from_tr(first_tr, browser_id, option_type)
+                if opposite_amount >= 0:
+                    if opposite_amount < 10:
+                        log_print(f"[{browser_id}] ✓ 对向仓位数量 {opposite_amount} < 10，视为无对向仓位，可以继续执行")
+                        return 0
+                    else:
+                        log_print(f"[{browser_id}] ⚠ 对向仓位数量 {opposite_amount} >= 10，不能继续执行")
+                        return -2  # 返回-2表示已有对向仓位且数量 >= 10
+                else:
+                    log_print(f"[{browser_id}] ⚠ 无法获取对向仓位数量，返回 -2")
+                    return -2
             
             # 如果存在匹配的option_type，获取实际持仓数量
             return get_position_amount_from_tr(first_tr, browser_id, option_type)
@@ -4436,7 +4463,6 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
             p_tags = accordion_div.find_elements(By.TAG_NAME, "p")
             
             for p in p_tags:
-                log_print(f"[{browser_id}] ✓ 找到 p 标签: {p.text.strip()}")
                 if p.text.strip() == trending_part1:
                     log_print(f"[{browser_id}] ✓ 找到匹配的 p 标签: {trending_part1}")
                     
@@ -4578,12 +4604,12 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
         # 检查 Position 数量
         # Buy: 返回实际持仓数量；Sell: 返回实际持仓数量
-        # Buy时如果已有对向仓位返回-2
+        # Buy时如果已有对向仓位且数量>=10返回-2
         initial_position_count = check_position_count(driver, browser_id, trending_part1, trade_type, option_type)
         
-        # Buy类型：如果返回-2，表示已有对向仓位
+        # Buy类型：如果返回-2，表示已有对向仓位且数量>=10，不能继续执行
         if trade_type == "Buy" and initial_position_count == -2:
-            return False, f"{browser_id}已有对向仓位"
+            return False, f"{browser_id}已有对向仓位且数量>=10"
         
         if initial_position_count < 0:
             log_print(f"[{browser_id}] ⚠ 无法获取 Position 数量，设为 0")
@@ -4594,9 +4620,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         else:
             log_print(f"[{browser_id}] 初始持仓数量: {initial_position_count}")
         
-        # Buy 类型：如果已有同向仓位则不能下单（现在返回的是实际持仓数量）
-        if trade_type == "Buy" and initial_position_count > 0:
-            return False, f"{browser_id}已有仓位"
+        # Buy 类型：允许有同向仓位，可以继续执行后面的逻辑
         
         # Sell 类型：如果没有仓位则不能下单
         if trade_type == "Sell" and initial_position_count == 0:
@@ -5135,6 +5159,218 @@ def get_balance_spot_address(driver, browser_id):
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
         return None, False
+
+
+def click_opinion_position_claim_buttons_only(driver, serial_number):
+    """
+    只点击 Position 按钮并处理所有页面的 Claim 按钮，不获取数据
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        
+    Returns:
+        tuple: (是否成功, 是否需要刷新重试)
+    """
+    
+    def handle_claim_buttons(driver, serial_number):
+        """
+        处理Claim按钮：点击第一个Claim按钮，切换到OKX页面点击第二个按钮，循环直到没有Claim按钮
+        
+        Args:
+            driver: Selenium WebDriver对象
+            serial_number: 浏览器序列号
+        """
+        while True:
+            try:
+                # 重新获取position_div（因为页面可能已更新）
+                position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                
+                # 在position_div下查找所有内容等于"Claim"的button
+                claim_buttons = []
+                all_buttons = position_div.find_elements(By.TAG_NAME, "button")
+                for button in all_buttons:
+                    if button.text.strip() == "Claim":
+                        claim_buttons.append(button)
+                
+                if len(claim_buttons) == 0:
+                    # 没有Claim按钮了，退出循环
+                    log_print(f"[{serial_number}] [OP] ✓ 没有找到 Claim 按钮，处理完成")
+                    break
+                
+                # 点击第一个Claim按钮
+                log_print(f"[{serial_number}] [OP] 找到 {len(claim_buttons)} 个 Claim 按钮，点击第一个...")
+                claim_buttons[0].click()
+                log_print(f"[{serial_number}] [OP] ✓ 已点击第一个 Claim 按钮")
+                
+                # 等待3秒
+                time.sleep(3)
+                
+                # 切换到OKX页面
+                log_print(f"[{serial_number}] [OP] 切换到 OKX 钱包页面...")
+                all_windows = driver.window_handles
+                main_window = None
+                okx_window = None
+                
+                # 先找到主窗口
+                for window in all_windows:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "app.opinion.trade" in current_url:
+                        main_window = window
+                        break
+                
+                # 再找OKX窗口
+                for window in all_windows:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
+                        okx_window = window
+                        log_print(f"[{serial_number}] [OP] ✓ 已切换到 OKX 页面")
+                        break
+                
+                if not okx_window:
+                    log_print(f"[{serial_number}] [OP] ⚠ 未找到 OKX 页面，跳过本次Claim处理")
+                    if main_window:
+                        driver.switch_to.window(main_window)
+                    break
+                
+                # 在10秒内查找并点击第二个按钮
+                log_print(f"[{serial_number}] [OP] 在10秒内查找 data-testid='okd-button' 的第二个按钮...")
+                button_clicked = False
+                button_start_time = time.time()
+                
+                while time.time() - button_start_time < 10:
+                    try:
+                        buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                        if len(buttons) >= 2:
+                            buttons[1].click()
+                            log_print(f"[{serial_number}] [OP] ✓ 已点击第二个按钮")
+                            button_clicked = True
+                            break
+                        else:
+                            time.sleep(0.5)
+                    except Exception as e:
+                        log_print(f"[{serial_number}] [OP] ⚠ 查找按钮时出错: {str(e)}")
+                        time.sleep(0.5)
+                
+                if not button_clicked:
+                    log_print(f"[{serial_number}] [OP] ⚠ 10秒内未找到足够的按钮或超时")
+                
+                # 切换回主界面
+                log_print(f"[{serial_number}] [OP] 切换回主界面...")
+                if main_window:
+                    driver.switch_to.window(main_window)
+                    log_print(f"[{serial_number}] [OP] ✓ 已切换回主界面")
+                else:
+                    # 如果没找到主窗口，尝试通过URL查找
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "app.opinion.trade" in current_url:
+                            log_print(f"[{serial_number}] [OP] ✓ 已切换回主界面")
+                            break
+                
+                # 等待3秒
+                time.sleep(3)
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 处理 Claim 按钮时出错: {str(e)}")
+                # 尝试切换回主界面
+                try:
+                    all_windows = driver.window_handles
+                    for window in all_windows:
+                        driver.switch_to.window(window)
+                        current_url = driver.current_url
+                        if "app.opinion.trade" in current_url:
+                            break
+                except:
+                    pass
+                break
+    
+    try:
+        log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Position 按钮...")
+        
+        position_clicked = False
+        start_time = time.time()
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                
+                for button in buttons:
+                    if button.text.strip() == "Position":
+                        button.click()
+                        log_print(f"[{serial_number}] [OP] ✓ 已点击 Position 按钮")
+                        position_clicked = True
+                        break
+                
+                if position_clicked:
+                    break
+                
+                time.sleep(0.5)
+            except:
+                time.sleep(0.5)
+        
+        if not position_clicked:
+            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Position 按钮")
+            return False, False
+        
+        time.sleep(3)
+        
+        try:
+            # 在180秒内遍历所有页面并点击Claim按钮
+            max_retry_time = 180
+            retry_start_time = time.time()
+            page_num = 1
+            
+            while time.time() - retry_start_time < max_retry_time:
+                try:
+                    # 重新获取 position_div（因为分页后内容会刷新）
+                    log_print(f"[{serial_number}] [OP] 查找 Position 内容区域（第 {page_num} 页）...")
+                    position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                    log_print(f"[{serial_number}] [OP] ✓ 找到 Position 内容区域 (ID: {position_div.get_attribute('id')})")
+                    
+                    # 处理当前页的Claim按钮
+                    log_print(f"[{serial_number}] [OP] 开始处理第 {page_num} 页的 Claim 按钮...")
+                    handle_claim_buttons(driver, serial_number)
+                    log_print(f"[{serial_number}] [OP] ✓ 第 {page_num} 页的 Claim 按钮处理完成")
+                    
+                    # 检查是否有下一页
+                    try:
+                        next_page_button = position_div.find_element(By.CSS_SELECTOR, 'button[aria-label="next page"]')
+                        is_disabled = next_page_button.get_attribute("disabled") is not None
+                        
+                        if is_disabled:
+                            log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面Claim按钮处理完成")
+                            break
+                        else:
+                            log_print(f"[{serial_number}] [OP] 发现下一页，点击下一页按钮...")
+                            next_page_button.click()
+                            time.sleep(3)  # 等待页面加载
+                            page_num += 1
+                            retry_start_time = time.time()  # 重置超时时间，因为开始新的一页
+                            continue
+                    except Exception as e:
+                        # 找不到下一页按钮，说明没有分页或已经是最后一页
+                        log_print(f"[{serial_number}] [OP] ✓ 未找到下一页按钮，所有页面Claim按钮处理完成")
+                        break
+                    
+                except Exception as e:
+                    elapsed = int(time.time() - retry_start_time)
+                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Position 内容区域异常: {str(e)}，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
+                    time.sleep(5)
+            
+            log_print(f"[{serial_number}] [OP] ✓ 所有页面的 Claim 按钮处理完成")
+            return True, False
+            
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 处理 Claim 按钮失败: {str(e)}")
+            return False, True
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [OP] ✗ 点击 Position 按钮失败: {str(e)}")
+        return False, False
 
 
 def click_opinion_position_and_get_data(driver, serial_number):
@@ -7900,12 +8136,12 @@ def collect_position_data(driver, browser_id, exchange_name):
                     else:
                         log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                     
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并获取数据...")
-                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
-                    collected_data['position'] = position_data
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并处理 Claim 按钮...")
+                    claim_success, need_retry_position = click_opinion_position_claim_buttons_only(driver, browser_id)
+                    
                     
                     if need_retry_position:
-                        log_print(f"[{browser_id}] ⚠ Position 数据获取超时，需要刷新页面重试")
+                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理超时，需要刷新页面重试")
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
@@ -7915,11 +8151,15 @@ def collect_position_data(driver, browser_id, exchange_name):
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position Claim 按钮处理失败")
                             break
+                    
+                    if not claim_success:
+                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理失败，继续执行后续步骤")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
+                    
                     
                     if need_retry_orders:
                         log_print(f"[{browser_id}] ⚠ Open Orders 数据获取超时，需要刷新页面重试")
@@ -7938,6 +8178,7 @@ def collect_position_data(driver, browser_id, exchange_name):
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Transactions 并获取数据...")
                     transactions_data, need_retry_transactions = click_opinion_transactions_and_get_data(driver, browser_id)
                     
+                    
                     if need_retry_transactions:
                         log_print(f"[{browser_id}] ⚠ Transactions 数据获取超时，需要刷新页面重试")
                         retry_attempt += 1
@@ -7952,14 +8193,18 @@ def collect_position_data(driver, browser_id, exchange_name):
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
                             break
                     
-                    # 获取 Points History 数据
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Points History 数据...")
-                    points_history_data = get_points_history_data(driver, browser_id)
-                    if points_history_data:
-                        collected_data['k'] = points_history_data
-                        log_print(f"[{browser_id}] ✓ Points History 数据已保存: {points_history_data[:100]}...")
+                    # 获取 Points History 数据（仅在周一）
+                    current_weekday = datetime.now().weekday()  # 0=Monday, 6=Sunday
+                    if current_weekday == 0:  # 周一
+                        log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}今天是周一，获取 Points History 数据...")
+                        points_history_data = get_points_history_data(driver, browser_id)
+                        if points_history_data:
+                            collected_data['k'] = points_history_data
+                            log_print(f"[{browser_id}] ✓ Points History 数据已保存: {points_history_data[:100]}...")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ Points History 数据获取失败或为空，继续执行后续步骤")
                     else:
-                        log_print(f"[{browser_id}] ⚠ Points History 数据获取失败或为空，继续执行后续步骤")
+                        log_print(f"[{browser_id}] 今天不是周一（当前是周{'一二三四五六日'[current_weekday]}），跳过 Points History 数据获取")
                     
                     # 全部成功，跳出重试循环
                     log_print(f"[{browser_id}] ✓ 所有数据获取成功")
@@ -7978,12 +8223,10 @@ def collect_position_data(driver, browser_id, exchange_name):
                         log_print(f"[{browser_id}] ✗ 已达到最大重试次数")
                         break
             
-            # 处理数据为标准格式
+            # 处理数据为标准格式（不再处理 position_data）
             log_print(f"[{browser_id}] 处理数据为标准格式...")
-            processed_positions = process_op_position_data(position_data)
             
             # open_orders_data 已经是标准格式字符串，不需要再处理
-            collected_data['positions'] = processed_positions
             collected_data['open_orders'] = open_orders_data
             collected_data['transactions'] = transactions_data
             
@@ -7991,9 +8234,7 @@ def collect_position_data(driver, browser_id, exchange_name):
             log_print(f"\n[{browser_id}] ========== 收集到的数据 (OP) ==========")
             log_print(f"[{browser_id}] Portfolio: {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance: {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 数据 ({len(processed_positions)} 项):")
-            for i, item in enumerate(processed_positions, 1):
-                log_print(f"[{browser_id}]   {i}. {item}")
+            log_print(f"[{browser_id}] Position 数据: 已跳过（仅处理 Claim 按钮）")
             log_print(f"[{browser_id}] Open Orders 数据 (标准格式):")
             if open_orders_data:
                 # 按分号分割显示每个仓位
@@ -8002,6 +8243,10 @@ def collect_position_data(driver, browser_id, exchange_name):
                     log_print(f"[{browser_id}]   {i}. {order}")
             else:
                 log_print(f"[{browser_id}]   无数据")
+            # 如果是周一，显示 Points History 数据
+            current_weekday = datetime.now().weekday()
+            if current_weekday == 0 and 'k' in collected_data:
+                log_print(f"[{browser_id}] Points History 数据: {collected_data.get('k', 'N/A')[:100]}...")
             log_print(f"[{browser_id}] ==========================================\n")
             
             # 上传数据
@@ -8129,6 +8374,7 @@ def process_type2_mission(task_data, retry_count=0):
         # 4. 判断交易所
         if exchange_name.upper() == "OP":
             log_print(f"[{browser_id}] 步骤4: 交易所为 OP，进入 profile 页面...")
+            
             
             profile_url = "https://app.opinion.trade/profile"
             try:
@@ -8296,10 +8542,10 @@ def process_type2_mission(task_data, retry_count=0):
             else:
                 log_print(f"[{browser_id}] ✓ 第一次检查通过，OKX Wallet 已正常连接")
             
+            
             # 获取数据（步骤5-9带重试机制）
             max_data_collection_retries = 3
             retry_attempt = 0
-            position_data = []
             open_orders_data = []
             transactions_data = []
             
@@ -8351,12 +8597,11 @@ def process_type2_mission(task_data, retry_count=0):
                     else:
                         log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                     
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并获取数据...")
-                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
-                    collected_data['position'] = position_data
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并处理 Claim 按钮...")
+                    claim_success, need_retry_position = click_opinion_position_claim_buttons_only(driver, browser_id)
                     
                     if need_retry_position:
-                        log_print(f"[{browser_id}] ⚠ Position 数据获取超时，需要刷新页面重试")
+                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理超时，需要刷新页面重试")
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
@@ -8367,8 +8612,11 @@ def process_type2_mission(task_data, retry_count=0):
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position Claim 按钮处理失败")
                             break
+                    
+                    if not claim_success:
+                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理失败，继续执行后续步骤")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤8: 点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
@@ -8436,14 +8684,7 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"\n[{browser_id}] ========== 原始数据 ==========")
             log_print(f"[{browser_id}] Portfolio (原始): {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance (原始): {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 原始数据 (标准格式字符串):")
-            if position_data:
-                # 按分号分割显示每个仓位
-                positions = position_data.split(';')
-                for i, pos in enumerate(positions, 1):
-                    log_print(f"[{browser_id}]   {i}. {pos}")
-            else:
-                log_print(f"[{browser_id}]   (空)")
+            log_print(f"[{browser_id}] Position 原始数据: 已跳过（仅处理 Claim 按钮）")
             log_print(f"[{browser_id}] Open Orders 原始数据 ({len(open_orders_data)} 项):")
             log_print(f"[{browser_id}]   {open_orders_data}")
             log_print(f"[{browser_id}] Transactions 原始数据 ({len(transactions_data)} 项):")
@@ -8454,18 +8695,15 @@ def process_type2_mission(task_data, retry_count=0):
             raw_data_for_server = {
                 'portfolio': collected_data.get('portfolio', ''),
                 'balance': collected_data.get('balance', ''),
-                'position': position_data,
                 'open_orders': open_orders_data,
                 'transactions': transactions_data
             }
             log_print(f"[{browser_id}] 收集到的原始数据: {raw_data_for_server}")
             
-            # 处理数据为标准格式
+            # 处理数据为标准格式（不再处理 position_data）
             log_print(f"[{browser_id}] 步骤10: 处理数据为标准格式...")
-            processed_positions = process_op_position_data(position_data)
             
             # open_orders_data 已经是标准格式字符串，不需要再处理
-            collected_data['positions'] = processed_positions
             collected_data['open_orders'] = open_orders_data
             collected_data['transactions'] = transactions_data
             
@@ -8473,9 +8711,7 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"\n[{browser_id}] ========== 收集到的数据 (OP) ==========")
             log_print(f"[{browser_id}] Portfolio: {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance: {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 数据 ({len(processed_positions)} 项):")
-            for i, item in enumerate(processed_positions, 1):
-                log_print(f"[{browser_id}]   {i}. {item}")
+            log_print(f"[{browser_id}] Position 数据: 已跳过（仅处理 Claim 按钮）")
             log_print(f"[{browser_id}] Open Orders 数据 (标准格式):")
             if open_orders_data:
                 # 按分号分割显示每个仓位
@@ -8484,6 +8720,9 @@ def process_type2_mission(task_data, retry_count=0):
                     log_print(f"[{browser_id}]   {i}. {order}")
             else:
                 log_print(f"[{browser_id}]   无数据")
+            # 显示 Points History 数据
+            if 'k' in collected_data:
+                log_print(f"[{browser_id}] Points History 数据: {collected_data.get('k', 'N/A')[:100]}...")
             log_print(f"[{browser_id}] ==========================================\n")
             
             # 上传数据
@@ -8826,16 +9065,16 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     else:
                         log_print(f"[{browser_id}] 任务一状态已是2或3或无法获取，无需修改")
             
-            # Type 5任务完成后发送 fingerprint 监控请求
-            if mission_type == 5 and task_browser_id:
-                log_print(f"[{browser_id}] Type 5 任务完成，发送 fingerprint 监控请求...")
-                send_fingerprint_monitor_request(task_browser_id)
+            # # Type 5任务完成后发送 fingerprint 监控请求
+            # if mission_type == 5 and task_browser_id:
+            #     log_print(f"[{browser_id}] Type 5 任务完成，发送 fingerprint 监控请求...")
+            #     send_fingerprint_monitor_request(task_browser_id)
             
             # Type 1/5任务完成后收集持仓数据（不影响任务结果）
             if driver and task_browser_id and task_exchange_name:
                 try:
                     log_print(f"[{browser_id}] 开始额外收集持仓数据（不影响任务结果）...")
-                    collect_position_data(driver, task_browser_id, task_exchange_name, mission_type)
+                    collect_position_data(driver, task_browser_id, task_exchange_name)
                     log_print(f"[{browser_id}] ✓ 额外持仓数据收集完成")
                 except Exception as e:
                     log_print(f"[{browser_id}] ⚠ 额外数据收集异常: {str(e)}，但不影响任务")

@@ -4,4 +4,5 @@ pandas>=1.3.0
 matplotlib>=3.4.0
 Pillow>=8.0.0
 requests>=2.26.0
+requests[socks]>=2.26.0  # 用于 SOCKS5 代理支持
 python-dateutil>=2.8.0
