@@ -192,6 +192,26 @@
           />
         </div>
         <div class="filter-item">
+          <label>余额范围:</label>
+          <el-input 
+            v-model="filters.balanceMin" 
+            placeholder="最小值"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+          />
+          <span style="margin: 0 8px; color: #666;">-</span>
+          <el-input 
+            v-model="filters.balanceMax" 
+            placeholder="最大值"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+          />
+        </div>
+        <div class="filter-item">
           <el-checkbox v-model="filters.showNoAddress" @change="applyFilters">
             显示无地址
           </el-checkbox>
@@ -738,6 +758,8 @@ const filters = ref({
   fingerprintNo: '',
   platform: '',
   positionSearch: '',  // 新增：仓位搜索
+  balanceMin: '',  // 余额最小值
+  balanceMax: '',  // 余额最大值
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false  // 显示无积分
@@ -748,6 +770,8 @@ const activeFilters = ref({
   fingerprintNo: [],
   platform: '',
   positionSearch: '',  // 新增：仓位搜索
+  balanceMin: null,  // 余额最小值
+  balanceMax: null,  // 余额最大值
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false  // 显示无积分
@@ -795,11 +819,17 @@ const parseInputValues = (input) => {
  * 应用筛选
  */
 const applyFilters = () => {
+  // 解析余额范围
+  const balanceMin = filters.value.balanceMin ? parseFloat(filters.value.balanceMin) : null
+  const balanceMax = filters.value.balanceMax ? parseFloat(filters.value.balanceMax) : null
+  
   activeFilters.value = {
     computeGroup: parseInputValues(filters.value.computeGroup),
     fingerprintNo: parseInputValues(filters.value.fingerprintNo),
     platform: filters.value.platform,
     positionSearch: filters.value.positionSearch.trim(),
+    balanceMin: isNaN(balanceMin) ? null : balanceMin,
+    balanceMax: isNaN(balanceMax) ? null : balanceMax,
     showNoAddress: filters.value.showNoAddress,
     showDuplicateAddress: filters.value.showDuplicateAddress,
     showNoPoints: filters.value.showNoPoints
@@ -816,6 +846,8 @@ const clearFilters = () => {
     fingerprintNo: '',
     platform: '',
     positionSearch: '',
+    balanceMin: '',
+    balanceMax: '',
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false
@@ -825,6 +857,8 @@ const clearFilters = () => {
     fingerprintNo: [],
     platform: '',
     positionSearch: '',
+    balanceMin: null,
+    balanceMax: null,
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false
@@ -855,6 +889,8 @@ const filteredTableData = computed(() => {
                     filters.fingerprintNo.length > 0 || 
                     filters.platform || 
                     filters.positionSearch ||
+                    filters.balanceMin !== null ||
+                    filters.balanceMax !== null ||
                     filters.showNoAddress ||
                     filters.showDuplicateAddress ||
                     filters.showNoPoints
@@ -891,6 +927,17 @@ const filteredTableData = computed(() => {
                         (row.b && row.b.toLowerCase().includes(searchTerm)) ||
                         (chainInfo && chainInfo.toLowerCase().includes(searchTerm))
         if (!hasMatch) {
+          return false
+        }
+      }
+      
+      // 余额范围筛选
+      if (filters.balanceMin !== null || filters.balanceMax !== null) {
+        const balance = parseFloat(row.balance) || 0
+        if (filters.balanceMin !== null && balance < filters.balanceMin) {
+          return false
+        }
+        if (filters.balanceMax !== null && balance > filters.balanceMax) {
           return false
         }
       }

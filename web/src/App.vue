@@ -253,6 +253,20 @@
               />
             </div>
             
+            <!-- 平仓最小数量设置 -->
+            <div class="hedge-amount-range">
+              <span class="filter-label">平仓最小数量（参数1）:</span>
+              <input 
+                v-model.number="hedgeMode.minCloseAmt" 
+                type="number" 
+                class="amount-range-input" 
+                min="0"
+                placeholder="0"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -1632,6 +1646,7 @@ const hedgeMode = reactive({
   maxDepth: 100,  // 最大允许深度
   minUAmt: 10,  // 最小开单
   maxUAmt: 1500,  // 最大开单
+  minCloseAmt: 500,  // 平仓最小数量（参数1）
   minOrderbookDepth: 3,  // 订单薄至少几组数据
   maxPriceDiff: 15,  // 买1-买3或卖1-卖3的最大价差
   priceRangeMin: 65,  // 先挂方价格区间最小值
@@ -4379,26 +4394,26 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
     console.log(`⚠️ 先挂方买卖价差不足 (${priceInfo.diff.toFixed(2)})，检查深度条件`)
     
     if (!hedgeMode.isClose) {
-      // 开仓模式：判断先挂方卖一价的深度（depth2，因为开仓是卖出）
-      const askDepth = priceInfo.depth2
-      console.log(`开仓模式，先挂方卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
-      
-      if (askDepth < hedgeMode.maxDepth) {
-        canHedge = true
-        console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
-      } else {
-        console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
-      }
-    } else {
-      // 平仓模式：判断先挂方买一价的深度（depth1，因为平仓是买入）
+      // 开仓模式：判断先挂方买一价的深度（depth1，因为开仓是买入）
       const bidDepth = priceInfo.depth1
-      console.log(`平仓模式，先挂方买一深度: ${bidDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      console.log(`开仓模式，先挂方买一深度: ${bidDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
       
       if (bidDepth < hedgeMode.maxDepth) {
         canHedge = true
         console.log(`✅ 深度满足条件 (${bidDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
       } else {
         console.log(`❌ 深度超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+      }
+    } else {
+      // 平仓模式：判断先挂方卖一价的深度（depth2，因为是卖出）
+      const askDepth = priceInfo.depth2
+      console.log(`平仓模式，先挂方卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      
+      if (askDepth < hedgeMode.maxDepth) {
+        canHedge = true
+        console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+      } else {
+        console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
       }
     }
   }
@@ -4470,6 +4485,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             timePassMin: hedgeMode.timePassMin,
             minUAmt: hedgeMode.minUAmt,  // 最小开单
             maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+            minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea  // 可平仓随机区间（小时）
           },
@@ -5196,7 +5212,8 @@ const saveHedgeSettings = () => {
       intervalType: hedgeMode.intervalType,
       intervalDelay: hedgeMode.intervalDelay,
       minUAmt: hedgeMode.minUAmt,
-      maxUAmt: hedgeMode.maxUAmt
+      maxUAmt: hedgeMode.maxUAmt,
+      minCloseAmt: hedgeMode.minCloseAmt
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -5223,6 +5240,9 @@ const loadHedgeSettings = () => {
     }
     if (settings.maxUAmt !== undefined) {
       hedgeMode.maxUAmt = settings.maxUAmt
+    }
+    if (settings.minCloseAmt !== undefined) {
+      hedgeMode.minCloseAmt = settings.minCloseAmt
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)

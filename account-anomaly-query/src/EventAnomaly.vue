@@ -22,7 +22,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="yes持仓数量" width="120" align="center">
+      <el-table-column label="yes持仓数量" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesPosition, b.yesPosition)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.yesPosition) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.yesPosition) }}
@@ -30,7 +30,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="no持仓数量" width="120" align="center">
+      <el-table-column label="no持仓数量" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.noPosition, b.noPosition)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.noPosition) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.noPosition) }}
@@ -38,7 +38,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="链上yes持仓数量" width="150" align="center">
+      <el-table-column label="链上yes持仓数量" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.chainYesPosition, b.chainYesPosition)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.chainYesPosition) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.chainYesPosition) }}
@@ -46,7 +46,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="链上no持仓数量" width="150" align="center">
+      <el-table-column label="链上no持仓数量" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.chainNoPosition, b.chainNoPosition)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.chainNoPosition) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.chainNoPosition) }}
@@ -70,7 +70,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="挂单yes数量" width="130" align="center">
+      <el-table-column label="挂单yes数量" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.orderYes, b.orderYes)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.orderYes) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.orderYes) }}
@@ -78,7 +78,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="挂单no数量" width="130" align="center">
+      <el-table-column label="挂单no数量" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.orderNo, b.orderNo)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.orderNo) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.orderNo) }}
@@ -86,7 +86,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="挂单差额" width="120" align="center">
+      <el-table-column label="挂单差额" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.orderDiff, b.orderDiff)">
         <template #default="scope">
           <span :class="parseFloat(scope.row.orderDiff) >= 0 ? 'positive' : 'negative'">
             {{ formatNumber(scope.row.orderDiff) }}

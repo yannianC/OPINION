@@ -184,14 +184,14 @@ GROUP_PASSWORDS = {
     "12": "Hhgj*liu-khHy5",  # 电脑组12的密码
     "13": "shdjjeG@^68Jhg",  # 电脑组13的密码
     "14": "gkj^&HGkhh45",  # 电脑组14的密码
-    "15": " kaznb3969*m%",  # 电脑组15的密码（注意前面有空格）
+    "15": " kaznb3969*m%",  # 电脑组15的密码
     "16": "ggTG*h785Wunj",  # 电脑组16的密码
     "21": "kjakln3*zhjql3",  # 电脑组21的密码
     "22": "ttRo451YU*58",  # 电脑组22的密码
     "23": "mj@w2ndJ*kX0g8!rns",  # 电脑组23的密码（浏览器1,2,3,4使用特定密码）
     "24": "5cx2Wsn#0kQnj*w240",  # 电脑组24的密码
-    "25":"kashg2*dk2F",
-    "26":"cxknwlJK&*f8",
+    "25": "kashg2*dk2F",  # 电脑组25的密码
+    "26": "cxknwlJK&*f8",  # 电脑组26的密码
     "27": "kiIH78hjfi.*+*",  # 电脑组27的密码
 }
 
@@ -686,7 +686,7 @@ def start_adspower_browser(serial_number):
             log_print(f"[{serial_number}] ✗ 启动浏览器时发生错误: {str(e)}")
         
         if attempt < MAX_RETRIES - 1:
-            wait_time = random.randint(5, 10)
+            wait_time = random.randint(5, 15)
             log_print(f"[{serial_number}] 等待 {wait_time} 秒后重试...")
             time.sleep(wait_time)
     
@@ -3713,19 +3713,44 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         log_print(f"[{browser_id}] 等待4秒...")
         time.sleep(15)
         
-        # 5. 打开目标页面
+        # 5. 打开目标页面（带重试机制）
         log_print(f"[{browser_id}] 步骤5: 打开目标页面")
-        try:
-            driver.get(target_url)
-        except WebDriverException as e:
-            error_msg = str(e)
+        page_load_success = False
+        last_error = None
+        max_page_retries = 3
+        
+        for page_retry in range(1, max_page_retries + 1):
+            try:
+                if page_retry > 1:
+                    log_print(f"[{browser_id}] 重试打开页面 (第 {page_retry}/{max_page_retries} 次)...")
+                    time.sleep(2)  # 重试前等待2秒
+                driver.get(target_url)
+                page_load_success = True
+                log_print(f"[{browser_id}] ✓ 页面加载成功")
+                break
+            except (WebDriverException, TimeoutException) as e:
+                last_error = e
+                error_msg = str(e)
+                log_print(f"[{browser_id}] ✗ 打开页面失败 (第 {page_retry}/{max_page_retries} 次): {error_msg}")
+                
+                # 如果还有重试机会，继续循环
+                if page_retry < max_page_retries:
+                    continue
+                else:
+                    # 3次都失败了，记录最后错误并跳出循环
+                    log_print(f"[{browser_id}] ✗ 页面加载失败，已重试 {max_page_retries} 次")
+        
+        # 如果页面加载失败（3次重试都失败），执行换IP重试（仅type=5任务且未重试过）
+        if not page_load_success:
+            error_msg = str(last_error) if last_error else "未知错误"
             # 检查是否是代理连接错误
-            if "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg:
-                log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
-                # 如果是代理错误且未重试过，执行换IP重试（仅type=5任务）
+            is_proxy_error = "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg or isinstance(last_error, TimeoutException)
+            
+            if is_proxy_error:
+                log_print(f"[{browser_id}] ✗ 检测到页面加载错误（代理或超时）: {error_msg}")
                 mission_type = mission.get("type")
                 if mission_type == 5 and retry_count == 0:
-                    log_print(f"[{browser_id}] Type=5 任务检测到代理连接失败，需要换IP重试，开始执行重试流程...")
+                    log_print(f"[{browser_id}] Type=5 任务页面加载失败，需要换IP重试，开始执行重试流程...")
                     
                     # 1. 关闭浏览器
                     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -3735,7 +3760,8 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     except:
                         pass
                     close_adspower_browser(browser_id)
-                    time.sleep(15)
+                    log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待2分钟...")
+                    time.sleep(120)  # Type=5任务等待2分钟
                     
                     # 2. 强制更换IP
                     log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
@@ -3767,10 +3793,10 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     return process_trading_mission(task_data, keep_browser_open, retry_count=1)
                 else:
                     # 不是type=5任务或已重试过，直接抛出错误
-                    raise
+                    raise last_error
             else:
                 # 其他类型的错误，直接抛出
-                raise
+                raise last_error
         
         # 5.5 检查并点击 "I Understand and Agree" p标签（如果存在）
         log_print(f"[{browser_id}] 步骤5.5: 检查是否存在 'I Understand and Agree' p标签...")
@@ -3788,7 +3814,8 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 except:
                     pass
                 close_adspower_browser(browser_id)
-                time.sleep(15)
+                log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待2分钟...")
+                time.sleep(120)  # Type=5任务等待2分钟
                 
                 # 2. 强制更换IP
                 log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
@@ -4233,8 +4260,10 @@ def get_position_amount_from_tr(tr, browser_id, option_type='YES'):
         try:
             # 处理 "<0.01" 这种情况
             if '<' in amount_text:
-                # 提取 < 后面的数字
-                amount_str = ''.join(c for c in amount_text.split('<')[1] if c.isdigit() or c == '.')
+                # 对于 "<0.01" 这种情况，表示持仓数量小于 0.01，应该视为 0
+                # 因为实际持仓太小，无法进行有效交易
+                log_print(f"[{browser_id}] ⚠ 持仓数量文本为 '{amount_text}'，表示持仓小于显示值，视为 0")
+                return 0.0
             else:
                 # 移除逗号和其他非数字字符，只保留数字和小数点
                 amount_str = ''.join(c for c in amount_text if c.isdigit() or c == '.')
@@ -4269,6 +4298,17 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
     Returns:
         int: Buy时返回实际持仓数量，Sell时返回实际持仓数量，失败返回-1，Buy时如果已有对向仓位且数量>=10返回-2
     """
+    # 辅助函数：检查 p_text 是否匹配 option_type
+    # 如果 option_type == 'YES'，还兼容 'Monad' 和 'Gold'
+    def matches_option_type(p_text, opt_type):
+        if opt_type == 'YES':
+            log_print(f"[{browser_id}] 检查 p_text {p_text}  {opt_type}仓位...")
+            return opt_type in p_text or 'Monad' in p_text or 'Gold' in p_text
+        elif opt_type == 'NO':
+            log_print(f"[{browser_id}] 检查 p_text {p_text}  {opt_type}仓位...")
+            return 'YES' not in p_text and 'Monad' not in p_text and  'Gold' not in p_text
+      
+    
     try:
         log_print(f"[{browser_id}] 检查 Position 仓位...")
         
@@ -4327,54 +4367,66 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
         if trending_part1 and count > 0:
             log_print(f"[{browser_id}] 检测到子标题 '{trending_part1}'，检查tr内p标签内容...")
             matched_count = 0
-            matched_tr = None
+            matched_tr = None  # 自己方向的tr（包含子标题和option_type）
+            opposite_tr = None  # 对向的tr（包含子标题但不包含option_type）
             for tr in tr_list:
                 try:
                     # 获取tr内所有p标签
                     p_tags = tr.find_elements(By.TAG_NAME, "p")
-                    # 检查是否有p标签内容包含子标题
+                    found_matched = False  # 是否有p标签同时包含子标题和option_type
+                    found_opposite = False  # 是否有p标签包含子标题但不包含option_type
+                    # 检查p标签内容
                     for p in p_tags:
                         p_text = p.text.strip()
+                        # 检查是否包含子标题
                         if trending_part1 in p_text:
-                            matched_count += 1
-                            matched_tr = tr
-                            break
+                            # 检查同一个p标签中是否匹配option_type（兼容Monad和Gold）
+                            if matches_option_type(p_text, option_type):
+                                # 同一个p标签同时包含子标题和option_type，是自己方向的tr
+                                found_matched = True
+                            else:
+                                # 同一个p标签包含子标题但不包含option_type，是对向的tr
+                                found_opposite = True
+                    
+                    # 记录匹配的tr
+                    if found_matched:
+                        matched_count += 1
+                        matched_tr = tr
+                    # 记录对向的tr（优先使用第一个找到的）
+                    elif found_opposite and opposite_tr is None:
+                        opposite_tr = tr
                 except:
                     continue
             
             log_print(f"[{browser_id}] 有子标题情况下，匹配的仓位数量: {matched_count}")
+            if opposite_tr:
+                log_print(f"[{browser_id}] ✓ 找到对向的tr（包含子标题但不包含option_type）")
             
             # 如果是Sell，需要获取实际持仓数量
             if trade_type == 'Sell' and matched_tr:
                 return get_position_amount_from_tr(matched_tr, browser_id, option_type)
             
             # 如果是Buy，需要检查匹配的tr中是否有对应option_type的p标签
-            if trade_type == 'Buy' and matched_tr:
+            if trade_type == 'Buy' and opposite_tr:
                 log_print(f"[{browser_id}] Buy类型：检查匹配tr中是否包含 '{option_type}' 的p标签...")
-                p_tags = matched_tr.find_elements(By.TAG_NAME, "p")
-                has_option_type = False
-                for p in p_tags:
-                    p_text = p.text.strip()
-                    if option_type in p_text:
-                        has_option_type = True
-                        log_print(f"[{browser_id}] ✓ 找到包含 '{option_type}' 的p标签: {p_text}")
-                        break
-                
-                if not has_option_type:
-                    log_print(f"[{browser_id}] ⚠ 匹配的tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位，检查对向仓位数量...")
-                    # 获取对向仓位的数量
-                    opposite_amount = get_position_amount_from_tr(matched_tr, browser_id, option_type)
-                    if opposite_amount >= 0:
-                        if opposite_amount < 10:
-                            log_print(f"[{browser_id}] ✓ 对向仓位数量 {opposite_amount} < 10，视为无对向仓位，可以继续执行")
-                            return 0
+                # 使用对向的tr来获取对向仓位的数量
+                if opposite_tr:
+                        opposite_amount = get_position_amount_from_tr(opposite_tr, browser_id, option_type)
+                        if opposite_amount >= 0:
+                            if opposite_amount < 10:
+                                log_print(f"[{browser_id}] ✓ 对向仓位数量 {opposite_amount} < 10，视为无对向仓位，可以继续执行")
+                                return 0
+                            else:
+                                log_print(f"[{browser_id}] ⚠ 对向仓位数量 {opposite_amount} >= 10，不能继续执行")
+                                return -2  # 返回-2表示已有对向仓位且数量 >= 10
                         else:
-                            log_print(f"[{browser_id}] ⚠ 对向仓位数量 {opposite_amount} >= 10，不能继续执行")
-                            return -2  # 返回-2表示已有对向仓位且数量 >= 10
-                    else:
-                        log_print(f"[{browser_id}] ⚠ 无法获取对向仓位数量，返回 -2")
+                            log_print(f"[{browser_id}] ⚠ 无法获取对向仓位数量，返回 -2")
+                            return -2
+                else:
+                        log_print(f"[{browser_id}] ⚠ 未找到对向的tr，返回 -2")
                         return -2
-                
+                    
+            if trade_type == 'Buy' and matched_tr:    
                 # 如果存在匹配的option_type，获取实际持仓数量
                 return get_position_amount_from_tr(matched_tr, browser_id, option_type)
             
@@ -4384,40 +4436,67 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
             
             return matched_count
         
-        # 如果是Sell且无子标题，获取第一行的实际持仓数量
-        if trade_type == 'Sell' and count > 0:
-            return get_position_amount_from_tr(tr_list[0], browser_id, option_type)
-        
-        # 如果是Buy且无子标题，检查第一行是否有对应option_type的p标签
-        if trade_type == 'Buy' and count > 0:
-            log_print(f"[{browser_id}] Buy类型（无子标题）：检查第一行tr中是否包含 '{option_type}' 的p标签...")
-            first_tr = tr_list[0]
-            p_tags = first_tr.find_elements(By.TAG_NAME, "p")
-            has_option_type = False
-            for p in p_tags:
-                p_text = p.text.strip()
-                if option_type in p_text:
-                    has_option_type = True
-                    log_print(f"[{browser_id}] ✓ 找到包含 '{option_type}' 的p标签: {p_text}")
-                    break
+        # 如果无子标题，遍历所有tr，找到包含option_type的tr和不包含的tr
+        if not trending_part1 and count > 0:
+            log_print(f"[{browser_id}] 无子标题，遍历所有tr查找包含 '{option_type}' 的tr...")
+            matched_tr = None  # 自己方向的tr（包含option_type）
+            opposite_tr = None  # 对向的tr（不包含option_type）
             
-            if not has_option_type:
-                log_print(f"[{browser_id}] ⚠ 第一行tr中没有包含 '{option_type}' 的p标签，表示已有对向仓位，检查对向仓位数量...")
-                # 获取对向仓位的数量
-                opposite_amount = get_position_amount_from_tr(first_tr, browser_id, option_type)
-                if opposite_amount >= 0:
-                    if opposite_amount < 10:
-                        log_print(f"[{browser_id}] ✓ 对向仓位数量 {opposite_amount} < 10，视为无对向仓位，可以继续执行")
-                        return 0
+            for tr in tr_list:
+                try:
+                    # 获取tr内所有p标签
+                    p_tags = tr.find_elements(By.TAG_NAME, "p")
+                    has_option_type = False
+                    # 检查是否有p标签匹配option_type（兼容Monad和Gold）
+                    for p in p_tags:
+                        p_text = p.text.strip()
+                        if matches_option_type(p_text, option_type):
+                            has_option_type = True
+                            log_print(f"[{browser_id}] ✓ 找到包含 '{option_type}' 的p标签: {p_text}")
+                            break
+                    
+                    if has_option_type:
+                        # 找到包含option_type的tr（自己方向的）
+                        matched_tr = tr
                     else:
-                        log_print(f"[{browser_id}] ⚠ 对向仓位数量 {opposite_amount} >= 10，不能继续执行")
-                        return -2  # 返回-2表示已有对向仓位且数量 >= 10
-                else:
-                    log_print(f"[{browser_id}] ⚠ 无法获取对向仓位数量，返回 -2")
-                    return -2
+                        # 找到不包含option_type的tr（对向的，优先使用第一个找到的）
+                        if opposite_tr is None:
+                            opposite_tr = tr
+                except:
+                    continue
             
-            # 如果存在匹配的option_type，获取实际持仓数量
-            return get_position_amount_from_tr(first_tr, browser_id, option_type)
+            # 如果是Sell，返回自己方向的tr的数量
+            if trade_type == 'Sell':
+                if matched_tr:
+                    return get_position_amount_from_tr(matched_tr, browser_id, option_type)
+                else:
+                    log_print(f"[{browser_id}] ⚠ Sell类型：未找到包含 '{option_type}' 的tr")
+                    return 0
+            
+            # 如果是Buy，需要检查对向仓位数量
+            if trade_type == 'Buy':
+                log_print(f"[{browser_id}] Buy类型（无子标题）：检查对向仓位...")
+                if opposite_tr:
+                    log_print(f"[{browser_id}] ✓ 找到对向的tr（不包含 '{option_type}'）")
+                    # 获取对向仓位的数量
+                    opposite_amount = get_position_amount_from_tr(opposite_tr, browser_id, option_type)
+                    if opposite_amount >= 0:
+                        if opposite_amount >= 10:
+                            log_print(f"[{browser_id}] ⚠ 对向仓位数量 {opposite_amount} >= 10，不能继续执行")
+                            return -2  # 返回-2表示已有对向仓位且数量 >= 10
+                        else:
+                            log_print(f"[{browser_id}] ✓ 对向仓位数量 {opposite_amount} < 10，视为无对向仓位，可以继续执行")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ 无法获取对向仓位数量，返回 -2")
+                        return -2
+                else:
+                    log_print(f"[{browser_id}] ✓ Buy类型：未找到对向的tr，可以继续执行")
+                
+                # 如果存在匹配的option_type，获取实际持仓数量
+                if matched_tr:
+                    return get_position_amount_from_tr(matched_tr, browser_id, option_type)
+                else:
+                    return 0
         
         # Buy类型但无仓位，返回0
         if trade_type == 'Buy':
@@ -8136,12 +8215,12 @@ def collect_position_data(driver, browser_id, exchange_name):
                     else:
                         log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                     
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并处理 Claim 按钮...")
-                    claim_success, need_retry_position = click_opinion_position_claim_buttons_only(driver, browser_id)
-                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并获取数据...")
+                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
+                    collected_data['position'] = position_data
                     
                     if need_retry_position:
-                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理超时，需要刷新页面重试")
+                        log_print(f"[{browser_id}] ⚠ Position 数据获取超时，需要刷新页面重试")
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
@@ -8151,11 +8230,8 @@ def collect_position_data(driver, browser_id, exchange_name):
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position Claim 按钮处理失败")
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
                             break
-                    
-                    if not claim_success:
-                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理失败，继续执行后续步骤")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
@@ -8223,10 +8299,12 @@ def collect_position_data(driver, browser_id, exchange_name):
                         log_print(f"[{browser_id}] ✗ 已达到最大重试次数")
                         break
             
-            # 处理数据为标准格式（不再处理 position_data）
+            # 处理数据为标准格式
             log_print(f"[{browser_id}] 处理数据为标准格式...")
+            processed_positions = process_op_position_data(position_data)
             
             # open_orders_data 已经是标准格式字符串，不需要再处理
+            collected_data['positions'] = processed_positions
             collected_data['open_orders'] = open_orders_data
             collected_data['transactions'] = transactions_data
             
@@ -8234,7 +8312,9 @@ def collect_position_data(driver, browser_id, exchange_name):
             log_print(f"\n[{browser_id}] ========== 收集到的数据 (OP) ==========")
             log_print(f"[{browser_id}] Portfolio: {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance: {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 数据: 已跳过（仅处理 Claim 按钮）")
+            log_print(f"[{browser_id}] Position 数据 ({len(processed_positions)} 项):")
+            for i, item in enumerate(processed_positions, 1):
+                log_print(f"[{browser_id}]   {i}. {item}")
             log_print(f"[{browser_id}] Open Orders 数据 (标准格式):")
             if open_orders_data:
                 # 按分号分割显示每个仓位
@@ -8445,7 +8525,8 @@ def process_type2_mission(task_data, retry_count=0):
                     except:
                         pass
                     close_adspower_browser(browser_id)
-                    time.sleep(15)
+                    log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待2分钟...")
+                    time.sleep(120)  # Type=5任务等待2分钟
                     
                     # 2. 强制更换IP
                     log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
@@ -8546,6 +8627,7 @@ def process_type2_mission(task_data, retry_count=0):
             # 获取数据（步骤5-9带重试机制）
             max_data_collection_retries = 3
             retry_attempt = 0
+            position_data = []
             open_orders_data = []
             transactions_data = []
             
@@ -8597,11 +8679,12 @@ def process_type2_mission(task_data, retry_count=0):
                     else:
                         log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                     
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并处理 Claim 按钮...")
-                    claim_success, need_retry_position = click_opinion_position_claim_buttons_only(driver, browser_id)
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并获取数据...")
+                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
+                    collected_data['position'] = position_data
                     
                     if need_retry_position:
-                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理超时，需要刷新页面重试")
+                        log_print(f"[{browser_id}] ⚠ Position 数据获取超时，需要刷新页面重试")
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
@@ -8612,11 +8695,8 @@ def process_type2_mission(task_data, retry_count=0):
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position Claim 按钮处理失败")
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
                             break
-                    
-                    if not claim_success:
-                        log_print(f"[{browser_id}] ⚠ Position Claim 按钮处理失败，继续执行后续步骤")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤8: 点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
@@ -8684,7 +8764,14 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"\n[{browser_id}] ========== 原始数据 ==========")
             log_print(f"[{browser_id}] Portfolio (原始): {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance (原始): {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 原始数据: 已跳过（仅处理 Claim 按钮）")
+            log_print(f"[{browser_id}] Position 原始数据 (标准格式字符串):")
+            if position_data:
+                # 按分号分割显示每个仓位
+                positions = position_data.split(';')
+                for i, pos in enumerate(positions, 1):
+                    log_print(f"[{browser_id}]   {i}. {pos}")
+            else:
+                log_print(f"[{browser_id}]   (空)")
             log_print(f"[{browser_id}] Open Orders 原始数据 ({len(open_orders_data)} 项):")
             log_print(f"[{browser_id}]   {open_orders_data}")
             log_print(f"[{browser_id}] Transactions 原始数据 ({len(transactions_data)} 项):")
@@ -8695,15 +8782,18 @@ def process_type2_mission(task_data, retry_count=0):
             raw_data_for_server = {
                 'portfolio': collected_data.get('portfolio', ''),
                 'balance': collected_data.get('balance', ''),
+                'position': position_data,
                 'open_orders': open_orders_data,
                 'transactions': transactions_data
             }
             log_print(f"[{browser_id}] 收集到的原始数据: {raw_data_for_server}")
             
-            # 处理数据为标准格式（不再处理 position_data）
+            # 处理数据为标准格式
             log_print(f"[{browser_id}] 步骤10: 处理数据为标准格式...")
+            processed_positions = process_op_position_data(position_data)
             
             # open_orders_data 已经是标准格式字符串，不需要再处理
+            collected_data['positions'] = processed_positions
             collected_data['open_orders'] = open_orders_data
             collected_data['transactions'] = transactions_data
             
@@ -8711,7 +8801,9 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"\n[{browser_id}] ========== 收集到的数据 (OP) ==========")
             log_print(f"[{browser_id}] Portfolio: {collected_data.get('portfolio', 'N/A')}")
             log_print(f"[{browser_id}] Balance: {collected_data.get('balance', 'N/A')}")
-            log_print(f"[{browser_id}] Position 数据: 已跳过（仅处理 Claim 按钮）")
+            log_print(f"[{browser_id}] Position 数据 ({len(processed_positions)} 项):")
+            for i, item in enumerate(processed_positions, 1):
+                log_print(f"[{browser_id}]   {i}. {item}")
             log_print(f"[{browser_id}] Open Orders 数据 (标准格式):")
             if open_orders_data:
                 # 按分号分割显示每个仓位
