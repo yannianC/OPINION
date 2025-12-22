@@ -493,10 +493,31 @@
                     <div class="section-title">对冲信息</div>
                     <div v-if="config.currentHedges && config.currentHedges.length > 0" class="hedge-info-list">
                       <div 
-                        v-for="(hedge, index) in config.currentHedges.filter(h => h.finalStatus === 'running')" 
+                        v-for="(hedge, index) in config.currentHedges.filter(h => {
+                          // 模式1：只显示运行中的
+                          if (!h.isMode2) {
+                            return h.finalStatus === 'running'
+                          }
+                          // 模式2：只要状态是running就显示（因为模式2在创建时就有yesList和noList）
+                          // 或者有已提交的任务，或者有计划任务列表
+                          return h.finalStatus === 'running' || 
+                                 (h.yesTasks && h.yesTasks.length > 0) || 
+                                 (h.noTasks && h.noTasks.length > 0) ||
+                                 (h.yesList && h.yesList.length > 0) ||
+                                 (h.noList && h.noList.length > 0)
+                        })" 
                         :key="hedge.id"
                         class="hedge-info"
-                        :style="{ marginBottom: index < config.currentHedges.filter(h => h.finalStatus === 'running').length - 1 ? '16px' : '0' }"
+                        :style="{ marginBottom: index < config.currentHedges.filter(h => {
+                          if (!h.isMode2) {
+                            return h.finalStatus === 'running'
+                          }
+                          return h.finalStatus === 'running' || 
+                                 (h.yesTasks && h.yesTasks.length > 0) || 
+                                 (h.noTasks && h.noTasks.length > 0) ||
+                                 (h.yesList && h.yesList.length > 0) ||
+                                 (h.noList && h.noList.length > 0)
+                        }).length - 1 ? '16px' : '0' }"
                       >
                         <div class="hedge-status-row">
                           <span class="hedge-label">对冲 #{{ hedge.id }} ({{ index + 1 }}/{{ config.currentHedges.filter(h => h.finalStatus === 'running').length }})</span>
@@ -634,70 +655,130 @@
                         
                         <!-- 模式2：多任务展示方式 -->
                         <template v-else>
-                          <!-- YES任务列表 -->
-                          <div v-if="hedge.yesTasks && hedge.yesTasks.length > 0" class="hedge-task-section">
+                          <!-- YES任务列表：优先显示已提交的任务，如果没有则显示计划任务 -->
+                          <div v-if="(hedge.yesTasks && hedge.yesTasks.length > 0) || (hedge.yesList && hedge.yesList.length > 0)" class="hedge-task-section">
                             <div class="task-title">
-                              YES任务 ({{ hedge.yesTasks.length }}个)
+                              YES任务 ({{ (hedge.yesTasks && hedge.yesTasks.length > 0) ? hedge.yesTasks.length : (hedge.yesList ? hedge.yesList.length : 0) }}个)
                             </div>
-                            <div v-for="(task, taskIndex) in hedge.yesTasks" :key="taskIndex" class="hedge-task-item">
-                              <div class="hedge-task-details-grid">
-                                <div class="hedge-detail-row">
-                                  <span>任务ID:</span>
-                                  <span :class="getTaskStatusClass(task.status)">
-                                    {{ task.taskId || '待提交' }}
-                                  </span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>浏览器:</span>
-                                  <span>{{ task.number }}</span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>电脑组:</span>
-                                  <span>{{ task.groupNo }}</span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>价格:</span>
-                                  <span>{{ task.price }}¢</span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>数量:</span>
-                                  <span>{{ task.share }}</span>
+                            <!-- 显示已提交的任务 -->
+                            <template v-if="hedge.yesTasks && hedge.yesTasks.length > 0">
+                              <div v-for="(task, taskIndex) in hedge.yesTasks" :key="taskIndex" class="hedge-task-item">
+                                <div class="hedge-task-details-grid">
+                                  <div class="hedge-detail-row">
+                                    <span>任务ID:</span>
+                                    <span :class="getTaskStatusClass(task.status)">
+                                      {{ task.taskId || '待提交' }}
+                                    </span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>浏览器:</span>
+                                    <span>{{ task.number }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>电脑组:</span>
+                                    <span>{{ task.groupNo }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>价格:</span>
+                                    <span>{{ task.price }}¢</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>数量:</span>
+                                    <span>{{ task.share }}</span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
+                            </template>
+                            <!-- 显示计划任务（还未提交） -->
+                            <template v-else-if="hedge.yesList && hedge.yesList.length > 0">
+                              <div v-for="(item, itemIndex) in hedge.yesList" :key="itemIndex" class="hedge-task-item">
+                                <div class="hedge-task-details-grid">
+                                  <div class="hedge-detail-row">
+                                    <span>任务ID:</span>
+                                    <span class="task-pending">待提交</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>浏览器:</span>
+                                    <span>{{ item.number }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>电脑组:</span>
+                                    <span>{{ getGroupNo(item.number) }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>价格:</span>
+                                    <span>{{ hedge.firstSide === 'YES' ? parseFloat(hedge.price) : (100 - parseFloat(hedge.price)) }}¢</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>数量:</span>
+                                    <span>{{ item.share }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
                           </div>
                           
-                          <!-- NO任务列表 -->
-                          <div v-if="hedge.noTasks && hedge.noTasks.length > 0" class="hedge-task-section">
+                          <!-- NO任务列表：优先显示已提交的任务，如果没有则显示计划任务 -->
+                          <div v-if="(hedge.noTasks && hedge.noTasks.length > 0) || (hedge.noList && hedge.noList.length > 0)" class="hedge-task-section">
                             <div class="task-title">
-                              NO任务 ({{ hedge.noTasks.length }}个)
+                              NO任务 ({{ (hedge.noTasks && hedge.noTasks.length > 0) ? hedge.noTasks.length : (hedge.noList ? hedge.noList.length : 0) }}个)
                             </div>
-                            <div v-for="(task, taskIndex) in hedge.noTasks" :key="taskIndex" class="hedge-task-item">
-                              <div class="hedge-task-details-grid">
-                                <div class="hedge-detail-row">
-                                  <span>任务ID:</span>
-                                  <span :class="getTaskStatusClass(task.status)">
-                                    {{ task.taskId || '待提交' }}
-                                  </span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>浏览器:</span>
-                                  <span>{{ task.number }}</span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>电脑组:</span>
-                                  <span>{{ task.groupNo }}</span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>价格:</span>
-                                  <span>{{ task.price }}¢</span>
-                                </div>
-                                <div class="hedge-detail-row">
-                                  <span>数量:</span>
-                                  <span>{{ task.share }}</span>
+                            <!-- 显示已提交的任务 -->
+                            <template v-if="hedge.noTasks && hedge.noTasks.length > 0">
+                              <div v-for="(task, taskIndex) in hedge.noTasks" :key="taskIndex" class="hedge-task-item">
+                                <div class="hedge-task-details-grid">
+                                  <div class="hedge-detail-row">
+                                    <span>任务ID:</span>
+                                    <span :class="getTaskStatusClass(task.status)">
+                                      {{ task.taskId || '待提交' }}
+                                    </span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>浏览器:</span>
+                                    <span>{{ task.number }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>电脑组:</span>
+                                    <span>{{ task.groupNo }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>价格:</span>
+                                    <span>{{ task.price }}¢</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>数量:</span>
+                                    <span>{{ task.share }}</span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
+                            </template>
+                            <!-- 显示计划任务（还未提交） -->
+                            <template v-else-if="hedge.noList && hedge.noList.length > 0">
+                              <div v-for="(item, itemIndex) in hedge.noList" :key="itemIndex" class="hedge-task-item">
+                                <div class="hedge-task-details-grid">
+                                  <div class="hedge-detail-row">
+                                    <span>任务ID:</span>
+                                    <span class="task-pending">待提交</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>浏览器:</span>
+                                    <span>{{ item.number }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>电脑组:</span>
+                                    <span>{{ getGroupNo(item.number) }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>价格:</span>
+                                    <span>{{ hedge.firstSide === 'NO' ? (100 - parseFloat(hedge.price)) : parseFloat(hedge.price) }}¢</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>数量:</span>
+                                    <span>{{ item.share }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
                           </div>
                           
                           <!-- 所有任务ID汇总 -->
@@ -1015,7 +1096,12 @@
                   type="number"
                   placeholder="请输入延时毫秒数"
                   :required="hedgeData.intervalType === 'delay'"
+                  :min="hedgeMode.isClose && hedgeMode.hedgeMode2 ? 20000 : 0"
+                  @blur="validateDelayMs"
                 />
+                <span v-if="hedgeMode.isClose && hedgeMode.hedgeMode2" style="font-size: 0.75rem; color: #666; margin-left: 8px;">
+                  平仓模式2：最小延时20秒（20000ms）
+                </span>
               </div>
 
               <div class="form-actions">
@@ -1640,29 +1726,59 @@
                 
                 <!-- 模式2：多任务展示方式 -->
                 <template v-else>
-                  <div v-if="log.yesTasks && log.yesTasks.length > 0" class="compact-task-row">
-                    <span class="task-label">YES ({{ log.yesTasks.length }}个):</span>
+                  <!-- YES任务：优先显示已提交的任务，如果没有则显示计划任务 -->
+                  <div v-if="(log.yesTasks && log.yesTasks.length > 0) || (log.yesList && log.yesList.length > 0)" class="compact-task-row">
+                    <span class="task-label">YES ({{ (log.yesTasks && log.yesTasks.length > 0) ? log.yesTasks.length : (log.yesList ? log.yesList.length : 0) }}个):</span>
                     <span class="task-info">
-                      <template v-for="(task, taskIndex) in log.yesTasks" :key="taskIndex">
-                        <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
-                        浏览器{{ task.number }} | 
-                        任务{{ task.taskId || '-' }} | 
-                        数量{{ task.share }} | 
-                        <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
-                        <span v-if="taskIndex < log.yesTasks.length - 1">; </span>
+                      <template v-if="log.yesTasks && log.yesTasks.length > 0">
+                        <!-- 显示已提交的任务 -->
+                        <template v-for="(task, taskIndex) in log.yesTasks" :key="taskIndex">
+                          <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                          浏览器{{ task.number }} | 
+                          任务{{ task.taskId || '-' }} | 
+                          数量{{ task.share }} | 
+                          <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
+                          <span v-if="taskIndex < log.yesTasks.length - 1">; </span>
+                        </template>
+                      </template>
+                      <template v-else-if="log.yesList && log.yesList.length > 0">
+                        <!-- 显示计划任务（还未提交） -->
+                        <template v-for="(item, itemIndex) in log.yesList" :key="itemIndex">
+                          <span class="task-group">组{{ getGroupNo(item.number) }}</span> | 
+                          浏览器{{ item.number }} | 
+                          任务待提交 | 
+                          数量{{ item.share }} | 
+                          <span class="task-pending">待提交</span>
+                          <span v-if="itemIndex < log.yesList.length - 1">; </span>
+                        </template>
                       </template>
                     </span>
                   </div>
-                  <div v-if="log.noTasks && log.noTasks.length > 0" class="compact-task-row">
-                    <span class="task-label">NO ({{ log.noTasks.length }}个):</span>
+                  <!-- NO任务：优先显示已提交的任务，如果没有则显示计划任务 -->
+                  <div v-if="(log.noTasks && log.noTasks.length > 0) || (log.noList && log.noList.length > 0)" class="compact-task-row">
+                    <span class="task-label">NO ({{ (log.noTasks && log.noTasks.length > 0) ? log.noTasks.length : (log.noList ? log.noList.length : 0) }}个):</span>
                     <span class="task-info">
-                      <template v-for="(task, taskIndex) in log.noTasks" :key="taskIndex">
-                        <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
-                        浏览器{{ task.number }} | 
-                        任务{{ task.taskId || '-' }} | 
-                        数量{{ task.share }} | 
-                        <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
-                        <span v-if="taskIndex < log.noTasks.length - 1">; </span>
+                      <template v-if="log.noTasks && log.noTasks.length > 0">
+                        <!-- 显示已提交的任务 -->
+                        <template v-for="(task, taskIndex) in log.noTasks" :key="taskIndex">
+                          <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                          浏览器{{ task.number }} | 
+                          任务{{ task.taskId || '-' }} | 
+                          数量{{ task.share }} | 
+                          <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
+                          <span v-if="taskIndex < log.noTasks.length - 1">; </span>
+                        </template>
+                      </template>
+                      <template v-else-if="log.noList && log.noList.length > 0">
+                        <!-- 显示计划任务（还未提交） -->
+                        <template v-for="(item, itemIndex) in log.noList" :key="itemIndex">
+                          <span class="task-group">组{{ getGroupNo(item.number) }}</span> | 
+                          浏览器{{ item.number }} | 
+                          任务待提交 | 
+                          数量{{ item.share }} | 
+                          <span class="task-pending">待提交</span>
+                          <span v-if="itemIndex < log.noList.length - 1">; </span>
+                        </template>
                       </template>
                     </span>
                   </div>
@@ -1743,7 +1859,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import axios from 'axios'
 
 const isConnected = ref(false)
@@ -2712,6 +2828,50 @@ const resetHedgeForm = () => {
   hedgeData.delayMs = null
   console.log('对冲表单已重置')
 }
+
+/**
+ * 验证延时时间（平仓模式2时，最小20秒）
+ */
+const validateDelayMs = () => {
+  if (hedgeMode.isClose && hedgeMode.hedgeMode2) {
+    if (!hedgeData.delayMs || hedgeData.delayMs < 20000) {
+      hedgeData.delayMs = 20000
+      console.log('平仓模式2：延时时间已自动调整为20秒（20000ms）')
+    }
+  }
+}
+
+/**
+ * 监听自动对冲模块的平仓模式2状态，自动设置手动对冲表单的默认值
+ */
+watch(
+  () => [hedgeMode.isClose, hedgeMode.hedgeMode2],
+  ([isClose, hedgeMode2]) => {
+    // 当是平仓模式2时
+    if (isClose && hedgeMode2) {
+      // 默认选择延时
+      if (hedgeData.intervalType !== 'delay') {
+        hedgeData.intervalType = 'delay'
+      }
+      // 如果延时时间小于20秒（20000ms），强制改为20秒
+      validateDelayMs()
+    }
+  },
+  { immediate: true }
+)
+
+/**
+ * 监听延时时间变化，确保平仓模式2时至少20秒
+ */
+watch(
+  () => hedgeData.delayMs,
+  (newDelayMs) => {
+    if (hedgeMode.isClose && hedgeMode.hedgeMode2 && newDelayMs !== null && newDelayMs < 20000) {
+      hedgeData.delayMs = 20000
+      console.log('平仓模式2：延时时间已自动调整为20秒（20000ms）')
+    }
+  }
+)
 
 /**
  * 从 markets 同步配置到 exchangeConfig
@@ -5660,7 +5820,21 @@ const getHedgeStatusText = (hedge) => {
   // 优先使用 finalStatus（新版本）
   if (hedge.finalStatus === 'success') return '全部成功'
   if (hedge.finalStatus === 'failed') return '失败'
-  if (hedge.finalStatus === 'running') return '进行中'
+  if (hedge.finalStatus === 'timeout') return '超时'
+  if (hedge.finalStatus === 'running') {
+    // 模式2：检查任务状态
+    if (hedge.isMode2) {
+      const allTasks = [...(hedge.yesTasks || []), ...(hedge.noTasks || [])]
+      if (allTasks.length === 0) return '等待提交'
+      const successCount = allTasks.filter(t => t.status === 2).length
+      const failedCount = allTasks.filter(t => t.status === 3).length
+      if (successCount > 0 || failedCount > 0) {
+        return `进行中 (成功:${successCount}, 失败:${failedCount}, 总计:${allTasks.length})`
+      }
+      return '进行中'
+    }
+    return '进行中'
+  }
   // 兼容旧版本（没有 finalStatus 字段的记录）
   if (hedge.yesStatus === 2 && hedge.noStatus === 2) return '全部成功'
   if (hedge.yesStatus === 3 || hedge.noStatus === 3) return '部分失败'
@@ -6130,7 +6304,10 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     // 模式2的数据结构：多个任务
     yesTasks: [],  // [{number, share, taskId, status, groupNo, price}]
     noTasks: [],   // [{number, share, taskId, status, groupNo, price}]
-    allTaskIds: []  // 所有任务ID的数组
+    allTaskIds: [],  // 所有任务ID的数组
+    // 保存原始数据，用于显示所有计划任务（包括未提交的）
+    yesList: yesList,  // 原始YES任务列表
+    noList: noList     // 原始NO任务列表
   }
   
   // 初始化 currentHedges 数组（如果不存在）
@@ -6155,6 +6332,7 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     
     console.log(`模式2 - 开始提交先挂方（${firstSide}）任务，共 ${firstSideList.length} 个`)
     
+    let firstSideSuccessCount = 0
     for (const item of firstSideList) {
       try {
         const browserNo = item.number
@@ -6223,11 +6401,25 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           }
           
           hedgeRecord.allTaskIds.push(taskId)
+          firstSideSuccessCount++
+        } else if (response.data && response.data.msg) {
+          console.error(`模式2 - 提交先挂方任务失败（浏览器: ${browserNo}）:`, response.data.msg)
         }
       } catch (error) {
         console.error(`模式2 - 提交先挂方任务失败（浏览器: ${item.number}）:`, error)
       }
     }
+    
+    // 如果先挂方任务全部失败，标记为失败
+    if (firstSideSuccessCount === 0) {
+      console.error(`模式2 - 先挂方任务全部失败，标记对冲为失败`)
+      hedgeRecord.finalStatus = 'failed'
+      hedgeRecord.errorMsg = '先挂方任务全部提交失败'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+    
+    console.log(`模式2 - 先挂方任务提交完成，成功: ${firstSideSuccessCount}/${firstSideList.length}`)
     
     // 根据延时，再为后挂方添加type=1的任务
     const secondSide = firstSide === 'YES' ? 'NO' : 'YES'
@@ -6314,15 +6506,25 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
       }
     }
     
+    // 初始化回调函数变量
+    let submitSecondSideTasksCallback = null
+    
     if (hedgeMode.intervalType === 'delay') {
       // 延时模式：等待指定时间后提交第二个任务
       console.log(`[模式2-延时模式] 等待 ${hedgeMode.intervalDelay}ms 后提交后挂方任务`)
-      setTimeout(() => {
+      setTimeout(async () => {
         if (hedgeRecord.finalStatus === 'running') {
           console.log(`[模式2-延时模式] 延时结束，提交后挂方任务`)
-          submitSecondSideTasks()
+          try {
+            await submitSecondSideTasks()
+          } catch (error) {
+            console.error(`[模式2-延时模式] 提交后挂方任务失败:`, error)
+            // 不因为后挂方任务提交失败而立即结束对冲，继续监控
+          }
         }
       }, hedgeMode.intervalDelay)
+      // 延时模式下不需要回调
+      submitSecondSideTasksCallback = null
     } else {
       // 挂单成功模式：先提交先挂方任务，等第一个任务成功后提交后挂方任务
       console.log(`[模式2-挂单成功模式] 等待先挂方任务成功后提交后挂方任务`)
@@ -6364,27 +6566,31 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
     }
     
     // 更新所有任务的状态
-    for (const task of hedgeRecord.yesTasks) {
-      if (task.taskId) {
-        const taskData = await fetchMissionStatus(task.taskId)
-        if (taskData) {
-          const oldStatus = task.status
-          task.status = taskData.status
-          if (oldStatus !== taskData.status) {
-            console.log(`[模式2-monitorHedgeStatus] YES任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+    if (hedgeRecord.yesTasks && hedgeRecord.yesTasks.length > 0) {
+      for (const task of hedgeRecord.yesTasks) {
+        if (task.taskId) {
+          const taskData = await fetchMissionStatus(task.taskId)
+          if (taskData) {
+            const oldStatus = task.status
+            task.status = taskData.status
+            if (oldStatus !== taskData.status) {
+              console.log(`[模式2-monitorHedgeStatus] YES任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+            }
           }
         }
       }
     }
     
-    for (const task of hedgeRecord.noTasks) {
-      if (task.taskId) {
-        const taskData = await fetchMissionStatus(task.taskId)
-        if (taskData) {
-          const oldStatus = task.status
-          task.status = taskData.status
-          if (oldStatus !== taskData.status) {
-            console.log(`[模式2-monitorHedgeStatus] NO任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+    if (hedgeRecord.noTasks && hedgeRecord.noTasks.length > 0) {
+      for (const task of hedgeRecord.noTasks) {
+        if (task.taskId) {
+          const taskData = await fetchMissionStatus(task.taskId)
+          if (taskData) {
+            const oldStatus = task.status
+            task.status = taskData.status
+            if (oldStatus !== taskData.status) {
+              console.log(`[模式2-monitorHedgeStatus] NO任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+            }
           }
         }
       }
@@ -6401,22 +6607,52 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
     }
     
     // 检查所有任务是否都完成
-    const allTasks = [...hedgeRecord.yesTasks, ...hedgeRecord.noTasks]
-    const allCompleted = allTasks.length > 0 && allTasks.every(t => t.status === 2 || t.status === 3)
-    const hasFailed = allTasks.some(t => t.status === 3)
-    const allSuccess = allTasks.length > 0 && allTasks.every(t => t.status === 2)
+    const yesTasks = hedgeRecord.yesTasks || []
+    const noTasks = hedgeRecord.noTasks || []
+    const allTasks = [...yesTasks, ...noTasks]
     
+    // 获取计划任务列表
+    const yesList = hedgeRecord.yesList || []
+    const noList = hedgeRecord.noList || []
+    const plannedTaskCount = yesList.length + noList.length
+    
+    // 如果没有任务，可能是数据异常，继续监控
+    if (allTasks.length === 0) {
+      console.warn(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 没有任务数据，继续监控`)
+      setTimeout(checkStatus, 5000)
+      return
+    }
+    
+    // 检查是否所有计划任务都已提交
+    // 只有当所有计划任务都已提交后，才能判断最终状态
+    if (allTasks.length < plannedTaskCount) {
+      console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 还有任务未提交（已提交: ${allTasks.length}/${plannedTaskCount}），继续监控`)
+      setTimeout(checkStatus, 5000)
+      return
+    }
+    
+    // 所有计划任务都已提交，检查是否都完成
+    const allCompleted = allTasks.every(t => t.status === 2 || t.status === 3)
+    const hasFailed = allTasks.some(t => t.status === 3)
+    const allSuccess = allTasks.every(t => t.status === 2)
+    
+    // 只有当所有任务都完成（成功或失败）时，才判断最终状态
     if (allCompleted) {
       if (allSuccess) {
         console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 所有任务都成功`)
         hedgeRecord.finalStatus = 'success'
       } else {
-        console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 有任务失败`)
+        console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 有任务失败（${allTasks.filter(t => t.status === 3).length}个失败）`)
         hedgeRecord.finalStatus = 'failed'
       }
       finishHedge(config, hedgeRecord)
       return
     }
+    
+    // 如果还有任务未完成，继续监控
+    const runningTasks = allTasks.filter(t => t.status === 9 || t.status === 0)
+    const completedTasks = allTasks.filter(t => t.status === 2 || t.status === 3)
+    console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务进度: ${completedTasks.length}/${allTasks.length} 完成，${runningTasks.length} 个运行中`)
     
     setTimeout(checkStatus, 5000)
   }

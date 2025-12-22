@@ -2448,7 +2448,7 @@ def get_position_from_api(serial_number, trending, option_type):
         return None
 
 
-def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending=""):
+def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None):
     """
     Type 5 任务专用：等待订单成功并收集数据
     
@@ -2461,6 +2461,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         trade_type: Buy 或 Sell
         option_type: YES 或 NO
         trending: 完整的交易主题（用于API调用，可选）
+        amount: 下单数量（可选，用于计算差额）
         
     Returns:
         tuple: (success, msg)
@@ -2497,7 +2498,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     else:
         log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
     
-    phase1_timeout = 700  # 10分钟
+    phase1_timeout = 600  # 10分钟
     check_interval = 20 if trade_type == "Sell" else 60  # Sell每20秒检查，Buy每60秒检查
     refresh_interval = 120  # 每2分钟刷新一次
     
@@ -3018,6 +3019,80 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         
         log_print(f"[{serial_number}] [{task_label}] Position数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
         
+        # 计算差额，如果差额绝对值小于5，跳过获取Open Orders数据
+        skip_open_orders = False
+        if amount is not None and filled_amount:
+            try:
+                # 将 filled_amount 转换为数字（处理可能包含逗号的情况）
+                filled_amount_str = str(filled_amount).replace(',', '').strip()
+                # 处理 "<0.01" 这种情况
+                if '<' in filled_amount_str:
+                    filled_amount_float = 0.0
+                else:
+                    filled_amount_float = float(filled_amount_str)
+                
+                # 计算变化值：filled_amount - initial_position_count
+                position_change = filled_amount_float - float(initial_position_count)
+                # 获取变化值的绝对值
+                position_change_abs = abs(position_change)
+                
+                # 计算差额：下单数量 - 变化值
+                difference = float(amount) - position_change_abs
+                difference_abs = abs(difference)
+                
+                log_print(f"[{serial_number}] [{task_label}] 差额计算:")
+                log_print(f"[{serial_number}] [{task_label}]   下单数量: {amount}")
+                log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount_float}")
+                log_print(f"[{serial_number}] [{task_label}]   初始数量: {initial_position_count}")
+                log_print(f"[{serial_number}] [{task_label}]   变化值: {position_change} (绝对值: {position_change_abs})")
+                log_print(f"[{serial_number}] [{task_label}]   差额: {difference} (绝对值: {difference_abs})")
+                
+                # 计算下单数量的10%作为阈值
+                amount_threshold = float(amount) * 0.1
+                log_print(f"[{serial_number}] [{task_label}]   下单数量的10%: {amount_threshold}")
+                
+                # 如果差额绝对值小于下单数量的10%，跳过获取Open Orders数据
+                if difference_abs < amount_threshold:
+                    log_print(f"[{serial_number}] [{task_label}] ✓ 差额绝对值 ({difference_abs}) < 下单数量的10% ({amount_threshold})，跳过获取Open Orders数据")
+                    skip_open_orders = True
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] 差额绝对值 ({difference_abs}) >= 下单数量的10% ({amount_threshold})，继续获取Open Orders数据")
+            except (ValueError, TypeError) as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 计算差额时出错: {str(e)}，继续获取Open Orders数据")
+        
+        # 如果跳过Open Orders，直接返回成功
+        if skip_open_orders:
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, is_task1, trade_type)
+            
+            import json
+            msg_data = {
+                "type": "TYPE5_SUCCESS",
+                "filled_amount": filled_amount,
+                "filled_price": filled_price,
+                "transaction_fee": transaction_fee
+            }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = str(initial_position_count)
+            
+            msg = json.dumps(msg_data, ensure_ascii=False)
+            
+            log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
+            log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
+            log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
+            
+            if fee_check_success:
+                log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 差额检查通过且交易费检查通过，任务成功！")
+                return True, msg
+            else:
+                log_print(f"[{serial_number}] [{task_label}] ✗ 差额检查通过但交易费检查失败，任务失败")
+                return False, msg
+        
         # 点击Open Orders
         log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
         open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
@@ -3227,7 +3302,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         return False, f"收集数据失败: {str(e)}"
 
 
-def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', option_type='YES', timeout=600, trending=''):
+def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', option_type='YES', timeout=600, trending='', amount=None):
     """
     Type 1 任务专用：等待订单成功并收集数据（与 Type 5 流程一致）
     
@@ -3241,6 +3316,7 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
         option_type: 期权类型（YES/NO）
         timeout: 超时时间（默认10分钟）
         trending: 完整的交易主题（用于API调用，可选）
+        amount: 下单数量（可选，用于计算差额）
         
     Returns:
         tuple: (success, msg)
@@ -3521,6 +3597,75 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
                     log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Position数据失败: {str(e)}")
         
         log_print(f"[{serial_number}] [{task_label}] Position数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
+        
+        # 计算差额，如果差额绝对值小于5，跳过获取Open Orders数据
+        skip_open_orders = False
+        if amount is not None and filled_amount:
+            try:
+                # 将 filled_amount 转换为数字（处理可能包含逗号的情况）
+                filled_amount_str = str(filled_amount).replace(',', '').strip()
+                # 处理 "<0.01" 这种情况
+                if '<' in filled_amount_str:
+                    filled_amount_float = 0.0
+                else:
+                    filled_amount_float = float(filled_amount_str)
+                
+                # 计算变化值：filled_amount - initial_position_count
+                position_change = filled_amount_float - float(initial_position_count)
+                # 获取变化值的绝对值
+                position_change_abs = abs(position_change)
+                
+                # 计算差额：下单数量 - 变化值
+                difference = float(amount) - position_change_abs
+                difference_abs = abs(difference)
+                
+                log_print(f"[{serial_number}] [{task_label}] 差额计算:")
+                log_print(f"[{serial_number}] [{task_label}]   下单数量: {amount}")
+                log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount_float}")
+                log_print(f"[{serial_number}] [{task_label}]   初始数量: {initial_position_count}")
+                log_print(f"[{serial_number}] [{task_label}]   变化值: {position_change} (绝对值: {position_change_abs})")
+                log_print(f"[{serial_number}] [{task_label}]   差额: {difference} (绝对值: {difference_abs})")
+                
+                # 计算下单数量的10%作为阈值
+                amount_threshold = float(amount) * 0.1
+                log_print(f"[{serial_number}] [{task_label}]   下单数量的10%: {amount_threshold}")
+                
+                # 如果差额绝对值小于下单数量的10%，跳过获取Open Orders数据
+                if difference_abs < amount_threshold:
+                    log_print(f"[{serial_number}] [{task_label}] ✓ 差额绝对值 ({difference_abs}) < 下单数量的10% ({amount_threshold})，跳过获取Open Orders数据")
+                    skip_open_orders = True
+                else:
+                    log_print(f"[{serial_number}] [{task_label}] 差额绝对值 ({difference_abs}) >= 下单数量的10% ({amount_threshold})，继续获取Open Orders数据")
+            except (ValueError, TypeError) as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 计算差额时出错: {str(e)}，继续获取Open Orders数据")
+        
+        # 如果跳过Open Orders，直接返回成功
+        if skip_open_orders:
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
+            
+            import json
+            msg_data = {
+                "type": "TYPE1_SUCCESS",
+                "filled_amount": filled_amount,
+                "filled_price": filled_price,
+                "transaction_fee": transaction_fee
+            }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = str(initial_position_count)
+            
+            msg = json.dumps(msg_data, ensure_ascii=False)
+            
+            log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
+            log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
+            log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
+            
+            return True, msg
         
         # 点击Open Orders
         log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
@@ -5423,7 +5568,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 task_data,
                 trade_type,
                 option_type,
-                trending
+                trending,
+                amount
             )
             
             
@@ -5445,7 +5591,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 trending_part1,
                 option_type,
                 timeout=600,
-                trending=trending
+                trending=trending,
+                amount=amount
             )
             
             if not success:
@@ -9518,7 +9665,7 @@ def check_and_submit_completed_missions():
             if task_type == 3:
                 # Type 3任务的结果在单浏览器处理时已提交
                 log_print(f"[系统] ✓ Type 3 任务 {mission_id} 已完成")
-            elif task_type == 5:
+            elif task_type == 5 or task_type == 1:
                 # Type 5任务特殊处理：直接使用详细的msg
                 success_count = sum(1 for r in results.values() if r['success'])
                 failed_count = sum(1 for r in results.values() if not r['success'])
