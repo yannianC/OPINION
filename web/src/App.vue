@@ -267,6 +267,51 @@
               />
             </div>
             
+            <!-- 合计最小平仓值（参数2）和合计最大平仓值（参数3）- 仅在平仓模式且模式2时显示 -->
+            <template v-if="hedgeMode.isClose && hedgeMode.hedgeMode2">
+              <div class="hedge-amount-range">
+                <span class="filter-label">合计最小平仓值（参数2）:</span>
+                <input 
+                  v-model.number="hedgeMode.minTotalCloseAmt" 
+                  type="number" 
+                  class="amount-range-input" 
+                  min="0"
+                  placeholder="0"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+              
+              <div class="hedge-amount-range">
+                <span class="filter-label">合计最大平仓值（参数3）:</span>
+                <input 
+                  v-model.number="hedgeMode.maxTotalCloseAmt" 
+                  type="number" 
+                  class="amount-range-input" 
+                  min="0"
+                  placeholder="0"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+            </template>
+            
+            <!-- 模式1/模式2开关 - 仅在平仓模式时显示 -->
+            <div v-if="hedgeMode.isClose" class="hedge-mode-switch">
+              <span class="filter-label">模式:</span>
+              <label class="switch-label">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.hedgeMode2" 
+                  class="switch-checkbox"
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                />
+                <span class="switch-slider"></span>
+                <span class="switch-text">{{ hedgeMode.hedgeMode2 ? '2' : '1' }}</span>
+              </label>
+            </div>
+            
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -461,127 +506,205 @@
                           >
                             {{ getHedgeStatusText(hedge) }}
                           </span>
+                          <span v-if="hedge.isMode2" class="hedge-mode-badge">模式2</span>
                         </div>
                         
-                        <!-- 任务一 -->
-                        <div class="hedge-task-section">
-                          <div class="task-title">
-                            任务一 - {{ hedge.firstSide }}
-                            <span class="task-amount">x{{ hedge.share }}</span>
-                          </div>
-                          <div class="hedge-task-details-grid">
-                            <div class="hedge-detail-row">
-                              <span>任务ID:</span>
-                              <span :class="getTaskStatusClass(
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.yesStatus 
-                                  : hedge.noStatus
-                              )">
-                                {{ 
+                        <!-- 模式1：原有展示方式 -->
+                        <template v-if="!hedge.isMode2">
+                          <!-- 任务一 -->
+                          <div class="hedge-task-section">
+                            <div class="task-title">
+                              任务一 - {{ hedge.firstSide }}
+                              <span class="task-amount">x{{ hedge.share }}</span>
+                            </div>
+                            <div class="hedge-task-details-grid">
+                              <div class="hedge-detail-row">
+                                <span>任务ID:</span>
+                                <span :class="getTaskStatusClass(
                                   hedge.firstSide === 'YES' 
-                                    ? (hedge.yesTaskId || '待提交') 
-                                    : (hedge.noTaskId || '待提交') 
-                                }}
-                              </span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>浏览器:</span>
-                              <span>{{ 
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.yesNumber 
-                                  : hedge.noNumber 
-                              }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>电脑组:</span>
-                              <span>{{ 
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.yesGroupNo 
-                                  : hedge.noGroupNo 
-                              }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>买/卖:</span>
-                              <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>方向:</span>
-                              <span>{{ hedge.firstSide }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>价格:</span>
-                              <span>{{ 
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.yesPrice 
-                                  : hedge.noPrice 
-                              }}¢</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>数量:</span>
-                              <span>{{ hedge.share }}</span>
+                                    ? hedge.yesStatus 
+                                    : hedge.noStatus
+                                )">
+                                  {{ 
+                                    hedge.firstSide === 'YES' 
+                                      ? (hedge.yesTaskId || '待提交') 
+                                      : (hedge.noTaskId || '待提交') 
+                                  }}
+                                </span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>浏览器:</span>
+                                <span>{{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.yesNumber 
+                                    : hedge.noNumber 
+                                }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>电脑组:</span>
+                                <span>{{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.yesGroupNo 
+                                    : hedge.noGroupNo 
+                                }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>买/卖:</span>
+                                <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>方向:</span>
+                                <span>{{ hedge.firstSide }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>价格:</span>
+                                <span>{{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.yesPrice 
+                                    : hedge.noPrice 
+                                }}¢</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>数量:</span>
+                                <span>{{ hedge.share }}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
+                          
+                          <!-- 任务二 -->
+                          <div class="hedge-task-section">
+                            <div class="task-title">
+                              任务二 - {{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}
+                              <span class="task-amount">x{{ hedge.share }}</span>
+                            </div>
+                            <div class="hedge-task-details-grid">
+                              <div class="hedge-detail-row">
+                                <span>任务ID:</span>
+                                <span :class="getTaskStatusClass(
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.noStatus 
+                                    : hedge.yesStatus
+                                )">
+                                  {{ 
+                                    hedge.firstSide === 'YES' 
+                                      ? (hedge.noTaskId || '待提交') 
+                                      : (hedge.yesTaskId || '待提交') 
+                                  }}
+                                </span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>浏览器:</span>
+                                <span>{{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.noNumber 
+                                    : hedge.yesNumber 
+                                }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>电脑组:</span>
+                                <span>{{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.noGroupNo 
+                                    : hedge.yesGroupNo 
+                                }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>买/卖:</span>
+                                <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>方向:</span>
+                                <span>{{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>价格:</span>
+                                <span>{{ 
+                                  hedge.firstSide === 'YES' 
+                                    ? hedge.noPrice 
+                                    : hedge.yesPrice 
+                                }}¢</span>
+                              </div>
+                              <div class="hedge-detail-row">
+                                <span>数量:</span>
+                                <span>{{ hedge.share }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
                         
-                        <!-- 任务二 -->
-                        <div class="hedge-task-section">
-                          <div class="task-title">
-                            任务二 - {{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}
-                            <span class="task-amount">x{{ hedge.share }}</span>
-                          </div>
-                          <div class="hedge-task-details-grid">
-                            <div class="hedge-detail-row">
-                              <span>任务ID:</span>
-                              <span :class="getTaskStatusClass(
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.noStatus 
-                                  : hedge.yesStatus
-                              )">
-                                {{ 
-                                  hedge.firstSide === 'YES' 
-                                    ? (hedge.noTaskId || '待提交') 
-                                    : (hedge.yesTaskId || '待提交') 
-                                }}
-                              </span>
+                        <!-- 模式2：多任务展示方式 -->
+                        <template v-else>
+                          <!-- YES任务列表 -->
+                          <div v-if="hedge.yesTasks && hedge.yesTasks.length > 0" class="hedge-task-section">
+                            <div class="task-title">
+                              YES任务 ({{ hedge.yesTasks.length }}个)
                             </div>
-                            <div class="hedge-detail-row">
-                              <span>浏览器:</span>
-                              <span>{{ 
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.noNumber 
-                                  : hedge.yesNumber 
-                              }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>电脑组:</span>
-                              <span>{{ 
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.noGroupNo 
-                                  : hedge.yesGroupNo 
-                              }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>买/卖:</span>
-                              <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>方向:</span>
-                              <span>{{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>价格:</span>
-                              <span>{{ 
-                                hedge.firstSide === 'YES' 
-                                  ? hedge.noPrice 
-                                  : hedge.yesPrice 
-                              }}¢</span>
-                            </div>
-                            <div class="hedge-detail-row">
-                              <span>数量:</span>
-                              <span>{{ hedge.share }}</span>
+                            <div v-for="(task, taskIndex) in hedge.yesTasks" :key="taskIndex" class="hedge-task-item">
+                              <div class="hedge-task-details-grid">
+                                <div class="hedge-detail-row">
+                                  <span>任务ID:</span>
+                                  <span :class="getTaskStatusClass(task.status)">
+                                    {{ task.taskId || '待提交' }}
+                                  </span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>浏览器:</span>
+                                  <span>{{ task.number }}</span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>电脑组:</span>
+                                  <span>{{ task.groupNo }}</span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>价格:</span>
+                                  <span>{{ task.price }}¢</span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>数量:</span>
+                                  <span>{{ task.share }}</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
+                          
+                          <!-- NO任务列表 -->
+                          <div v-if="hedge.noTasks && hedge.noTasks.length > 0" class="hedge-task-section">
+                            <div class="task-title">
+                              NO任务 ({{ hedge.noTasks.length }}个)
+                            </div>
+                            <div v-for="(task, taskIndex) in hedge.noTasks" :key="taskIndex" class="hedge-task-item">
+                              <div class="hedge-task-details-grid">
+                                <div class="hedge-detail-row">
+                                  <span>任务ID:</span>
+                                  <span :class="getTaskStatusClass(task.status)">
+                                    {{ task.taskId || '待提交' }}
+                                  </span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>浏览器:</span>
+                                  <span>{{ task.number }}</span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>电脑组:</span>
+                                  <span>{{ task.groupNo }}</span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>价格:</span>
+                                  <span>{{ task.price }}¢</span>
+                                </div>
+                                <div class="hedge-detail-row">
+                                  <span>数量:</span>
+                                  <span>{{ task.share }}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <!-- 所有任务ID汇总 -->
+                          <div v-if="hedge.allTaskIds && hedge.allTaskIds.length > 0" class="hedge-summary">
+                            <span>任务ID组: {{ hedge.allTaskIds.join(', ') }}</span>
+                          </div>
+                        </template>
                         
                         <div class="hedge-summary">
                           <span>{{ hedge.isClose ? '卖出' : '买入' }} @ {{ hedge.price }}¢</span>
@@ -1355,6 +1478,7 @@
                 >
                   {{ getHedgeLogStatusText(log) }}
                 </span>
+                <span v-if="log.isMode2" class="log-mode-badge">模式2</span>
                 <span class="log-time">{{ formatTime(log.startTime) }}</span>
               </div>
               <div class="log-details">
@@ -1366,22 +1490,55 @@
                   <span class="log-label">价格:</span>
                   <span>{{ log.price }}</span>
                 </div>
-                <div class="log-row">
-                  <span class="log-label">数量:</span>
-                  <span>{{ log.share }}</span>
-                </div>
-                <div class="log-row">
-                  <span class="log-label">先挂:</span>
-                  <span>{{ log.firstSide }}</span>
-                </div>
-                <div class="log-row">
-                  <span class="log-label">YES浏览器:</span>
-                  <span>{{ log.yesNumber }} - {{ getStatusText(log.yesStatus) }}</span>
-                </div>
-                <div class="log-row">
-                  <span class="log-label">NO浏览器:</span>
-                  <span>{{ log.noNumber }} - {{ getStatusText(log.noStatus) }}</span>
-                </div>
+                
+                <!-- 模式1：原有展示方式 -->
+                <template v-if="!log.isMode2">
+                  <div class="log-row">
+                    <span class="log-label">数量:</span>
+                    <span>{{ log.share }}</span>
+                  </div>
+                  <div class="log-row">
+                    <span class="log-label">先挂:</span>
+                    <span>{{ log.firstSide }}</span>
+                  </div>
+                  <div class="log-row">
+                    <span class="log-label">YES浏览器:</span>
+                    <span>{{ log.yesNumber }} - {{ getStatusText(log.yesStatus) }}</span>
+                  </div>
+                  <div class="log-row">
+                    <span class="log-label">NO浏览器:</span>
+                    <span>{{ log.noNumber }} - {{ getStatusText(log.noStatus) }}</span>
+                  </div>
+                </template>
+                
+                <!-- 模式2：多任务展示方式 -->
+                <template v-else>
+                  <div class="log-row">
+                    <span class="log-label">先挂:</span>
+                    <span>{{ log.firstSide }}</span>
+                  </div>
+                  <div v-if="log.yesTasks && log.yesTasks.length > 0" class="log-row">
+                    <span class="log-label">YES任务 ({{ log.yesTasks.length }}个):</span>
+                    <div class="log-task-list">
+                      <div v-for="(task, taskIndex) in log.yesTasks" :key="taskIndex" class="log-task-item">
+                        浏览器{{ task.number }} | 任务{{ task.taskId || '-' }} | 数量{{ task.share }} | {{ getStatusText(task.status) }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="log.noTasks && log.noTasks.length > 0" class="log-row">
+                    <span class="log-label">NO任务 ({{ log.noTasks.length }}个):</span>
+                    <div class="log-task-list">
+                      <div v-for="(task, taskIndex) in log.noTasks" :key="taskIndex" class="log-task-item">
+                        浏览器{{ task.number }} | 任务{{ task.taskId || '-' }} | 数量{{ task.share }} | {{ getStatusText(task.status) }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="log.allTaskIds && log.allTaskIds.length > 0" class="log-row">
+                    <span class="log-label">任务ID组:</span>
+                    <span>{{ log.allTaskIds.join(', ') }}</span>
+                  </div>
+                </template>
+                
                 <div v-if="log.endTime" class="log-row">
                   <span class="log-label">结束时间:</span>
                   <span>{{ formatTime(log.endTime) }}</span>
@@ -1426,49 +1583,94 @@
                   {{ getHedgeLogStatusText(log) }}
                 </span>
                 <span class="compact-log-mode">{{ log.isClose ? '平仓' : '开仓' }}</span>
+                <span v-if="log.isMode2" class="compact-log-mode-badge">模式2</span>
                 <span class="compact-log-info">
-                  价格:{{ log.price }} | 数量:{{ log.share }} | 先挂:{{ log.firstSide }}
+                  <template v-if="!log.isMode2">
+                    价格:{{ log.price }} | 数量:{{ log.share }} | 先挂:{{ log.firstSide }}
+                  </template>
+                  <template v-else>
+                    价格:{{ log.price }} | 先挂:{{ log.firstSide }} | 
+                    YES:{{ log.yesTasks ? log.yesTasks.length : 0 }}个 | 
+                    NO:{{ log.noTasks ? log.noTasks.length : 0 }}个
+                  </template>
                 </span>
                 <span class="compact-log-time">{{ formatCompactTime(log.startTime) }}</span>
                 <span v-if="log.duration" class="compact-log-duration">{{ log.duration }}分</span>
               </div>
               <div class="compact-log-details">
-                <div class="compact-task-row">
-                  <span class="task-label">YES:</span>
-                  <span class="task-info">
-                    <span class="task-group">组{{ log.yesGroupNo || '-' }}</span> | 
-                    浏览器{{ log.yesNumber }} | 
-                    任务{{ log.yesTaskId || '-' }} | 
-                    <span :class="getTaskStatusClass(log.yesStatus)">{{ getStatusText(log.yesStatus) }}</span>
-                    <span v-if="log.yesTaskMsg" class="task-msg">| {{ formatTaskMsg(log.yesTaskMsg) }}</span>
-                    <span v-if="log.yesNumber && log.trendingName" class="on-chain-balance">
-                      | 链上余额:
-                      <span :class="['balance-value', 
-                        log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? 'loading' : 
-                        log.yesOnChainBalance === '获取失败' ? 'error' : 'success']">
-                        {{ log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? '加载中...' : log.yesOnChainBalance }}
+                <!-- 模式1：原有展示方式 -->
+                <template v-if="!log.isMode2">
+                  <div class="compact-task-row">
+                    <span class="task-label">YES:</span>
+                    <span class="task-info">
+                      <span class="task-group">组{{ log.yesGroupNo || '-' }}</span> | 
+                      浏览器{{ log.yesNumber }} | 
+                      任务{{ log.yesTaskId || '-' }} | 
+                      <span :class="getTaskStatusClass(log.yesStatus)">{{ getStatusText(log.yesStatus) }}</span>
+                      <span v-if="log.yesTaskMsg" class="task-msg">| {{ formatTaskMsg(log.yesTaskMsg) }}</span>
+                      <span v-if="log.yesNumber && log.trendingName" class="on-chain-balance">
+                        | 链上余额:
+                        <span :class="['balance-value', 
+                          log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? 'loading' : 
+                          log.yesOnChainBalance === '获取失败' ? 'error' : 'success']">
+                          {{ log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? '加载中...' : log.yesOnChainBalance }}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                </div>
-                <div class="compact-task-row">
-                  <span class="task-label">NO:</span>
-                  <span class="task-info">
-                    <span class="task-group">组{{ log.noGroupNo || '-' }}</span> | 
-                    浏览器{{ log.noNumber }} | 
-                    任务{{ log.noTaskId || '-' }} | 
-                    <span :class="getTaskStatusClass(log.noStatus)">{{ getStatusText(log.noStatus) }}</span>
-                    <span v-if="log.noTaskMsg" class="task-msg">| {{ formatTaskMsg(log.noTaskMsg) }}</span>
-                    <span v-if="log.noNumber && log.trendingName" class="on-chain-balance">
-                      | 链上余额:
-                      <span :class="['balance-value', 
-                        log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? 'loading' : 
-                        log.noOnChainBalance === '获取失败' ? 'error' : 'success']">
-                        {{ log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? '加载中...' : log.noOnChainBalance }}
+                  </div>
+                  <div class="compact-task-row">
+                    <span class="task-label">NO:</span>
+                    <span class="task-info">
+                      <span class="task-group">组{{ log.noGroupNo || '-' }}</span> | 
+                      浏览器{{ log.noNumber }} | 
+                      任务{{ log.noTaskId || '-' }} | 
+                      <span :class="getTaskStatusClass(log.noStatus)">{{ getStatusText(log.noStatus) }}</span>
+                      <span v-if="log.noTaskMsg" class="task-msg">| {{ formatTaskMsg(log.noTaskMsg) }}</span>
+                      <span v-if="log.noNumber && log.trendingName" class="on-chain-balance">
+                        | 链上余额:
+                        <span :class="['balance-value', 
+                          log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? 'loading' : 
+                          log.noOnChainBalance === '获取失败' ? 'error' : 'success']">
+                          {{ log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? '加载中...' : log.noOnChainBalance }}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                </div>
+                  </div>
+                </template>
+                
+                <!-- 模式2：多任务展示方式 -->
+                <template v-else>
+                  <div v-if="log.yesTasks && log.yesTasks.length > 0" class="compact-task-row">
+                    <span class="task-label">YES ({{ log.yesTasks.length }}个):</span>
+                    <span class="task-info">
+                      <template v-for="(task, taskIndex) in log.yesTasks" :key="taskIndex">
+                        <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                        浏览器{{ task.number }} | 
+                        任务{{ task.taskId || '-' }} | 
+                        数量{{ task.share }} | 
+                        <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
+                        <span v-if="taskIndex < log.yesTasks.length - 1">; </span>
+                      </template>
+                    </span>
+                  </div>
+                  <div v-if="log.noTasks && log.noTasks.length > 0" class="compact-task-row">
+                    <span class="task-label">NO ({{ log.noTasks.length }}个):</span>
+                    <span class="task-info">
+                      <template v-for="(task, taskIndex) in log.noTasks" :key="taskIndex">
+                        <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                        浏览器{{ task.number }} | 
+                        任务{{ task.taskId || '-' }} | 
+                        数量{{ task.share }} | 
+                        <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
+                        <span v-if="taskIndex < log.noTasks.length - 1">; </span>
+                      </template>
+                    </span>
+                  </div>
+                  <div v-if="log.allTaskIds && log.allTaskIds.length > 0" class="compact-task-row">
+                    <span class="task-label">任务ID组:</span>
+                    <span class="task-info">{{ log.allTaskIds.join(', ') }}</span>
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -1647,6 +1849,9 @@ const hedgeMode = reactive({
   minUAmt: 10,  // 最小开单
   maxUAmt: 1500,  // 最大开单
   minCloseAmt: 500,  // 平仓最小数量（参数1）
+  minTotalCloseAmt: 0,  // 合计最小平仓值（参数2）
+  maxTotalCloseAmt: 0,  // 合计最大平仓值（参数3）
+  hedgeMode2: false,  // false: 模式1, true: 模式2
   minOrderbookDepth: 3,  // 订单薄至少几组数据
   maxPriceDiff: 15,  // 买1-买3或卖1-卖3的最大价差
   priceRangeMin: 65,  // 先挂方价格区间最小值
@@ -3396,6 +3601,8 @@ const toggleAutoHedge = () => {
   if (autoHedgeRunning.value) {
     stopAutoHedge()
   } else {
+    // 在开始自动分配时保存所有对冲模块的输入框数据
+    saveHedgeSettings()
     startAutoHedge()
   }
 }
@@ -4475,9 +4682,25 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
       try {
         console.log(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
         
-        const response = await axios.post(
-          'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4',
-          {
+        // 根据模式选择不同的接口
+        const isMode2 = hedgeMode.isClose && hedgeMode.hedgeMode2
+        let apiUrl, requestData
+        
+        if (isMode2) {
+          // 模式2：使用 calReadyToHedgeToCloseV2 接口
+          apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeToCloseV2'
+          requestData = {
+            trendingId: config.id,
+            currentPrice: orderPrice,
+            priceOutCome: priceInfo.firstSide,  // 先挂方 (yes/no)
+            singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
+            closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
+            closeAmtSumMax: hedgeMode.maxTotalCloseAmt  // 参数3：合计最大平仓值
+          }
+        } else {
+          // 模式1：使用原有接口
+          apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4'
+          requestData = {
             trendingId: config.id,
             isClose: hedgeMode.isClose,
             currentPrice: orderPrice,
@@ -4488,7 +4711,12 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea  // 可平仓随机区间（小时）
-          },
+          }
+        }
+        
+        const response = await axios.post(
+          apiUrl,
+          requestData,
           {
             headers: {
               'Content-Type': 'application/json'
@@ -4500,12 +4728,22 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           const hedgeData = response.data.data
           console.log(`配置 ${config.id} - 获取对冲双方成功 (任务 ${i + 1}/${availableSlots}):`, hedgeData)
           
-          // 执行对冲任务
-          await executeHedgeTask(config, {
-            ...hedgeData,
-            currentPrice: orderPrice,
-            firstSide: priceInfo.firstSide
-          })
+          // 根据模式执行不同的对冲任务
+          if (isMode2) {
+            // 模式2：使用新的多任务逻辑
+            await executeHedgeTaskV2(config, {
+              ...hedgeData,
+              currentPrice: orderPrice,
+              firstSide: priceInfo.firstSide
+            })
+          } else {
+            // 模式1：使用原有逻辑
+            await executeHedgeTask(config, {
+              ...hedgeData,
+              currentPrice: orderPrice,
+              firstSide: priceInfo.firstSide
+            })
+          }
           
           hedgeResults.push(true)
           console.log(`配置 ${config.id} - 第 ${i + 1} 个对冲任务已提交成功`)
@@ -5208,12 +5446,32 @@ const formatCompactTime = (timeStr) => {
 const saveHedgeSettings = () => {
   try {
     localStorage.setItem(HEDGE_SETTINGS_KEY, JSON.stringify({
+      // 对冲模式基本设置
+      isClose: hedgeMode.isClose,
       timePassMin: hedgeMode.timePassMin,
       intervalType: hedgeMode.intervalType,
       intervalDelay: hedgeMode.intervalDelay,
+      maxDepth: hedgeMode.maxDepth,
       minUAmt: hedgeMode.minUAmt,
       maxUAmt: hedgeMode.maxUAmt,
-      minCloseAmt: hedgeMode.minCloseAmt
+      minCloseAmt: hedgeMode.minCloseAmt,
+      minTotalCloseAmt: hedgeMode.minTotalCloseAmt,
+      maxTotalCloseAmt: hedgeMode.maxTotalCloseAmt,
+      hedgeMode2: hedgeMode.hedgeMode2,
+      maxOpenHour: hedgeMode.maxOpenHour,
+      closeOpenHourArea: hedgeMode.closeOpenHourArea,
+      // 订单薄相关设置
+      minOrderbookDepth: hedgeMode.minOrderbookDepth,
+      maxPriceDiff: hedgeMode.maxPriceDiff,
+      priceRangeMin: hedgeMode.priceRangeMin,
+      priceRangeMax: hedgeMode.priceRangeMax,
+      minTotalDepth: hedgeMode.minTotalDepth,
+      // 其他设置
+      hedgeTasksPerTopic: hedgeTasksPerTopic.value,
+      randomGetCount: randomGetCount.value,
+      enableBatchMode: enableBatchMode.value,
+      batchSize: batchSize.value,
+      batchExecutionTime: batchExecutionTime.value
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -5226,6 +5484,11 @@ const saveHedgeSettings = () => {
 const loadHedgeSettings = () => {
   try {
     const settings = JSON.parse(localStorage.getItem(HEDGE_SETTINGS_KEY) || '{}')
+    
+    // 对冲模式基本设置
+    if (settings.isClose !== undefined) {
+      hedgeMode.isClose = settings.isClose
+    }
     if (settings.timePassMin !== undefined) {
       hedgeMode.timePassMin = settings.timePassMin
     }
@@ -5235,6 +5498,9 @@ const loadHedgeSettings = () => {
     if (settings.intervalDelay !== undefined) {
       hedgeMode.intervalDelay = settings.intervalDelay
     }
+    if (settings.maxDepth !== undefined) {
+      hedgeMode.maxDepth = settings.maxDepth
+    }
     if (settings.minUAmt !== undefined) {
       hedgeMode.minUAmt = settings.minUAmt
     }
@@ -5243,6 +5509,55 @@ const loadHedgeSettings = () => {
     }
     if (settings.minCloseAmt !== undefined) {
       hedgeMode.minCloseAmt = settings.minCloseAmt
+    }
+    if (settings.minTotalCloseAmt !== undefined) {
+      hedgeMode.minTotalCloseAmt = settings.minTotalCloseAmt
+    }
+    if (settings.maxTotalCloseAmt !== undefined) {
+      hedgeMode.maxTotalCloseAmt = settings.maxTotalCloseAmt
+    }
+    if (settings.hedgeMode2 !== undefined) {
+      hedgeMode.hedgeMode2 = settings.hedgeMode2
+    }
+    if (settings.maxOpenHour !== undefined) {
+      hedgeMode.maxOpenHour = settings.maxOpenHour
+    }
+    if (settings.closeOpenHourArea !== undefined) {
+      hedgeMode.closeOpenHourArea = settings.closeOpenHourArea
+    }
+    
+    // 订单薄相关设置
+    if (settings.minOrderbookDepth !== undefined) {
+      hedgeMode.minOrderbookDepth = settings.minOrderbookDepth
+    }
+    if (settings.maxPriceDiff !== undefined) {
+      hedgeMode.maxPriceDiff = settings.maxPriceDiff
+    }
+    if (settings.priceRangeMin !== undefined) {
+      hedgeMode.priceRangeMin = settings.priceRangeMin
+    }
+    if (settings.priceRangeMax !== undefined) {
+      hedgeMode.priceRangeMax = settings.priceRangeMax
+    }
+    if (settings.minTotalDepth !== undefined) {
+      hedgeMode.minTotalDepth = settings.minTotalDepth
+    }
+    
+    // 其他设置
+    if (settings.hedgeTasksPerTopic !== undefined) {
+      hedgeTasksPerTopic.value = settings.hedgeTasksPerTopic
+    }
+    if (settings.randomGetCount !== undefined) {
+      randomGetCount.value = settings.randomGetCount
+    }
+    if (settings.enableBatchMode !== undefined) {
+      enableBatchMode.value = settings.enableBatchMode
+    }
+    if (settings.batchSize !== undefined) {
+      batchSize.value = settings.batchSize
+    }
+    if (settings.batchExecutionTime !== undefined) {
+      batchExecutionTime.value = settings.batchExecutionTime
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -5788,6 +6103,325 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     hedgeRecord.finalStatus = 'failed'
     finishHedge(config, hedgeRecord)
   }
+}
+
+/**
+ * 执行对冲任务（模式2 - 支持多个yes/no，不同share）
+ */
+const executeHedgeTaskV2 = async (config, hedgeData) => {
+  const firstSide = hedgeData.firstSide
+  const yesList = hedgeData.yesList || []
+  const noList = hedgeData.noList || []
+  
+  // 创建对冲记录
+  const hedgeRecord = {
+    id: Date.now(),
+    trendingId: config.id,
+    trendingName: config.trending,
+    price: hedgeData.currentPrice,
+    firstSide: firstSide,
+    side: hedgeMode.isClose ? 2 : 1,  // 开仓=买入(1)，平仓=卖出(2)
+    isClose: hedgeMode.isClose,
+    startTime: new Date().toISOString(),
+    endTime: null,
+    duration: null,
+    finalStatus: 'running',  // running, success, failed
+    isMode2: true,  // 标记为模式2
+    // 模式2的数据结构：多个任务
+    yesTasks: [],  // [{number, share, taskId, status, groupNo, price}]
+    noTasks: [],   // [{number, share, taskId, status, groupNo, price}]
+    allTaskIds: []  // 所有任务ID的数组
+  }
+  
+  // 初始化 currentHedges 数组（如果不存在）
+  if (!config.currentHedges) {
+    config.currentHedges = []
+  }
+  
+  // 添加到数组中
+  config.currentHedges.push(hedgeRecord)
+  
+  // 为了兼容旧代码，也设置 currentHedge（指向最新的）
+  config.currentHedge = hedgeRecord
+  
+  pausedType3Tasks.value.add(config.id)
+  
+  console.log(`开始对冲（模式2） ${config.id}:`, hedgeRecord)
+  
+  try {
+    // 先为所有先挂方的任务添加type=1的任务
+    const firstSideList = firstSide === 'YES' ? yesList : noList
+    const firstPsSide = firstSide === 'YES' ? 1 : 2
+    
+    console.log(`模式2 - 开始提交先挂方（${firstSide}）任务，共 ${firstSideList.length} 个`)
+    
+    for (const item of firstSideList) {
+      try {
+        const browserNo = item.number
+        const share = floorToTwoDecimals(item.share)
+        const groupNo = browserToGroupMap.value[browserNo] || '1'
+        
+        // 计算价格
+        const taskPrice = firstSide === 'YES' 
+          ? parseFloat(hedgeData.currentPrice) 
+          : (100 - parseFloat(hedgeData.currentPrice))
+        
+        const taskData = {
+          groupNo: groupNo,
+          numberList: parseInt(browserNo),
+          type: 1,  // 模式2使用type=1
+          trendingId: config.id,
+          exchangeName: 'OP',
+          side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
+          psSide: firstPsSide,
+          amt: share,
+          price: taskPrice
+        }
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/add',
+          taskData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data && response.data.data) {
+          const taskData = response.data.data
+          let taskId = null
+          
+          if (typeof taskData === 'object' && taskData !== null) {
+            taskId = taskData.id
+          } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+            taskId = taskData
+          }
+          
+          if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+            console.error(`模式2 - 提交先挂方任务失败: 无效的任务ID`, { taskData, taskId })
+            continue
+          }
+          
+          taskId = String(Number(taskId))
+          console.log(`模式2 - 先挂方任务提交成功，浏览器: ${browserNo}, 任务ID: ${taskId}`)
+          
+          // 保存任务信息
+          const taskInfo = {
+            number: browserNo,
+            share: share,
+            taskId: taskId,
+            status: 9,  // 初始状态为9（进行中）
+            groupNo: groupNo,
+            price: taskPrice
+          }
+          
+          if (firstSide === 'YES') {
+            hedgeRecord.yesTasks.push(taskInfo)
+          } else {
+            hedgeRecord.noTasks.push(taskInfo)
+          }
+          
+          hedgeRecord.allTaskIds.push(taskId)
+        }
+      } catch (error) {
+        console.error(`模式2 - 提交先挂方任务失败（浏览器: ${item.number}）:`, error)
+      }
+    }
+    
+    // 根据延时，再为后挂方添加type=1的任务
+    const secondSide = firstSide === 'YES' ? 'NO' : 'YES'
+    const secondSideList = firstSide === 'YES' ? noList : yesList
+    const secondPsSide = firstSide === 'YES' ? 2 : 1
+    
+    console.log(`模式2 - 等待延时后提交后挂方（${secondSide}）任务，共 ${secondSideList.length} 个`)
+    
+    // 根据事件间隔类型决定何时提交第二个任务
+    const submitSecondSideTasks = async () => {
+      for (const item of secondSideList) {
+        try {
+          const browserNo = item.number
+          const share = floorToTwoDecimals(item.share)
+          const groupNo = browserToGroupMap.value[browserNo] || '1'
+          
+          // 计算价格（另一方是 100 - currentPrice）
+          const taskPrice = firstSide === 'YES'
+            ? (100 - parseFloat(hedgeData.currentPrice))
+            : parseFloat(hedgeData.currentPrice)
+          
+          const taskData = {
+            groupNo: groupNo,
+            numberList: parseInt(browserNo),
+            type: 1,  // 模式2使用type=1
+            trendingId: config.id,
+            exchangeName: 'OP',
+            side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
+            psSide: secondPsSide,
+            amt: share,
+            price: taskPrice
+            // 不再需要tp1
+          }
+          
+          const response = await axios.post(
+            'https://sg.bicoin.com.cn/99l/mission/add',
+            taskData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          )
+          
+          if (response.data && response.data.data) {
+            const taskData = response.data.data
+            let taskId = null
+            
+            if (typeof taskData === 'object' && taskData !== null) {
+              taskId = taskData.id
+            } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+              taskId = taskData
+            }
+            
+            if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+              console.error(`模式2 - 提交后挂方任务失败: 无效的任务ID`, { taskData, taskId })
+              continue
+            }
+            
+            taskId = String(Number(taskId))
+            console.log(`模式2 - 后挂方任务提交成功，浏览器: ${browserNo}, 任务ID: ${taskId}`)
+            
+            // 保存任务信息
+            const taskInfo = {
+              number: browserNo,
+              share: share,
+              taskId: taskId,
+              status: 9,  // 初始状态为9（进行中）
+              groupNo: groupNo,
+              price: taskPrice
+            }
+            
+            if (secondSide === 'YES') {
+              hedgeRecord.yesTasks.push(taskInfo)
+            } else {
+              hedgeRecord.noTasks.push(taskInfo)
+            }
+            
+            hedgeRecord.allTaskIds.push(taskId)
+          }
+        } catch (error) {
+          console.error(`模式2 - 提交后挂方任务失败（浏览器: ${item.number}）:`, error)
+        }
+      }
+    }
+    
+    if (hedgeMode.intervalType === 'delay') {
+      // 延时模式：等待指定时间后提交第二个任务
+      console.log(`[模式2-延时模式] 等待 ${hedgeMode.intervalDelay}ms 后提交后挂方任务`)
+      setTimeout(() => {
+        if (hedgeRecord.finalStatus === 'running') {
+          console.log(`[模式2-延时模式] 延时结束，提交后挂方任务`)
+          submitSecondSideTasks()
+        }
+      }, hedgeMode.intervalDelay)
+    } else {
+      // 挂单成功模式：先提交先挂方任务，等第一个任务成功后提交后挂方任务
+      console.log(`[模式2-挂单成功模式] 等待先挂方任务成功后提交后挂方任务`)
+      // 监控先挂方任务状态，当第一个任务成功时提交后挂方任务
+      submitSecondSideTasksCallback = submitSecondSideTasks
+    }
+    
+    // 开始监控所有任务状态
+    monitorHedgeStatusV2(config, hedgeRecord, submitSecondSideTasksCallback)
+  } catch (error) {
+    console.error('模式2 - 执行对冲任务失败:', error)
+    hedgeRecord.finalStatus = 'failed'
+    finishHedge(config, hedgeRecord)
+  }
+}
+
+/**
+ * 监控对冲状态（模式2）
+ */
+const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback = null) => {
+  const startTime = new Date(hedgeRecord.startTime)
+  let secondSideTasksSubmitted = false
+  
+  const checkStatus = async () => {
+    // 检查是否已完成
+    if (hedgeRecord.finalStatus !== 'running') {
+      return
+    }
+    
+    const now = new Date()
+    const elapsed = (now - startTime) / 1000 / 60
+    
+    // 检查20分钟超时
+    if (elapsed >= 20) {
+      console.log(`模式2 - 对冲 ${hedgeRecord.id} 超时（${elapsed.toFixed(1)}分钟）`)
+      hedgeRecord.finalStatus = 'timeout'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+    
+    // 更新所有任务的状态
+    for (const task of hedgeRecord.yesTasks) {
+      if (task.taskId) {
+        const taskData = await fetchMissionStatus(task.taskId)
+        if (taskData) {
+          const oldStatus = task.status
+          task.status = taskData.status
+          if (oldStatus !== taskData.status) {
+            console.log(`[模式2-monitorHedgeStatus] YES任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+          }
+        }
+      }
+    }
+    
+    for (const task of hedgeRecord.noTasks) {
+      if (task.taskId) {
+        const taskData = await fetchMissionStatus(task.taskId)
+        if (taskData) {
+          const oldStatus = task.status
+          task.status = taskData.status
+          if (oldStatus !== taskData.status) {
+            console.log(`[模式2-monitorHedgeStatus] NO任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+          }
+        }
+      }
+    }
+    
+    // 挂单成功模式：检查先挂方第一个任务是否成功，如果成功则提交后挂方任务
+    if (hedgeMode.intervalType === 'success' && submitSecondSideTasksCallback && !secondSideTasksSubmitted) {
+      const firstSideTasks = hedgeRecord.firstSide === 'YES' ? hedgeRecord.yesTasks : hedgeRecord.noTasks
+      if (firstSideTasks.length > 0 && firstSideTasks[0].status === 2) {
+        console.log(`[模式2-挂单成功模式] 先挂方第一个任务成功，开始提交后挂方任务`)
+        secondSideTasksSubmitted = true
+        await submitSecondSideTasksCallback()
+      }
+    }
+    
+    // 检查所有任务是否都完成
+    const allTasks = [...hedgeRecord.yesTasks, ...hedgeRecord.noTasks]
+    const allCompleted = allTasks.length > 0 && allTasks.every(t => t.status === 2 || t.status === 3)
+    const hasFailed = allTasks.some(t => t.status === 3)
+    const allSuccess = allTasks.length > 0 && allTasks.every(t => t.status === 2)
+    
+    if (allCompleted) {
+      if (allSuccess) {
+        console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 所有任务都成功`)
+        hedgeRecord.finalStatus = 'success'
+      } else {
+        console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 有任务失败`)
+        hedgeRecord.finalStatus = 'failed'
+      }
+      finishHedge(config, hedgeRecord)
+      return
+    }
+    
+    setTimeout(checkStatus, 5000)
+  }
+  
+  checkStatus()
 }
 
 /**
@@ -8643,6 +9277,16 @@ onUnmounted(() => {
 .switch-text {
   font-size: 0.875rem;
   color: #333;
+  white-space: nowrap;
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+/* 对冲模式开关中的文本样式 */
+.hedge-mode-switch .switch-text {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+  min-width: 1.2rem;
 }
 
 .btn-remove {

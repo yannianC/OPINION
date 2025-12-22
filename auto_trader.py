@@ -2513,7 +2513,6 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         if initial_position_count_api is not None:
             log_print(f"[{serial_number}] [{task_label}] 初始链上仓位数量: {initial_position_count_api}")
     
-    time.sleep(10)
     while time.time() - phase1_start_time < phase1_timeout:
         try:
             elapsed = int(time.time() - phase1_start_time)
@@ -2874,42 +2873,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
     
     try:
-        # 点击Position
-        log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
-        position_buttons = driver.find_elements(By.TAG_NAME, "button")
-        for btn in position_buttons:
-            if btn.text.strip() == "Position":
-                btn.click()
-                time.sleep(7)
-                break
-        
-        # 获取Position数据
-        log_print(f"[{serial_number}] [{task_label}] 获取Position数据...")
-        
-        # 查找 Position div
-        tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
-        position_div = None
-        for div in tabs_divs:
-            div_id = div.get_attribute('id')
-            if div_id and 'content-position' in div_id.lower():
-                position_div = div
-                break
-        
-        if not position_div:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Position div")
-            return False, "未找到Position数据"
-        
-        # 获取 tbody 和 tr
-        tbody = position_div.find_element(By.TAG_NAME, "tbody")
-        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-        
-        if not tr_list or len(tr_list) == 0:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ Position中没有tr")
-            return False, "Position中没有数据"
-        
-        # 等待tr中的内容完全加载
-        log_print(f"[{serial_number}] [{task_label}] 等待tr内容加载...")
-        time.sleep(3)
+
         
         filled_amount = ""
         filled_price = ""
@@ -2928,6 +2892,42 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         
         # 如果使用本地数据，进行本地抓取
         if not use_api_data:
+                    # 点击Position
+            log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
+            position_buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in position_buttons:
+                if btn.text.strip() == "Position":
+                    btn.click()
+                    time.sleep(7)
+                    break
+            
+            # 获取Position数据
+            log_print(f"[{serial_number}] [{task_label}] 获取Position数据...")
+            
+            # 查找 Position div
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            position_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'content-position' in div_id.lower():
+                    position_div = div
+                    break
+            
+            if not position_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Position div")
+                return False, "未找到Position数据"
+            
+            # 获取 tbody 和 tr
+            tbody = position_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            
+            if not tr_list or len(tr_list) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ Position中没有tr")
+                return False, "Position中没有数据"
+            
+            # 等待tr中的内容完全加载
+            log_print(f"[{serial_number}] [{task_label}] 等待tr内容加载...")
+            time.sleep(3)
             if trending_part1:
                 # 有子标题：找到包含子标题的tr
                 log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的行...")
@@ -3227,30 +3227,29 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         return False, f"收集数据失败: {str(e)}"
 
 
-def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', option_type='YES', timeout=600):
+def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', option_type='YES', timeout=600, trending=''):
     """
-    等待 Opinion Trade 订单成功（交替检查 Open Orders 和 Position）
+    Type 1 任务专用：等待订单成功并收集数据（与 Type 5 流程一致）
     
     Args:
         driver: Selenium WebDriver对象
-        initial_open_orders_count: 初始 Open Orders 行数
-        initial_position_count: 初始 Position 行数
+        initial_open_orders_count: 初始 Open Orders 行数（未使用，保留兼容性）
+        initial_position_count: 初始 Position 行数（Buy时是tr数量，Sell时是实际持仓数量）
         trade_type: 交易类型（Buy/Sell）
         serial_number: 浏览器序列号
         trending_part1: 子标题（用于筛选）
         option_type: 期权类型（YES/NO）
         timeout: 超时时间（默认10分钟）
+        trending: 完整的交易主题（用于API调用，可选）
         
     Returns:
-        bool: 成功返回True
+        tuple: (success, msg)
     """
-    log_print(f"[{serial_number}] [OP] 开始监测订单状态...")
-    log_print(f"[{serial_number}] [OP] 交易类型: {trade_type}")
-    log_print(f"[{serial_number}] [OP] 初始 Open Orders 数量: {initial_open_orders_count}")
-    log_print(f"[{serial_number}] [OP] 初始 Position 数量: {initial_position_count}")
+    task_label = "Type1"
     
-    start_time = time.time()
-    check_interval = 60  # 每隔1分钟检查一次
+    log_print(f"[{serial_number}] [{task_label}] Type 1 专用等待流程开始...")
+    log_print(f"[{serial_number}] [{task_label}] 交易类型: {trade_type}")
+    log_print(f"[{serial_number}] [{task_label}] 初始 Position 数量: {initial_position_count}")
     
     # 切换回主页面
     try:
@@ -3259,86 +3258,463 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
             driver.switch_to.window(window)
             current_url = driver.current_url
             if "app.opinion.trade" in current_url:
-                log_print(f"[{serial_number}] [OP] ✓ 已切换回主页面")
+                log_print(f"[{serial_number}] [{task_label}] ✓ 已切换回主页面")
                 break
     except Exception as e:
-        log_print(f"[{serial_number}] [OP] ⚠ 切换回主页面失败: {str(e)}")
+        log_print(f"[{serial_number}] [{task_label}] ⚠ 切换回主页面失败: {str(e)}")
+        return False, "切换页面失败"
     
-    # 交替检查标志：True=检查Open Orders，False=检查Position
-    # 第一次先检查 Open Orders
-    check_open_orders = True
+    # 第一阶段：检测Position变化（10分钟超时）
+    if trade_type == "Buy":
+        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
+    else:
+        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
     
-    while time.time() - start_time < timeout:
+    phase1_timeout = 700  # 10分钟
+    check_interval = 20 if trade_type == "Sell" else 60  # Sell每20秒检查，Buy每60秒检查
+    refresh_interval = 120  # 每2分钟刷新一次
+    
+    phase1_start_time = time.time()
+    last_refresh_time = phase1_start_time
+    position_changed = False
+    use_api_data = False  # 标记是否使用链上数据（如果链上数据先检测到变化，则后续使用链上数据）
+    current_position_value = None  # 记录检测到变化时的当前数量
+    
+    # 对于Buy类型，如果使用链上数据，需要记录初始链上仓位数量
+    initial_position_count_api = None
+    if trade_type == "Buy" and trending:
+        initial_position_count_api = get_position_from_api(serial_number, trending, option_type)
+        if initial_position_count_api is not None:
+            log_print(f"[{serial_number}] [{task_label}] 初始链上仓位数量: {initial_position_count_api}")
+    
+    while time.time() - phase1_start_time < phase1_timeout:
         try:
-            elapsed = int(time.time() - start_time)
-            log_print(f"[{serial_number}] [OP] ========== 第 {elapsed // 60 + 1} 次检查（已用时 {elapsed}秒）==========")
+            elapsed = int(time.time() - phase1_start_time)
+            log_print(f"[{serial_number}] [{task_label}] 检查Position（已用时 {elapsed}秒）...")
             
-            if check_open_orders:
-                # 检查 Open Orders
-                log_print(f"[{serial_number}] [OP] 检查 Open Orders...")
-                current_open_orders_count = get_opinion_table_row_count(
-                    driver, 
-                    serial_number, 
-                    need_click_open_orders=True, 
-                    trending_part1=trending_part1
-                )
+            # 对于Buy和Sell类型，每2分钟刷新
+            if time.time() - last_refresh_time >= refresh_interval:
+                log_print(f"[{serial_number}] [{task_label}] 2分钟无变化，刷新页面...")
+                driver.refresh()
+                time.sleep(5)
+                last_refresh_time = time.time()
+            
+            if trade_type == "Buy":
+                # Buy类型：检查Position数量是否增加
+                # 方式1：本地抓取
+                current_position_count_local = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
                 
-                if current_open_orders_count < 0:
-                    log_print(f"[{serial_number}] [OP] ⚠ 无法获取 Open Orders 数量")
-                else:
-                    log_print(f"[{serial_number}] [OP] 当前 Open Orders 数量: {current_open_orders_count} (初始: {initial_open_orders_count})")
-                    
-                    if trade_type == "Buy":
-                        # Buy 类型：挂单数量增加即成功
-                        if current_open_orders_count > initial_open_orders_count:
-                            log_print(f"[{serial_number}] [OP] ✓✓✓ Buy 订单成功！Open Orders 从 {initial_open_orders_count} 增加到 {current_open_orders_count}")
-                            return True
-                    else:  # Sell
-                        # Sell 类型：挂单数量增加即成功
-                        if current_open_orders_count > initial_open_orders_count:
-                            log_print(f"[{serial_number}] [OP] ✓✓✓ Sell 订单成功！Open Orders 从 {initial_open_orders_count} 增加到 {current_open_orders_count}")
-                            return True
+                # 方式2：链上API（如果提供了trending参数）
+                current_position_count_api = None
+                if trending:
+                    current_position_count_api = get_position_from_api(serial_number, trending, option_type)
+                    if current_position_count_api is not None:
+                        log_print(f"[{serial_number}] [{task_label}] 链上仓位数量: {current_position_count_api}")
                 
-                # 下次检查 Position
-                check_open_orders = False
+                # 判断是否检测到变化，并记录是哪种方式先检测到的
+                position_changed_detected = False
+                local_detected = False
+                api_detected = False
                 
+                # 检查本地数据（tr数量）
+                if current_position_count_local == -2:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 检测到对向仓位，跳过本次检查")
+                elif current_position_count_local >= 0:
+                    log_print(f"[{serial_number}] [{task_label}] 本地持仓数量(tr): {current_position_count_local} (初始: {initial_position_count})")
+                    # 本地数据需要大于 initial + 1 才算变化
+                    if current_position_count_local > initial_position_count + 1:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 本地数据检测到持仓数量增加！")
+                        local_detected = True
+                        position_changed_detected = True
+                        current_position_value = current_position_count_local
+                
+                # 检查链上数据（仓位数量）
+                if current_position_count_api is not None and initial_position_count_api is not None:
+                    log_print(f"[{serial_number}] [{task_label}] 链上持仓数量: {current_position_count_api} (初始: {initial_position_count_api})")
+                    # 链上数据需要大于 initial + 1 才算变化（因为链上数据小数位数较多）
+                    if current_position_count_api > initial_position_count_api + 1:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 链上数据检测到持仓数量增加！")
+                        api_detected = True
+                        position_changed_detected = True
+                        if current_position_value is None:
+                            current_position_value = current_position_count_api
+                
+                # 如果链上数据先检测到变化，标记后续使用链上数据
+                if api_detected and not local_detected:
+                    use_api_data = True
+                    log_print(f"[{serial_number}] [{task_label}] 链上数据先检测到变化，后续将使用链上数据")
+                
+                if position_changed_detected:
+                    position_changed = True
+                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到持仓数量变化！当前数量: {current_position_value}")
+                    break
             else:
-                # 检查 Position
-                log_print(f"[{serial_number}] [OP] 检查 Position...")
-                current_position_count = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
+                # Sell类型：检查已成交数量是否变化
+                # 方式1：本地抓取
+                current_filled_amount_local = get_position_filled_amount(driver, serial_number, trending_part1)
                 
-                if current_position_count == -2:
-                    log_print(f"[{serial_number}] [OP] ⚠ 检测到对向仓位，跳过本次检查")
-                elif current_position_count < 0:
-                    log_print(f"[{serial_number}] [OP] ⚠ 无法获取 Position 数量")
+                # 方式2：链上API（如果提供了trending参数）
+                current_filled_amount_api = None
+                if trending:
+                    current_filled_amount_api = get_position_from_api(serial_number, trending, option_type)
+                    if current_filled_amount_api is not None:
+                        log_print(f"[{serial_number}] [{task_label}] 链上已成交数量: {current_filled_amount_api}")
+                
+                # 判断是否检测到变化，并记录是哪种方式先检测到的
+                position_changed_detected = False
+                local_detected = False
+                api_detected = False
+                
+                # 检查本地数据
+                if current_filled_amount_local:
+                    log_print(f"[{serial_number}] [{task_label}] 本地已成交数量: {current_filled_amount_local} (初始: {initial_position_count})")
+                    # 处理文本：去掉逗号并转换为数字，与initial_position_count比较
+                    try:
+                        # 移除逗号和其他非数字字符，只保留数字和小数点
+                        amount_str = ''.join(c for c in current_filled_amount_local if c.isdigit() or c == '.')
+                        if amount_str:
+                            current_filled_amount_float = float(amount_str)
+                            # 链上数据需要大于1才算变化
+                            if abs(current_filled_amount_float - float(initial_position_count)) > 1:
+                                log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 本地数据检测到已成交数量变化！")
+                                local_detected = True
+                                position_changed_detected = True
+                                current_position_value = current_filled_amount_float
+                            else:
+                                log_print(f"[{serial_number}] [{task_label}] 本地已成交数量未变化")
+                        else:
+                            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法从文本中提取数字: {current_filled_amount_local}")
+                    except (ValueError, TypeError) as e:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 数量转换失败: {current_filled_amount_local}, 错误: {str(e)}")
                 else:
-                    log_print(f"[{serial_number}] [OP] 当前持仓数量: {current_position_count} (初始: {initial_position_count})")
-                    
-                    if trade_type == "Buy":
-                        # Buy 类型：持仓数量增加即成功
-                        if current_position_count > initial_position_count:
-                            log_print(f"[{serial_number}] [OP] ✓✓✓ Buy 订单成功！持仓从 {initial_position_count} 增加到 {current_position_count}")
-                            return True
-                    else:  # Sell
-                        # Sell 类型：持仓数量减少即成功
-                        if current_position_count < initial_position_count:
-                            log_print(f"[{serial_number}] [OP] ✓✓✓ Sell 订单成功！持仓从 {initial_position_count} 减少到 {current_position_count}")
-                            return True
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取本地已成交数量")
                 
-                # 下次检查 Open Orders
-                check_open_orders = True
+                # 检查链上数据
+                if current_filled_amount_api is not None:
+                    log_print(f"[{serial_number}] [{task_label}] 链上已成交数量: {current_filled_amount_api} (初始: {initial_position_count})")
+                    # 链上数据需要大于1才算变化
+                    if abs(current_filled_amount_api - float(initial_position_count)) > 1:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 链上数据检测到已成交数量变化！")
+                        api_detected = True
+                        position_changed_detected = True
+                        if current_position_value is None:
+                            current_position_value = current_filled_amount_api
+                
+                # 如果链上数据先检测到变化，标记后续使用链上数据
+                if api_detected and not local_detected:
+                    use_api_data = True
+                    log_print(f"[{serial_number}] [{task_label}] 链上数据先检测到变化，后续将使用链上数据")
+                
+                if position_changed_detected:
+                    position_changed = True
+                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到已成交数量变化！当前数量: {current_position_value}")
+                    break
             
-            log_print(f"[{serial_number}] [OP] 等待 {check_interval} 秒后继续检查...")
             time.sleep(check_interval)
             
         except Exception as e:
-            log_print(f"[{serial_number}] [OP] ⚠ 检查订单状态时出错: {str(e)}")
-            import traceback
-            log_print(f"[{serial_number}] [OP] 错误详情:\n{traceback.format_exc()}")
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 检查Position时出错: {str(e)}")
             time.sleep(check_interval)
     
-    log_print(f"[{serial_number}] [OP] ✗ 等待订单超时（{timeout}秒）")
-    return False
+    if not position_changed:
+        log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
+        return False, "Position未检测到变化，超时"
+    
+    # 第二阶段：获取Position和Open Orders的详细数据（与Type 5一致）
+    log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：收集数据 ==========")
+    
+    try:
+       
+        
+        filled_amount = ""
+        filled_price = ""
+        
+        # 如果前面是链上数据先检测到变化，直接使用链上数据，跳过本地抓取
+        if use_api_data and trending:
+            log_print(f"[{serial_number}] [{task_label}] 前面链上数据先检测到变化，直接使用链上数据...")
+            api_position_amount = get_position_from_api(serial_number, trending, option_type)
+            if api_position_amount is not None:
+                filled_amount = str(api_position_amount)
+                filled_price = "--"
+                log_print(f"[{serial_number}] [{task_label}] 链上数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
+            else:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 获取链上数据失败，改用本地抓取")
+                use_api_data = False  # 如果链上数据获取失败，改用本地抓取
+        
+        # 如果使用本地数据，进行本地抓取
+        if not use_api_data:
+             # 点击Position
+            log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
+            position_buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in position_buttons:
+                if btn.text.strip() == "Position":
+                    btn.click()
+                    time.sleep(7)
+                    break
+            
+            # 获取Position数据
+            log_print(f"[{serial_number}] [{task_label}] 获取Position数据...")
+            
+            # 查找 Position div
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            position_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'content-position' in div_id.lower():
+                    position_div = div
+                    break
+            
+            if not position_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Position div")
+                return False, "未找到Position数据"
+            
+            # 获取 tbody 和 tr
+            tbody = position_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            
+            if not tr_list or len(tr_list) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ Position中没有tr")
+                return False, "Position中没有数据"
+            
+            # 等待tr中的内容完全加载
+            log_print(f"[{serial_number}] [{task_label}] 等待tr内容加载...")
+            time.sleep(3)
+            if trending_part1:
+                # 有子标题：找到包含子标题的tr
+                log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的行...")
+                for tr in tr_list:
+                    try:
+                        # 获取第一个td的div下的p标签
+                        tds = tr.find_elements(By.TAG_NAME, "td")
+                        if len(tds) > 0:
+                            first_td_ps = tds[0].find_elements(By.TAG_NAME, "p")
+                            first_td_text = " ".join([p.text.strip() for p in first_td_ps])
+                            if trending_part1 in first_td_text:
+                                log_print(f"[{serial_number}] [{task_label}] ✓ 找到包含子标题的行")
+                                # 第2个td（index=1）：已成交数量
+                                if len(tds) > 1:
+                                    td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                                    filled_amount = td2_ps[0].text.strip() if td2_ps else ""
+                                # 第4个td（index=3）：价格
+                                if len(tds) > 3:
+                                    td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
+                                    filled_price = td4_ps[0].text.strip() if td4_ps else ""
+                                break
+                    except Exception as e:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 解析Position行失败: {str(e)}")
+                        continue
+            else:
+                # 无子标题：第一个tr
+                log_print(f"[{serial_number}] [{task_label}] 无子标题，获取第一行数据...")
+                try:
+                    first_tr = tr_list[0]
+                    tds = first_tr.find_elements(By.TAG_NAME, "td")
+                    # 第2个td（index=1）：已成交数量
+                    if len(tds) > 1:
+                        td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                        filled_amount = td2_ps[0].text.strip() if td2_ps else ""
+                    # 第4个td（index=3）：价格
+                    if len(tds) > 3:
+                        td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
+                        filled_price = td4_ps[0].text.strip() if td4_ps else ""
+                except Exception as e:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Position数据失败: {str(e)}")
+        
+        log_print(f"[{serial_number}] [{task_label}] Position数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
+        
+        # 点击Open Orders
+        log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
+        open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
+        for btn in open_orders_buttons:
+            if btn.text.strip() == "Open Orders":
+                btn.click()
+                time.sleep(7)
+                break
+        
+        # 获取Open Orders数据
+        log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
+        
+        # 查找 Open Orders div
+        tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+        open_orders_div = None
+        for div in tabs_divs:
+            div_id = div.get_attribute('id')
+            if div_id and 'open orders' in div_id.lower():
+                open_orders_div = div
+                break
+        
+        if not open_orders_div:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
+            # 没找到div，检查 Transactions
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
+            
+            import json
+            msg_data = {
+                "type": "TYPE1_SUCCESS",
+                "filled_amount": filled_amount,
+                "filled_price": filled_price,
+                "transaction_fee": transaction_fee
+            }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = str(initial_position_count)
+            
+            msg = json.dumps(msg_data, ensure_ascii=False)
+            
+            log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
+            log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
+            log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
+            
+            return True, msg
+        
+        # 获取 tbody 和 tr
+        try:
+            tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+        except:
+            # 没有tbody或tr，说明没有挂单
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
+            
+            import json
+            msg_data = {
+                "type": "TYPE1_SUCCESS",
+                "filled_amount": filled_amount,
+                "filled_price": filled_price,
+                "transaction_fee": transaction_fee
+            }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = str(initial_position_count)
+            
+            msg = json.dumps(msg_data, ensure_ascii=False)
+            
+            log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
+            log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
+            log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
+            
+            return True, msg
+        
+        if not tr_list or len(tr_list) == 0:
+            # 没有tr，说明没有挂单
+            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
+            
+            import json
+            msg_data = {
+                "type": "TYPE1_SUCCESS",
+                "filled_amount": filled_amount,
+                "filled_price": filled_price,
+                "transaction_fee": transaction_fee
+            }
+            
+            # Sell类型添加原数量
+            if trade_type == "Sell":
+                msg_data["initial_filled_amount"] = str(initial_position_count)
+            
+            msg = json.dumps(msg_data, ensure_ascii=False)
+            
+            log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+            if trade_type == "Sell":
+                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
+            log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
+            log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
+            log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
+            
+            return True, msg
+
+        
+        # 有Open Orders，任务失败，需要获取挂单价格和进度
+        pending_price = ""
+        progress = ""
+        
+        if trending_part1:
+            # 有子标题：找到包含子标题的tr
+            log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的挂单...")
+            for tr in tr_list:
+                try:
+                    # 获取第二个td的div下的p标签
+                    tds = tr.find_elements(By.TAG_NAME, "td")
+                    if len(tds) > 1:
+                        second_td_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                        second_td_text = " ".join([p.text.strip() for p in second_td_ps])
+                        if trending_part1 in second_td_text:
+                            log_print(f"[{serial_number}] [{task_label}] ✓ 找到包含子标题的挂单")
+                            # 第4个td（index=3）：挂单价格
+                            if len(tds) > 3:
+                                td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
+                                pending_price = td4_ps[0].text.strip() if td4_ps else ""
+                            # 第6个td（index=5）：进度
+                            if len(tds) > 5:
+                                td6_ps = tds[5].find_elements(By.TAG_NAME, "p")
+                                progress = " ".join([p.text.strip() for p in td6_ps])
+                            break
+                except Exception as e:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 解析Open Orders行失败: {str(e)}")
+                    continue
+        else:
+            # 无子标题：第一个tr
+            log_print(f"[{serial_number}] [{task_label}] 无子标题，获取第一行挂单数据...")
+            try:
+                first_tr = tr_list[0]
+                tds = first_tr.find_elements(By.TAG_NAME, "td")
+                # 第4个td（index=3）：挂单价格
+                if len(tds) > 3:
+                    td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
+                    pending_price = td4_ps[0].text.strip() if td4_ps else ""
+                # 第6个td（index=5）：进度
+                if len(tds) > 5:
+                    td6_ps = tds[5].find_elements(By.TAG_NAME, "p")
+                    progress = " ".join([p.text.strip() for p in td6_ps])
+            except Exception as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Open Orders数据失败: {str(e)}")
+        
+        log_print(f"[{serial_number}] [{task_label}] Open Orders数据 - 挂单价格: {pending_price}, 进度: {progress}")
+        
+        # 有挂单，获取交易费
+        transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
+        
+        # 有挂单，任务失败
+        import json
+        msg_data = {
+            "type": "TYPE1_PARTIAL",
+            "filled_amount": filled_amount,
+            "filled_price": filled_price,
+            "pending_price": pending_price,
+            "progress": progress,
+            "transaction_fee": transaction_fee
+        }
+        
+        # Sell类型添加原数量
+        if trade_type == "Sell":
+            msg_data["initial_filled_amount"] = str(initial_position_count)
+        
+        msg = json.dumps(msg_data, ensure_ascii=False)
+        log_print(f"[{serial_number}] [{task_label}] ✗ 有挂单，任务失败")
+        log_print(f"[{serial_number}] [{task_label}] 结果详情:")
+        if trade_type == "Sell":
+            log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
+        log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
+        log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
+        log_print(f"[{serial_number}] [{task_label}]   挂单价格: {pending_price}")
+        log_print(f"[{serial_number}] [{task_label}]   挂单进度: {progress}")
+        log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
+        return False, msg
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [{task_label}] ✗ 收集数据失败: {str(e)}")
+        import traceback
+        log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
+        return False, f"收集数据失败: {str(e)}"
 
 
 # ============================================================================
@@ -3991,7 +4367,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         # 检查是否需要换IP重试（仅type=5任务且未重试过）
         if not success and failure_reason == "NEED_IP_RETRY" and retry_count == 0:
             mission_type = mission.get("type")
-            if mission_type == 5:
+            if mission_type == 5 or mission_type == 1:
                 log_print(f"[{browser_id}] Type=5 任务需要换IP重试，开始执行重试流程...")
                 
                 # 1. 关闭浏览器
@@ -5058,9 +5434,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] ========== Type 5 任务成功: {msg} ==========\n")
                 return True, msg
         else:
-            # Type 1 任务使用原有的等待逻辑
-            log_print(f"[{browser_id}] 步骤13: 等待订单确认（交替检查 Open Orders 和 Position）...")
-            if not wait_for_opinion_order_success(
+            # Type 1 任务使用与 Type 5 一致的等待逻辑
+            log_print(f"[{browser_id}] 步骤13: Type 1 任务 - 等待订单确认并收集数据...")
+            success, msg = wait_for_opinion_order_success(
                 driver, 
                 initial_open_orders_count, 
                 initial_position_count, 
@@ -5068,12 +5444,17 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 browser_id, 
                 trending_part1,
                 option_type,
-                timeout=600
-            ):
-                return False, "订单确认超时"
+                timeout=600,
+                trending=trending
+            )
             
-            log_print(f"[{browser_id}] ========== Opinion Trade 任务完成 ==========\n")
-            return True, ""
+            if not success:
+                log_print(f"[{browser_id}] ========== Type 1 任务失败: {msg} ==========\n")
+                return False, msg
+            else:
+                log_print(f"[{browser_id}] ========== Type 1 任务成功: {msg} ==========\n")
+                return True, msg
+            
         
     except Exception as e:
         log_print(f"[{browser_id}] ✗✗✗ Opinion Trade 任务执行异常: {str(e)}")
@@ -9312,27 +9693,24 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     log_print(f"[{browser_id}] 关闭浏览器...")
                     close_adspower_browser(task_browser_id)
                     # Type 5 任务关闭浏览器后调用 removeNumberInUse 接口
-                    if mission_type == 5:
-                        try:
+                    try:
                             log_print(f"[{browser_id}] Type 5 任务完成，调用 removeNumberInUse 接口...")
                             remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
                             remove_resp = requests.post(remove_url, json={"number": task_browser_id}, timeout=10)
                             log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
-                        except Exception as e:
+                    except Exception as e:
                             log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
             else:
                 # 如果 driver 等为 None，说明任务失败，尝试关闭浏览器（可能已被关闭）
                 if not success:
                     log_print(f"[{browser_id}] 任务失败且未返回driver，尝试关闭浏览器（兜底）...")
                     close_adspower_browser(browser_id)
-                    # Type 5 任务关闭浏览器后调用 removeNumberInUse 接口
-                    if mission_type == 5:
-                        try:
+                    try:
                             log_print(f"[{browser_id}] Type 5 任务完成，调用 removeNumberInUse 接口...")
                             remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
                             remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
                             log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
-                        except Exception as e:
+                    except Exception as e:
                             log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
             # Type 1/5 任务结果已经在上面记录了，跳过后面的统一记录
             return
