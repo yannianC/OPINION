@@ -827,7 +827,7 @@ def get_mission_from_server():
         return None
 
 
-def submit_mission_result(mission_id, success_count, failed_count, failed_info, status=2):
+def submit_mission_result(mission_id, success_count, failed_count, failed_info, status=2, custom_msg=None):
     """
     提交任务结果到服务器（带重试机制）
     
@@ -837,6 +837,7 @@ def submit_mission_result(mission_id, success_count, failed_count, failed_info, 
         failed_count: 失败数量
         failed_info: 失败的浏览器信息字典 {browser_id: failure_reason}
         status: 任务状态，2=成功，3=失败
+        custom_msg: 自定义消息（如果提供，将使用此消息而不是默认格式）
         
     Returns:
         bool: 提交成功返回True，失败返回False
@@ -844,15 +845,20 @@ def submit_mission_result(mission_id, success_count, failed_count, failed_info, 
     url = f"{SERVER_BASE_URL}/mission/saveResult"
     
     # 构建消息
-    msg = f"成功: {success_count}个, 失败: {failed_count}个"
-    if failed_info:
-        msg += f", 失败的浏览器: {', '.join(failed_info.keys())}"
-        reasons = []
-        for bid, reason in failed_info.items():
-            if reason:
-                reasons.append(f"{bid}{reason}")
-        if reasons:
-            msg += f"，其中{'，'.join(reasons)}"
+    if custom_msg:
+        # 如果提供了自定义消息，直接使用
+        msg = custom_msg
+    else:
+        # 否则使用默认格式
+        msg = f"成功: {success_count}个, 失败: {failed_count}个"
+        if failed_info:
+            msg += f", 失败的浏览器: {', '.join(failed_info.keys())}"
+            reasons = []
+            for bid, reason in failed_info.items():
+                if reason:
+                    reasons.append(f"{bid}{reason}")
+            if reasons:
+                msg += f"，其中{'，'.join(reasons)}"
     
     payload = {
         "id": mission_id,
@@ -9679,26 +9685,10 @@ def check_and_submit_completed_missions():
                 
                 # 如果有详细msg，直接使用；否则使用默认格式
                 if detailed_msg:
-                    # 直接提交详细msg
+                    # 使用 submit_mission_result 提交详细msg（带重试机制）
                     status = 2 if success_count > 0 else 3
-                    url = f"{SERVER_BASE_URL}/mission/saveResult"
-                    payload = {
-                        "id": mission_id,
-                        "status": status,
-                        "msg": detailed_msg
-                    }
-                    
-                    log_print(f"\n[系统] Type 5 任务提交详细结果: {url}")
-                    log_print(f"[系统] 提交数据: {payload}")
-                    
-                    try:
-                        response = requests.post(url, json=payload, timeout=10)
-                        if response.status_code == 200:
-                            log_print(f"[系统] ✓ Type 5 结果提交成功")
-                        else:
-                            log_print(f"[系统] ✗ Type 5 结果提交失败，状态码: {response.status_code}")
-                    except Exception as e:
-                        log_print(f"[系统] ✗ Type 5 结果提交异常: {str(e)}")
+                    log_print(f"\n[系统] Type {task_type} 任务提交详细结果...")
+                    submit_mission_result(mission_id, success_count, failed_count, {}, status, custom_msg=detailed_msg)
                 else:
                     # 没有详细msg，使用默认格式
                     failed_info = {bid: r['reason'] for bid, r in results.items() if not r['success']}

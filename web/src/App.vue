@@ -6339,10 +6339,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         const share = floorToTwoDecimals(item.share)
         const groupNo = browserToGroupMap.value[browserNo] || '1'
         
-        // 计算价格
-        const taskPrice = firstSide === 'YES' 
-          ? parseFloat(hedgeData.currentPrice) 
-          : (100 - parseFloat(hedgeData.currentPrice))
+        // 计算价格：先挂方使用 currentPrice（与模式1一致）
+        const taskPrice = parseFloat(hedgeData.currentPrice)
         
         const taskData = {
           groupNo: groupNo,
@@ -6436,10 +6434,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           const share = floorToTwoDecimals(item.share)
           const groupNo = browserToGroupMap.value[browserNo] || '1'
           
-          // 计算价格（另一方是 100 - currentPrice）
-          const taskPrice = firstSide === 'YES'
-            ? (100 - parseFloat(hedgeData.currentPrice))
-            : parseFloat(hedgeData.currentPrice)
+          // 计算价格：后挂方使用 100 - currentPrice（与模式1一致）
+          const taskPrice = 100 - parseFloat(hedgeData.currentPrice)
           
           const taskData = {
             groupNo: groupNo,
