@@ -2848,34 +2848,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
             return False, "Position未检测到变化超时,且取消挂单出错"
     
-    # 第二阶段：轮询任务一状态，等待状态变为10（10分钟超时，每10秒检查一次）
-    log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：轮询任务状态 ==========")
-    phase2_timeout = 800  # 10分钟
-    phase2_check_interval = 10  # 每10秒检查一次
-    phase2_start_time = time.time()
-    status_is_10 = False
-    
-    while time.time() - phase2_start_time < phase2_timeout:
-        try:
-            elapsed = int(time.time() - phase2_start_time)
-            current_status = get_mission_status(target_mission_id)
-            log_print(f"[{serial_number}] [{task_label}] 轮询任务一状态: {current_status}（已用时 {elapsed}秒）")
-            
-            if current_status == 10:
-                log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到任务一状态为10！")
-                status_is_10 = True
-                break
-            
-            time.sleep(phase2_check_interval)
-            
-        except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 轮询任务状态时出错: {str(e)}")
-            time.sleep(phase2_check_interval)
-    
-    if not status_is_10:
-        log_print(f"[{serial_number}] [{task_label}] ✗ 检测吃单超时")
-        return False, "检测对方吃单超时，自己仓位已变化"
-    
+        
     # 第三阶段：获取Position和Open Orders的详细数据
     log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
     
@@ -3498,12 +3471,13 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
             log_print(f"[{serial_number}] [{task_label}] ⚠ 检查Position时出错: {str(e)}")
             time.sleep(check_interval)
     
-    if not position_changed:
-        log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
-        return False, "Position未检测到变化，超时"
-    
     # 第二阶段：获取Position和Open Orders的详细数据（与Type 5一致）
     log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：收集数据 ==========")
+    
+    # 如果Position未检测到变化，超时，需要检查Open Orders
+    position_timeout = not position_changed
+    if position_timeout:
+        log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时，将检查Open Orders")
     
     try:
        
@@ -3511,8 +3485,11 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
         filled_amount = ""
         filled_price = ""
         
+        # 如果Position超时，跳过获取Position数据，直接检查Open Orders
+        if position_timeout:
+            log_print(f"[{serial_number}] [{task_label}] Position超时，跳过获取Position数据，直接检查Open Orders")
         # 如果前面是链上数据先检测到变化，直接使用链上数据，跳过本地抓取
-        if use_api_data and trending:
+        elif use_api_data and trending:
             log_print(f"[{serial_number}] [{task_label}] 前面链上数据先检测到变化，直接使用链上数据...")
             api_position_amount = get_position_from_api(serial_number, trending, option_type)
             if api_position_amount is not None:
@@ -3523,8 +3500,8 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 获取链上数据失败，改用本地抓取")
                 use_api_data = False  # 如果链上数据获取失败，改用本地抓取
         
-        # 如果使用本地数据，进行本地抓取
-        if not use_api_data:
+        # 如果使用本地数据，进行本地抓取（且不是超时情况）
+        if not position_timeout and not use_api_data:
              # 点击Position
             log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
             position_buttons = driver.find_elements(By.TAG_NAME, "button")
@@ -3696,6 +3673,11 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
         
         if not open_orders_div:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
+            # 如果是Position超时，返回失败消息
+            if position_timeout:
+                log_print(f"[{serial_number}] [{task_label}] ✗ 检测仓位超时，且无挂单")
+                return False, "检测仓位超时，且无挂单"
+            
             # 没找到div，检查 Transactions
             transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
             
@@ -3729,6 +3711,11 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
             tr_list = tbody.find_elements(By.TAG_NAME, "tr")
         except:
             # 没有tbody或tr，说明没有挂单
+            # 如果是Position超时，返回失败消息
+            if position_timeout:
+                log_print(f"[{serial_number}] [{task_label}] ✗ 检测仓位超时，且无挂单")
+                return False, "检测仓位超时，且无挂单"
+            
             transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
             
             import json
@@ -3757,6 +3744,11 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
         
         if not tr_list or len(tr_list) == 0:
             # 没有tr，说明没有挂单
+            # 如果是Position超时，返回失败消息
+            if position_timeout:
+                log_print(f"[{serial_number}] [{task_label}] ✗ 检测仓位超时，且无挂单")
+                return False, "检测仓位超时，且无挂单"
+            
             transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
             
             import json

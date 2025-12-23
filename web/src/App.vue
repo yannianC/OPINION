@@ -294,6 +294,19 @@
                   @blur="saveHedgeSettings"
                 />
               </div>
+              
+              <div class="hedge-amount-range">
+                <span class="filter-label">taker最小数量（参数4）:</span>
+                <input 
+                  v-model.number="hedgeMode.takerMinAmt" 
+                  type="number" 
+                  class="amount-range-input" 
+                  min="0"
+                  placeholder="200"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
             </template>
             
             <!-- 模式1/模式2开关 - 仅在平仓模式时显示 -->
@@ -1967,6 +1980,7 @@ const hedgeMode = reactive({
   minCloseAmt: 500,  // 平仓最小数量（参数1）
   minTotalCloseAmt: 0,  // 合计最小平仓值（参数2）
   maxTotalCloseAmt: 0,  // 合计最大平仓值（参数3）
+  takerMinAmt: 200,  // taker最小数量（参数4）
   hedgeMode2: false,  // false: 模式1, true: 模式2
   minOrderbookDepth: 3,  // 订单薄至少几组数据
   maxPriceDiff: 15,  // 买1-买3或卖1-卖3的最大价差
@@ -4855,7 +4869,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             priceOutCome: priceInfo.firstSide,  // 先挂方 (yes/no)
             singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
-            closeAmtSumMax: hedgeMode.maxTotalCloseAmt  // 参数3：合计最大平仓值
+            closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
+            takerMinAmt: hedgeMode.takerMinAmt  // 参数4：taker最小数量
           }
         } else {
           // 模式1：使用原有接口
@@ -5617,6 +5632,7 @@ const saveHedgeSettings = () => {
       minCloseAmt: hedgeMode.minCloseAmt,
       minTotalCloseAmt: hedgeMode.minTotalCloseAmt,
       maxTotalCloseAmt: hedgeMode.maxTotalCloseAmt,
+      takerMinAmt: hedgeMode.takerMinAmt,
       hedgeMode2: hedgeMode.hedgeMode2,
       maxOpenHour: hedgeMode.maxOpenHour,
       closeOpenHourArea: hedgeMode.closeOpenHourArea,
@@ -5675,6 +5691,9 @@ const loadHedgeSettings = () => {
     }
     if (settings.maxTotalCloseAmt !== undefined) {
       hedgeMode.maxTotalCloseAmt = settings.maxTotalCloseAmt
+    }
+    if (settings.takerMinAmt !== undefined) {
+      hedgeMode.takerMinAmt = settings.takerMinAmt
     }
     if (settings.hedgeMode2 !== undefined) {
       hedgeMode.hedgeMode2 = settings.hedgeMode2
