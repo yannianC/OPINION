@@ -2882,7 +2882,7 @@ const syncConfigFromMarkets = async () => {
     
     // 1. 并行请求两个接口
     const [marketsResponse, configResponse] = await Promise.all([
-      axios.get('http://opinion.api.predictscan.dev:10001/api/markets'),
+      axios.get('https://predictscan.dev/api/markets'),
       axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     ])
     
@@ -2918,9 +2918,9 @@ const syncConfigFromMarkets = async () => {
       
       let trending
       if (market.parentEvent) {
-        trending = `${market.parentEvent.title}###${market.marketTitle}`
+        trending = `${market.parentEvent.title}###${market.title}`
       } else {
-        trending = market.marketTitle
+        trending = market.title
       }
       marketMap.set(trending, market)
       addedCount++
@@ -6821,9 +6821,17 @@ const queryTransactionFee = async () => {
     const startTimeStr = formatDateTime(feeQuery.startTime)
     const endTimeStr = formatDateTime(feeQuery.endTime)
     
-    // 并行请求本地手续费和链上手续费
-    const [localResponse, chainResponse] = await Promise.all([
-      // 调用本地手续费接口
+    // 并行请求本地手续费（type=1 和 type=5）和链上手续费
+    const [type1Response, type5Response, chainResponse] = await Promise.all([
+      // 调用本地手续费接口 type=1
+      axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
+        params: {
+          type: 1,
+          startTime: startTimestamp,
+          endTime: endTimestamp
+        }
+      }),
+      // 调用本地手续费接口 type=5
       axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
         params: {
           type: 5,
@@ -6840,12 +6848,13 @@ const queryTransactionFee = async () => {
     
     let missionsCount = 0
     const listPartBrowserNumbers = new Set() // 存储 listPart 中有手续费的浏览器编号
+    const listPartBrowserFees = new Map() // 存储每个浏览器编号的手续费总和 {browserNumber: totalFee}
+    let totalFee = 0
     
-    // 处理本地手续费
-    if (localResponse.data && localResponse.data.code === 0) {
-      const missions = localResponse.data.data.list || []
-      missionsCount = missions.length
-      let totalFee = 0
+    // 处理本地手续费 - type=1
+    if (type1Response.data && type1Response.data.code === 0) {
+      const missions = type1Response.data.data.list || []
+      missionsCount += missions.length
       
       // 遍历所有任务
       missions.forEach(item => {
@@ -6863,9 +6872,13 @@ const queryTransactionFee = async () => {
               if (fee > 0) {
                 totalFee += fee
                 
-                // 记录有手续费的浏览器编号
+                // 记录有手续费的浏览器编号和手续费
                 if (mission.numberList) {
-                  listPartBrowserNumbers.add(String(mission.numberList))
+                  const browserNum = String(mission.numberList)
+                  listPartBrowserNumbers.add(browserNum)
+                  // 累加该浏览器编号的手续费
+                  const currentFee = listPartBrowserFees.get(browserNum) || 0
+                  listPartBrowserFees.set(browserNum, currentFee + fee)
                 }
               }
             }
@@ -6874,14 +6887,51 @@ const queryTransactionFee = async () => {
           }
         }
       })
-      
-      feeQuery.totalFee = totalFee
-    } else {
-      feeQuery.totalFee = null
     }
+    
+    // 处理本地手续费 - type=5
+    if (type5Response.data && type5Response.data.code === 0) {
+      const missions = type5Response.data.data.list || []
+      missionsCount += missions.length
+      
+      // 遍历所有任务
+      missions.forEach(item => {
+        const mission = item.mission
+        // 只处理状态为2（成功）的任务
+        if (mission && mission.status === 2 && mission.msg) {
+          try {
+            // 解析 msg JSON
+            const msgData = JSON.parse(mission.msg)
+            // 检查 transaction_fee 存在且不为 "-"
+            if (msgData.transaction_fee && msgData.transaction_fee !== '-' && +msgData.transaction_fee!=0 ) {
+              // 提取交易费数字部分（移除 $ 符号和逗号）
+              const feeStr = msgData.transaction_fee.replace(/[$,]/g, '')
+              const fee = parseFloat(feeStr) || 0
+              if (fee > 0) {
+                totalFee += fee
+                
+                // 记录有手续费的浏览器编号和手续费
+                if (mission.numberList) {
+                  const browserNum = String(mission.numberList)
+                  listPartBrowserNumbers.add(browserNum)
+                  // 累加该浏览器编号的手续费
+                  const currentFee = listPartBrowserFees.get(browserNum) || 0
+                  listPartBrowserFees.set(browserNum, currentFee + fee)
+                }
+              }
+            }
+          } catch (error) {
+            console.error('解析任务消息失败:', mission.id, error)
+          }
+        }
+      })
+    }
+    
+    feeQuery.totalFee = totalFee > 0 ? totalFee : null
     
     // 处理链上手续费
     const summaryBrowserNumbers = new Set() // 存储 summary 中有手续费的浏览器编号
+    const summaryBrowserFees = new Map() // 存储每个浏览器编号的手续费 {browserNumber: totalFee}
     if (chainResponse.data) {
       const summary = chainResponse.data.summary || {}
       const addresses = chainResponse.data.addresses || []
@@ -6889,10 +6939,12 @@ const queryTransactionFee = async () => {
       feeQuery.chainFee = summary.total_fee || 0
       feeQuery.feeAddresses = addresses
       
-      // 提取有手续费的浏览器编号（total_fee > 0）
+      // 提取有手续费的浏览器编号和手续费（total_fee > 0）
       addresses.forEach(addr => {
         if (addr.total_fee && parseFloat(addr.total_fee) > 0 && addr.fingerprint_no) {
-          summaryBrowserNumbers.add(String(addr.fingerprint_no))
+          const browserNum = String(addr.fingerprint_no)
+          summaryBrowserNumbers.add(browserNum)
+          summaryBrowserFees.set(browserNum, parseFloat(addr.total_fee) || 0)
         }
       })
       
@@ -6917,6 +6969,35 @@ const queryTransactionFee = async () => {
     
     // 找出 summary 中有但 listPart 中没有的（少了哪些）
     const onlyInSummary = Array.from(summaryBrowserNumbers).filter(num => !listPartBrowserNumbers.has(num))
+    
+    // 找出两边都有的浏览器编号，并计算手续费差值
+    const commonBrowserNumbers = Array.from(listPartBrowserNumbers).filter(num => summaryBrowserNumbers.has(num))
+    if (commonBrowserNumbers.length > 0) {
+      console.log('========== 两边都有的浏览器编号手续费对比 ==========')
+      const feeDiffs = commonBrowserNumbers.map(browserNum => {
+        const listPartFee = listPartBrowserFees.get(browserNum) || 0
+        const summaryFee = summaryBrowserFees.get(browserNum) || 0
+        const diff = listPartFee - summaryFee
+        return {
+          browserNum: parseInt(browserNum),
+          listPartFee: listPartFee.toFixed(4),
+          summaryFee: summaryFee.toFixed(4),
+          diff: diff.toFixed(4),
+          diffAbs: Math.abs(diff).toFixed(4)
+        }
+      }).sort((a, b) => a.browserNum - b.browserNum)
+      
+      feeDiffs.forEach(item => {
+        const sign = parseFloat(item.diff) > 0 ? '+' : (parseFloat(item.diff) < 0 ? '-' : '=')
+        console.log(`浏览器编号 ${item.browserNum}: listPart=${item.listPartFee}, summary=${item.summaryFee}, 差值=${sign}${item.diffAbs}`)
+      })
+      
+      // 统计总差值
+      const totalDiff = feeDiffs.reduce((sum, item) => sum + parseFloat(item.diff), 0)
+      console.log(`总差值: ${totalDiff >= 0 ? '+' : ''}${totalDiff.toFixed(4)}`)
+    } else {
+      console.log('⚠️ 两边没有共同的浏览器编号')
+    }
     if (onlyInSummary.length > 0) {
       console.log('⚠️ summary 中有但 listPart 中没有的浏览器编号（少了）:', onlyInSummary.sort((a, b) => parseInt(a) - parseInt(b)))
     } else {
