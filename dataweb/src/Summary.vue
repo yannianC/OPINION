@@ -151,12 +151,17 @@
               class="summary-position-item"
             >
               <span class="position-title-summary">{{ pos.title }}</span>
-              <el-tag 
-                :type="parseFloat(pos.amount) >= 0 ? 'success' : 'danger'" 
-                size="small"
-              >
-                {{ pos.amount }}
-              </el-tag>
+              <div class="position-values">
+                <el-tag 
+                  :type="parseFloat(pos.amount) >= 0 ? 'success' : 'danger'" 
+                  size="small"
+                >
+                  链上: {{ pos.amount }}
+                </el-tag>
+                <span v-if="getPositionDifference(pos.title) !== null" class="difference-value" :class="getDifferenceClass(getPositionDifference(pos.title))">
+                  信息差: {{ formatDifference(getPositionDifference(pos.title)) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -509,6 +514,65 @@ const loadChainStats = async () => {
 }
 
 /**
+ * 获取持有仓位的数量
+ */
+const getHoldingPositionAmount = (title) => {
+  if (!currentSummary.value || !currentSummary.value.positionSummary) {
+    return null
+  }
+  
+  // 尝试精确匹配
+  const exactMatch = currentSummary.value.positionSummary.find(p => p.title === title)
+  if (exactMatch) {
+    return parseFloat(exactMatch.amount) || 0
+  }
+  
+  // 尝试匹配基础title（去除###后的部分）
+  const titleKey = title.split('###')[0].trim()
+  for (const pos of currentSummary.value.positionSummary) {
+    const posTitleKey = pos.title.split('###')[0].trim()
+    if (posTitleKey === titleKey) {
+      return parseFloat(pos.amount) || 0
+    }
+  }
+  
+  return null
+}
+
+/**
+ * 计算信息差（持有仓位 - 链上仓位）
+ */
+const getPositionDifference = (chainTitle) => {
+  const chainAmount = parseFloat(chainSummary.value.positionSummary.find(p => p.title === chainTitle)?.amount || 0)
+  const holdingAmount = getHoldingPositionAmount(chainTitle)
+  
+  if (holdingAmount === null) {
+    return null  // 没有持有仓位数据
+  }
+  
+  return holdingAmount - chainAmount
+}
+
+/**
+ * 格式化差异值
+ */
+const formatDifference = (diff) => {
+  if (diff === null) return '--'
+  const sign = diff > 0 ? '+' : ''
+  return `${sign}${diff.toFixed(2)}`
+}
+
+/**
+ * 获取差异值的样式类
+ */
+const getDifferenceClass = (diff) => {
+  if (diff === null) return 'difference-zero'
+  if (diff > 0) return 'difference-positive'
+  if (diff < 0) return 'difference-negative'
+  return 'difference-zero'
+}
+
+/**
  * 返回列表页面
  */
 const goBack = () => {
@@ -699,6 +763,33 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.difference-value {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.difference-positive {
+  background-color: rgba(103, 194, 58, 0.2);
+  color: #67c23a;
+  border: 1px solid rgba(103, 194, 58, 0.4);
+}
+
+.difference-negative {
+  background-color: rgba(245, 108, 108, 0.2);
+  color: #f56c6c;
+  border: 1px solid rgba(245, 108, 108, 0.4);
+}
+
+.difference-zero {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .no-saved-data {

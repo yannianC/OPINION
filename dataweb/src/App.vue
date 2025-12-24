@@ -14,6 +14,12 @@
       >
         数据总计
       </el-button>
+      <el-button 
+        :type="currentPage === 'history' ? 'primary' : 'default'"
+        @click="currentPage = 'history'"
+      >
+        历史查询
+      </el-button>
     </div>
 
     <!-- 数据列表页面 -->
@@ -226,10 +232,44 @@
             显示无积分
           </el-checkbox>
         </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showHasDifference" @change="applyFilters">
+            显示与链上信息有差额
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
+          <label>打开时间大于:</label>
+          <el-input 
+            v-model.number="filters.openTimeGreaterThanHours" 
+            placeholder="小时数"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+            min="0"
+          />
+          <span style="margin-left: 5px; color: #666;">小时</span>
+        </div>
+        <div class="filter-item">
+          <label>仓位抓取时间大于:</label>
+          <el-input 
+            v-model.number="filters.positionTimeGreaterThanHours" 
+            placeholder="小时数"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+            min="0"
+          />
+          <span style="margin-left: 5px; color: #666;">小时</span>
+        </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
         <el-button type="warning" size="small" @click="parseAllRows" :loading="parsingAll">
           全部解析
+        </el-button>
+        <el-button type="success" size="small" @click="refreshFilteredPositions" :loading="refreshingFiltered">
+          刷新筛选结果仓位
         </el-button>
       </div>
     </div>
@@ -393,6 +433,29 @@
             {{ getChainInfo(scope.row) }}
           </div>
           <span v-else class="empty-text">暂无数据</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="信息差" width="400">
+        <template #default="scope">
+          <div v-if="getChainInfo(scope.row) && getPositionDifferences(scope.row).length > 0" class="position-list">
+            <div 
+              v-for="(diff, idx) in getPositionDifferences(scope.row)" 
+              :key="`${scope.row.index}-diff-${idx}`" 
+              class="position-item"
+            >
+              <div class="position-title">{{ diff.title }}</div>
+              <div class="position-details">
+                <span class="difference-value" :class="getDifferenceClass(diff.difference)">
+                  信息差: {{ formatDifference(diff.difference) }}
+                </span>
+                <span class="position-amount">持有: {{ diff.holdingAmount }}</span>
+                <span class="position-amount">链上: {{ diff.chainAmount }}</span>
+              </div>
+            </div>
+          </div>
+          <span v-else-if="!getChainInfo(scope.row)" class="empty-text">暂无链上数据</span>
+          <span v-else class="empty-text">无差异</span>
         </template>
       </el-table-column>
 
@@ -610,6 +673,9 @@
 
     <!-- 数据总计页面 -->
     <Summary v-if="currentPage === 'summary'" />
+
+    <!-- 历史查询页面 -->
+    <HistoryQuery v-if="currentPage === 'history'" />
   </div>
 </template>
 
@@ -666,6 +732,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, Loading } from '@element-plus/icons-vue'
 import axios from 'axios'
 import Summary from './Summary.vue'
+import HistoryQuery from './HistoryQuery.vue'
 
 /**
  * 基础配置
@@ -690,6 +757,7 @@ const saving = ref(false)
 const refreshingAll = ref(false)
 const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
 const refreshingRedOld = ref(false)  // 刷新变红且超过30分钟仓位的加载状态
+const refreshingFiltered = ref(false)  // 刷新筛选结果仓位的加载状态
 const parsingAll = ref(false)  // 是否正在全部解析
 const deduplicating = ref(false)  // 地址去重的加载状态
 const gettingWalletAddresses = ref(false)  // 获取钱包地址的加载状态
@@ -762,7 +830,10 @@ const filters = ref({
   balanceMax: '',  // 余额最大值
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
-  showNoPoints: false  // 显示无积分
+  showNoPoints: false,  // 显示无积分
+  showHasDifference: false,  // 显示与链上信息有差额
+  openTimeGreaterThanHours: null,  // 打开时间大于X小时
+  positionTimeGreaterThanHours: null  // 仓位抓取时间大于X小时
 })
 
 const activeFilters = ref({
@@ -774,7 +845,10 @@ const activeFilters = ref({
   balanceMax: null,  // 余额最大值
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
-  showNoPoints: false  // 显示无积分
+  showNoPoints: false,  // 显示无积分
+  showHasDifference: false,  // 显示与链上信息有差额
+  openTimeGreaterThanHours: null,  // 打开时间大于X小时
+  positionTimeGreaterThanHours: null  // 仓位抓取时间大于X小时
 })
 
 /**
@@ -823,6 +897,16 @@ const applyFilters = () => {
   const balanceMin = filters.value.balanceMin ? parseFloat(filters.value.balanceMin) : null
   const balanceMax = filters.value.balanceMax ? parseFloat(filters.value.balanceMax) : null
   
+  // 解析打开时间大于X小时
+  const openTimeHours = filters.value.openTimeGreaterThanHours !== null && filters.value.openTimeGreaterThanHours !== undefined && filters.value.openTimeGreaterThanHours !== '' 
+    ? parseFloat(filters.value.openTimeGreaterThanHours) 
+    : null
+  
+  // 解析仓位抓取时间大于X小时
+  const positionTimeHours = filters.value.positionTimeGreaterThanHours !== null && filters.value.positionTimeGreaterThanHours !== undefined && filters.value.positionTimeGreaterThanHours !== '' 
+    ? parseFloat(filters.value.positionTimeGreaterThanHours) 
+    : null
+  
   activeFilters.value = {
     computeGroup: parseInputValues(filters.value.computeGroup),
     fingerprintNo: parseInputValues(filters.value.fingerprintNo),
@@ -832,7 +916,10 @@ const applyFilters = () => {
     balanceMax: isNaN(balanceMax) ? null : balanceMax,
     showNoAddress: filters.value.showNoAddress,
     showDuplicateAddress: filters.value.showDuplicateAddress,
-    showNoPoints: filters.value.showNoPoints
+    showNoPoints: filters.value.showNoPoints,
+    showHasDifference: filters.value.showHasDifference,
+    openTimeGreaterThanHours: isNaN(openTimeHours) ? null : openTimeHours,
+    positionTimeGreaterThanHours: isNaN(positionTimeHours) ? null : positionTimeHours
   }
   ElMessage.success('筛选已应用')
 }
@@ -850,7 +937,10 @@ const clearFilters = () => {
     balanceMax: '',
     showNoAddress: false,
     showDuplicateAddress: false,
-    showNoPoints: false
+    showNoPoints: false,
+    showHasDifference: false,
+    openTimeGreaterThanHours: null,
+    positionTimeGreaterThanHours: null
   }
   activeFilters.value = {
     computeGroup: [],
@@ -861,7 +951,10 @@ const clearFilters = () => {
     balanceMax: null,
     showNoAddress: false,
     showDuplicateAddress: false,
-    showNoPoints: false
+    showNoPoints: false,
+    showHasDifference: false,
+    openTimeGreaterThanHours: null,
+    positionTimeGreaterThanHours: null
   }
   ElMessage.info('筛选已清除')
 }
@@ -893,7 +986,10 @@ const filteredTableData = computed(() => {
                     filters.balanceMax !== null ||
                     filters.showNoAddress ||
                     filters.showDuplicateAddress ||
-                    filters.showNoPoints
+                    filters.showNoPoints ||
+                    filters.showHasDifference ||
+                    (filters.openTimeGreaterThanHours !== null && filters.openTimeGreaterThanHours !== undefined) ||
+                    (filters.positionTimeGreaterThanHours !== null && filters.positionTimeGreaterThanHours !== undefined)
   
   let result = data
   
@@ -965,6 +1061,45 @@ const filteredTableData = computed(() => {
       if (filters.showNoPoints) {
         if (row.k && row.k.trim()) {
           return false  // 有积分，不显示
+        }
+      }
+      
+      // 显示与链上信息有差额筛选
+      if (filters.showHasDifference) {
+        if (!hasPositionDifference(row)) {
+          return false  // 没有差额，不显示
+        }
+      }
+      
+      // 打开时间大于X小时筛选
+      if (filters.openTimeGreaterThanHours !== null && filters.openTimeGreaterThanHours !== undefined) {
+        if (!row.f) {
+          return false  // 没有打开时间的数据不显示
+        }
+        const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+        const now = Date.now()
+        const hoursAgo = parseFloat(filters.openTimeGreaterThanHours)
+        const thresholdTime = now - (hoursAgo * 60 * 60 * 1000)  // 转换为毫秒
+        
+        // 如果打开时间大于阈值时间（即打开时间更早），则显示
+        if (openTime > thresholdTime) {
+          return false  // 打开时间不够早，不显示
+        }
+      }
+      
+      // 仓位抓取时间大于X小时筛选
+      if (filters.positionTimeGreaterThanHours !== null && filters.positionTimeGreaterThanHours !== undefined) {
+        if (!row.d) {
+          return false  // 没有仓位抓取时间的数据不显示
+        }
+        const positionTime = typeof row.d === 'string' ? parseInt(row.d) : row.d
+        const now = Date.now()
+        const hoursAgo = parseFloat(filters.positionTimeGreaterThanHours)
+        const thresholdTime = now - (hoursAgo * 60 * 60 * 1000)  // 转换为毫秒
+        
+        // 如果仓位抓取时间大于阈值时间（即抓取时间更早），则显示
+        if (positionTime > thresholdTime) {
+          return false  // 仓位抓取时间不够早，不显示
         }
       }
       
@@ -1560,6 +1695,109 @@ const isPositionMismatched = (row) => {
   const chainInfo = getChainInfo(row)
   if (!chainInfo) return false
   return !comparePositionsWithChain(row.a, chainInfo)
+}
+
+/**
+ * 检查是否有与链上信息的差额（差异绝对值>=1）
+ */
+const hasPositionDifference = (row) => {
+  const differences = getPositionDifferences(row)
+  return differences.length > 0
+}
+
+/**
+ * 计算持有仓位和链上信息的信息差
+ * 返回每个市场的差异数组
+ */
+const getPositionDifferences = (row) => {
+  const differences = []
+  
+  if (!row.a) return differences
+  
+  const chainInfo = getChainInfo(row)
+  if (!chainInfo) return differences
+  
+  // 解析持有仓位
+  const holdingPositions = parsePositions(row.a)
+  // 解析链上仓位
+  const chainPositions = parsePositions(chainInfo)
+  
+  // 创建链上仓位的映射（按title匹配，支持基础title匹配）
+  const chainMap = new Map()
+  for (const chainPos of chainPositions) {
+    const titleKey = chainPos.title.split('###')[0].trim()
+    const existing = chainMap.get(titleKey)
+    if (existing) {
+      // 如果已有相同基础title，累加数量
+      existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(chainPos.amount) || 0)
+    } else {
+      chainMap.set(titleKey, {
+        title: chainPos.title,
+        amount: parseFloat(chainPos.amount) || 0
+      })
+    }
+  }
+  
+  // 创建持有仓位的映射
+  const holdingMap = new Map()
+  for (const holdingPos of holdingPositions) {
+    const titleKey = holdingPos.title.split('###')[0].trim()
+    const existing = holdingMap.get(titleKey)
+    if (existing) {
+      existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(holdingPos.amount) || 0)
+    } else {
+      holdingMap.set(titleKey, {
+        title: holdingPos.title,
+        amount: parseFloat(holdingPos.amount) || 0
+      })
+    }
+  }
+  
+  // 计算所有市场的差异
+  const allTitles = new Set([...holdingMap.keys(), ...chainMap.keys()])
+  
+  for (const titleKey of allTitles) {
+    const holding = holdingMap.get(titleKey)
+    const chain = chainMap.get(titleKey)
+    
+    const holdingAmount = holding ? holding.amount : 0
+    const chainAmount = chain ? chain.amount : 0
+    const difference = holdingAmount - chainAmount
+    
+    // 只显示有差异的市场（差异绝对值大于等于1）
+    if (Math.abs(difference) >= 1) {
+      differences.push({
+        title: holding ? holding.title : (chain ? chain.title : titleKey),
+        holdingAmount: holdingAmount.toFixed(2),
+        chainAmount: chainAmount.toFixed(2),
+        difference: difference
+      })
+    }
+  }
+  
+  // 按差异绝对值排序
+  differences.sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference))
+  
+  return differences
+}
+
+/**
+ * 格式化差异值
+ */
+const formatDifference = (diff) => {
+  if (diff === null || diff === undefined) return '0.00'
+  const sign = diff > 0 ? '+' : ''
+  return `${sign}${diff.toFixed(2)}`
+}
+
+/**
+ * 获取差异值的样式类
+ */
+const getDifferenceClass = (diff) => {
+  if (diff === null || diff === undefined) return 'difference-zero'
+  if (diff > 0) return 'difference-positive'
+  if (diff < 0) return 'difference-negative'
+  return 'difference-zero'
 }
 
 /**
@@ -2575,6 +2813,76 @@ const refreshRedPositions = async () => {
     ElMessage.error('刷新变红仓位失败: ' + (error.message || '网络错误'))
   } finally {
     refreshingRed.value = false
+  }
+}
+
+/**
+ * 刷新筛选结果的仓位（只刷新当前筛选后显示的行）
+ */
+const refreshFilteredPositions = async () => {
+  // 获取当前筛选后的所有行（不分页）
+  const filteredRows = filteredTableData.value.filter(row => 
+    row.fingerprintNo && row.computeGroup && row.platform
+  )
+  
+  if (filteredRows.length === 0) {
+    ElMessage.warning('没有可刷新的账户')
+    return
+  }
+  
+  refreshingFiltered.value = true
+  ElMessage.info(`开始刷新筛选结果中的 ${filteredRows.length} 个账户的仓位数据，请稍候...`)
+  
+  let successCount = 0
+  let failCount = 0
+  
+  try {
+    // 提交所有 type=2 任务
+    const taskPromises = filteredRows.map(async (row) => {
+      try {
+        if (row.platform == 'OP') {
+          const taskData = {
+            groupNo: row.computeGroup,
+            numberList: parseInt(row.fingerprintNo),
+            type: 2,
+            exchangeName: row.platform === 'OP' ? 'OP' : '监控'
+          }
+          
+          await axios.post(
+            `${API_BASE_URL}/mission/add`,
+            taskData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          )
+          
+          console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+          successCount++
+        }
+      } catch (error) {
+        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
+        failCount++
+      }
+    })
+    
+    await Promise.all(taskPromises)
+    
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    
+    // 等待 70 秒后自动刷新列表
+    ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
+    setTimeout(async () => {
+      await loadData(true)  // 静默刷新
+      ElMessage.success('数据已自动更新')
+    }, 70000)
+    
+  } catch (error) {
+    console.error('刷新筛选结果仓位失败:', error)
+    ElMessage.error('刷新筛选结果仓位失败: ' + (error.message || '网络错误'))
+  } finally {
+    refreshingFiltered.value = false
   }
 }
 
@@ -3994,6 +4302,32 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: 600;
   color: #2c3e50;
+}
+
+.difference-value {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.difference-positive {
+  background-color: rgba(103, 194, 58, 0.15);
+  color: #67c23a;
+  border: 1px solid rgba(103, 194, 58, 0.4);
+}
+
+.difference-negative {
+  background-color: rgba(245, 108, 108, 0.15);
+  color: #f56c6c;
+  border: 1px solid rgba(245, 108, 108, 0.4);
+}
+
+.difference-zero {
+  background-color: rgba(144, 147, 153, 0.15);
+  color: #909399;
+  border: 1px solid rgba(144, 147, 153, 0.3);
 }
 
 .empty-text {
