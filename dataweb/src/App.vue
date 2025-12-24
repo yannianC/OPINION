@@ -236,6 +236,11 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
+          <el-checkbox v-model="filters.showNoPosition" @change="applyFilters">
+            显示无持有仓位
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
           <el-checkbox v-model="filters.showHasDifference" @change="applyFilters">
             显示与链上信息有差额
           </el-checkbox>
@@ -383,31 +388,79 @@
             v-if="isRowParsed(scope.row) && scope.row.a" 
             class="position-list" 
             :class="{ 'position-mismatch': isPositionMismatched(scope.row) }"
-            v-memo="[scope.row.a, isRowParsed(scope.row), isPositionMismatched(scope.row)]"
+            v-memo="[scope.row.a, isRowParsed(scope.row), isPositionMismatched(scope.row), filters.positionSearch]"
           >
-            <div 
-              v-for="(pos, idx) in getCachedPositions(scope.row.a)" 
-              :key="`${scope.row.index}-pos-${idx}`" 
-              class="position-item"
-            >
-              <div class="position-title">{{ pos.title }}</div>
-              <div class="position-details">
-                <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
-                  {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
-                </el-tag>
-                <span class="position-amount">数量: {{ pos.amount }}</span>
-                <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+            <template v-if="filters.positionSearch">
+              <template v-if="filterPositionsBySearch(getCachedPositions(scope.row.a), filters.positionSearch).length > 0">
+                <div 
+                  v-for="(pos, idx) in filterPositionsBySearch(getCachedPositions(scope.row.a), filters.positionSearch)" 
+                  :key="`${scope.row.index}-pos-${idx}`" 
+                  class="position-item"
+                >
+                  <div class="position-title">{{ pos.title }}</div>
+                  <div class="position-details">
+                    <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                      {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                    </el-tag>
+                    <span class="position-amount">数量: {{ pos.amount }}</span>
+                    <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+                  </div>
+                </div>
+              </template>
+              <span v-else class="empty-text">无匹配的仓位</span>
+            </template>
+            <template v-else>
+              <div 
+                v-for="(pos, idx) in getCachedPositions(scope.row.a)" 
+                :key="`${scope.row.index}-pos-${idx}`" 
+                class="position-item"
+              >
+                <div class="position-title">{{ pos.title }}</div>
+                <div class="position-details">
+                  <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                    {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                  </el-tag>
+                  <span class="position-amount">数量: {{ pos.amount }}</span>
+                  <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+                </div>
               </div>
+            </template>
+          </div>
+          <!-- 未解析时：如果有搜索条件，尝试解析并过滤显示；否则显示原始字符串 -->
+          <template v-else-if="scope.row.a">
+            <template v-if="filters.positionSearch">
+              <!-- 尝试解析并过滤 -->
+              <div 
+                class="position-list" 
+                :class="{ 'position-mismatch': isPositionMismatched(scope.row) }"
+              >
+                <template v-if="filterPositionsBySearch(getCachedPositions(scope.row.a), filters.positionSearch).length > 0">
+                  <div 
+                    v-for="(pos, idx) in filterPositionsBySearch(getCachedPositions(scope.row.a), filters.positionSearch)" 
+                    :key="`${scope.row.index}-pos-raw-${idx}`" 
+                    class="position-item"
+                  >
+                    <div class="position-title">{{ pos.title }}</div>
+                    <div class="position-details">
+                      <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                        {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                      </el-tag>
+                      <span class="position-amount">数量: {{ pos.amount }}</span>
+                      <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+                    </div>
+                  </div>
+                </template>
+                <span v-else class="empty-text">无匹配的仓位</span>
+              </div>
+            </template>
+            <div 
+              v-else
+              class="raw-data-text"
+              :class="{ 'position-mismatch': isPositionMismatched(scope.row) }"
+            >
+              {{ scope.row.a }}
             </div>
-          </div>
-          <!-- 未解析时直接显示原始字符串 -->
-          <div 
-            v-else-if="scope.row.a" 
-            class="raw-data-text"
-            :class="{ 'position-mismatch': isPositionMismatched(scope.row) }"
-          >
-            {{ scope.row.a }}
-          </div>
+          </template>
           <span v-else class="empty-text">暂无数据</span>
         </template>
       </el-table-column>
@@ -415,47 +468,113 @@
       <el-table-column label="链上信息" width="400">
         <template #default="scope">
           <!-- 如果已解析，显示解析后的数据 -->
-          <div v-if="isRowParsed(scope.row) && getChainInfo(scope.row)" class="position-list" v-memo="[getChainInfo(scope.row), isRowParsed(scope.row)]">
-            <div 
-              v-for="(pos, idx) in getCachedPositions(getChainInfo(scope.row))" 
-              :key="`${scope.row.index}-chain-${idx}`" 
-              class="position-item"
-            >
-              <div class="position-title">{{ pos.title }}</div>
-              <div class="position-details">
-                <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
-                  {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
-                </el-tag>
-                <span class="position-amount">数量: {{ pos.amount }}</span>
-                <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+          <div v-if="isRowParsed(scope.row) && getChainInfo(scope.row)" class="position-list" v-memo="[getChainInfo(scope.row), isRowParsed(scope.row), filters.positionSearch]">
+            <template v-if="filters.positionSearch">
+              <template v-if="filterPositionsBySearch(getCachedPositions(getChainInfo(scope.row)), filters.positionSearch).length > 0">
+                <div 
+                  v-for="(pos, idx) in filterPositionsBySearch(getCachedPositions(getChainInfo(scope.row)), filters.positionSearch)" 
+                  :key="`${scope.row.index}-chain-${idx}`" 
+                  class="position-item"
+                >
+                  <div class="position-title">{{ pos.title }}</div>
+                  <div class="position-details">
+                    <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                      {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                    </el-tag>
+                    <span class="position-amount">数量: {{ pos.amount }}</span>
+                    <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+                  </div>
+                </div>
+              </template>
+              <span v-else class="empty-text">无匹配的仓位</span>
+            </template>
+            <template v-else>
+              <div 
+                v-for="(pos, idx) in getCachedPositions(getChainInfo(scope.row))" 
+                :key="`${scope.row.index}-chain-${idx}`" 
+                class="position-item"
+              >
+                <div class="position-title">{{ pos.title }}</div>
+                <div class="position-details">
+                  <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                    {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                  </el-tag>
+                  <span class="position-amount">数量: {{ pos.amount }}</span>
+                  <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+                </div>
               </div>
+            </template>
+          </div>
+          <!-- 未解析时：如果有搜索条件，尝试解析并过滤显示；否则显示原始字符串 -->
+          <template v-else-if="getChainInfo(scope.row)">
+            <template v-if="filters.positionSearch">
+              <!-- 尝试解析并过滤 -->
+              <div class="position-list">
+                <template v-if="filterPositionsBySearch(getCachedPositions(getChainInfo(scope.row)), filters.positionSearch).length > 0">
+                  <div 
+                    v-for="(pos, idx) in filterPositionsBySearch(getCachedPositions(getChainInfo(scope.row)), filters.positionSearch)" 
+                    :key="`${scope.row.index}-chain-raw-${idx}`" 
+                    class="position-item"
+                  >
+                    <div class="position-title">{{ pos.title }}</div>
+                    <div class="position-details">
+                      <el-tag :type="pos.amount >= 0 ? 'success' : 'danger'" size="small">
+                        {{ pos.option || (pos.amount >= 0 ? 'YES' : 'NO') }}
+                      </el-tag>
+                      <span class="position-amount">数量: {{ pos.amount }}</span>
+                      <span v-if="pos.avgPrice" class="position-price">均价: {{ pos.avgPrice }}</span>
+                    </div>
+                  </div>
+                </template>
+                <span v-else class="empty-text">无匹配的仓位</span>
+              </div>
+            </template>
+            <div v-else class="raw-data-text">
+              {{ getChainInfo(scope.row) }}
             </div>
-          </div>
-          <!-- 未解析时直接显示原始字符串 -->
-          <div v-else-if="getChainInfo(scope.row)" class="raw-data-text">
-            {{ getChainInfo(scope.row) }}
-          </div>
+          </template>
           <span v-else class="empty-text">暂无数据</span>
         </template>
       </el-table-column>
 
       <el-table-column label="信息差" width="400">
         <template #default="scope">
-          <div v-if="getChainInfo(scope.row) && getPositionDifferences(scope.row).length > 0" class="position-list">
-            <div 
-              v-for="(diff, idx) in getPositionDifferences(scope.row)" 
-              :key="`${scope.row.index}-diff-${idx}`" 
-              class="position-item"
-            >
-              <div class="position-title">{{ diff.title }}</div>
-              <div class="position-details">
-                <span class="difference-value" :class="getDifferenceClass(diff.difference)">
-                  信息差: {{ formatDifference(diff.difference) }}
-                </span>
-                <span class="position-amount">持有: {{ diff.holdingAmount }}</span>
-                <span class="position-amount">链上: {{ diff.chainAmount }}</span>
+          <div v-if="getChainInfo(scope.row) && getPositionDifferences(scope.row).length > 0" class="position-list" v-memo="[getChainInfo(scope.row), scope.row.a, filters.positionSearch]">
+            <template v-if="filters.positionSearch">
+              <template v-if="filterDifferencesBySearch(getPositionDifferences(scope.row), filters.positionSearch).length > 0">
+                <div 
+                  v-for="(diff, idx) in filterDifferencesBySearch(getPositionDifferences(scope.row), filters.positionSearch)" 
+                  :key="`${scope.row.index}-diff-${idx}`" 
+                  class="position-item"
+                >
+                  <div class="position-title">{{ diff.title }}</div>
+                  <div class="position-details">
+                    <span class="difference-value" :class="getDifferenceClass(diff.difference)">
+                      信息差: {{ formatDifference(diff.difference) }}
+                    </span>
+                    <span class="position-amount">持有: {{ diff.holdingAmount }}</span>
+                    <span class="position-amount">链上: {{ diff.chainAmount }}</span>
+                  </div>
+                </div>
+              </template>
+              <span v-else class="empty-text">无匹配的仓位</span>
+            </template>
+            <template v-else>
+              <div 
+                v-for="(diff, idx) in getPositionDifferences(scope.row)" 
+                :key="`${scope.row.index}-diff-${idx}`" 
+                class="position-item"
+              >
+                <div class="position-title">{{ diff.title }}</div>
+                <div class="position-details">
+                  <span class="difference-value" :class="getDifferenceClass(diff.difference)">
+                    信息差: {{ formatDifference(diff.difference) }}
+                  </span>
+                  <span class="position-amount">持有: {{ diff.holdingAmount }}</span>
+                  <span class="position-amount">链上: {{ diff.chainAmount }}</span>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
           <span v-else-if="!getChainInfo(scope.row)" class="empty-text">暂无链上数据</span>
           <span v-else class="empty-text">无差异</span>
@@ -465,44 +584,125 @@
       <el-table-column label="挂单仓位 (b)" width="400">
         <template #default="scope">
           <!-- 如果已解析，显示解析后的数据 -->
-          <div v-if="isRowParsed(scope.row) && scope.row.b" class="position-list" v-memo="[scope.row.b, isRowParsed(scope.row)]">
-            <div 
-              v-for="(order, idx) in getCachedOrders(scope.row.b)" 
-              :key="`${scope.row.index}-order-${idx}`" 
-              class="position-item"
-            >
-              <div class="position-title">{{ order.title }}</div>
-              <div class="position-details">
-                <!-- 新格式：显示买卖方向和选项 -->
-                <template v-if="order.buySellDirection !== undefined">
-                  <el-tag 
-                    :type="order.buySellDirection === 'Buy' ? 'success' : 'danger'" 
-                    size="small"
-                  >
-                    {{ order.buySellDirection }}
-                  </el-tag>
-                  <el-tag 
-                    :type="order.option === 'YES' ? 'success' : 'danger'" 
-                    size="small"
-                    style="margin-left: 4px;"
-                  >
-                    {{ order.option }}
-                  </el-tag>
-                  <span class="position-price" style="margin-left: 8px;">价格: {{ order.price }}</span>
-                  <span class="position-amount" style="margin-left: 8px;">进度: {{ order.progress }}</span>
-                </template>
-                <!-- 兼容旧格式：只显示价格和进度 -->
-                <template v-else>
-                  <span class="position-price">{{ order.price }}</span>
-                  <span class="position-amount">{{ order.progress }}</span>
-                </template>
+          <div v-if="isRowParsed(scope.row) && scope.row.b" class="position-list" v-memo="[scope.row.b, isRowParsed(scope.row), filters.positionSearch]">
+            <template v-if="filters.positionSearch">
+              <template v-if="filterOrdersBySearch(getCachedOrders(scope.row.b), filters.positionSearch).length > 0">
+                <div 
+                  v-for="(order, idx) in filterOrdersBySearch(getCachedOrders(scope.row.b), filters.positionSearch)" 
+                  :key="`${scope.row.index}-order-${idx}`" 
+                  class="position-item"
+                >
+                  <div class="position-title">{{ order.title }}</div>
+                  <div class="position-details">
+                    <!-- 新格式：显示买卖方向和选项 -->
+                    <template v-if="order.buySellDirection !== undefined">
+                      <el-tag 
+                        :type="order.buySellDirection === 'Buy' ? 'success' : 'danger'" 
+                        size="small"
+                      >
+                        {{ order.buySellDirection }}
+                      </el-tag>
+                      <el-tag 
+                        :type="order.option === 'YES' ? 'success' : 'danger'" 
+                        size="small"
+                        style="margin-left: 4px;"
+                      >
+                        {{ order.option }}
+                      </el-tag>
+                      <span class="position-price" style="margin-left: 8px;">价格: {{ order.price }}</span>
+                      <span class="position-amount" style="margin-left: 8px;">进度: {{ order.progress }}</span>
+                    </template>
+                    <!-- 兼容旧格式：只显示价格和进度 -->
+                    <template v-else>
+                      <span class="position-price">{{ order.price }}</span>
+                      <span class="position-amount">{{ order.progress }}</span>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <span v-else class="empty-text">无匹配的仓位</span>
+            </template>
+            <template v-else>
+              <div 
+                v-for="(order, idx) in getCachedOrders(scope.row.b)" 
+                :key="`${scope.row.index}-order-${idx}`" 
+                class="position-item"
+              >
+                <div class="position-title">{{ order.title }}</div>
+                <div class="position-details">
+                  <!-- 新格式：显示买卖方向和选项 -->
+                  <template v-if="order.buySellDirection !== undefined">
+                    <el-tag 
+                      :type="order.buySellDirection === 'Buy' ? 'success' : 'danger'" 
+                      size="small"
+                    >
+                      {{ order.buySellDirection }}
+                    </el-tag>
+                    <el-tag 
+                      :type="order.option === 'YES' ? 'success' : 'danger'" 
+                      size="small"
+                      style="margin-left: 4px;"
+                    >
+                      {{ order.option }}
+                    </el-tag>
+                    <span class="position-price" style="margin-left: 8px;">价格: {{ order.price }}</span>
+                    <span class="position-amount" style="margin-left: 8px;">进度: {{ order.progress }}</span>
+                  </template>
+                  <!-- 兼容旧格式：只显示价格和进度 -->
+                  <template v-else>
+                    <span class="position-price">{{ order.price }}</span>
+                    <span class="position-amount">{{ order.progress }}</span>
+                  </template>
+                </div>
               </div>
+            </template>
+          </div>
+          <!-- 未解析时：如果有搜索条件，尝试解析并过滤显示；否则显示原始字符串 -->
+          <template v-else-if="scope.row.b">
+            <template v-if="filters.positionSearch">
+              <!-- 尝试解析并过滤 -->
+              <div class="position-list">
+                <template v-if="filterOrdersBySearch(getCachedOrders(scope.row.b), filters.positionSearch).length > 0">
+                  <div 
+                    v-for="(order, idx) in filterOrdersBySearch(getCachedOrders(scope.row.b), filters.positionSearch)" 
+                    :key="`${scope.row.index}-order-raw-${idx}`" 
+                    class="position-item"
+                  >
+                    <div class="position-title">{{ order.title }}</div>
+                    <div class="position-details">
+                      <!-- 新格式：显示买卖方向和选项 -->
+                      <template v-if="order.buySellDirection !== undefined">
+                        <el-tag 
+                          :type="order.buySellDirection === 'Buy' ? 'success' : 'danger'" 
+                          size="small"
+                        >
+                          {{ order.buySellDirection }}
+                        </el-tag>
+                        <el-tag 
+                          :type="order.option === 'YES' ? 'success' : 'danger'" 
+                          size="small"
+                          style="margin-left: 4px;"
+                        >
+                          {{ order.option }}
+                        </el-tag>
+                        <span class="position-price" style="margin-left: 8px;">价格: {{ order.price }}</span>
+                        <span class="position-amount" style="margin-left: 8px;">进度: {{ order.progress }}</span>
+                      </template>
+                      <!-- 兼容旧格式：只显示价格和进度 -->
+                      <template v-else>
+                        <span class="position-price">{{ order.price }}</span>
+                        <span class="position-amount">{{ order.progress }}</span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <span v-else class="empty-text">无匹配的仓位</span>
+              </div>
+            </template>
+            <div v-else class="raw-data-text">
+              {{ scope.row.b }}
             </div>
-          </div>
-          <!-- 未解析时直接显示原始字符串 -->
-          <div v-else-if="scope.row.b" class="raw-data-text">
-            {{ scope.row.b }}
-          </div>
+          </template>
           <span v-else class="empty-text">暂无数据</span>
         </template>
       </el-table-column>
@@ -835,6 +1035,7 @@ const filters = ref({
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
+  showNoPosition: false,  // 显示无持有仓位
   showHasDifference: false,  // 显示与链上信息有差额
   openTimeGreaterThanHours: null,  // 打开时间大于X小时
   positionTimeGreaterThanHours: null  // 仓位抓取时间大于X小时
@@ -850,6 +1051,7 @@ const activeFilters = ref({
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
+  showNoPosition: false,  // 显示无持有仓位
   showHasDifference: false,  // 显示与链上信息有差额
   openTimeGreaterThanHours: null,  // 打开时间大于X小时
   positionTimeGreaterThanHours: null  // 仓位抓取时间大于X小时
@@ -921,6 +1123,7 @@ const applyFilters = () => {
     showNoAddress: filters.value.showNoAddress,
     showDuplicateAddress: filters.value.showDuplicateAddress,
     showNoPoints: filters.value.showNoPoints,
+    showNoPosition: filters.value.showNoPosition,
     showHasDifference: filters.value.showHasDifference,
     openTimeGreaterThanHours: isNaN(openTimeHours) ? null : openTimeHours,
     positionTimeGreaterThanHours: isNaN(positionTimeHours) ? null : positionTimeHours
@@ -942,6 +1145,7 @@ const clearFilters = () => {
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
+    showNoPosition: false,
     showHasDifference: false,
     openTimeGreaterThanHours: null,
     positionTimeGreaterThanHours: null
@@ -991,6 +1195,7 @@ const filteredTableData = computed(() => {
                     filters.showNoAddress ||
                     filters.showDuplicateAddress ||
                     filters.showNoPoints ||
+                    filters.showNoPosition ||
                     filters.showHasDifference ||
                     (filters.openTimeGreaterThanHours !== null && filters.openTimeGreaterThanHours !== undefined) ||
                     (filters.positionTimeGreaterThanHours !== null && filters.positionTimeGreaterThanHours !== undefined)
@@ -1065,6 +1270,13 @@ const filteredTableData = computed(() => {
       if (filters.showNoPoints) {
         if (row.k && row.k.trim()) {
           return false  // 有积分，不显示
+        }
+      }
+      
+      // 显示无持有仓位筛选
+      if (filters.showNoPosition) {
+        if (row.a && row.a.trim()) {
+          return false  // 有持有仓位，不显示
         }
       }
       
@@ -1542,6 +1754,39 @@ const getCachedPositions = (posStr) => {
 const getCachedOrders = (ordersStr) => {
   if (!ordersStr) return []
   return parseOpenOrders(ordersStr)  // parseOpenOrders 内部已经有缓存机制
+}
+
+/**
+ * 根据仓位搜索条件过滤持仓列表
+ */
+const filterPositionsBySearch = (positions, searchTerm) => {
+  if (!searchTerm || !positions || positions.length === 0) return positions
+  const lowerSearchTerm = searchTerm.toLowerCase()
+  return positions.filter(pos => {
+    return pos.title && pos.title.toLowerCase().includes(lowerSearchTerm)
+  })
+}
+
+/**
+ * 根据仓位搜索条件过滤挂单列表
+ */
+const filterOrdersBySearch = (orders, searchTerm) => {
+  if (!searchTerm || !orders || orders.length === 0) return orders
+  const lowerSearchTerm = searchTerm.toLowerCase()
+  return orders.filter(order => {
+    return order.title && order.title.toLowerCase().includes(lowerSearchTerm)
+  })
+}
+
+/**
+ * 根据仓位搜索条件过滤信息差列表
+ */
+const filterDifferencesBySearch = (differences, searchTerm) => {
+  if (!searchTerm || !differences || differences.length === 0) return differences
+  const lowerSearchTerm = searchTerm.toLowerCase()
+  return differences.filter(diff => {
+    return diff.title && diff.title.toLowerCase().includes(lowerSearchTerm)
+  })
 }
 
 /**

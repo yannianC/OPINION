@@ -2426,34 +2426,52 @@ def get_position_from_api(serial_number, trending, option_type):
     Returns:
         float: 仓位数量，失败返回None
     """
-    try:
-        url = "https://enstudyai.fatedreamer.com/t3/api/fingerprint/position"
-        payload = {
-            "fingerprintNo": str(serial_number),
-            "title": trending
-        }
-        
-        response = requests.post(url, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            position = data.get("position", {})
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            url = "https://enstudyai.fatedreamer.com/t3/api/fingerprint/position"
+            payload = {
+                "fingerprintNo": str(serial_number),
+                "title": trending
+            }
             
-            if option_type == "YES":
-                amount = position.get("yes_amount")
-            else:  # NO
-                amount = position.get("no_amount")
+            response = requests.post(url, json=payload, timeout=10)
             
-            if amount is not None:
-                return float(amount)
+            if response.status_code == 200:
+                data = response.json()
+                position = data.get("position", {})
+                
+                if option_type == "YES":
+                    amount = position.get("yes_amount")
+                else:  # NO
+                    amount = position.get("no_amount")
+                
+                if amount is not None:
+                    return float(amount)
+                else:
+                    if attempt < max_retries - 1:
+                        log_print(f"[{serial_number}] ⚠ 未获取到仓位数据，{15}秒后重试 ({attempt + 1}/{max_retries})")
+                        time.sleep(15)
+                        continue
+                    return None
             else:
+                if attempt < max_retries - 1:
+                    log_print(f"[{serial_number}] ⚠ API请求失败，状态码: {response.status_code}，{15}秒后重试 ({attempt + 1}/{max_retries})")
+                    time.sleep(15)
+                    continue
+                else:
+                    log_print(f"[{serial_number}] ⚠ API请求失败，状态码: {response.status_code}")
+                    return None
+        except Exception as e:
+            if attempt < max_retries - 1:
+                log_print(f"[{serial_number}] ⚠ 获取链上仓位数据失败: {str(e)}，{15}秒后重试 ({attempt + 1}/{max_retries})")
+                time.sleep(15)
+                continue
+            else:
+                log_print(f"[{serial_number}] ⚠ 获取链上仓位数据失败: {str(e)}")
                 return None
-        else:
-            log_print(f"[{serial_number}] ⚠ API请求失败，状态码: {response.status_code}")
-            return None
-    except Exception as e:
-        log_print(f"[{serial_number}] ⚠ 获取链上仓位数据失败: {str(e)}")
-        return None
+    
+    return None
 
 
 def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None):
@@ -2761,9 +2779,6 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 log_print(f"[{serial_number}] [{task_label}] Position未检测到变化超时，但对方已变化，保留挂单")
                 return False, "Position未检测到变化超时，但对方已变化，保留挂单"
             
-            # 对方未变化，需要取消挂单
-            log_print(f"[{serial_number}] [{task_label}] 对方未变化，开始取消挂单...")
-            
             # 找到第一个tr的最后一个td下的svg并点击
             first_tr = tr_list[0]
             tds = first_tr.find_elements(By.TAG_NAME, "td")
@@ -2776,7 +2791,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not svg_elements or len(svg_elements) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时，挂单取消失败"
             
             log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
             svg_elements[0].click()
@@ -2808,7 +2823,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not confirm_found:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
-                return False, "Position未检测到变化超时"
+                return False, "Position未检测到变化超时，挂单取消失败"
             
             # 等待10秒
             log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")

@@ -1845,7 +1845,7 @@
           <h3>链上手续费详情</h3>
           <button class="modal-close" @click="showFeeDetailDialog = false">×</button>
         </div>
-        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div class="modal-body">
           <table class="data-table" style="width: 100%;">
             <thead>
               <tr>
@@ -7661,7 +7661,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   width: 100%;
   max-width: 100vw;
-  overflow-x: hidden;
+  overflow-x: auto;
   box-sizing: border-box;
 }
 
@@ -7672,6 +7672,9 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  min-width: 0;
 }
 
 .top-header h1 {
@@ -7684,6 +7687,8 @@ onUnmounted(() => {
 .header-actions {
   display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .btn-header {
@@ -7742,6 +7747,8 @@ onUnmounted(() => {
 
 .main {
   padding: 2rem;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .container {
@@ -7752,6 +7759,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   display: grid;
   gap: 2rem;
+  min-width: 0;
 }
 
 .form-sections {
@@ -7764,6 +7772,55 @@ onUnmounted(() => {
   .form-sections {
     grid-template-columns: 1fr;
   }
+  
+  .main {
+    padding: 1rem;
+  }
+  
+  .container {
+    padding: 0 0.5rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .top-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+  }
+  
+  .top-header h1 {
+    font-size: 1.4rem;
+  }
+  
+  .header-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  
+  .section {
+    padding: 1rem;
+  }
+  
+  .section-header-with-filter {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .trending-filter .filter-input {
+    width: 100%;
+    max-width: 250px;
+  }
+  
+  .main {
+    padding: 0.5rem;
+  }
+  
+  .container {
+    padding: 0;
+    gap: 1rem;
+  }
 }
 
 .section {
@@ -7771,6 +7828,8 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 2rem;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .auto-hedge-section {
@@ -9380,6 +9439,34 @@ onUnmounted(() => {
   justify-content: center;
   z-index: 1000;
   padding: 2rem;
+  overflow: auto;
+}
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 1rem;
+  }
+  
+  .modal-content {
+    max-height: 95vh;
+  }
+  
+  .modal-header {
+    padding: 1rem;
+  }
+  
+  .modal-header h3 {
+    font-size: 1.1rem;
+  }
+  
+  .modal-form {
+    padding: 1rem;
+  }
+  
+  .modal-actions {
+    padding: 1rem;
+    flex-wrap: wrap;
+  }
 }
 
 .modal-content {
@@ -9389,6 +9476,7 @@ onUnmounted(() => {
   max-width: 600px;
   width: 100%;
   max-height: 90vh;
+  overflow-x: auto;
   overflow-y: auto;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
@@ -9439,6 +9527,39 @@ onUnmounted(() => {
   padding: 2rem;
   display: grid;
   gap: 1.5rem;
+}
+
+.modal-body {
+  padding: 1.5rem 2rem;
+  max-height: 70vh;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 600px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.data-table th {
+  background-color: #f8f9fa;
+  font-weight: 600;
+  color: #333;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.data-table tbody tr:hover {
+  background-color: #f8f9fa;
 }
 
 .modal-actions {

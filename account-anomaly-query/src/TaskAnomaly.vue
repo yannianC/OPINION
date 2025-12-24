@@ -34,6 +34,17 @@
               <option value="3">分组3</option>
             </select>
           </div>
+          <div class="form-group" v-if="queryMode === 1">
+            <label>交易方向:</label>
+            <select 
+              v-model="sideFilter" 
+              class="group-select"
+            >
+              <option value="all">全部</option>
+              <option value="buy">买入</option>
+              <option value="sell">卖出</option>
+            </select>
+          </div>
           <div class="form-group">
             <label>开始时间:</label>
             <input 
@@ -511,6 +522,7 @@ export default {
       expandedGroups: {}, // 模式2中展开的分组 {trendingId: {successYes: true, successNo: true}}
       selectedGroup: 'default', // 当前选择的分组
       groupConfigList: [], // 分组配置列表
+      sideFilter: 'all', // 模式1的交易方向筛选：'all'全部, 'buy'买入, 'sell'卖出
       toast: {
         show: false,
         message: '',
@@ -539,60 +551,87 @@ export default {
   computed: {
     // 过滤后的结果
     filteredResults() {
-      if (!this.filterKeyword || this.filterKeyword.trim() === '') {
-        return this.results
+      // 先应用关键词筛选
+      let keywordFiltered = this.results
+      if (this.filterKeyword && this.filterKeyword.trim() !== '') {
+        const keyword = this.filterKeyword.trim().toLowerCase()
+        keywordFiltered = {}
+        
+        if (this.queryMode === 1) {
+          // 模式1：过滤每个任务组：如果组内任何一个任务匹配关键词，就显示整个组
+          Object.keys(this.results).forEach(groupKey => {
+            const group = this.results[groupKey]
+            
+            // 检查组内是否有任何任务匹配关键词
+            const hasMatch = group.tasks.some(task => {
+              // 检查失败原因是否包含关键词（同时检查原始和格式化后的文本）
+              const originalMsg = (task.msg || '').toLowerCase()
+              const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
+              return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
+            })
+            
+            // 如果有匹配，返回整个组（包含所有任务）
+            if (hasMatch) {
+              keywordFiltered[groupKey] = {
+                ...group,
+                tasks: group.tasks // 返回所有任务，而不是只返回匹配的任务
+              }
+            }
+          })
+        } else {
+          // 模式2：检查所有分类的任务
+          Object.keys(this.results).forEach(groupKey => {
+            const group = this.results[groupKey]
+            
+            // 检查所有任务列表（成功YES、成功NO、失败YES、失败NO）
+            const allTasks = [
+              ...(group.successYesTasks || []),
+              ...(group.successNoTasks || []),
+              ...(group.failYesTasks || []),
+              ...(group.failNoTasks || [])
+            ]
+            
+            const hasMatch = allTasks.some(task => {
+              const originalMsg = (task.msg || '').toLowerCase()
+              const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
+              return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
+            })
+            
+            if (hasMatch) {
+              keywordFiltered[groupKey] = { ...group }
+            }
+          })
+        }
       }
       
-      const keyword = this.filterKeyword.trim().toLowerCase()
-      const filtered = {}
-      
-      if (this.queryMode === 1) {
-        // 模式1：过滤每个任务组：如果组内任何一个任务匹配关键词，就显示整个组
-        Object.keys(this.results).forEach(groupKey => {
-          const group = this.results[groupKey]
+      // 模式1时应用交易方向筛选
+      if (this.queryMode === 1 && this.sideFilter !== 'all') {
+        const sideFiltered = {}
+        Object.keys(keywordFiltered).forEach(groupKey => {
+          const group = keywordFiltered[groupKey]
           
-          // 检查组内是否有任何任务匹配关键词
-          const hasMatch = group.tasks.some(task => {
-            // 检查失败原因是否包含关键词（同时检查原始和格式化后的文本）
-            const originalMsg = (task.msg || '').toLowerCase()
-            const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
-            return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
+          // 根据 sideFilter 筛选任务
+          const filteredTasks = group.tasks.filter(task => {
+            if (this.sideFilter === 'buy') {
+              return task.side === 1 // 买入
+            } else if (this.sideFilter === 'sell') {
+              return task.side !== 1 // 卖出
+            }
+            return true
           })
           
-          // 如果有匹配，返回整个组（包含所有任务）
-          if (hasMatch) {
-            filtered[groupKey] = {
+          // 如果筛选后还有任务，则保留这个组
+          if (filteredTasks.length > 0) {
+            sideFiltered[groupKey] = {
               ...group,
-              tasks: group.tasks // 返回所有任务，而不是只返回匹配的任务
+              tasks: filteredTasks
             }
           }
         })
-      } else {
-        // 模式2：检查所有分类的任务
-        Object.keys(this.results).forEach(groupKey => {
-          const group = this.results[groupKey]
-          
-          // 检查所有任务列表（成功YES、成功NO、失败YES、失败NO）
-          const allTasks = [
-            ...(group.successYesTasks || []),
-            ...(group.successNoTasks || []),
-            ...(group.failYesTasks || []),
-            ...(group.failNoTasks || [])
-          ]
-          
-          const hasMatch = allTasks.some(task => {
-            const originalMsg = (task.msg || '').toLowerCase()
-            const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
-            return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
-          })
-          
-          if (hasMatch) {
-            filtered[groupKey] = { ...group }
-          }
-        })
+        return sideFiltered
       }
       
-      return filtered
+      return keywordFiltered
     },
     
     // 获取带索引的任务组列表，用于颜色循环（模式1）
@@ -718,6 +757,7 @@ export default {
         this.expandedGroups = {}
         this.hasQueried = false
         this.filterKeyword = ''
+        this.sideFilter = 'all' // 重置交易方向筛选
       }
     },
     

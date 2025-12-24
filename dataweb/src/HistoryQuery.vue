@@ -200,6 +200,11 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
+          <el-checkbox v-model="filters.showNoPosition" @change="applyFilters">
+            显示无持有仓位
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
           <label>打开时间大于:</label>
           <el-input 
             v-model.number="filters.openTimeGreaterThanHours" 
@@ -388,6 +393,7 @@ const filters = ref({
   showNoAddress: false,
   showDuplicateAddress: false,
   showNoPoints: false,
+  showNoPosition: false,  // 显示无持有仓位
   openTimeGreaterThanHours: null  // 打开时间大于X小时
 })
 
@@ -463,6 +469,7 @@ const filteredTableData = computed(() => {
                     filterVals.showNoAddress ||
                     filterVals.showDuplicateAddress ||
                     filterVals.showNoPoints ||
+                    filterVals.showNoPosition ||
                     (filterVals.openTimeGreaterThanHours !== null && filterVals.openTimeGreaterThanHours !== undefined && filterVals.openTimeGreaterThanHours !== '')
   
   if (!hasFilters) {
@@ -528,6 +535,13 @@ const filteredTableData = computed(() => {
     if (filterVals.showNoPoints) {
       if (row.k && row.k.trim()) {
         return false
+      }
+    }
+    
+    // 显示无持有仓位筛选
+    if (filterVals.showNoPosition) {
+      if (row.a && row.a.trim()) {
+        return false  // 有持有仓位，不显示
       }
     }
     
@@ -793,6 +807,7 @@ const clearFilters = () => {
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
+    showNoPosition: false,
     openTimeGreaterThanHours: null
   }
   currentPageNum.value = 1
