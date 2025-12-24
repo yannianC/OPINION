@@ -64,6 +64,9 @@
       <el-button type="primary" @click="getWalletAddresses" :loading="gettingWalletAddresses">
         获取钱包地址
       </el-button>
+      <el-button type="info" @click="doSnapAccountConfig" :loading="snappingAccount">
+        手动快照
+      </el-button>
       <span class="red-count-label">变红仓位数量：<strong>{{ redPositionCount }}</strong></span>
     </div>
     
@@ -761,6 +764,7 @@ const refreshingFiltered = ref(false)  // 刷新筛选结果仓位的加载状�
 const parsingAll = ref(false)  // 是否正在全部解析
 const deduplicating = ref(false)  // 地址去重的加载状态
 const gettingWalletAddresses = ref(false)  // 获取钱包地址的加载状态
+const snappingAccount = ref(false)  // 手动快照的加载状态
 const chainDataMap = ref(new Map())  // 链上信息数据映射，key为wallet_address（小写），value为链上信息字符串
 let nextId = 1
 
@@ -3326,6 +3330,34 @@ const getContractCreatorWithProxy = async (address, proxyConfig) => {
   } catch (error) {
     console.error(`[请求失败] 地址: ${address}, 错误:`, error)
     throw error
+  }
+}
+
+/**
+ * 手动快照
+ * 调用 /boost/doSnapAccountConfig 接口
+ */
+const doSnapAccountConfig = async () => {
+  snappingAccount.value = true
+  
+  try {
+    const response = await axios.get(`${API_BASE_URL}/boost/doSnapAccountConfig`)
+    
+    if (response.data) {
+      ElMessage.success('手动快照成功')
+      // 可选：快照成功后刷新列表
+      setTimeout(async () => {
+        await loadData(true)
+      }, 1000)
+    } else {
+      ElMessage.warning('手动快照完成，但未返回数据')
+    }
+  } catch (error) {
+    console.error('手动快照失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '网络错误'
+    ElMessage.error('手动快照失败: ' + errorMsg)
+  } finally {
+    snappingAccount.value = false
   }
 }
 

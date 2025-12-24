@@ -22,6 +22,19 @@
             </div>
           </div>
           <div class="form-group">
+            <label>分组:</label>
+            <select 
+              v-model="selectedGroup" 
+              class="group-select"
+              @change="onGroupChange"
+            >
+              <option value="default">默认</option>
+              <option value="1">分组1</option>
+              <option value="2">分组2</option>
+              <option value="3">分组3</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>开始时间:</label>
             <input 
               v-model="query.startTime" 
@@ -489,13 +502,15 @@ export default {
         startTime: '',
         endTime: ''
       },
-      recentHours: 1, // 默认查询最近1小时
+      recentHours: 3, // 默认查询最近3小时
       loading: false,
       results: {},
       hasQueried: false,
       filterKeyword: '', // 筛选关键词
       filterHistory: [], // 筛选历史
       expandedGroups: {}, // 模式2中展开的分组 {trendingId: {successYes: true, successNo: true}}
+      selectedGroup: 'default', // 当前选择的分组
+      groupConfigList: [], // 分组配置列表
       toast: {
         show: false,
         message: '',
@@ -506,6 +521,20 @@ export default {
   mounted() {
     // 从本地存储加载筛选历史
     this.loadFilterHistory()
+    
+    // 解析URL参数
+    this.parseUrlParams()
+    
+    // 如果有分组参数，加载分组配置并自动查询
+    if (this.selectedGroup !== 'default') {
+      this.loadGroupConfig(this.selectedGroup).then(() => {
+        // 自动查询最近3小时
+        this.queryRecentHours()
+      })
+    } else {
+      // 默认分组也自动查询最近3小时
+      this.queryRecentHours()
+    }
   },
   computed: {
     // 过滤后的结果
@@ -624,6 +653,62 @@ export default {
     }
   },
   methods: {
+    // 解析URL参数
+    parseUrlParams() {
+      const hash = window.location.hash
+      const params = new URLSearchParams(hash.split('?')[1] || '')
+      const groupParam = params.get('group')
+      
+      if (groupParam) {
+        // 参数映射：分组1传2->收到2选分组2, 分组2传3->收到3选分组3, 分组3传1->收到1选分组3
+        if (groupParam === '2') {
+          this.selectedGroup = '2' // 收到2，对应分组2
+        } else if (groupParam === '3') {
+          this.selectedGroup = '3' // 收到3，对应分组3
+        } else if (groupParam === '1') {
+          this.selectedGroup = '3' // 收到1，对应分组3
+        }
+      }
+    },
+    
+    // 加载分组配置
+    async loadGroupConfig(groupNo) {
+      try {
+        const response = await axios.get(`https://sg.bicoin.com.cn/99l/mission/exchangeConfigByGroupNo?groupNo=${groupNo}`)
+        
+        if (response.data && response.data.code === 0) {
+          this.groupConfigList = response.data.data.configList || []
+          console.log(`分组${groupNo}配置加载成功，共 ${this.groupConfigList.length} 个主题`)
+          return true
+        } else {
+          console.error('获取分组配置失败')
+          this.showToast('获取分组配置失败', 'error')
+          return false
+        }
+      } catch (error) {
+        console.error('加载分组配置失败:', error)
+        this.showToast('加载分组配置失败', 'error')
+        return false
+      }
+    },
+    
+    // 分组变化处理
+    async onGroupChange() {
+      if (this.selectedGroup === 'default') {
+        this.groupConfigList = []
+      } else {
+        await this.loadGroupConfig(this.selectedGroup)
+      }
+    },
+    
+    // 检查主题是否在分组配置中
+    isTopicInGroupConfig(trending) {
+      if (this.selectedGroup === 'default') {
+        return true // 默认分组显示所有主题
+      }
+      return this.groupConfigList.some(config => config.trending === trending)
+    },
+    
     // 切换模式
     switchMode(mode) {
       if (this.queryMode !== mode) {
@@ -976,10 +1061,16 @@ export default {
           // 1. status === 2：跳过（成功任务）
           // 2. status === 3：直接显示（失败任务）
           // 3. status !== 2 && status !== 3：检查 createTime，如果距离现在超过20分钟才显示
+          // 4. 如果是分组模式，只显示分组配置中的主题
           const failedTasks = []
           allTasksMap.forEach((task, taskId) => {
             // 跳过状态为2（成功）的任务
             if (task.status === 2) {
+              return
+            }
+            
+            // 如果是分组模式，检查主题是否在分组配置中
+            if (this.selectedGroup !== 'default' && !this.isTopicInGroupConfig(task.trending)) {
               return
             }
             
@@ -1067,7 +1158,7 @@ export default {
           })
           
           // 第四步：为每个任务计算同组任务ID，并转换为对象格式用于显示
-          // 先转换为数组，然后按照任务1的开始时间排序
+          // 先转换为数组，然后根据分组模式决定排序方式
           const groupsArray = []
           groupMap.forEach((group, internalGroupId) => {
             // 为组内每个任务计算同组任务ID
@@ -1098,18 +1189,34 @@ export default {
             const task1 = tasksWithGroupId.find(t => !t.tp1)
             const displayKey = task1 ? task1.id : group.tasks[0].id
             
+            // 获取主题（trending）用于分组排序
+            const trending = task1 ? task1.trending : group.tasks[0].trending
+            
             groupsArray.push({
               groupId: displayKey, // 用于显示
               internalGroupId: internalGroupId, // 用于颜色计算，确保同组任务使用相同颜色
               tasks: tasksWithGroupId,
-              task1CreateTime: group.task1CreateTime
+              task1CreateTime: group.task1CreateTime,
+              trending: trending // 添加trending用于分组排序
             })
           })
           
-          // 按照任务1的开始时间排序（从早到晚）
-          groupsArray.sort((a, b) => {
-            return a.task1CreateTime - b.task1CreateTime
-          })
+          // 排序：如果是分组模式，按事件（trending）分组；否则按时间排序
+          if (this.selectedGroup !== 'default') {
+            // 分组模式：按trending分组，相同trending的放在一起
+            groupsArray.sort((a, b) => {
+              // 先按trending排序
+              if (a.trending < b.trending) return -1
+              if (a.trending > b.trending) return 1
+              // 相同trending的，按时间排序
+              return a.task1CreateTime - b.task1CreateTime
+            })
+          } else {
+            // 默认模式：按时间排序
+            groupsArray.sort((a, b) => {
+              return a.task1CreateTime - b.task1CreateTime
+            })
+          }
           
           // 转换为对象格式，使用排序后的顺序
           const sortedGroups = {}
@@ -1184,6 +1291,10 @@ export default {
       // 处理每个分组：统计成功/失败，分类任务
       const processedGroups = {}
       groupsByTrendingId.forEach((group, trendingId) => {
+        // 如果是分组模式，只处理分组配置中的主题
+        if (this.selectedGroup !== 'default' && !this.isTopicInGroupConfig(group.trending)) {
+          return
+        }
         let successYesAmt = 0
         let successNoAmt = 0
         let failYesAmt = 0
@@ -1467,6 +1578,22 @@ export default {
 }
 
 .datetime-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.group-select {
+  padding: 10px 15px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  min-width: 120px;
+  transition: border-color 0.3s;
+  background: white;
+  cursor: pointer;
+}
+
+.group-select:focus {
   outline: none;
   border-color: #667eea;
 }

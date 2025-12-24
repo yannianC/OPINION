@@ -101,7 +101,7 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "2": "mj@w2ndJ*kX0g8!rnsf",
     "3": "mj@w2ndJ*kX0g8!rnsf",
     "4": "mj@w2ndJ*kX0g8!rnsf",
-    
+    "10": "qwer1234",
     # 电脑组9的特定浏览器配置
     "941": "cx142359.",  # 电脑组9的浏览器941-1000
     "942": "cx142359.",
@@ -163,6 +163,8 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "998": "cx142359.",
     "999": "cx142359.",
     "1000": "cx142359.",
+    
+    "2060": "kaznb3969*m%",
 }
 
 # 电脑组对应的默认密码配置

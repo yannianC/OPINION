@@ -33,6 +33,18 @@
       
       <el-collapse-transition>
         <div v-show="summaryExpanded">
+          <!-- 总计信息 -->
+          <div class="summary-totals">
+            <div class="total-item">
+              <span class="total-label">余额总计:</span>
+              <span class="total-value">{{ formatNumber(summaryTotals.totalBalance) }}</span>
+            </div>
+            <div class="total-item">
+              <span class="total-label">Portfolio总计:</span>
+              <span class="total-value">{{ formatNumber(summaryTotals.totalPortfolio) }}</span>
+            </div>
+          </div>
+          
           <el-table 
             :data="eventTableData" 
             border 
@@ -381,6 +393,12 @@ const filters = ref({
 
 // 事件统计数据
 const eventTableData = ref([])
+
+// 总计数据
+const summaryTotals = ref({
+  totalBalance: 0,
+  totalPortfolio: 0
+})
 
 /**
  * 解析筛选条件的电脑组和浏览器编号
@@ -914,6 +932,24 @@ const calculateEventStats = (data) => {
 }
 
 /**
+ * 计算总计数据（余额总计和Portfolio总计）
+ */
+const calculateSummaryTotals = (data) => {
+  let totalBalance = 0
+  let totalPortfolio = 0
+  
+  for (const row of data) {
+    totalBalance += parseFloat(row.balance) || 0
+    totalPortfolio += parseFloat(row.c) || 0
+  }
+  
+  summaryTotals.value = {
+    totalBalance: totalBalance,
+    totalPortfolio: totalPortfolio
+  }
+}
+
+/**
  * 加载历史数据
  */
 const loadHistoryData = async () => {
@@ -945,6 +981,9 @@ const loadHistoryData = async () => {
       
       // 计算事件统计数据
       eventTableData.value = calculateEventStats(serverData)
+      
+      // 计算总计数据
+      calculateSummaryTotals(serverData)
       
       ElMessage.success(`已加载 ${historyDate.value} 的历史数据，共 ${serverData.length} 条`)
     } else {
@@ -1104,6 +1143,34 @@ const loadHistoryData = async () => {
   margin-top: 20px;
   display: flex;
   justify-content: center;
+}
+
+.summary-totals {
+  display: flex;
+  gap: 30px;
+  padding: 15px 20px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #e4e7ed;
+}
+
+.total-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.total-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #606266;
+}
+
+.total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #409eff;
 }
 </style>
 

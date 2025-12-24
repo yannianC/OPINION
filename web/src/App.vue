@@ -3,6 +3,13 @@
     <header class="top-header">
       <h1>任务管理系统</h1>
       <div class="header-actions">
+        <select v-model="selectedGroup" class="group-select" style="margin-right: 10px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+          <option value="default">默认</option>
+          <option value="1">分组1</option>
+          <option value="2">分组2</option>
+          <option value="3">分组3</option>
+        </select>
+        <button class="btn-header" @click="openTaskAnomaly" style="margin-right: 10px;">查询上上轮日志</button>
         <button class="btn-header" @click="syncConfigFromMarkets">更新配置</button>
         <button class="btn-header" @click="showEditConfigDialog">修改配置</button>
       </div>
@@ -1907,6 +1914,7 @@ const editConfigFilter = ref('')  // 修改配置弹窗的筛选
 const showOnlyValid = ref(false)  // 是否只显示符合对冲条件的
 const editConfigStatusFilter = ref('')  // 修改配置弹窗的状态筛选
 const editConfigBatchFilter = ref('')  // 修改配置弹窗的批次筛选
+const selectedGroup = ref('default')  // 当前选择的分组：default/1/2/3
 
 // 新配置数据
 const newConfig = reactive({
@@ -2888,12 +2896,99 @@ watch(
 )
 
 /**
+ * 打开查询上上轮日志页面
+ */
+const openTaskAnomaly = () => {
+  // 分组映射：分组1->传2, 分组2->传3, 分组3->传1, 默认->不传
+  let groupParam = ''
+  if (selectedGroup.value === '1') {
+    groupParam = '?group=2'
+  } else if (selectedGroup.value === '2') {
+    groupParam = '?group=3'
+  } else if (selectedGroup.value === '3') {
+    groupParam = '?group=1'
+  }
+  // 默认分组不传参数
+  
+  const url = `https://oss.w3id.info/Opanomaly/index.html#/task-anomaly${groupParam}`
+  window.open(url, '_blank')
+}
+
+/**
+ * 加载分组配置
+ */
+const loadGroupConfig = async (groupNo) => {
+  try {
+    console.log(`正在加载分组${groupNo}配置...`)
+    showToast(`正在加载分组${groupNo}配置...`, 'info')
+    
+    const groupResponse = await axios.get(`https://sg.bicoin.com.cn/99l/mission/exchangeConfigByGroupNo?groupNo=${groupNo}`)
+    
+    if (groupResponse.data?.code !== 0) {
+      throw new Error('获取分组配置数据失败')
+    }
+    
+    const groupData = groupResponse.data.data
+    const groupConfigList = groupData.configList || []
+    
+    // 将分组配置转换为标准格式并更新configList
+    configList.value = groupConfigList.map(config => ({
+      ...config,
+      enabled: config.isOpen === 1
+    }))
+    
+    // 更新exchangeList
+    if (groupData.exchangeList) {
+      exchangeList.value = groupData.exchangeList
+    }
+    
+    // 更新活动配置列表（这会隐藏原有的主题列表，显示新的分组主题）
+    updateActiveConfigs()
+    
+    showToast(`分组${groupNo}配置加载成功！共 ${groupConfigList.length} 个主题`, 'success')
+    console.log(`分组${groupNo}配置加载成功，共 ${groupConfigList.length} 个主题`)
+  } catch (error) {
+    console.error('加载分组配置失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    showToast(`加载分组配置失败: ${errorMsg}`, 'error')
+  }
+}
+
+/**
+ * 监听分组选择变化，自动加载对应分组的配置
+ */
+watch(
+  () => selectedGroup.value,
+  (newGroup, oldGroup) => {
+    // 避免初始化时触发（oldGroup为undefined时是初始化）
+    if (oldGroup === undefined) {
+      return
+    }
+    
+    if (newGroup === 'default') {
+      // 切换到默认模式，恢复原始配置
+      fetchExchangeConfig()
+    } else {
+      // 切换到分组模式，加载对应分组的配置
+      loadGroupConfig(newGroup)
+    }
+  }
+)
+
+/**
  * 从 markets 同步配置到 exchangeConfig
  */
 const syncConfigFromMarkets = async () => {
   try {
     showToast('正在同步配置...', 'info')
     
+    // 如果选择了分组模式，调用分组API并替换主题列表
+    if (selectedGroup.value !== 'default') {
+      await loadGroupConfig(selectedGroup.value)
+      return
+    }
+    
+    // 默认模式：保持原有逻辑
     // 1. 并行请求两个接口
     const [marketsResponse, configResponse] = await Promise.all([
       axios.get('https://predictscan.dev/api/markets'),
