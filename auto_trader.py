@@ -6504,7 +6504,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 点击 Position 按钮失败: {str(e)}")
-        return "", False
+        return "", True
 
 
 def get_p_tag_text_from_element(element):
@@ -8918,7 +8918,7 @@ def collect_position_data(driver, browser_id, exchange_name):
                             continue
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
-                            break
+                            return False,""
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
@@ -9383,7 +9383,7 @@ def process_type2_mission(task_data, retry_count=0):
                             continue
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
-                            break
+                            return False,""
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤8: 点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)

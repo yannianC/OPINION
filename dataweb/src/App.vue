@@ -299,6 +299,137 @@
       </div>
     </div>
 
+    <!-- 数据总计表格（默认折叠） -->
+    <div class="summary-section">
+      <div class="summary-header">
+        <h2 class="summary-title">数据总计</h2>
+        <el-button 
+          type="text" 
+          @click="summaryExpanded = !summaryExpanded"
+          class="collapse-btn"
+        >
+          {{ summaryExpanded ? '收起' : '展开' }}
+        </el-button>
+      </div>
+      
+      <el-collapse-transition>
+        <div v-show="summaryExpanded">
+          <!-- 总计信息 -->
+          <div class="summary-totals">
+            <div class="total-item">
+              <span class="total-label">余额总计:</span>
+              <span class="total-value">{{ formatNumber(filteredSummaryTotals.totalBalance) }}</span>
+            </div>
+            <div class="total-item">
+              <span class="total-label">Portfolio总计:</span>
+              <span class="total-value">{{ formatNumber(filteredSummaryTotals.totalPortfolio) }}</span>
+            </div>
+          </div>
+          
+          <el-table 
+            :data="filteredEventTableData" 
+            border 
+            style="width: 100%"
+            max-height="500px"
+          >
+            <el-table-column prop="eventName" label="事件名" width="400" fixed>
+              <template #default="scope">
+                <div class="event-name-cell">{{ scope.row.eventName }}</div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="yes持仓数量" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesPosition, b.yesPosition)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.yesPosition) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.yesPosition) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="no持仓数量" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.noPosition, b.noPosition)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.noPosition) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.noPosition) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="链上yes持仓数量" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.chainYesPosition, b.chainYesPosition)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.chainYesPosition) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.chainYesPosition) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="链上no持仓数量" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.chainNoPosition, b.chainNoPosition)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.chainNoPosition) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.chainNoPosition) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="实际差额" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.actualDiff, b.actualDiff)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.actualDiff) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.actualDiff) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="链上差额" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.chainActualDiff, b.chainActualDiff)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.chainActualDiff) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.chainActualDiff) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="挂单yes数量" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.orderYes, b.orderYes)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.orderYes) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.orderYes) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="挂单no数量" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.orderNo, b.orderNo)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.orderNo) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.orderNo) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="挂单差额" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.orderDiff, b.orderDiff)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.orderDiff) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.orderDiff) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="成交后差额" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.finalDiff, b.finalDiff)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.finalDiff) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.finalDiff) }}
+                </span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="链上成交后差额" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(a.chainFinalDiff, b.chainFinalDiff)">
+              <template #default="scope">
+                <span :class="parseFloat(scope.row.chainFinalDiff) >= 0 ? 'positive' : 'negative'">
+                  {{ formatNumber(scope.row.chainFinalDiff) }}
+                </span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-collapse-transition>
+    </div>
+
     <!-- 数据表格 -->
     <el-table 
       :data="paginatedTableData" 
@@ -967,6 +1098,243 @@ const gettingWalletAddresses = ref(false)  // 获取钱包地址的加载状态
 const snappingAccount = ref(false)  // 手动快照的加载状态
 const chainDataMap = ref(new Map())  // 链上信息数据映射，key为wallet_address（小写），value为链上信息字符串
 let nextId = 1
+
+// 数据总计相关
+const summaryExpanded = ref(false)
+
+/**
+ * 匹配事件名称和链上数据的title
+ */
+const matchEventName = (eventName, chainTitle) => {
+  if (!eventName || !chainTitle) return false
+  
+  // 去除首尾空格后完全匹配
+  const trimmedEvent = eventName.trim()
+  const trimmedChain = chainTitle.trim()
+  if (trimmedEvent === trimmedChain) return true
+  
+  // 去除###后面的部分后匹配
+  const eventBase = trimmedEvent.split('###')[0].trim()
+  const chainBase = trimmedChain.split('###')[0].trim()
+  if (eventBase === chainBase && eventBase.length > 0) return true
+  
+  return false
+}
+
+/**
+ * 计算筛选后数据的事件统计数据
+ */
+const filteredEventTableData = computed(() => {
+  const data = filteredTableData.value
+  const eventMap = new Map()
+  
+  // 处理账户持仓和挂单数据
+  for (const row of data) {
+    // 解析持仓数据
+    if (row.a) {
+      const positions = parsePositions(row.a)
+      for (const pos of positions) {
+        const eventName = pos.title
+        if (!eventMap.has(eventName)) {
+          eventMap.set(eventName, {
+            eventName: eventName,
+            yesPosition: 0,
+            noPosition: 0,
+            actualDiff: 0,
+            orderYes: 0,
+            orderNo: 0,
+            orderDiff: 0,
+            finalDiff: 0,
+            chainYesPosition: 0,
+            chainNoPosition: 0,
+            chainActualDiff: 0,
+            chainFinalDiff: 0
+          })
+        }
+        
+        const event = eventMap.get(eventName)
+        const amount = Math.abs(pos.amount)
+        
+        let isYes = false
+        let isNo = false
+        
+        if (eventName.includes('First to 5k')) {
+          if (pos.option === 'GOLD') {
+            isYes = true
+          } else if (pos.option === 'ETH') {
+            isNo = true
+          }
+        } else if (eventName.includes('Monad vs MegaETH')) {
+          if (pos.option === 'Monad') {
+            isYes = true
+          } else if (pos.option === 'MegaETH') {
+            isNo = true
+          }
+        } else {
+          if (pos.option === 'YES' || (pos.amount >= 0 && !pos.option)) {
+            isYes = true
+          } else if (pos.option === 'NO' || pos.amount < 0) {
+            isNo = true
+          }
+        }
+        
+        if (isYes) {
+          event.yesPosition += amount
+        } else if (isNo) {
+          event.noPosition += amount
+        }
+      }
+    }
+    
+    // 解析挂单数据
+    if (row.b) {
+      const orders = parseOrders(row.b)
+      for (const order of orders) {
+        const eventName = order.title
+        if (!eventMap.has(eventName)) {
+          eventMap.set(eventName, {
+            eventName: eventName,
+            yesPosition: 0,
+            noPosition: 0,
+            actualDiff: 0,
+            orderYes: 0,
+            orderNo: 0,
+            orderDiff: 0,
+            finalDiff: 0,
+            chainYesPosition: 0,
+            chainNoPosition: 0,
+            chainActualDiff: 0,
+            chainFinalDiff: 0
+          })
+        }
+        
+        const event = eventMap.get(eventName)
+        const pending = order.pending
+        const sign = order.buySellDirection === 'Buy' ? 1 : -1
+        
+        let isYes = false
+        let isNo = false
+        
+        if (eventName.includes('First to 5k')) {
+          if (order.option === 'GOLD') {
+            isYes = true
+          } else if (order.option === 'ETH') {
+            isNo = true
+          }
+        } else if (eventName.includes('Monad vs MegaETH')) {
+          if (order.option === 'Monad') {
+            isYes = true
+          } else if (order.option === 'MegaETH') {
+            isNo = true
+          }
+        } else {
+          if (order.option === 'YES') {
+            isYes = true
+          } else if (order.option === 'NO') {
+            isNo = true
+          }
+        }
+        
+        if (isYes) {
+          event.orderYes += sign * pending
+        } else if (isNo) {
+          event.orderNo += sign * pending
+        }
+      }
+    }
+    
+    // 处理链上数据
+    const chainInfo = getChainInfo(row)
+    if (chainInfo) {
+      const chainPositions = parsePositions(chainInfo)
+      for (const chainPos of chainPositions) {
+        const eventName = chainPos.title
+        if (!eventMap.has(eventName)) {
+          eventMap.set(eventName, {
+            eventName: eventName,
+            yesPosition: 0,
+            noPosition: 0,
+            actualDiff: 0,
+            orderYes: 0,
+            orderNo: 0,
+            orderDiff: 0,
+            finalDiff: 0,
+            chainYesPosition: 0,
+            chainNoPosition: 0,
+            chainActualDiff: 0,
+            chainFinalDiff: 0
+          })
+        }
+        
+        const event = eventMap.get(eventName)
+        const amount = Math.abs(chainPos.amount)
+        
+        let isYes = false
+        let isNo = false
+        
+        if (eventName.includes('First to 5k')) {
+          if (chainPos.option === 'GOLD') {
+            isYes = true
+          } else if (chainPos.option === 'ETH') {
+            isNo = true
+          }
+        } else if (eventName.includes('Monad vs MegaETH')) {
+          if (chainPos.option === 'Monad') {
+            isYes = true
+          } else if (chainPos.option === 'MegaETH') {
+            isNo = true
+          }
+        } else {
+          if (chainPos.option === 'YES' || (chainPos.amount >= 0 && !chainPos.option)) {
+            isYes = true
+          } else if (chainPos.option === 'NO' || chainPos.amount < 0) {
+            isNo = true
+          }
+        }
+        
+        if (isYes) {
+          event.chainYesPosition += amount
+        } else if (isNo) {
+          event.chainNoPosition += amount
+        }
+      }
+    }
+  }
+  
+  // 计算差额
+  for (const event of eventMap.values()) {
+    event.actualDiff = event.yesPosition - event.noPosition
+    event.orderDiff = event.orderYes - event.orderNo
+    event.finalDiff = event.actualDiff + event.orderDiff
+    event.chainActualDiff = event.chainYesPosition - event.chainNoPosition
+    // 链上成交后差额 = 链上差额 + 挂单差额
+    event.chainFinalDiff = event.chainActualDiff + event.orderDiff
+  }
+  
+  // 转换为数组并排序
+  return Array.from(eventMap.values()).sort((a, b) => {
+    return Math.abs(b.finalDiff) - Math.abs(a.finalDiff)
+  })
+})
+
+/**
+ * 计算筛选后数据的总计
+ */
+const filteredSummaryTotals = computed(() => {
+  const data = filteredTableData.value
+  let totalBalance = 0
+  let totalPortfolio = 0
+  
+  for (const row of data) {
+    totalBalance += parseFloat(row.balance) || 0
+    totalPortfolio += parseFloat(row.c) || 0
+  }
+  
+  return {
+    totalBalance: totalBalance,
+    totalPortfolio: totalPortfolio
+  }
+})
 
 /**
  * 分页相关
@@ -1961,15 +2329,15 @@ const hasPositionDifference = (row) => {
 const getPositionDifferences = (row) => {
   const differences = []
   
-  if (!row.a) return differences
-  
   const chainInfo = getChainInfo(row)
-  if (!chainInfo) return differences
+  
+  // 如果持有仓位没有且链上信息也没有，返回空数组
+  if (!row.a && !chainInfo) return differences
   
   // 解析持有仓位
-  const holdingPositions = parsePositions(row.a)
+  const holdingPositions = row.a ? parsePositions(row.a) : []
   // 解析链上仓位
-  const chainPositions = parsePositions(chainInfo)
+  const chainPositions = chainInfo ? parsePositions(chainInfo) : []
   
   // 创建链上仓位的映射（按title匹配，支持基础title匹配）
   const chainMap = new Map()
@@ -2005,22 +2373,48 @@ const getPositionDifferences = (row) => {
   // 计算所有市场的差异
   const allTitles = new Set([...holdingMap.keys(), ...chainMap.keys()])
   
-  for (const titleKey of allTitles) {
-    const holding = holdingMap.get(titleKey)
-    const chain = chainMap.get(titleKey)
-    
-    const holdingAmount = holding ? holding.amount : 0
-    const chainAmount = chain ? chain.amount : 0
-    const difference = holdingAmount - chainAmount
-    
-    // 只显示有差异的市场（差异绝对值大于等于1）
-    if (Math.abs(difference) >= 1) {
+  // 如果持有仓位没有或链上信息没有，也要算成差额
+  // 如果持有仓位没有但链上信息有，所有链上仓位都算差额
+  if (!row.a && chainInfo && chainMap.size > 0) {
+    for (const [titleKey, chain] of chainMap.entries()) {
       differences.push({
-        title: holding ? holding.title : (chain ? chain.title : titleKey),
-        holdingAmount: holdingAmount.toFixed(2),
-        chainAmount: chainAmount.toFixed(2),
-        difference: difference
+        title: chain.title,
+        holdingAmount: '0.00',
+        chainAmount: chain.amount.toFixed(2),
+        difference: -chain.amount
       })
+    }
+  }
+  // 如果持有仓位有但链上信息没有，所有持有仓位都算差额
+  else if (row.a && !chainInfo && holdingMap.size > 0) {
+    for (const [titleKey, holding] of holdingMap.entries()) {
+      differences.push({
+        title: holding.title,
+        holdingAmount: holding.amount.toFixed(2),
+        chainAmount: '0.00',
+        difference: holding.amount
+      })
+    }
+  }
+  // 如果两者都有，计算差异
+  else if (row.a && chainInfo) {
+    for (const titleKey of allTitles) {
+      const holding = holdingMap.get(titleKey)
+      const chain = chainMap.get(titleKey)
+      
+      const holdingAmount = holding ? holding.amount : 0
+      const chainAmount = chain ? chain.amount : 0
+      const difference = holdingAmount - chainAmount
+      
+      // 只显示有差异的市场（差异绝对值大于等于1）
+      if (Math.abs(difference) >= 1) {
+        differences.push({
+          title: holding ? holding.title : (chain ? chain.title : titleKey),
+          holdingAmount: holdingAmount.toFixed(2),
+          chainAmount: chainAmount.toFixed(2),
+          difference: difference
+        })
+      }
     }
   }
   
@@ -4393,6 +4787,78 @@ onUnmounted(() => {
   color: #606266;
   white-space: nowrap;
   font-weight: 500;
+}
+
+/* 数据总计表格样式 */
+.summary-section {
+  margin-bottom: 20px;
+  padding: 20px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.summary-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.collapse-btn {
+  padding: 0;
+  font-size: 14px;
+}
+
+.summary-totals {
+  display: flex;
+  gap: 30px;
+  padding: 15px 20px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #e4e7ed;
+}
+
+.total-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.total-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #606266;
+}
+
+.total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #409eff;
+}
+
+.event-name-cell {
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.positive {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.negative {
+  color: #f56c6c;
+  font-weight: 600;
 }
 
 /* 总计信息容器 */

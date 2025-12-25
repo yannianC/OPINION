@@ -224,20 +224,89 @@
             padding: 60px 20px;
             color: #6c757d;
         }
+
+        .export-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+            margin-left: 10px;
+        }
+
+        .export-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);
+        }
+
+        .export-btn:active {
+            transform: translateY(0);
+        }
+
+        .export-result {
+            margin: 20px 30px;
+            padding: 20px;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .export-result.show {
+            display: block;
+        }
+
+        .export-result h3 {
+            margin: 0 0 10px 0;
+            color: #856404;
+            font-size: 16px;
+        }
+
+        .export-result-content {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            word-break: break-all;
+            color: #212529;
+            font-size: 14px;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .button-group {
+            display: flex;
+            align-items: center;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         
         <div class="controls">
-            <button class="refresh-btn" id="refreshBtn" onclick="loadData()">
-                🔄 刷新数据
-            </button>
+            <div class="button-group">
+                <button class="refresh-btn" id="refreshBtn" onclick="loadData()">
+                    🔄 刷新数据
+                </button>
+                <button class="export-btn" id="exportBtn" onclick="exportUnqualified()">
+                    📋 导出不达标
+                </button>
+            </div>
             <div class="stats">
                 <div>总计: <span id="totalCount">0</span> 条</div>
                 <div>达标: <span id="qualifiedCount">0</span> 条</div>
                 <div>不达标: <span id="unqualifiedCount">0</span> 条</div>
             </div>
+        </div>
+
+        <div class="export-result" id="exportResult">
+            <h3>不达标浏览器列表：</h3>
+            <div class="export-result-content" id="exportContent"></div>
         </div>
 
         <div class="table-container" id="tableContainer">
@@ -254,11 +323,15 @@
         async function loadData() {
             const refreshBtn = document.getElementById('refreshBtn');
             const tableContainer = document.getElementById('tableContainer');
+            const exportResult = document.getElementById('exportResult');
             
             // 禁用按钮并显示加载状态
             refreshBtn.disabled = true;
             refreshBtn.textContent = '🔄 加载中...';
             tableContainer.innerHTML = '<div class="loading">正在加载数据...</div>';
+            
+            // 隐藏导出结果
+            exportResult.classList.remove('show');
 
             try {
                 const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/orderCount');
@@ -409,6 +482,35 @@
             document.getElementById('totalCount').textContent = total;
             document.getElementById('qualifiedCount').textContent = qualified;
             document.getElementById('unqualifiedCount').textContent = unqualified;
+        }
+
+        function exportUnqualified() {
+            if (!currentData || currentData.length === 0) {
+                alert('暂无数据，请先刷新数据');
+                return;
+            }
+
+            // 筛选不达标的数据（status === 1）
+            const unqualifiedList = currentData
+                .filter(item => Number(item.status) === 1)
+                .map(item => item.number || '')
+                .filter(number => number !== '');
+
+            const exportResult = document.getElementById('exportResult');
+            const exportContent = document.getElementById('exportContent');
+
+            if (unqualifiedList.length === 0) {
+                exportContent.textContent = '暂无不达标数据';
+            } else {
+                // 用逗号拼接
+                exportContent.textContent = unqualifiedList.join(',');
+            }
+
+            // 显示导出结果
+            exportResult.classList.add('show');
+
+            // 滚动到导出结果区域
+            exportResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         // 页面加载时自动获取数据
