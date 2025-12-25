@@ -101,7 +101,14 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "2": "mj@w2ndJ*kX0g8!rnsf",
     "3": "mj@w2ndJ*kX0g8!rnsf",
     "4": "mj@w2ndJ*kX0g8!rnsf",
+    "9": "qwer1234",
     "10": "qwer1234",
+    
+    "2060": "kaznb3969*m%",  # 电脑组23的浏览器2057,2058,2059,2060
+    "2057": "kaznb3969*m%",
+    "2058": "kaznb3969*m%",
+    "2059": "kaznb3969*m%",
+    
     # 电脑组9的特定浏览器配置
     "941": "cx142359.",  # 电脑组9的浏览器941-1000
     "942": "cx142359.",
@@ -164,7 +171,6 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "999": "cx142359.",
     "1000": "cx142359.",
     
-    "2060": "kaznb3969*m%",
 }
 
 # 电脑组对应的默认密码配置
@@ -6397,7 +6403,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
         
         if not position_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Position 按钮")
-            return "", False
+            return "", True
         
         time.sleep(3)
         
