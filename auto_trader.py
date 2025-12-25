@@ -9164,6 +9164,14 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
+                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                        try:
+                            log_print(f"[{browser_id}] Type 2 任务换IP重试，调用 removeNumberInUse 接口...")
+                            remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                            remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+                            log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
                         time.sleep(15)
                         
                         # 2. 强制更换IP
@@ -9212,8 +9220,16 @@ def process_type2_mission(task_data, retry_count=0):
                     except:
                         pass
                     close_adspower_browser(browser_id)
-                    log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待2分钟...")
-                    time.sleep(120)  # Type=5任务等待2分钟
+                    # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                    try:
+                        log_print(f"[{browser_id}] Type 2 任务换IP重试，调用 removeNumberInUse 接口...")
+                        remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                        remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+                        log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                    except Exception as e:
+                        log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
+                    log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
+                    time.sleep(120)  # Type=2任务等待2分钟
                     
                     # 2. 强制更换IP
                     log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
@@ -9278,6 +9294,14 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
+                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                        try:
+                            log_print(f"[{browser_id}] Type 2 任务换IP重试，调用 removeNumberInUse 接口...")
+                            remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                            remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+                            log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
                         time.sleep(2)
                         
                         # 2. 强制更换IP
@@ -9540,6 +9564,14 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
+                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                        try:
+                            log_print(f"[{browser_id}] Type 2 任务换IP重试，调用 removeNumberInUse 接口...")
+                            remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                            remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+                            log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
                         time.sleep(15)
                         
                         # 2. 强制更换IP
@@ -9641,6 +9673,14 @@ def process_type2_mission(task_data, retry_count=0):
         # 关闭浏览器
         log_print(f"[{browser_id}] 任务完成，正在关闭浏览器...")
         close_adspower_browser(browser_id)
+        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+        try:
+            log_print(f"[{browser_id}] Type 2 任务完成，调用 removeNumberInUse 接口...")
+            remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+            remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+            log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+        except Exception as e:
+            log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
 
 
 # ============================================================================
@@ -9873,6 +9913,15 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             success = False
             failure_reason = "未执行"
             
+            # Type 2 任务开始时调用 addNumberInUse
+            try:
+                log_print(f"[{browser_id}] Type 2 任务开始，调用 addNumberInUse 接口...")
+                add_url = "https://sg.bicoin.com.cn/99l/hedge/addNumberInUse"
+                add_resp = requests.post(add_url, json={"number": browser_id}, timeout=10)
+                log_print(f"[{browser_id}] addNumberInUse 响应: {add_resp.status_code}")
+            except Exception as e:
+                log_print(f"[{browser_id}] addNumberInUse 调用失败: {str(e)}")
+            
             try:
                 # 将浏览器ID和任务ID加入正在执行的映射
                 with active_type2_browsers_lock:
@@ -9885,6 +9934,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     # 无论成功还是失败，都从映射中移除浏览器ID
                     with active_type2_browsers_lock:
                         active_type2_browsers.pop(browser_id, None)
+                        
                         log_print(f"[{browser_id}] Type 2 任务 {mission_id} 完成，浏览器标记已清除")
             except Exception as e:
                 # 如果 process_type2_mission 本身抛出异常，确保清除标记
@@ -10000,6 +10050,15 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             log_print(f"[{browser_id}] Type {mission_type} 任务异常，尝试关闭浏览器（兜底）...")
             try:
                 close_adspower_browser(browser_id)
+                # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                if mission_type == 2:
+                    try:
+                        log_print(f"[{browser_id}] Type 2 任务异常关闭浏览器，调用 removeNumberInUse 接口...")
+                        remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
+                        remove_resp = requests.post(remove_url, json={"number": browser_id}, timeout=10)
+                        log_print(f"[{browser_id}] removeNumberInUse 响应: {remove_resp.status_code}")
+                    except Exception as e:
+                        log_print(f"[{browser_id}] removeNumberInUse 调用失败: {str(e)}")
             except Exception as close_error:
                 log_print(f"[{browser_id}] 关闭浏览器时出错: {str(close_error)}")
         

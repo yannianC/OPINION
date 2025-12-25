@@ -187,6 +187,13 @@
             color: #495057;
         }
 
+        .index {
+            text-align: center;
+            color: #6c757d;
+            font-weight: 500;
+            width: 60px;
+        }
+
         .loading {
             text-align: center;
             padding: 60px 20px;
@@ -446,6 +453,7 @@
                 <table>
                     <thead>
                         <tr>
+                            <th class="index">序号</th>
                             <th class="sortable ${getSortClass('number')}" onclick="sortData('number')">浏览器</th>
                             <th class="sortable ${getSortClass('count')}" onclick="sortData('count')">交易次数</th>
                             <th class="sortable ${getSortClass('status')}" onclick="sortData('status')">是否达标</th>
@@ -455,13 +463,14 @@
                     <tbody>
             `;
 
-            list.forEach(item => {
+            list.forEach((item, index) => {
                 const statusClass = item.status === 0 ? 'status-0' : 'status-1';
                 const statusText = item.status === 0 ? '达标' : '不达标';
                 const volume = parseFloat(item.volume || 0).toFixed(2);
 
                 tableHTML += `
                     <tr>
+                        <td class="index">${index + 1}</td>
                         <td><strong>${item.number || '-'}</strong></td>
                         <td>${item.count || 0}</td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>

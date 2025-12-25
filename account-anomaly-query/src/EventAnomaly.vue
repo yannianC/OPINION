@@ -6,6 +6,16 @@
       <el-button type="primary" @click="loadAndCalculate" :loading="loading">
         刷新数据
       </el-button>
+      <el-select 
+        v-model="selectedGroup" 
+        @change="handleGroupChange"
+        style="width: 120px; margin-left: 10px;"
+        placeholder="选择分组"
+      >
+        <el-option label="全部" value="all" />
+        <el-option label="分组1" value="1" />
+        <el-option label="分组2" value="2" />
+      </el-select>
     </div>
 
     <!-- 事件统计表格 -->
@@ -123,6 +133,8 @@ const CHAIN_STATS_API_URL = 'https://enstudyai.fatedreamer.com/t3/api/markets/st
 
 const loading = ref(false)
 const eventTableData = ref([])
+const selectedGroup = ref('all')
+const groupConfigList = ref([]) // 存储当前分组的事件名列表
 
 /**
  * 格式化数字
@@ -456,6 +468,32 @@ const matchEventName = (eventName, chainTitle) => {
 }
 
 /**
+ * 加载分组配置数据
+ */
+const loadGroupConfig = async (groupNo) => {
+  try {
+    console.log(`[事件异常] 开始加载分组${groupNo}配置...`)
+    const response = await axios.get(`${API_BASE_URL}/mission/exchangeConfigByGroupNo?groupNo=${groupNo}`)
+    
+    if (response.data && response.data.code === 0 && response.data.data && response.data.data.configList) {
+      // 提取所有trending字段作为事件名列表
+      const eventNames = response.data.data.configList
+        .map(config => config.trending)
+        .filter(trending => trending) // 过滤掉null或undefined
+      
+      console.log(`[事件异常] 分组${groupNo}配置加载完成，共 ${eventNames.length} 个事件`)
+      return eventNames
+    } else {
+      console.warn(`[事件异常] 未获取到分组${groupNo}配置数据`)
+      return []
+    }
+  } catch (error) {
+    console.error(`[事件异常] 加载分组${groupNo}配置失败:`, error)
+    return []
+  }
+}
+
+/**
  * 加载链上数据
  */
 const loadChainStats = async () => {
@@ -512,6 +550,12 @@ const loadAndCalculate = async () => {
   
   try {
     console.log('[事件异常] 开始加载数据...')
+    
+    // 如果选择了分组且分组配置列表为空，先加载分组配置
+    if (selectedGroup.value !== 'all' && groupConfigList.value.length === 0) {
+      const eventNames = await loadGroupConfig(selectedGroup.value)
+      groupConfigList.value = eventNames
+    }
     
     // 并行加载账户数据和链上数据
     const [accountResponse, chainDataMap] = await Promise.all([
@@ -709,9 +753,57 @@ const loadAndCalculate = async () => {
       }
       
       // 转换为数组并排序（按成交后差额绝对值降序）
-      eventTableData.value = Array.from(eventMap.values()).sort((a, b) => {
+      let allEvents = Array.from(eventMap.values()).sort((a, b) => {
         return Math.abs(b.finalDiff) - Math.abs(a.finalDiff)
       })
+      
+      // 根据选择的分组进行过滤
+      if (selectedGroup.value !== 'all' && groupConfigList.value.length > 0) {
+        // 创建事件名集合用于快速查找（支持完全匹配和去除空格后的匹配）
+        const eventNameSet = new Set(groupConfigList.value.map(name => name.trim()))
+        const normalizedEventNameSet = new Set(
+          groupConfigList.value.map(name => {
+            // 去除首尾空格，去除###后面的部分
+            return name.trim().split('###')[0].trim()
+          })
+        )
+        
+        allEvents = allEvents.filter(event => {
+          const eventName = event.eventName.trim()
+          const eventNameBase = eventName.split('###')[0].trim()
+          
+          // 完全匹配
+          if (eventNameSet.has(eventName)) return true
+          
+          // 基础名称匹配（去除###后的部分）
+          if (normalizedEventNameSet.has(eventNameBase)) return true
+          
+          // 检查是否包含在配置列表中（部分匹配）
+          for (const configName of groupConfigList.value) {
+            const configNameTrimmed = configName.trim()
+            const configNameBase = configNameTrimmed.split('###')[0].trim()
+            
+            if (eventName === configNameTrimmed || eventNameBase === configNameBase) {
+              return true
+            }
+            
+            // 如果事件名包含配置名或配置名包含事件名，也认为匹配
+            if (eventName.includes(configNameTrimmed) || configNameTrimmed.includes(eventName)) {
+              return true
+            }
+            if (eventNameBase && configNameBase && 
+                (eventNameBase.includes(configNameBase) || configNameBase.includes(eventNameBase))) {
+              return true
+            }
+          }
+          
+          return false
+        })
+        
+        console.log(`[事件异常] 分组${selectedGroup.value}过滤后，共 ${allEvents.length} 个事件`)
+      }
+      
+      eventTableData.value = allEvents
       
       console.log('[事件异常] 计算完成')
       ElMessage.success(`数据加载并计算完成，共 ${eventTableData.value.length} 个事件`)
@@ -723,6 +815,32 @@ const loadAndCalculate = async () => {
     ElMessage.error('加载数据失败: ' + (error.message || '网络错误'))
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 处理分组变化
+ */
+const handleGroupChange = async (value) => {
+  console.log('[事件异常] 分组选择变化:', value)
+  
+  if (value === 'all') {
+    // 选择"全部"时，清空分组配置列表
+    groupConfigList.value = []
+    // 重新加载数据（会显示所有事件）
+    await loadAndCalculate()
+  } else {
+    // 选择分组1或分组2时，加载对应的配置
+    const eventNames = await loadGroupConfig(value)
+    groupConfigList.value = eventNames
+    
+    if (eventNames.length === 0) {
+      ElMessage.warning(`分组${value}配置为空，将显示所有事件`)
+    } else {
+      console.log(`[事件异常] 分组${value}包含的事件:`, eventNames)
+      // 重新加载数据（会根据分组配置过滤）
+      await loadAndCalculate()
+    }
   }
 }
 

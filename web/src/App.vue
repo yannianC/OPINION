@@ -3,13 +3,54 @@
     <header class="top-header">
       <h1>任务管理系统</h1>
       <div class="header-actions">
+        <select v-model="selectedNumberType" class="group-select" style="margin-right: 10px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+          <option value="1">全部账户</option>
+          <option value="2">1000个账户</option>
+          <option value="3">1000个账户中未达标的</option>
+        </select>
         <select v-model="selectedGroup" class="group-select" style="margin-right: 10px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
           <option value="default">默认</option>
           <option value="1">分组1</option>
           <option value="2">分组2</option>
-          <option value="3">分组3</option>
         </select>
-        <button class="btn-header" @click="openTaskAnomaly" style="margin-right: 10px;">查询上上轮日志</button>
+        <div style="display: inline-flex; align-items: center; gap: 8px; margin-right: 10px;">
+          <label style="font-size: 14px;">每轮时间（小时）:</label>
+          <input 
+            v-model.number="groupExecution.roundTimeHours" 
+            type="number" 
+            min="0.1"
+            step="0.1"
+            style="width: 80px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+            :disabled="groupExecution.isRunning"
+          />
+          <label style="font-size: 14px;">每轮间隔时间（分钟）:</label>
+          <input 
+            v-model.number="groupExecution.intervalMinutes" 
+            type="number" 
+            min="0"
+            step="1"
+            style="width: 80px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+            :disabled="groupExecution.isRunning"
+          />
+          <button 
+            class="btn-header" 
+            @click="toggleGroupExecution"
+            :class="{ 'btn-running': groupExecution.isRunning }"
+          >
+            {{ groupExecution.isRunning ? '停止分组执行' : '开始分组执行' }}
+          </button>
+          <span v-if="groupExecution.isRunning && groupExecution.unrefreshedCount > 0" style="margin-left: 10px; color: #ff6b6b; font-size: 14px;">
+            上一轮仓位未刷新数量：{{ groupExecution.unrefreshedCount }}
+            <button 
+              class="btn-header" 
+              @click="showUnrefreshedBrowsersDialog = true"
+              style="margin-left: 8px; padding: 4px 8px; font-size: 12px;"
+            >
+              查看
+            </button>
+          </span>
+        </div>
+        <button class="btn-header" @click="openTaskAnomaly" style="margin-right: 10px;">查询上轮日志</button>
         <button class="btn-header" @click="syncConfigFromMarkets">更新配置</button>
         <button class="btn-header" @click="showEditConfigDialog">修改配置</button>
       </div>
@@ -274,8 +315,8 @@
               />
             </div>
             
-            <!-- 合计最小平仓值（参数2）和合计最大平仓值（参数3）- 仅在平仓模式且模式2时显示 -->
-            <template v-if="hedgeMode.isClose && hedgeMode.hedgeMode2">
+            <!-- 合计最小平仓值（参数2）和合计最大平仓值（参数3）- 仅在平仓模式且模式2或模式3时显示 -->
+            <template v-if="hedgeMode.isClose && (hedgeMode.hedgeMode === 2 || hedgeMode.hedgeMode === 3)">
               <div class="hedge-amount-range">
                 <span class="filter-label">合计最小平仓值（参数2）:</span>
                 <input 
@@ -316,20 +357,19 @@
               </div>
             </template>
             
-            <!-- 模式1/模式2开关 - 仅在平仓模式时显示 -->
-            <div v-if="hedgeMode.isClose" class="hedge-mode-switch">
+            <!-- 模式选择下拉框 - 仅在平仓模式时显示 -->
+            <div v-if="hedgeMode.isClose" class="hedge-mode-select">
               <span class="filter-label">模式:</span>
-              <label class="switch-label">
-                <input 
-                  type="checkbox" 
-                  v-model="hedgeMode.hedgeMode2" 
-                  class="switch-checkbox"
-                  :disabled="autoHedgeRunning"
-                  @change="saveHedgeSettings"
-                />
-                <span class="switch-slider"></span>
-                <span class="switch-text">{{ hedgeMode.hedgeMode2 ? '2' : '1' }}</span>
-              </label>
+              <select 
+                v-model.number="hedgeMode.hedgeMode" 
+                class="mode-select"
+                :disabled="autoHedgeRunning"
+                @change="saveHedgeSettings"
+              >
+                <option :value="1">模式1</option>
+                <option :value="2">模式2</option>
+                <option :value="3">模式3</option>
+              </select>
             </div>
             
             <button 
@@ -1116,10 +1156,10 @@
                   type="number"
                   placeholder="请输入延时毫秒数"
                   :required="hedgeData.intervalType === 'delay'"
-                  :min="hedgeMode.isClose && hedgeMode.hedgeMode2 ? 20000 : 0"
+                  :min="hedgeMode.isClose && hedgeMode.hedgeMode === 2 ? 20000 : 0"
                   @blur="validateDelayMs"
                 />
-                <span v-if="hedgeMode.isClose && hedgeMode.hedgeMode2" style="font-size: 0.75rem; color: #666; margin-left: 8px;">
+                <span v-if="hedgeMode.isClose && hedgeMode.hedgeMode === 2" style="font-size: 0.75rem; color: #666; margin-left: 8px;">
                   平仓模式2：最小延时20秒（20000ms）
                 </span>
               </div>
@@ -1432,6 +1472,9 @@
           </div>
           <button type="button" class="btn btn-danger btn-sm" @click="disableAllConfigs">
             全部禁用
+          </button>
+          <button type="button" class="btn btn-success btn-sm" @click="enableAllConfigs">
+            全部启用
           </button>
           <button type="button" class="btn btn-secondary btn-sm" @click="showAllConfigs">
             全部显示
@@ -1875,6 +1918,35 @@
         </div>
       </div>
     </div>
+
+    <!-- 未刷新浏览器弹窗 -->
+    <div v-if="showUnrefreshedBrowsersDialog" class="modal-overlay" @click="showUnrefreshedBrowsersDialog = false">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>上一轮仓位未刷新浏览器列表 (共 {{ groupExecution.unrefreshedBrowsers.length }} 个)</h3>
+          <button class="modal-close" @click="showUnrefreshedBrowsersDialog = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="max-height: 500px; overflow-y: auto;">
+            <div v-if="groupExecution.unrefreshedBrowsers.length === 0" style="text-align: center; padding: 20px; color: #999;">
+              暂无未刷新的浏览器
+            </div>
+            <div v-else style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span 
+                v-for="(browserId, index) in groupExecution.unrefreshedBrowsers" 
+                :key="index"
+                style="display: inline-block; padding: 6px 12px; background: #f0f0f0; border-radius: 4px; font-size: 14px;"
+              >
+                {{ browserId }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="showUnrefreshedBrowsersDialog = false">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1914,7 +1986,22 @@ const editConfigFilter = ref('')  // 修改配置弹窗的筛选
 const showOnlyValid = ref(false)  // 是否只显示符合对冲条件的
 const editConfigStatusFilter = ref('')  // 修改配置弹窗的状态筛选
 const editConfigBatchFilter = ref('')  // 修改配置弹窗的批次筛选
-const selectedGroup = ref('default')  // 当前选择的分组：default/1/2/3
+const selectedGroup = ref('default')  // 当前选择的分组：default/1/2
+const selectedNumberType = ref('2')  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+
+// 分组执行相关
+const groupExecution = reactive({
+  isRunning: false,
+  roundTimeHours: 2,  // 每轮时间（小时）
+  intervalMinutes: 15,  // 每轮间隔时间（分钟）
+  timer: null,  // 定时器
+  intervalTimer: null,  // 间隔定时器
+  currentRoundStartTime: null,  // 当前轮开始时间戳
+  previousRoundEndTime: null,  // 上一轮结束时间戳（即当前轮开始时间）
+  checkTimer: null,  // 检查定时器
+  unrefreshedCount: 0,  // 上一轮仓位未刷新数量
+  unrefreshedBrowsers: []  // 未刷新的浏览器ID列表
+})
 
 // 新配置数据
 const newConfig = reactive({
@@ -1989,7 +2076,7 @@ const hedgeMode = reactive({
   minTotalCloseAmt: 0,  // 合计最小平仓值（参数2）
   maxTotalCloseAmt: 0,  // 合计最大平仓值（参数3）
   takerMinAmt: 200,  // taker最小数量（参数4）
-  hedgeMode2: false,  // false: 模式1, true: 模式2
+  hedgeMode: 1,  // 1: 模式1, 2: 模式2, 3: 模式3
   minOrderbookDepth: 3,  // 订单薄至少几组数据
   maxPriceDiff: 15,  // 买1-买3或卖1-卖3的最大价差
   priceRangeMin: 65,  // 先挂方价格区间最小值
@@ -2029,6 +2116,7 @@ const initFeeQueryTime = () => {
 
 // 对冲日志相关
 const showHedgeLogDialog = ref(false)
+const showUnrefreshedBrowsersDialog = ref(false)  // 显示未刷新浏览器弹窗
 const currentLogConfig = ref(null)
 const hedgeLogs = ref([])
 const showAllHedgeLogsDialog = ref(false)  // 总日志弹窗
@@ -2855,7 +2943,7 @@ const resetHedgeForm = () => {
  * 验证延时时间（平仓模式2时，最小20秒）
  */
 const validateDelayMs = () => {
-  if (hedgeMode.isClose && hedgeMode.hedgeMode2) {
+  if (hedgeMode.isClose && hedgeMode.hedgeMode === 2) {
     if (!hedgeData.delayMs || hedgeData.delayMs < 20000) {
       hedgeData.delayMs = 20000
       console.log('平仓模式2：延时时间已自动调整为20秒（20000ms）')
@@ -2867,10 +2955,10 @@ const validateDelayMs = () => {
  * 监听自动对冲模块的平仓模式2状态，自动设置手动对冲表单的默认值
  */
 watch(
-  () => [hedgeMode.isClose, hedgeMode.hedgeMode2],
-  ([isClose, hedgeMode2]) => {
+  () => [hedgeMode.isClose, hedgeMode.hedgeMode],
+  ([isClose, mode]) => {
     // 当是平仓模式2时
-    if (isClose && hedgeMode2) {
+    if (isClose && mode === 2) {
       // 默认选择延时
       if (hedgeData.intervalType !== 'delay') {
         hedgeData.intervalType = 'delay'
@@ -2888,7 +2976,7 @@ watch(
 watch(
   () => hedgeData.delayMs,
   (newDelayMs) => {
-    if (hedgeMode.isClose && hedgeMode.hedgeMode2 && newDelayMs !== null && newDelayMs < 20000) {
+    if (hedgeMode.isClose && hedgeMode.hedgeMode === 2 && newDelayMs !== null && newDelayMs < 20000) {
       hedgeData.delayMs = 20000
       console.log('平仓模式2：延时时间已自动调整为20秒（20000ms）')
     }
@@ -2896,17 +2984,15 @@ watch(
 )
 
 /**
- * 打开查询上上轮日志页面
+ * 打开查询上轮日志页面
  */
 const openTaskAnomaly = () => {
-  // 分组映射：分组1->传2, 分组2->传3, 分组3->传1, 默认->不传
+  // 分组映射：分组1->传1, 分组2->传2, 默认->不传
   let groupParam = ''
   if (selectedGroup.value === '1') {
-    groupParam = '?group=2'
-  } else if (selectedGroup.value === '2') {
-    groupParam = '?group=3'
-  } else if (selectedGroup.value === '3') {
     groupParam = '?group=1'
+  } else if (selectedGroup.value === '2') {
+    groupParam = '?group=2'
   }
   // 默认分组不传参数
   
@@ -2931,10 +3017,11 @@ const loadGroupConfig = async (groupNo) => {
     const groupData = groupResponse.data.data
     const groupConfigList = groupData.configList || []
     
-    // 将分组配置转换为标准格式并更新configList
+    // 将分组配置转换为标准格式并更新configList，自动启用和显示所有主题
     configList.value = groupConfigList.map(config => ({
       ...config,
-      enabled: config.isOpen === 1
+      enabled: true,  // 自动启用
+      visible: true   // 自动显示
     }))
     
     // 更新exchangeList
@@ -3261,12 +3348,18 @@ const closeEditConfigDialog = () => {
  * 全部禁用配置
  */
 const disableAllConfigs = () => {
-  if (confirm('确定要禁用所有配置吗？')) {
-    editConfigList.value.forEach(config => {
-      config.enabled = false
-    })
-    alert('已将所有配置设置为禁用状态，请点击"保存全部"以生效')
-  }
+  editConfigList.value.forEach(config => {
+    config.enabled = false
+  })
+}
+
+/**
+ * 全部启用配置
+ */
+const enableAllConfigs = () => {
+  editConfigList.value.forEach(config => {
+    config.enabled = true
+  })
 }
 
 /**
@@ -3957,6 +4050,297 @@ const stopAutoHedge = () => {
   
   currentBatchIndex.value = 0
   console.log('停止自动对冲')
+}
+
+/**
+ * 切换分组执行状态
+ */
+const toggleGroupExecution = () => {
+  if (groupExecution.isRunning) {
+    stopGroupExecution()
+  } else {
+    startGroupExecution()
+  }
+}
+
+/**
+ * 开始分组执行
+ */
+const startGroupExecution = () => {
+  // 验证输入
+  if (!groupExecution.roundTimeHours || groupExecution.roundTimeHours <= 0) {
+    alert('每轮时间必须大于0')
+    return
+  }
+  if (groupExecution.intervalMinutes < 0) {
+    alert('每轮间隔时间不能小于0')
+    return
+  }
+  
+  groupExecution.isRunning = true
+  
+  // 记录当前轮开始时间戳
+  groupExecution.currentRoundStartTime = Date.now()
+  groupExecution.previousRoundEndTime = null
+  groupExecution.unrefreshedCount = 0
+  groupExecution.unrefreshedBrowsers = []
+  
+  // 如果当前是默认分组，切换到分组1
+  if (selectedGroup.value === 'default') {
+    selectedGroup.value = '1'
+  }
+  
+  // 执行当前分组
+  executeCurrentGroup()
+}
+
+/**
+ * 执行当前分组
+ */
+const executeCurrentGroup = async () => {
+  try {
+    // 清除之前的定时器
+    if (groupExecution.timer) {
+      clearTimeout(groupExecution.timer)
+      groupExecution.timer = null
+    }
+    if (groupExecution.intervalTimer) {
+      clearTimeout(groupExecution.intervalTimer)
+      groupExecution.intervalTimer = null
+    }
+    
+    // 确保分组配置已加载
+    if (selectedGroup.value !== 'default') {
+      await loadGroupConfig(selectedGroup.value)
+    }
+    
+    // 等待配置加载完成后，开始自动分配
+    setTimeout(() => {
+      if (!autoHedgeRunning.value && groupExecution.isRunning) {
+        toggleAutoHedge()
+      }
+      
+      // 设置定时器，在每轮时间后切换到另一组
+      if (groupExecution.isRunning) {
+        const roundTimeMs = groupExecution.roundTimeHours * 60 * 60 * 1000
+        groupExecution.timer = setTimeout(() => {
+          if (groupExecution.isRunning) {
+            // 停止当前自动对冲
+            if (autoHedgeRunning.value) {
+              stopAutoHedge()
+            }
+            
+            // 等待间隔时间
+            const intervalMs = groupExecution.intervalMinutes * 60 * 1000
+            if (intervalMs > 0) {
+              groupExecution.intervalTimer = setTimeout(() => {
+                if (groupExecution.isRunning) {
+                  switchToNextGroup()
+                }
+              }, intervalMs)
+            } else {
+              switchToNextGroup()
+            }
+          }
+        }, roundTimeMs)
+        
+        console.log(`开始分组执行，当前分组：${selectedGroup.value}，每轮时间：${groupExecution.roundTimeHours}小时，间隔时间：${groupExecution.intervalMinutes}分钟`)
+      }
+    }, 1000)
+  } catch (error) {
+    console.error('执行当前分组失败:', error)
+    showToast('执行当前分组失败', 'error')
+    groupExecution.isRunning = false
+  }
+}
+
+/**
+ * 切换到下一组
+ */
+const switchToNextGroup = () => {
+  // 记录上一轮结束时间戳（即当前轮开始时间）
+  if (groupExecution.currentRoundStartTime) {
+    groupExecution.previousRoundEndTime = groupExecution.currentRoundStartTime
+  }
+  
+  // 记录新的当前轮开始时间戳
+  groupExecution.currentRoundStartTime = Date.now()
+  
+  // 重置未刷新数量（等待新的检查结果）
+  groupExecution.unrefreshedCount = 0
+  groupExecution.unrefreshedBrowsers = []
+  
+  // 清除之前的检查定时器
+  if (groupExecution.checkTimer) {
+    clearInterval(groupExecution.checkTimer)
+    groupExecution.checkTimer = null
+  }
+  
+  // 在分组1和分组2之间切换
+  if (selectedGroup.value === '1') {
+    selectedGroup.value = '2'
+  } else if (selectedGroup.value === '2') {
+    selectedGroup.value = '1'
+  } else {
+    // 如果是默认分组，切换到分组1
+    selectedGroup.value = '1'
+  }
+  
+  // 等待分组切换完成后，执行当前分组
+  setTimeout(() => {
+    if (groupExecution.isRunning) {
+      executeCurrentGroup()
+      
+      // 如果有上一轮结束时间，等待15分钟后开始检查
+      if (groupExecution.previousRoundEndTime) {
+        setTimeout(() => {
+          if (groupExecution.isRunning) {
+            checkPositionRefreshStatus()
+            // 每隔15分钟检查一次
+            groupExecution.checkTimer = setInterval(() => {
+              if (groupExecution.isRunning) {
+                checkPositionRefreshStatus()
+              } else {
+                clearInterval(groupExecution.checkTimer)
+                groupExecution.checkTimer = null
+              }
+            }, 15 * 60 * 1000)  // 15分钟
+          }
+        }, 15 * 60 * 1000)  // 等待15分钟
+      }
+    }
+  }, 1000)
+}
+
+/**
+ * 停止分组执行
+ */
+const stopGroupExecution = () => {
+  groupExecution.isRunning = false
+  
+  // 清除定时器
+  if (groupExecution.timer) {
+    clearTimeout(groupExecution.timer)
+    groupExecution.timer = null
+  }
+  if (groupExecution.intervalTimer) {
+    clearTimeout(groupExecution.intervalTimer)
+    groupExecution.intervalTimer = null
+  }
+  if (groupExecution.checkTimer) {
+    clearInterval(groupExecution.checkTimer)
+    groupExecution.checkTimer = null
+  }
+  
+  // 停止自动对冲
+  if (autoHedgeRunning.value) {
+    stopAutoHedge()
+  }
+  
+  console.log('停止分组执行')
+}
+
+/**
+ * 检查仓位刷新状态
+ */
+const checkPositionRefreshStatus = async () => {
+  if (!groupExecution.previousRoundEndTime || !groupExecution.currentRoundStartTime) {
+    console.log('没有上一轮时间戳，跳过检查')
+    return
+  }
+  
+  try {
+    const startTime = groupExecution.previousRoundEndTime
+    const endTime = groupExecution.currentRoundStartTime
+    
+    console.log(`开始检查仓位刷新状态，时间段：${new Date(startTime).toLocaleString()} - ${new Date(endTime).toLocaleString()}`)
+    
+    // 1. 调用 numberInUseList 接口获取浏览器编号列表
+    const numberListResponse = await axios.get('https://sg.bicoin.com.cn/99l/hedge/numberInUseList', {
+      params: {
+        startTime: startTime,
+        endTime: endTime
+      }
+    })
+    
+    if (numberListResponse.data?.code !== 0 || !numberListResponse.data?.data?.list) {
+      console.error('获取浏览器编号列表失败:', numberListResponse.data)
+      return
+    }
+    
+    const browserNumbers = numberListResponse.data.data.list
+    console.log(`获取到 ${browserNumbers.length} 个浏览器编号`)
+    
+    // 2. 调用 findAccountConfigCache 接口获取浏览器详细信息
+    const accountConfigResponse = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+    
+    if (accountConfigResponse.data?.code !== 0 || !accountConfigResponse.data?.data) {
+      console.error('获取账户配置失败:', accountConfigResponse.data)
+      return
+    }
+    
+    const accountConfigs = accountConfigResponse.data.data
+    console.log(`获取到 ${accountConfigs.length} 个账户配置`)
+    
+    // 3. 筛选出在浏览器编号列表中的账户（需要处理字符串和数字类型的匹配）
+    const relevantAccounts = accountConfigs.filter(account => {
+      const fingerprintNo = String(account.fingerprintNo || '')
+      return browserNumbers.some(num => String(num) === fingerprintNo)
+    })
+    
+    console.log(`筛选出 ${relevantAccounts.length} 个相关账户`)
+    
+    // 4. 检查哪些账户的 d 字段时间戳小于上一轮结束时间戳
+    const currentTime = Date.now()
+    const fifteenMinutesAgo = currentTime - 15 * 60 * 1000
+    
+    const unrefreshedBrowsers = []
+    
+    for (const account of relevantAccounts) {
+      const dTimestamp = parseInt(account.d) || 0
+      const fTimestamp = parseInt(account.f) || 0
+      
+      // 如果 d 字段时间戳小于上一轮结束时间戳
+      if (dTimestamp < groupExecution.previousRoundEndTime) {
+        // 检查 f 字段时间戳是否小于当前时间戳15分钟
+        if (fTimestamp < fifteenMinutesAgo) {
+          // 调用 add 接口添加任务
+          try {
+            await axios.post('https://sg.bicoin.com.cn/99l/mission/add', {
+              groupNo: account.computeGroup || '1',
+              numberList: account.fingerprintNo,
+              type: 2,
+              exchangeName: 'OP'
+            })
+            console.log(`已为浏览器 ${account.fingerprintNo} 添加刷新任务`)
+          } catch (error) {
+            console.error(`为浏览器 ${account.fingerprintNo} 添加任务失败:`, error)
+          }
+        }
+        
+        // 记录未刷新的浏览器
+        unrefreshedBrowsers.push(account.fingerprintNo)
+      }
+    }
+    
+    // 更新未刷新数量和列表
+    groupExecution.unrefreshedCount = unrefreshedBrowsers.length
+    groupExecution.unrefreshedBrowsers = unrefreshedBrowsers
+    
+    console.log(`检查完成，未刷新数量：${unrefreshedBrowsers.length}`)
+    
+    // 如果还有未刷新的，继续等待下次检查
+    if (unrefreshedBrowsers.length > 0) {
+      console.log(`还有 ${unrefreshedBrowsers.length} 个浏览器未刷新，将在15分钟后再次检查`)
+    } else {
+      console.log('所有浏览器都已刷新')
+      // 如果所有浏览器都已刷新，可以停止检查（但定时器会继续运行直到下一轮开始）
+    }
+    
+  } catch (error) {
+    console.error('检查仓位刷新状态失败:', error)
+    showToast('检查仓位刷新状态失败', 'error')
+  }
 }
 
 /**
@@ -4952,10 +5336,10 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
         console.log(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
         
         // 根据模式选择不同的接口
-        const isMode2 = hedgeMode.isClose && hedgeMode.hedgeMode2
+        const currentMode = hedgeMode.isClose ? hedgeMode.hedgeMode : 1
         let apiUrl, requestData
         
-        if (isMode2) {
+        if (currentMode === 2) {
           // 模式2：使用 calReadyToHedgeToCloseV2 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeToCloseV2'
           requestData = {
@@ -4965,7 +5349,21 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
             closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
+            takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
+            numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+          }
+        } else if (currentMode === 3) {
+          // 模式3：使用 quickCalReadyToHedgeToClose 接口
+          apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
+          requestData = {
+            trendingId: config.id,
+            currentPrice: orderPrice,
+            priceOutCome: priceInfo.firstSide,  // 先挂方 (yes/no)
+            singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
+            closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
+            closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
             takerMinAmt: hedgeMode.takerMinAmt  // 参数4：taker最小数量
+            // 模式3不传 numberType
           }
         } else {
           // 模式1：使用原有接口
@@ -4980,7 +5378,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             maxUAmt: hedgeMode.maxUAmt,   // 最大开单
             minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
-            closeOpenHourArea: hedgeMode.closeOpenHourArea  // 可平仓随机区间（小时）
+            closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+            numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
           }
         }
         
@@ -4999,8 +5398,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           console.log(`配置 ${config.id} - 获取对冲双方成功 (任务 ${i + 1}/${availableSlots}):`, hedgeData)
           
           // 根据模式执行不同的对冲任务
-          if (isMode2) {
-            // 模式2：使用新的多任务逻辑
+          if (currentMode === 2 || currentMode === 3) {
+            // 模式2和模式3：使用新的多任务逻辑
             await executeHedgeTaskV2(config, {
               ...hedgeData,
               currentPrice: orderPrice,
@@ -5728,7 +6127,7 @@ const saveHedgeSettings = () => {
       minTotalCloseAmt: hedgeMode.minTotalCloseAmt,
       maxTotalCloseAmt: hedgeMode.maxTotalCloseAmt,
       takerMinAmt: hedgeMode.takerMinAmt,
-      hedgeMode2: hedgeMode.hedgeMode2,
+      hedgeMode: hedgeMode.hedgeMode,
       maxOpenHour: hedgeMode.maxOpenHour,
       closeOpenHourArea: hedgeMode.closeOpenHourArea,
       // 订单薄相关设置
@@ -5790,8 +6189,11 @@ const loadHedgeSettings = () => {
     if (settings.takerMinAmt !== undefined) {
       hedgeMode.takerMinAmt = settings.takerMinAmt
     }
-    if (settings.hedgeMode2 !== undefined) {
-      hedgeMode.hedgeMode2 = settings.hedgeMode2
+    if (settings.hedgeMode !== undefined) {
+      hedgeMode.hedgeMode = settings.hedgeMode
+    } else if (settings.hedgeMode2 !== undefined) {
+      // 兼容旧版本：将 boolean 转换为 number
+      hedgeMode.hedgeMode = settings.hedgeMode2 ? 2 : 1
     }
     if (settings.maxOpenHour !== undefined) {
       hedgeMode.maxOpenHour = settings.maxOpenHour
@@ -8175,6 +8577,43 @@ onUnmounted(() => {
   padding: 0.5rem 1rem;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 8px;
+}
+
+.hedge-mode-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.mode-select {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.mode-select:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.mode-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mode-select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
 }
 
 .mode-label {

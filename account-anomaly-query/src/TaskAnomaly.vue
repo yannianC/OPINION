@@ -183,11 +183,18 @@
                     <span class="task-separator">|</span>
                     <span class="task-info">
                       <span class="field-label">链上余额:</span>
-                      <span :class="['balance-value', 
-                        !task.onChainBalance ? 'loading' : 
+                      <span v-if="task.onChainBalance" :class="['balance-value', 
                         task.onChainBalance === '获取失败' ? 'error' : 'success']">
-                        {{ task.onChainBalance || '加载中...' }}
+                        {{ task.onChainBalance }}
                       </span>
+                      <button 
+                        v-else
+                        @click="loadTaskBalance(task)"
+                        class="balance-btn"
+                        :disabled="task.balanceLoading"
+                      >
+                        {{ task.balanceLoading ? '加载中...' : '获取' }}
+                      </button>
                     </span>
                     <span class="task-separator">|</span>
                     <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -196,6 +203,14 @@
                       :href="task.opUrl" 
                       target="_blank" 
                       class="link-btn"
+                    >
+                      查看
+                    </a>
+                    <a 
+                      :href="task.opUrl" 
+                      target="_blank" 
+                      class="link-btn"
+                      style="margin-left: 8px;"
                     >
                       查看
                     </a>
@@ -274,11 +289,18 @@
                       <span class="task-separator">|</span>
                       <span class="task-info">
                         <span class="field-label">链上余额:</span>
-                        <span :class="['balance-value', 
-                          !task.onChainBalance ? 'loading' : 
+                        <span v-if="task.onChainBalance" :class="['balance-value', 
                           task.onChainBalance === '获取失败' ? 'error' : 'success']">
-                          {{ task.onChainBalance || '加载中...' }}
+                          {{ task.onChainBalance }}
                         </span>
+                        <button 
+                          v-else
+                          @click="loadTaskBalance(task)"
+                          class="balance-btn"
+                          :disabled="task.balanceLoading"
+                        >
+                          {{ task.balanceLoading ? '加载中...' : '获取' }}
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -339,11 +361,18 @@
                       <span class="task-separator">|</span>
                       <span class="task-info">
                         <span class="field-label">链上余额:</span>
-                        <span :class="['balance-value', 
-                          !task.onChainBalance ? 'loading' : 
+                        <span v-if="task.onChainBalance" :class="['balance-value', 
                           task.onChainBalance === '获取失败' ? 'error' : 'success']">
-                          {{ task.onChainBalance || '加载中...' }}
+                          {{ task.onChainBalance }}
                         </span>
+                        <button 
+                          v-else
+                          @click="loadTaskBalance(task)"
+                          class="balance-btn"
+                          :disabled="task.balanceLoading"
+                        >
+                          {{ task.balanceLoading ? '加载中...' : '获取' }}
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -401,11 +430,18 @@
                       <span class="task-separator">|</span>
                       <span class="task-info">
                         <span class="field-label">链上余额:</span>
-                        <span :class="['balance-value', 
-                          !task.onChainBalance ? 'loading' : 
+                        <span v-if="task.onChainBalance" :class="['balance-value', 
                           task.onChainBalance === '获取失败' ? 'error' : 'success']">
-                          {{ task.onChainBalance || '加载中...' }}
+                          {{ task.onChainBalance }}
                         </span>
+                        <button 
+                          v-else
+                          @click="loadTaskBalance(task)"
+                          class="balance-btn"
+                          :disabled="task.balanceLoading"
+                        >
+                          {{ task.balanceLoading ? '加载中...' : '获取' }}
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -463,11 +499,18 @@
                       <span class="task-separator">|</span>
                       <span class="task-info">
                         <span class="field-label">链上余额:</span>
-                        <span :class="['balance-value', 
-                          !task.onChainBalance ? 'loading' : 
+                        <span v-if="task.onChainBalance" :class="['balance-value', 
                           task.onChainBalance === '获取失败' ? 'error' : 'success']">
-                          {{ task.onChainBalance || '加载中...' }}
+                          {{ task.onChainBalance }}
                         </span>
+                        <button 
+                          v-else
+                          @click="loadTaskBalance(task)"
+                          class="balance-btn"
+                          :disabled="task.balanceLoading"
+                        >
+                          {{ task.balanceLoading ? '加载中...' : '获取' }}
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -537,15 +580,9 @@ export default {
     // 解析URL参数
     this.parseUrlParams()
     
-    // 如果有分组参数，加载分组配置并自动查询
+    // 如果有分组参数，加载分组配置（不自动查询）
     if (this.selectedGroup !== 'default') {
-      this.loadGroupConfig(this.selectedGroup).then(() => {
-        // 自动查询最近3小时
-        this.queryRecentHours()
-      })
-    } else {
-      // 默认分组也自动查询最近3小时
-      this.queryRecentHours()
+      this.loadGroupConfig(this.selectedGroup)
     }
   },
   computed: {
@@ -798,16 +835,43 @@ export default {
       }
     },
     
-    // 为所有任务加载链上余额
+    // 点击查看余额按钮时加载链上余额
+    async loadTaskBalance(task) {
+      if (!task.browserId || !task.trending) {
+        this.showToast('缺少必要信息，无法获取余额', 'warning')
+        return
+      }
+      
+      // 如果正在加载中，直接返回
+      if (task.balanceLoading) {
+        return
+      }
+      
+      // 设置加载状态
+      task.balanceLoading = true
+      
+      try {
+        const balance = await this.getOnChainBalance(task.browserId, task.trending, task.psSide)
+        task.onChainBalance = balance
+      } catch (error) {
+        console.error('加载链上余额失败:', error)
+        task.onChainBalance = '获取失败'
+      } finally {
+        task.balanceLoading = false
+      }
+    },
+    
+    // 为失败任务加载链上余额（只处理状态不为2的任务）
     async loadOnChainBalances(groups) {
-      // 收集所有需要获取余额的任务
+      // 收集所有需要获取余额的任务（只收集失败的任务，status !== 2）
       const tasksToLoad = []
       Object.keys(groups).forEach(groupKey => {
         const group = groups[groupKey]
         // 检查是否有 tasks 属性（模式1）或其他任务数组（模式2）
         if (group.tasks && Array.isArray(group.tasks)) {
           group.tasks.forEach((task, taskIndex) => {
-            if (task.browserId && task.trending) {
+            // 只处理失败的任务（status !== 2）
+            if (task.browserId && task.trending && task.status !== 2) {
               tasksToLoad.push({
                 task: task,
                 groupKey: groupKey,
@@ -1271,8 +1335,7 @@ export default {
           
       this.results = sortedGroups
       
-      // 为每个任务获取链上余额
-      this.loadOnChainBalances(sortedGroups)
+      // 不再自动加载链上余额，改为点击按钮时加载
       
       const totalGroups = Object.keys(sortedGroups).length
       this.hasQueried = true
@@ -1411,19 +1474,7 @@ export default {
       
       this.results = processedGroups
       
-      // 为失败任务获取链上余额（成功任务在展开时才加载）
-      const failGroups = {}
-      Object.keys(processedGroups).forEach(key => {
-        const group = processedGroups[key]
-        if (group.failYesTasks.length > 0 || group.failNoTasks.length > 0) {
-          failGroups[key] = {
-            tasks: [...group.failYesTasks, ...group.failNoTasks]
-          }
-        }
-      })
-      if (Object.keys(failGroups).length > 0) {
-        this.loadOnChainBalances(failGroups)
-      }
+      // 不再自动加载链上余额，改为点击按钮时加载
       
       const totalGroups = Object.keys(processedGroups).length
       this.hasQueried = true
@@ -1523,10 +1574,7 @@ export default {
       const isExpanded = this.expandedGroups[trendingId][category] || false
       this.expandedGroups[trendingId][category] = !isExpanded
       
-      // 如果展开，加载链上余额
-      if (!isExpanded) {
-        this.loadMode2CategoryBalances(trendingId, category)
-      }
+      // 不再自动加载链上余额，改为点击按钮时加载
     },
     
     // 检查是否展开（模式2）
@@ -1534,7 +1582,7 @@ export default {
       return this.expandedGroups[trendingId] && this.expandedGroups[trendingId][category]
     },
     
-    // 加载模式2分类的链上余额
+    // 加载模式2分类的链上余额（只处理失败任务，status !== 2）
     async loadMode2CategoryBalances(trendingId, category) {
       // 找到对应的分组
       const groupKey = Object.keys(this.results).find(key => {
@@ -1553,10 +1601,13 @@ export default {
         tasks = group.successNoTasks || []
       }
       
-      // 为这些任务加载链上余额
+      // 过滤出失败的任务（status !== 2）
+      const failedTasks = tasks.filter(task => task.status !== 2)
+      
+      // 只为失败任务加载链上余额
       const batchSize = 10
-      for (let i = 0; i < tasks.length; i += batchSize) {
-        const batch = tasks.slice(i, i + batchSize)
+      for (let i = 0; i < failedTasks.length; i += batchSize) {
+        const batch = failedTasks.slice(i, i + batchSize)
         await Promise.all(batch.map(async (task) => {
           const balance = await this.getOnChainBalance(task.browserId, task.trending, task.psSide)
           // 更新任务对象的链上余额
@@ -2045,6 +2096,29 @@ export default {
 .link-btn:hover {
   color: #764ba2;
   text-decoration: underline;
+}
+
+.balance-btn {
+  padding: 4px 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.balance-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+}
+
+.balance-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 模式2样式 */

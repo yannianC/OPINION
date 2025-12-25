@@ -2625,6 +2625,54 @@ const parseOpenOrders = (ordersStr) => {
 }
 
 /**
+ * 解析挂单数据字符串（用于事件统计，返回包含pending字段）
+ * 格式: "唯一标题|||买卖方向|||选项|||价格|||进度;唯一标题|||买卖方向|||选项|||价格|||进度"
+ */
+const parseOrders = (ordersStr) => {
+  if (!ordersStr) return []
+  
+  try {
+    const orders = []
+    const items = ordersStr.split(';')
+    
+    for (const item of items) {
+      if (!item.trim()) continue
+      
+      if (item.includes('|||')) {
+        const parts = item.split('|||')
+        if (parts.length >= 5) {
+          const title = parts[0].trim()
+          const buySellDirection = parts[1].trim()
+          const option = parts[2].trim()
+          const price = parts[3].trim()
+          const progress = parts[4].trim()
+          
+          let pending = 0
+          const progressMatch = progress.match(/([\d.,]+)\/([\d.,]+)/)
+          if (progressMatch) {
+            const filled = parseFloat(progressMatch[1].replace(/,/g, '')) || 0
+            const total = parseFloat(progressMatch[2].replace(/,/g, '')) || 0
+            pending = total - filled
+          }
+          
+          orders.push({
+            title: title,
+            buySellDirection: buySellDirection,
+            option: option,
+            price: price,
+            pending: pending
+          })
+        }
+      }
+    }
+    
+    return orders
+  } catch {
+    return []
+  }
+}
+
+/**
  * 解析交易记录数据字符串
  * 格式: "标题1|||方向1|||选项1|||数量1|||金额1|||价格1|||时间1;标题2|||方向2|||选项2|||数量2|||金额2|||价格2|||时间2"
  */
@@ -4798,6 +4846,19 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
+.summary-section .summary-title {
+  color: #333 !important;
+}
+
+.summary-section .collapse-btn {
+  color: #409eff !important;
+  background-color: transparent !important;
+}
+
+.summary-section .collapse-btn:hover {
+  color: #66b1ff !important;
+}
+
 .summary-header {
   display: flex;
   justify-content: space-between;
@@ -4815,6 +4876,12 @@ onUnmounted(() => {
 .collapse-btn {
   padding: 0;
   font-size: 14px;
+  color: #409eff !important;
+  background-color: transparent !important;
+}
+
+.collapse-btn:hover {
+  color: #66b1ff !important;
 }
 
 .summary-totals {
@@ -4905,14 +4972,14 @@ onUnmounted(() => {
   text-shadow: none;
 }
 
-.collapse-btn {
+.summary-container .collapse-btn {
   background-color: rgba(255, 255, 255, 0.2) !important;
   border: none !important;
   color: #fff !important;
   transition: all 0.3s ease;
 }
 
-.collapse-btn:hover {
+.summary-container .collapse-btn:hover {
   background-color: rgba(255, 255, 255, 0.3) !important;
   transform: scale(1.1);
 }
