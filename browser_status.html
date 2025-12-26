@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面6-浏览器状态</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .total-summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            color: #495057;
+        }
+
+        .total-summary-label {
+            font-weight: 600;
+        }
+
+        .total-summary-value {
+            font-weight: 700;
+            color: #28a745;
+            font-size: 18px;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .table-container {
+            overflow-x: auto;
+            max-height: calc(100vh - 250px);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e9ecef;
+            color: #212529;
+            font-size: 14px;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+            font-size: 16px;
+        }
+
+        .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: #dc3545;
+            background: #f8d7da;
+            margin: 20px;
+            border-radius: 6px;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .browser-ids {
+            word-break: break-all;
+            max-width: 600px;
+        }
+
+        .group-id {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .total-count {
+            font-weight: 600;
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <div class="controls">
+            <button class="refresh-btn" id="refreshBtn" onclick="loadData()">
+                🔄 刷新数据
+            </button>
+            <div class="total-summary">
+                <span class="total-summary-label">总计个数：</span>
+                <span class="total-summary-value" id="totalSum">-</span>
+            </div>
+        </div>
+
+        <div class="table-container" id="tableContainer">
+            <div class="loading">正在加载数据...</div>
+        </div>
+    </div>
+
+    <script>
+        async function loadData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const tableContainer = document.getElementById('tableContainer');
+
+            // 禁用按钮并显示加载状态
+            refreshBtn.disabled = true;
+            refreshBtn.classList.add('loading');
+            tableContainer.innerHTML = '<div class="loading">正在加载数据...</div>';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/groupStatus');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data) {
+                    displayData(result.data, result.data2 || {});
+                } else {
+                    throw new Error(result.msg || '获取数据失败');
+                }
+            } catch (error) {
+                tableContainer.innerHTML = `
+                    <div class="error">
+                        <h3>加载失败</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                console.error('加载数据失败:', error);
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.classList.remove('loading');
+            }
+        }
+
+        function displayData(data, data2) {
+            const tableContainer = document.getElementById('tableContainer');
+            const totalSumElement = document.getElementById('totalSum');
+
+            // 如果没有数据
+            if (!data || Object.keys(data).length === 0) {
+                tableContainer.innerHTML = '<div class="empty">暂无数据</div>';
+                totalSumElement.textContent = '0';
+                return;
+            }
+
+            // 按电脑组ID排序
+            const groupIds = Object.keys(data).sort((a, b) => {
+                const numA = parseInt(a);
+                const numB = parseInt(b);
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    return numA - numB;
+                }
+                return a.localeCompare(b);
+            });
+
+            // 计算总计个数之和
+            let totalSum = 0;
+
+            // 创建表格
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>序号</th>
+                            <th>电脑组</th>
+                            <th>浏览器ID</th>
+                            <th>总计个数</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            // 遍历每个电脑组
+            groupIds.forEach((groupId, index) => {
+                const browserIds = data[groupId] || [];
+                const totalCount = data2[groupId] || browserIds.length;
+                const browserIdsStr = browserIds.join(',');
+                
+                // 累加总计个数
+                totalSum += totalCount;
+
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><span class="group-id">${groupId}</span></td>
+                        <td class="browser-ids">${browserIdsStr || '-'}</td>
+                        <td><span class="total-count">${totalCount}</span></td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            tableContainer.innerHTML = html;
+            totalSumElement.textContent = totalSum;
+        }
+
+        // 页面加载时自动加载数据
+        window.addEventListener('DOMContentLoaded', () => {
+            loadData();
+        });
+    </script>
+</body>
+</html>
+

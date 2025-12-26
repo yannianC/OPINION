@@ -410,8 +410,6 @@
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
-              :disabled="!autoHedgeRunning && !isAccountConfigMapped"
-              :title="!autoHedgeRunning && !isAccountConfigMapped ? '请等待账户配置映射完成' : ''"
             >
               {{ autoHedgeRunning ? '停止自动分配' : '开始自动分配' }}
             </button>
@@ -2569,13 +2567,13 @@ const fetchTopicsByYesCount = async () => {
     console.log(`筛选出 ${filteredTopics.length} 个符合条件的主题:`, filteredTopics)
     
     // 4. 获取 exchangeConfig 数据
-    const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    const exchangeConfigResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     
-    if (!configResponse.data || configResponse.data.code !== 0) {
+    if (!exchangeConfigResponse.data || exchangeConfigResponse.data.code !== 0) {
       throw new Error('获取配置数据失败')
     }
     
-    const exchangeConfigList = configResponse.data.data?.configList || []
+    const exchangeConfigList = exchangeConfigResponse.data.data?.configList || []
     const configMap = new Map()
     exchangeConfigList.forEach(config => {
       // 使用 trending 字段进行匹配（可能包含完整标题或部分标题）
@@ -2680,10 +2678,12 @@ const fetchTopicsByYesCount = async () => {
         }
       })
       
-      // 刷新配置列表（重新获取最新数据）
-      await fetchExchangeConfig()
-      
       showToast(`成功添加 ${matchedConfigs.length} 个主题到自动对冲列表`, 'success')
+      
+      // 异步刷新配置列表（不阻塞界面响应）
+      fetchExchangeConfig().catch(err => {
+        console.error('刷新配置列表失败:', err)
+      })
     } else {
       throw new Error(updateResponse.data?.msg || '更新配置失败')
     }
@@ -6705,7 +6705,11 @@ const saveHedgeSettings = () => {
       randomGetCount: randomGetCount.value,
       enableBatchMode: enableBatchMode.value,
       batchSize: batchSize.value,
-      batchExecutionTime: batchExecutionTime.value
+      batchExecutionTime: batchExecutionTime.value,
+      // yes数量大于、模式选择、账户选择
+      yesCountThreshold: yesCountThreshold.value,
+      isFastMode: isFastMode.value,
+      selectedNumberType: selectedNumberType.value
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -6798,6 +6802,17 @@ const loadHedgeSettings = () => {
     }
     if (settings.batchExecutionTime !== undefined) {
       batchExecutionTime.value = settings.batchExecutionTime
+    }
+    
+    // yes数量大于、模式选择、账户选择
+    if (settings.yesCountThreshold !== undefined) {
+      yesCountThreshold.value = settings.yesCountThreshold
+    }
+    if (settings.isFastMode !== undefined) {
+      isFastMode.value = settings.isFastMode
+    }
+    if (settings.selectedNumberType !== undefined) {
+      selectedNumberType.value = settings.selectedNumberType
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)

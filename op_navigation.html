@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OP导航页</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 30px;
+        }
+
+        .nav-card {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 25px;
+            text-decoration: none;
+            color: #212529;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.3s ease;
+        }
+
+        .nav-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+            border-color: #667eea;
+        }
+
+        .nav-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .nav-card-icon {
+            font-size: 32px;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .nav-card-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #212529;
+        }
+
+        .nav-card-desc {
+            font-size: 14px;
+            color: #6c757d;
+            line-height: 1.5;
+        }
+
+        .nav-card-url {
+            font-size: 12px;
+            color: #667eea;
+            margin-top: 10px;
+            word-break: break-all;
+            opacity: 0.7;
+        }
+
+        @media (max-width: 768px) {
+            .nav-grid {
+                grid-template-columns: 1fr;
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 28px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>OP导航页</h1>
+            <p>快速访问各个功能页面</p>
+        </div>
+
+        <div class="nav-grid">
+            <a href="https://oss.w3id.info/OPPLOY3/index.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">📊</span>
+                <div class="nav-card-title">页面1对冲</div>
+                <div class="nav-card-desc">对冲交易管理页面</div>
+                <div class="nav-card-url">oss.w3id.info/OPPLOY3/index.html</div>
+            </a>
+
+            <a href="https://oss.w3id.info/OpPloyData/index.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">📈</span>
+                <div class="nav-card-title">页面8数据</div>
+                <div class="nav-card-desc">数据统计与分析页面</div>
+                <div class="nav-card-url">oss.w3id.info/OpPloyData/index.html</div>
+            </a>
+
+            <a href="https://oss.w3id.info/Opanomaly/index.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">⚠️</span>
+                <div class="nav-card-title">账号异常界面</div>
+                <div class="nav-card-desc">账号异常检测与管理</div>
+                <div class="nav-card-url">oss.w3id.info/Opanomaly/index.html</div>
+            </a>
+
+            <a href="https://oss.w3id.info/OpsStatistics/thread_config.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">⚙️</span>
+                <div class="nav-card-title">电脑组线程配置</div>
+                <div class="nav-card-desc">线程配置管理页面</div>
+                <div class="nav-card-url">oss.w3id.info/OpsStatistics/thread_config.html</div>
+            </a>
+
+            <a href="https://oss.w3id.info/OpsStatistics/hedge_order_count.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">✅</span>
+                <div class="nav-card-title">任务达标页面</div>
+                <div class="nav-card-desc">任务完成情况统计</div>
+                <div class="nav-card-url">oss.w3id.info/OpsStatistics/hedge_order_count.html</div>
+            </a>
+
+            <a href="https://oss.w3id.info/OpsStatistics/browser_status.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">🌐</span>
+                <div class="nav-card-title">浏览器打开状态</div>
+                <div class="nav-card-desc">浏览器状态监控页面</div>
+                <div class="nav-card-url">oss.w3id.info/OpsStatistics/browser_status.html</div>
+            </a>
+
+            <a href="https://oss.w3id.info/OPPLOY/browser_ip_query.html" target="_blank" class="nav-card">
+                <span class="nav-card-icon">🔍</span>
+                <div class="nav-card-title">IP查询</div>
+                <div class="nav-card-desc">浏览器IP地址查询页面</div>
+                <div class="nav-card-url">oss.w3id.info/OPPLOY/browser_ip_query.html</div>
+            </a>
+        </div>
+    </div>
+</body>
+</html>
+

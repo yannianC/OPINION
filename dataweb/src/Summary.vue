@@ -275,7 +275,9 @@ const loadAndCalculate = async () => {
   
   try {
     console.log('[数据总计] 开始加载数据...')
-    const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`)
+    const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`, {
+      timeout: 120000  // 120秒超时，数据量较大
+    })
     
     if (response.data && response.data.data) {
       const data = response.data.data

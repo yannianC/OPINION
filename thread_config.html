@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面7-配置线程</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .controls {
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .save-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+            margin-left: 10px;
+        }
+
+        .save-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.6);
+        }
+
+        .save-btn:active {
+            transform: translateY(0);
+        }
+
+        .save-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .add-rows-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+            margin-left: 10px;
+        }
+
+        .add-rows-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);
+        }
+
+        .add-rows-btn:active {
+            transform: translateY(0);
+        }
+
+        .clean-mission-btn {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+            margin-left: 10px;
+        }
+
+        .clean-mission-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6);
+        }
+
+        .clean-mission-btn:active {
+            transform: translateY(0);
+        }
+
+        .clean-mission-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .row-save-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 6px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+            min-width: 80px;
+        }
+
+        .row-save-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.5);
+        }
+
+        .row-save-btn:active {
+            transform: translateY(0);
+        }
+
+        .row-save-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .blacklist-btn {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+            margin-left: 8px;
+        }
+
+        .blacklist-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5);
+        }
+
+        .blacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .blacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .unblacklist-btn {
+            background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+            margin-left: 8px;
+        }
+
+        .unblacklist-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 193, 7, 0.5);
+        }
+
+        .unblacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .unblacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .group-input {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 120px;
+            transition: border-color 0.3s ease;
+        }
+
+        .group-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .new-row {
+            background-color: #fff3cd;
+        }
+
+        .action-cell {
+            text-align: center;
+            width: 200px;
+        }
+
+        .action-cell .button-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .table-container {
+            padding: 15px 20px;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+        }
+
+        th {
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            font-size: 14px;
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+            color: #212529;
+        }
+
+        tbody tr {
+            transition: background-color 0.2s ease;
+        }
+
+        tbody tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .thread-input {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 120px;
+            transition: border-color 0.3s ease;
+        }
+
+        .thread-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: #dc3545;
+            background: #f8d7da;
+            margin: 20px;
+            border-radius: 6px;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 500px;
+            animation: slideIn 0.3s ease-out;
+            font-size: 14px;
+        }
+
+        .toast.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .toast.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-message {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+
+        .toast.hide {
+            animation: slideOut 0.3s ease-out forwards;
+        }
+
+        .computer-group {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .index-cell {
+            text-align: center;
+            width: 60px;
+            color: #6c757d;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+ 
+
+        <div class="controls">
+            <div class="button-group">
+                <button class="refresh-btn" id="refreshBtn" onclick="loadData()">
+                    🔄 刷新数据
+                </button>
+                <button class="save-btn" id="saveBtn" onclick="saveConfig()">
+                    💾 保存配置
+                </button>
+                <button class="add-rows-btn" id="addRowsBtn" onclick="addTenRows()">
+                    ➕ 新增十行
+                </button>
+                <button class="clean-mission-btn" id="cleanMissionBtn" onclick="cleanAllMission()">
+                    🗑️ 清空任务
+                </button>
+            </div>
+        </div>
+
+        <div class="table-container" id="tableContainer">
+            <div class="loading">正在加载数据...</div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量：保存配置数据
+        let configData = [];
+        let rowIndexCounter = 0; // 用于生成唯一的行索引
+        let blackList = []; // 拉黑名单
+
+        // 加载拉黑名单
+        async function loadBlackList() {
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/tempGroupBlackList');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data && result.data.list) {
+                    blackList = result.data.list.map(item => item.group || item);
+                } else {
+                    blackList = [];
+                }
+            } catch (error) {
+                console.error('加载拉黑名单失败:', error);
+                blackList = [];
+            }
+        }
+
+        // 更新单行的拉黑按钮状态
+        async function updateRowBlacklistButton(rowId, computerGroup) {
+            try {
+                // 重新加载拉黑名单
+                await loadBlackList();
+                
+                // 更新当前行的拉黑按钮
+                const actionCell = document.querySelector(`#${rowId} .action-cell .button-group`);
+                if (actionCell) {
+                    const isBlack = isBlacklisted(computerGroup);
+                    
+                    // 移除旧的拉黑按钮
+                    const oldBlacklistBtn = actionCell.querySelector('.blacklist-btn, .unblacklist-btn');
+                    if (oldBlacklistBtn) {
+                        oldBlacklistBtn.remove();
+                    }
+                    
+                    // 创建新的拉黑按钮
+                    const newBlacklistBtn = document.createElement('button');
+                    if (isBlack) {
+                        newBlacklistBtn.className = 'unblacklist-btn';
+                        newBlacklistBtn.textContent = '解除拉黑';
+                        newBlacklistBtn.onclick = () => unblacklistGroup(rowId);
+                    } else {
+                        newBlacklistBtn.className = 'blacklist-btn';
+                        newBlacklistBtn.textContent = '拉黑';
+                        newBlacklistBtn.onclick = () => blacklistGroup(rowId);
+                    }
+                    
+                    // 添加到按钮组
+                    actionCell.appendChild(newBlacklistBtn);
+                }
+            } catch (error) {
+                console.error('更新拉黑按钮失败:', error);
+            }
+        }
+
+        // 静默刷新数据（不显示加载状态）
+        async function silentRefresh() {
+            try {
+                // 并行加载配置数据和拉黑名单
+                await Promise.all([
+                    loadBlackList(),
+                    (async () => {
+                        const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting');
+                        const result = await response.json();
+
+                        if (result.code === 0 && result.data && result.data.list) {
+                            configData = result.data.list;
+                        }
+                    })()
+                ]);
+
+                // 静默更新显示
+                displayData(configData);
+            } catch (error) {
+                console.error('静默刷新失败:', error);
+            }
+        }
+
+        // 加载配置数据
+        async function loadData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const tableContainer = document.getElementById('tableContainer');
+            
+            // 禁用按钮并显示加载状态
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '🔄 加载中...';
+            tableContainer.innerHTML = '<div class="loading">正在加载数据...</div>';
+
+            try {
+                // 并行加载配置数据和拉黑名单
+                await Promise.all([
+                    loadBlackList(),
+                    (async () => {
+                        const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting');
+                        const result = await response.json();
+
+                        if (result.code === 0 && result.data && result.data.list) {
+                            configData = result.data.list;
+                        } else {
+                            throw new Error(result.msg || '数据格式错误');
+                        }
+                    })()
+                ]);
+
+                displayData(configData);
+            } catch (error) {
+                tableContainer.innerHTML = `
+                    <div class="error">
+                        <h3>❌ 加载失败</h3>
+                        <p>${error.message}</p>
+                        <p style="margin-top: 10px; font-size: 12px;">请检查网络连接或稍后重试</p>
+                    </div>
+                `;
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 刷新数据';
+            }
+        }
+
+        // 检查电脑组是否在拉黑名单中
+        function isBlacklisted(computerGroup) {
+            return blackList.includes(computerGroup) || blackList.includes(parseInt(computerGroup));
+        }
+
+        // 显示数据
+        function displayData(list) {
+            const tableContainer = document.getElementById('tableContainer');
+            
+            // 生成表格HTML
+            let tableHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="index-cell">序号</th>
+                            <th>电脑组</th>
+                            <th>线程数</th>
+                            <th class="action-cell">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            // 显示已有数据
+            if (list && list.length > 0) {
+                list.forEach((item, index) => {
+                    const rowId = `row_${rowIndexCounter++}`;
+                    const computerGroup = item.computerGroup || '';
+                    const isBlack = isBlacklisted(computerGroup);
+                    const blacklistButton = isBlack 
+                        ? `<button class="unblacklist-btn" onclick="unblacklistGroup('${rowId}')">解除拉黑</button>`
+                        : `<button class="blacklist-btn" onclick="blacklistGroup('${rowId}')">拉黑</button>`;
+                    
+                    tableHTML += `
+                        <tr id="${rowId}">
+                            <td class="index-cell">${index + 1}</td>
+                            <td>
+                                <input type="number" 
+                                       class="group-input" 
+                                       id="group_${rowId}"
+                                       value="${computerGroup}" 
+                                       min="1" 
+                                       step="1"
+                                       placeholder="输入电脑组">
+                            </td>
+                            <td>
+                                <input type="number" 
+                                       class="thread-input" 
+                                       id="thread_${rowId}"
+                                       value="${item.threadCount || 0}" 
+                                       min="1" 
+                                       step="1"
+                                       placeholder="输入线程数">
+                            </td>
+                            <td class="action-cell">
+                                <div class="button-group">
+                                    <button class="row-save-btn" onclick="saveRow('${rowId}')">
+                                        💾 保存
+                                    </button>
+                                    ${blacklistButton}
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            tableHTML += `
+                    </tbody>
+                </table>
+            `;
+
+            tableContainer.innerHTML = tableHTML;
+        }
+
+        // 新增十行
+        function addTenRows() {
+            const tableContainer = document.getElementById('tableContainer');
+            let tbody = tableContainer.querySelector('tbody');
+            
+            // 如果表格不存在，创建新表格
+            if (!tbody) {
+                const tableHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="index-cell">序号</th>
+                                <th>电脑组</th>
+                                <th>线程数</th>
+                                <th class="action-cell">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                `;
+                tableContainer.innerHTML = tableHTML;
+                tbody = tableContainer.querySelector('tbody');
+            }
+
+            // 获取当前已有行数，用于计算序号
+            const existingRows = tbody.querySelectorAll('tr');
+            const startIndex = existingRows.length;
+
+            // 添加10行空数据
+            for (let i = 0; i < 10; i++) {
+                const rowId = `row_${rowIndexCounter++}`;
+                const row = document.createElement('tr');
+                row.id = rowId;
+                row.className = 'new-row';
+                row.innerHTML = `
+                    <td class="index-cell">${startIndex + i + 1}</td>
+                    <td>
+                        <input type="number" 
+                               class="group-input" 
+                               id="group_${rowId}"
+                               value="" 
+                               min="1" 
+                               step="1"
+                               placeholder="输入电脑组">
+                    </td>
+                    <td>
+                        <input type="number" 
+                               class="thread-input" 
+                               id="thread_${rowId}"
+                               value="" 
+                               min="1" 
+                               step="1"
+                               placeholder="输入线程数">
+                    </td>
+                    <td class="action-cell">
+                        <div class="button-group">
+                            <button class="row-save-btn" onclick="saveRow('${rowId}')">
+                                💾 保存
+                            </button>
+                            <button class="blacklist-btn" onclick="blacklistGroup('${rowId}')">拉黑</button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            }
+
+            // 滚动到新增的行
+            const newRows = tbody.querySelectorAll('.new-row');
+            if (newRows.length > 0) {
+                newRows[newRows.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        // 保存单行数据
+        async function saveRow(rowId) {
+            const saveBtn = document.querySelector(`#${rowId} .row-save-btn`);
+            const groupInput = document.getElementById(`group_${rowId}`);
+            const threadInput = document.getElementById(`thread_${rowId}`);
+            
+            const computerGroup = parseInt(groupInput.value);
+            const threadCount = parseInt(threadInput.value);
+            
+            // 验证输入
+            if (isNaN(computerGroup) || computerGroup < 1) {
+                showToast('请输入有效的电脑组号（大于等于1的整数）', 'error');
+                return;
+            }
+            
+            if (isNaN(threadCount) || threadCount < 1) {
+                showToast('请输入有效的线程数（大于等于1的整数）', 'error');
+                return;
+            }
+
+            // 禁用按钮并显示加载状态
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳ 保存中...';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        list: [{
+                            computerGroup: computerGroup,
+                            threadCount: threadCount
+                        }]
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast(`电脑组 ${computerGroup} 保存成功`, 'success');
+                    // 移除新增行的样式标记
+                    const row = document.getElementById(rowId);
+                    if (row) {
+                        row.classList.remove('new-row');
+                    }
+                    // 只更新当前行的拉黑按钮状态
+                    await updateRowBlacklistButton(rowId, computerGroup);
+                } else {
+                    throw new Error(result.msg || '保存失败');
+                }
+            } catch (error) {
+                showToast('保存失败: ' + error.message, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = '💾 保存';
+            }
+        }
+
+        // 保存配置（批量保存所有行）
+        async function saveConfig() {
+            const saveBtn = document.getElementById('saveBtn');
+            const tableContainer = document.getElementById('tableContainer');
+            const rows = tableContainer.querySelectorAll('tbody tr');
+            
+            if (rows.length === 0) {
+                showToast('没有可保存的数据', 'error');
+                return;
+            }
+            
+            const updateList = [];
+            
+            // 收集所有行的数据
+            rows.forEach(row => {
+                const rowId = row.id;
+                const groupInput = document.getElementById(`group_${rowId}`);
+                const threadInput = document.getElementById(`thread_${rowId}`);
+                
+                if (!groupInput || !threadInput) {
+                    return;
+                }
+                
+                const computerGroup = parseInt(groupInput.value);
+                const threadCount = parseInt(threadInput.value);
+                
+                // 跳过空行
+                if (isNaN(computerGroup) || isNaN(threadCount) || computerGroup < 1 || threadCount < 1) {
+                    return;
+                }
+                
+                updateList.push({
+                    computerGroup: computerGroup,
+                    threadCount: threadCount
+                });
+            });
+
+            if (updateList.length === 0) {
+                showToast('没有可保存的数据，请填写电脑组和线程数', 'error');
+                return;
+            }
+
+            // 禁用按钮并显示加载状态
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳ 保存中...';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        list: updateList
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast(`成功保存 ${updateList.length} 条配置`, 'success');
+                    // 更新本地数据
+                    configData = updateList;
+                    // 刷新数据以获取最新状态
+                    await loadData();
+                } else {
+                    throw new Error(result.msg || '保存失败');
+                }
+            } catch (error) {
+                showToast('保存配置失败: ' + error.message, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = '💾 保存配置';
+            }
+        }
+
+        // 拉黑电脑组
+        async function blacklistGroup(rowId) {
+            const groupInput = document.getElementById(`group_${rowId}`);
+            const computerGroup = parseInt(groupInput.value);
+            
+            if (isNaN(computerGroup) || computerGroup < 1) {
+                showToast('请输入有效的电脑组号', 'error');
+                return;
+            }
+
+            const blacklistBtn = document.querySelector(`#${rowId} .blacklist-btn`);
+            if (blacklistBtn) {
+                blacklistBtn.disabled = true;
+                blacklistBtn.textContent = '处理中...';
+            }
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/addTempGroupBlack', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        group: computerGroup
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast(`电脑组 ${computerGroup} 已拉黑`, 'success');
+                    // 静默刷新数据
+                    await silentRefresh();
+                } else {
+                    throw new Error(result.msg || '拉黑失败');
+                }
+            } catch (error) {
+                showToast('拉黑失败: ' + error.message, 'error');
+                if (blacklistBtn) {
+                    blacklistBtn.disabled = false;
+                    blacklistBtn.textContent = '拉黑';
+                }
+            }
+        }
+
+        // 解除拉黑电脑组
+        async function unblacklistGroup(rowId) {
+            const groupInput = document.getElementById(`group_${rowId}`);
+            const computerGroup = parseInt(groupInput.value);
+            
+            if (isNaN(computerGroup) || computerGroup < 1) {
+                showToast('请输入有效的电脑组号', 'error');
+                return;
+            }
+
+            const unblacklistBtn = document.querySelector(`#${rowId} .unblacklist-btn`);
+            if (unblacklistBtn) {
+                unblacklistBtn.disabled = true;
+                unblacklistBtn.textContent = '处理中...';
+            }
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/removeTempGroupBlack', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        group: computerGroup
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast(`电脑组 ${computerGroup} 已解除拉黑`, 'success');
+                    // 静默刷新数据
+                    await silentRefresh();
+                } else {
+                    throw new Error(result.msg || '解除拉黑失败');
+                }
+            } catch (error) {
+                showToast('解除拉黑失败: ' + error.message, 'error');
+                if (unblacklistBtn) {
+                    unblacklistBtn.disabled = false;
+                    unblacklistBtn.textContent = '解除拉黑';
+                }
+            }
+        }
+
+        // 清空任务列表
+        async function cleanAllMission() {
+            const cleanBtn = document.getElementById('cleanMissionBtn');
+            
+            // 确认操作
+            if (!confirm('确定要清空所有任务吗？此操作不可恢复！')) {
+                return;
+            }
+
+            // 禁用按钮并显示加载状态
+            cleanBtn.disabled = true;
+            cleanBtn.textContent = '⏳ 清空中...';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/mission/cleanAllMission', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('任务列表已清空', 'success');
+                } else {
+                    throw new Error(result.msg || '清空任务失败');
+                }
+            } catch (error) {
+                showToast('清空任务失败: ' + error.message, 'error');
+            } finally {
+                cleanBtn.disabled = false;
+                cleanBtn.textContent = '🗑️ 清空任务';
+            }
+        }
+
+        // 显示提示消息
+        function showToast(message, type = 'success') {
+            // 移除已存在的 toast
+            const existingToast = document.querySelector('.toast');
+            if (existingToast) {
+                existingToast.remove();
+            }
+
+            // 创建新的 toast
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'success' ? '✅' : '❌';
+            toast.innerHTML = `
+                <span class="toast-icon">${icon}</span>
+                <span class="toast-message">${message}</span>
+            `;
+
+            document.body.appendChild(toast);
+
+            // 3秒后自动移除
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        // 页面加载时自动获取数据
+        window.addEventListener('DOMContentLoaded', () => {
+            loadData();
+        });
+    </script>
+</body>
+</html>

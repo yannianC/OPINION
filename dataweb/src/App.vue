@@ -2242,7 +2242,9 @@ const formatChainMarkets = (markets) => {
  */
 const loadChainData = async () => {
   try {
-    const response = await axios.get(CHAIN_DATA_API_URL)
+    const response = await axios.get(CHAIN_DATA_API_URL, {
+      timeout: 120000  // 120秒超时，数据量较大
+    })
     
     if (response.data && response.data.items && Array.isArray(response.data.items)) {
       const newChainDataMap = new Map()
@@ -2890,7 +2892,9 @@ const loadData = async (silent = false) => {
   }
   
   try {
-    const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`)
+    const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`, {
+      timeout: 180000  // 120秒超时，数据量较大
+    })
     
     if (response.data && response.data.data) {
       const serverData = response.data.data
