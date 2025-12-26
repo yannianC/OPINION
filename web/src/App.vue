@@ -75,6 +75,15 @@
               查看
             </button>
           </span>
+          <button 
+            v-if="groupExecution.isRunning"
+            class="btn-header" 
+            @click="checkUnfinishedType2Browsers"
+            :disabled="isLoadingUnfinishedType2"
+            style="margin-left: 10px; padding: 4px 8px; font-size: 12px;"
+          >
+            {{ isLoadingUnfinishedType2 ? '查询中...' : '查看未完成type2任务' }}
+          </button>
         </div>
         <button class="btn-header" @click="openTaskAnomaly" style="margin-right: 10px;">查询上轮日志</button>
         <button class="btn-header" @click="syncConfigFromMarkets">更新配置</button>
@@ -1530,6 +1539,7 @@
                   <th style="width: 300px;">Opinion Trade URL *</th>
                   <th style="width: 100px;">权重 *</th>
                   <th style="width: 100px;">所属批次</th>
+                  <th style="width: 100px;">分组</th>
                   <th style="width: 100px;">是否拉黑</th>
                   <th style="width: 100px;">当前状态</th>
                   <th style="width: 200px;">当前订单薄</th>
@@ -1572,6 +1582,14 @@
                   </td>
                   <td>
                     <span>{{ getConfigBatch(config) || '-' }}</span>
+                  </td>
+                  <td>
+                    <input 
+                      v-model="config.group" 
+                      type="text" 
+                      placeholder="分组" 
+                      class="table-input" 
+                    />
                   </td>
                   <td>
                     <label class="switch-label">
@@ -1959,19 +1977,62 @@
             <div v-if="groupExecution.unrefreshedBrowsers.length === 0" style="text-align: center; padding: 20px; color: #999;">
               暂无未刷新的浏览器
             </div>
-            <div v-else style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span 
-                v-for="(browserId, index) in groupExecution.unrefreshedBrowsers" 
-                :key="index"
-                style="display: inline-block; padding: 6px 12px; background: #f0f0f0; border-radius: 4px; font-size: 14px;"
-              >
-                {{ browserId }}
-              </span>
-            </div>
+            <table v-else class="config-table" style="width: 100%; margin-top: 10px;">
+              <thead>
+                <tr>
+                  <th style="width: 150px;">浏览器编号</th>
+                  <th style="width: 100px;">电脑组</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(browserInfo, index) in (groupExecution.unrefreshedBrowserInfo.length > 0 ? groupExecution.unrefreshedBrowserInfo : groupExecution.unrefreshedBrowsers.map(id => ({ fingerprintNo: id, computeGroup: '-' })))" :key="index">
+                  <td>{{ browserInfo.fingerprintNo }}</td>
+                  <td>{{ browserInfo.computeGroup }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" @click="showUnrefreshedBrowsersDialog = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 未完成type2任务浏览器弹窗 -->
+    <div v-if="showUnfinishedType2Dialog" class="modal-overlay" @click="showUnfinishedType2Dialog = false">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>未完成type2任务浏览器列表 (共 {{ unfinishedType2Browsers.length }} 个)</h3>
+          <button class="modal-close" @click="showUnfinishedType2Dialog = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="max-height: 500px; overflow-y: auto;">
+            <div v-if="unfinishedType2Browsers.length === 0" style="text-align: center; padding: 20px; color: #999;">
+              暂无未完成type2任务的浏览器
+            </div>
+            <table v-else class="config-table" style="width: 100%; margin-top: 10px;">
+              <thead>
+                <tr>
+                  <th style="width: 150px;">浏览器编号</th>
+                  <th style="width: 100px;">电脑组</th>
+                  <th style="width: 200px;">任务ID</th>
+                  <th style="width: 100px;">任务状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(browserInfo, index) in unfinishedType2Browsers" :key="index">
+                  <td>{{ browserInfo.fingerprintNo }}</td>
+                  <td>{{ browserInfo.computeGroup }}</td>
+                  <td>{{ browserInfo.taskId || '-' }}</td>
+                  <td>{{ getTaskStatusText(browserInfo.status) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="showUnfinishedType2Dialog = false">关闭</button>
         </div>
       </div>
     </div>
@@ -2031,7 +2092,8 @@ const groupExecution = reactive({
   previousRoundEndTime: null,  // 上一轮结束时间戳（即当前轮开始时间）
   checkTimer: null,  // 检查定时器
   unrefreshedCount: 0,  // 上一轮仓位未刷新数量
-  unrefreshedBrowsers: []  // 未刷新的浏览器ID列表
+  unrefreshedBrowsers: [],  // 未刷新的浏览器ID列表
+  unrefreshedBrowserInfo: []  // 未刷新的浏览器详细信息（包含电脑组）
 })
 
 // 新配置数据
@@ -2149,6 +2211,9 @@ const initFeeQueryTime = () => {
 // 对冲日志相关
 const showHedgeLogDialog = ref(false)
 const showUnrefreshedBrowsersDialog = ref(false)  // 显示未刷新浏览器弹窗
+const showUnfinishedType2Dialog = ref(false)  // 显示未完成type2任务浏览器弹窗
+const unfinishedType2Browsers = ref([])  // 未完成type2任务的浏览器列表
+const isLoadingUnfinishedType2 = ref(false)  // 是否正在加载未完成type2任务
 const currentLogConfig = ref(null)
 const hedgeLogs = ref([])
 const showAllHedgeLogsDialog = ref(false)  // 总日志弹窗
@@ -4091,7 +4156,8 @@ const submitEditConfig = async () => {
         currentConfig.polyUrl !== originalConfig.polyUrl ||
         currentConfig.opTopicId !== originalConfig.opTopicId ||
         currentConfig.weight !== originalConfig.weight ||
-        currentConfig.enabled !== originalConfig.enabled
+        currentConfig.enabled !== originalConfig.enabled ||
+        currentConfig.group !== originalConfig.group
       
       if (isServerFieldModified) {
         hasAnyChange = true
@@ -4131,7 +4197,8 @@ const submitEditConfig = async () => {
         polyUrl: config.polyUrl,
         opTopicId: config.opTopicId,
         weight: config.weight || 0,
-        isOpen: config.enabled ? 1 : 0  // enabled 映射为 isOpen (true->1, false->0)
+        isOpen: config.enabled ? 1 : 0,  // enabled 映射为 isOpen (true->1, false->0)
+        group: config.group || null  // 添加group字段
         // 注意：visible 字段不提交到服务器
       }))
     }
@@ -4433,6 +4500,7 @@ const startGroupExecution = () => {
   groupExecution.previousRoundEndTime = null
   groupExecution.unrefreshedCount = 0
   groupExecution.unrefreshedBrowsers = []
+  groupExecution.unrefreshedBrowserInfo = []
   
   // 如果当前是默认分组，切换到分组1
   if (selectedGroup.value === 'default') {
@@ -4518,6 +4586,7 @@ const switchToNextGroup = () => {
   // 重置未刷新数量（等待新的检查结果）
   groupExecution.unrefreshedCount = 0
   groupExecution.unrefreshedBrowsers = []
+  groupExecution.unrefreshedBrowserInfo = []
   
   // 清除之前的检查定时器
   if (groupExecution.checkTimer) {
@@ -4644,6 +4713,7 @@ const checkPositionRefreshStatus = async () => {
     const fifteenMinutesAgo = currentTime - 15 * 60 * 1000
     
     const unrefreshedBrowsers = []
+    const unrefreshedBrowserInfo = []
     
     for (const account of relevantAccounts) {
       const dTimestamp = parseInt(account.d) || 0
@@ -4669,12 +4739,18 @@ const checkPositionRefreshStatus = async () => {
         
         // 记录未刷新的浏览器
         unrefreshedBrowsers.push(account.fingerprintNo)
+        // 保存浏览器详细信息（包含电脑组）
+        unrefreshedBrowserInfo.push({
+          fingerprintNo: account.fingerprintNo,
+          computeGroup: account.computeGroup || '1'
+        })
       }
     }
     
     // 更新未刷新数量和列表
     groupExecution.unrefreshedCount = unrefreshedBrowsers.length
     groupExecution.unrefreshedBrowsers = unrefreshedBrowsers
+    groupExecution.unrefreshedBrowserInfo = unrefreshedBrowserInfo
     
     console.log(`检查完成，未刷新数量：${unrefreshedBrowsers.length}`)
     
@@ -4690,6 +4766,142 @@ const checkPositionRefreshStatus = async () => {
     console.error('检查仓位刷新状态失败:', error)
     showToast('检查仓位刷新状态失败', 'error')
   }
+}
+
+/**
+ * 查询未完成type2任务的浏览器
+ */
+const checkUnfinishedType2Browsers = async () => {
+  if (!groupExecution.previousRoundEndTime || !groupExecution.currentRoundStartTime) {
+    alert('请先开始分组执行')
+    return
+  }
+  
+  isLoadingUnfinishedType2.value = true
+  unfinishedType2Browsers.value = []
+  
+  try {
+    const startTime = groupExecution.previousRoundEndTime
+    const endTime = groupExecution.currentRoundStartTime
+    
+    console.log(`开始查询未完成type2任务，时间段：${new Date(startTime).toLocaleString()} - ${new Date(endTime).toLocaleString()}`)
+    
+    // 1. 调用 numberInUseList 接口获取浏览器编号列表
+    const numberListResponse = await axios.get('https://sg.bicoin.com.cn/99l/hedge/numberInUseList', {
+      params: {
+        startTime: startTime,
+        endTime: endTime
+      }
+    })
+    
+    if (numberListResponse.data?.code !== 0 || !numberListResponse.data?.data?.list) {
+      console.error('获取浏览器编号列表失败:', numberListResponse.data)
+      alert('获取浏览器编号列表失败')
+      return
+    }
+    
+    const browserNumbers = numberListResponse.data.data.list
+    console.log(`获取到 ${browserNumbers.length} 个浏览器编号`)
+    
+    // 2. 调用 findAccountConfigCache 接口获取浏览器详细信息
+    const accountConfigResponse = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+    
+    if (accountConfigResponse.data?.code !== 0 || !accountConfigResponse.data?.data) {
+      console.error('获取账户配置失败:', accountConfigResponse.data)
+      alert('获取账户配置失败')
+      return
+    }
+    
+    const accountConfigs = accountConfigResponse.data.data
+    console.log(`获取到 ${accountConfigs.length} 个账户配置`)
+    
+    // 3. 筛选出在浏览器编号列表中的账户
+    const relevantAccounts = accountConfigs.filter(account => {
+      const fingerprintNo = String(account.fingerprintNo || '')
+      return browserNumbers.some(num => String(num) === fingerprintNo)
+    })
+    
+    console.log(`筛选出 ${relevantAccounts.length} 个相关账户`)
+    
+    // 4. 获取任务列表，查找type=2的任务
+    const missionListResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
+      params: {
+        limit: 1000  // 获取更多任务
+      }
+    })
+    
+    if (missionListResponse.data?.code !== 0 || !missionListResponse.data?.data?.list) {
+      console.error('获取任务列表失败:', missionListResponse.data)
+      alert('获取任务列表失败')
+      return
+    }
+    
+    const allMissions = missionListResponse.data.data.list || []
+    // 筛选出type=2的任务，且时间在上一轮范围内
+    const type2Missions = allMissions.filter(mission => {
+      return mission.type === 2 && 
+             mission.createTime >= startTime && 
+             mission.createTime <= endTime
+    })
+    
+    console.log(`找到 ${type2Missions.length} 个type2任务`)
+    
+    // 5. 为每个相关账户查找对应的type2任务，检查是否完成
+    const unfinishedBrowsers = []
+    
+    for (const account of relevantAccounts) {
+      const fingerprintNo = account.fingerprintNo
+      
+      // 查找该浏览器的type2任务
+      const browserTasks = type2Missions.filter(mission => {
+        return String(mission.numberList) === String(fingerprintNo)
+      })
+      
+      // 检查是否有未完成的任务（status !== 2 表示未成功）
+      const unfinishedTasks = browserTasks.filter(task => task.status !== 2)
+      
+      if (unfinishedTasks.length > 0) {
+        // 获取最新的未完成任务
+        const latestTask = unfinishedTasks.sort((a, b) => b.createTime - a.createTime)[0]
+        unfinishedBrowsers.push({
+          fingerprintNo: fingerprintNo,
+          computeGroup: account.computeGroup || '1',
+          taskId: latestTask.id,
+          status: latestTask.status
+        })
+      }
+    }
+    
+    unfinishedType2Browsers.value = unfinishedBrowsers
+    showUnfinishedType2Dialog.value = true
+    
+    console.log(`查询完成，未完成type2任务的浏览器：${unfinishedBrowsers.length} 个`)
+    
+    if (unfinishedBrowsers.length === 0) {
+      alert('所有浏览器的type2任务都已完成')
+    }
+    
+  } catch (error) {
+    console.error('查询未完成type2任务失败:', error)
+    showToast('查询未完成type2任务失败', 'error')
+    alert('查询失败：' + (error.response?.data?.message || error.message || '未知错误'))
+  } finally {
+    isLoadingUnfinishedType2.value = false
+  }
+}
+
+/**
+ * 获取任务状态文本
+ */
+const getTaskStatusText = (status) => {
+  const statusMap = {
+    0: '待执行',
+    1: '执行中',
+    2: '成功',
+    3: '失败',
+    9: '进行中'
+  }
+  return statusMap[status] || `状态${status}`
 }
 
 /**
@@ -7211,8 +7423,10 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
       try {
         const browserNo = item.number
         const share = floorToTwoDecimals(item.share)
-        // 优先使用 item 中的 groupNo，否则使用返回的 yesGroup/noGroup，最后才从映射中获取
-        const groupNo = item.groupNo || 
+        // 优先使用返回的 group 字段，否则使用 item 中的 groupNo，再使用返回的 yesGroup/noGroup，最后才从映射中获取
+        const groupNo = hedgeData.group || 
+                       item.groupNo || 
+                       item.group ||
                        (firstSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) ||
                        browserToGroupMap.value[browserNo] || '1'
         
@@ -7310,8 +7524,10 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         try {
           const browserNo = item.number
           const share = floorToTwoDecimals(item.share)
-          // 优先使用 item 中的 groupNo，否则使用返回的 yesGroup/noGroup，最后才从映射中获取
-          const groupNo = item.groupNo || 
+          // 优先使用返回的 group 字段，否则使用 item 中的 groupNo，再使用返回的 yesGroup/noGroup，最后才从映射中获取
+          const groupNo = hedgeData.group || 
+                         item.groupNo || 
+                         item.group ||
                          (secondSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) ||
                          browserToGroupMap.value[browserNo] || '1'
           

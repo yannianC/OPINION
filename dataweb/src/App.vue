@@ -3391,6 +3391,49 @@ const resetAutoRefresh = () => {
 }
 
 /**
+ * 提交刷新任务（带重试机制，直到成功）
+ */
+const submitRefreshTaskWithRetry = async (row, retryDelay = 2000) => {
+  if (row.platform !== 'OP') {
+    return { success: false, skipped: true }
+  }
+  
+  const taskData = {
+    groupNo: row.computeGroup,
+    numberList: parseInt(row.fingerprintNo),
+    type: 2,
+    exchangeName: row.platform === 'OP' ? 'OP' : '监控'
+  }
+  
+  while (true) {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/mission/add`,
+        taskData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      // 保存最新的任务ID（只保留最后一个）
+      if (response.data && response.data.data && response.data.data.id) {
+        latestMissionId.value = response.data.data.id
+      }
+      
+      console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
+      return { success: true }
+    } catch (error) {
+      console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败，将重试:`, error)
+      // 等待后重试
+      await new Promise(resolve => setTimeout(resolve, retryDelay))
+      // 继续循环重试，直到成功
+    }
+  }
+}
+
+/**
  * 刷新全部仓位
  */
 const refreshAllPositions = async () => {
@@ -3408,43 +3451,22 @@ const refreshAllPositions = async () => {
   ElMessage.info(`开始刷新 ${validRows.length} 个账户的仓位数据，请稍候...`)
   
   let successCount = 0
-  let failCount = 0
+  let skippedCount = 0
   
   try {
-    // 提交所有 type=2 任务
+    // 提交所有 type=2 任务（带重试机制）
     const taskPromises = validRows.map(async (row) => {
-      try {
-        if (row.platform == 'OP'){
-            const taskData = {
-              groupNo: row.computeGroup,
-              numberList: parseInt(row.fingerprintNo),
-              type: 2,
-              exchangeName: row.platform === 'OP' ? 'OP' : '监控'
-            }
-            
-            await axios.post(
-              `${API_BASE_URL}/mission/add`,
-              taskData,
-              {
-                headers: {
-                  'Content-Type': 'application/json'
-                }
-              }
-            )
-            
-            console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
-            successCount++
-        }
-      
-      } catch (error) {
-        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
-        failCount++
+      const result = await submitRefreshTaskWithRetry(row)
+      if (result.success) {
+        successCount++
+      } else if (result.skipped) {
+        skippedCount++
       }
     })
     
     await Promise.all(taskPromises)
     
-    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${skippedCount > 0 ? `，${skippedCount} 个跳过（非OP平台）` : ''}`)
     
     // 等待 70 秒后自动刷新列表
     ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
@@ -3484,49 +3506,22 @@ const refreshRedPositions = async () => {
   ElMessage.info(`开始刷新 ${redRows.length} 个变红仓位，请稍候...`)
   
   let successCount = 0
-  let failCount = 0
+  let skippedCount = 0
   
   try {
-    // 提交所有 type=2 任务
+    // 提交所有 type=2 任务（带重试机制）
     const taskPromises = redRows.map(async (row) => {
-      try {
-        if (row.platform == 'OP'){
-          const taskData = {
-            groupNo: row.computeGroup,
-            numberList: parseInt(row.fingerprintNo),
-            type: 2,
-            exchangeName: row.platform === 'OP' ? 'OP' : '监控'
-          }
-          
-          const response = await axios.post(
-            `${API_BASE_URL}/mission/add`,
-            taskData,
-            {
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            }
-          )
-          
-          // 保存最新的任务ID（只保留最后一个）
-          if (response.data && response.data.data && response.data.data.id) {
-            latestMissionId.value = response.data.data.id
-          }
-          
-          console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
-          successCount++
-
-        }
-     
-      } catch (error) {
-        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
-        failCount++
+      const result = await submitRefreshTaskWithRetry(row)
+      if (result.success) {
+        successCount++
+      } else if (result.skipped) {
+        skippedCount++
       }
     })
     
     await Promise.all(taskPromises)
     
-    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${skippedCount > 0 ? `，${skippedCount} 个跳过（非OP平台）` : ''}`)
     
     // 等待 70 秒后自动刷新列表
     ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
@@ -3561,42 +3556,22 @@ const refreshFilteredPositions = async () => {
   ElMessage.info(`开始刷新筛选结果中的 ${filteredRows.length} 个账户的仓位数据，请稍候...`)
   
   let successCount = 0
-  let failCount = 0
+  let skippedCount = 0
   
   try {
-    // 提交所有 type=2 任务
+    // 提交所有 type=2 任务（带重试机制）
     const taskPromises = filteredRows.map(async (row) => {
-      try {
-        if (row.platform == 'OP') {
-          const taskData = {
-            groupNo: row.computeGroup,
-            numberList: parseInt(row.fingerprintNo),
-            type: 2,
-            exchangeName: row.platform === 'OP' ? 'OP' : '监控'
-          }
-          
-          await axios.post(
-            `${API_BASE_URL}/mission/add`,
-            taskData,
-            {
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            }
-          )
-          
-          console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
-          successCount++
-        }
-      } catch (error) {
-        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
-        failCount++
+      const result = await submitRefreshTaskWithRetry(row)
+      if (result.success) {
+        successCount++
+      } else if (result.skipped) {
+        skippedCount++
       }
     })
     
     await Promise.all(taskPromises)
     
-    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${skippedCount > 0 ? `，${skippedCount} 个跳过（非OP平台）` : ''}`)
     
     // 等待 70 秒后自动刷新列表
     ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
@@ -3644,49 +3619,22 @@ const refreshRedPositionsOld = async () => {
   ElMessage.info(`开始刷新 ${redOldRows.length} 个变红且超过30分钟的仓位，请稍候...`)
 
   let successCount = 0
-  let failCount = 0
+  let skippedCount = 0
 
   try {
-    // 提交所有 type=2 任务
+    // 提交所有 type=2 任务（带重试机制）
     const taskPromises = redOldRows.map(async (row) => {
-      try {
-        if (row.platform == 'OP'){
-          const taskData = {
-            groupNo: row.computeGroup,
-            numberList: parseInt(row.fingerprintNo),
-            type: 2,
-            exchangeName: row.platform === 'OP' ? 'OP' : '监控'
-          }
-
-          const response = await axios.post(
-            `${API_BASE_URL}/mission/add`,
-            taskData,
-            {
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            }
-          )
-
-          // 保存最新的任务ID（只保留最后一个）
-          if (response.data && response.data.data && response.data.data.id) {
-            latestMissionId.value = response.data.data.id
-          }
-
-          console.log(`浏览器 ${row.fingerprintNo} 刷新任务已提交`)
-          successCount++
-
-        }
-
-      } catch (error) {
-        console.error(`浏览器 ${row.fingerprintNo} 刷新任务提交失败:`, error)
-        failCount++
+      const result = await submitRefreshTaskWithRetry(row)
+      if (result.success) {
+        successCount++
+      } else if (result.skipped) {
+        skippedCount++
       }
     })
 
     await Promise.all(taskPromises)
 
-    ElMessage.success(`已提交 ${successCount} 个刷新任务${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    ElMessage.success(`已提交 ${successCount} 个刷新任务${skippedCount > 0 ? `，${skippedCount} 个跳过（非OP平台）` : ''}`)
 
     // 等待 70 秒后自动刷新列表
     ElMessage.info('任务已全部提交，70秒后自动刷新列表...')

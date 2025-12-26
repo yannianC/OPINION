@@ -324,6 +324,14 @@ active_type3_browsers_lock = threading.Lock()
 active_type2_browsers = {}
 active_type2_browsers_lock = threading.Lock()
 
+# 全局浏览器锁机制（不区分任务类型）：正在执行任务的浏览器ID映射 {browser_id: mission_id}
+active_browsers = {}
+active_browsers_lock = threading.Lock()
+
+# 浏览器等待队列：{browser_id: [task_data1, task_data2, ...]}
+browser_waiting_queue = {}
+browser_waiting_queue_lock = threading.Lock()
+
 # AdsPower配置
 ADSPOWER_BASE_URL = "http://127.0.0.1:50325"
 ADSPOWER_API_KEY = "506664c47e5e174036720d305c7b9732"
@@ -10158,6 +10166,36 @@ def check_and_submit_completed_missions():
             log_print(f"[系统] 任务 {mission_id} 已从活动任务列表中移除")
 
 
+def process_browser_waiting_queue(browser_id):
+    """
+    处理浏览器等待队列：当浏览器任务完成时，从等待队列中取出下一个任务执行
+    
+    Args:
+        browser_id: 浏览器ID
+    """
+    with browser_waiting_queue_lock:
+        if browser_id in browser_waiting_queue and browser_waiting_queue[browser_id]:
+            # 取出队列中的第一个任务
+            next_task_data = browser_waiting_queue[browser_id].pop(0)
+            next_mission = next_task_data.get("mission", {})
+            next_mission_id = next_mission.get("id")
+            next_mission_type = next_mission.get("type")
+            
+            log_print(f"[{browser_id}] 从等待队列中取出任务 {next_mission_id} (type={next_mission_type})，准备执行")
+            
+            # 如果队列为空，删除该浏览器的队列
+            if not browser_waiting_queue[browser_id]:
+                del browser_waiting_queue[browser_id]
+            
+            # 提交下一个任务到线程池
+            submit_mission_to_pool(next_task_data)
+        else:
+            # 队列为空，清除浏览器标记
+            with active_browsers_lock:
+                active_browsers.pop(browser_id, None)
+                log_print(f"[{browser_id}] 等待队列为空，浏览器标记已清除")
+
+
 def submit_mission_to_pool(task_data):
     """
     将任务提交到全局线程池
@@ -10202,6 +10240,12 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
     """
     mission = task_data.get("mission", {})
     mission_type = mission.get("type")
+    
+    # 标记浏览器为繁忙（不区分任务类型）
+    if browser_id:
+        with active_browsers_lock:
+            active_browsers[browser_id] = mission_id
+            log_print(f"[{browser_id}] 任务 {mission_id} 开始执行，浏览器已标记为繁忙")
     
     try:
         # 先更新浏览器时间戳
@@ -10291,6 +10335,9 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     close_adspower_browser(browser_id)
                     call_remove_number_in_use(browser_id, "Type 5 任务完成，")
             # Type 1/5 任务结果已经在上面记录了，跳过后面的统一记录
+            # 清除浏览器标记并处理等待队列
+            if browser_id:
+                process_browser_waiting_queue(browser_id)
             return
             
         elif mission_type == 2:
@@ -10328,6 +10375,10 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     active_type2_browsers.pop(browser_id, None)
                     log_print(f"[{browser_id}] Type 2 任务 {mission_id} 异常，清除浏览器标记")
                 raise
+            
+            # Type 2 任务完成后，清除全局浏览器标记并处理等待队列
+            if browser_id:
+                process_browser_waiting_queue(browser_id)
             
         elif mission_type == 3:
             # Type 3: 订单簿数据获取任务
@@ -10396,6 +10447,9 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                             log_print(f"[{browser_id}] ✓ Type 3 任务计数已补充更新（外层finally）")
             
             # Type 3 任务结果已经提交了，跳过后面的统一记录
+            # 清除浏览器标记并处理等待队列
+            if browser_id:
+                process_browser_waiting_queue(browser_id)
             return
             
         else:
@@ -10430,6 +10484,10 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 if browser_id in active_type3_browsers:
                     active_type3_browsers.pop(browser_id, None)
                     log_print(f"[{browser_id}] Type 3 任务 {mission_id} 异常，清除浏览器标记")
+        
+        # 清除全局浏览器标记并处理等待队列（异常情况下也要处理）
+        if browser_id:
+            process_browser_waiting_queue(browser_id)
         
         # 对于 Type 1/2/5 任务，尝试关闭浏览器（兜底保护，避免浏览器泄漏）
         if mission_type in [1, 2, 5]:
@@ -10512,6 +10570,33 @@ def main():
                 browser_id = str(mission.get("numberList", ""))
                 
                 log_print(f"[系统] 获取到任务 {mission_id}，类型: {mission_type}，交易所: {exchange_name}，浏览器: {browser_id}")
+                
+                # 检查浏览器是否正在执行任务（不区分任务类型）
+                browser_is_busy = False
+                with active_browsers_lock:
+                    if browser_id in active_browsers:
+                        old_mission_id = active_browsers[browser_id]
+                        # 检查旧任务是否真的还在运行
+                        with active_tasks_lock:
+                            if old_mission_id in active_tasks:
+                                # 旧任务还在运行，浏览器确实繁忙
+                                browser_is_busy = True
+                                log_print(f"[系统] 浏览器 {browser_id} 正在执行任务 {old_mission_id}，将任务 {mission_id} 加入等待队列")
+                            else:
+                                # 旧任务已完成但标记未清除（幽灵标记），自动清理
+                                log_print(f"[系统] ⚠ 检测到幽灵标记：浏览器 {browser_id} 的旧任务 {old_mission_id} 已完成但标记未清除，自动清理")
+                                active_browsers.pop(browser_id, None)
+                                browser_is_busy = False
+                
+                if browser_is_busy:
+                    # 将任务加入等待队列
+                    with browser_waiting_queue_lock:
+                        if browser_id not in browser_waiting_queue:
+                            browser_waiting_queue[browser_id] = []
+                        browser_waiting_queue[browser_id].append(task_data)
+                        queue_length = len(browser_waiting_queue[browser_id])
+                        log_print(f"[系统] ✓ 任务 {mission_id} 已加入浏览器 {browser_id} 的等待队列（队列长度: {queue_length}）")
+                    continue  # 跳过后续处理，继续下一次循环
                 
                 # 如果是 type=2 任务，检查该浏览器是否已经在执行 type=2 任务
                 if mission_type == 2:
