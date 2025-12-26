@@ -3,6 +3,32 @@
     <header class="top-header">
       <h1>任务管理系统</h1>
       <div class="header-actions">
+        <div style="display: inline-flex; align-items: center; gap: 8px; margin-right: 10px;">
+          <label style="font-size: 14px;">yes数量大于:</label>
+          <input 
+            v-model.number="yesCountThreshold" 
+            type="number" 
+            min="0"
+            step="0.01"
+            placeholder="输入阈值"
+            style="width: 120px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+          />
+          <button 
+            class="btn-header" 
+            @click="fetchTopicsByYesCount"
+            :disabled="isFetchingTopics"
+          >
+            {{ isFetchingTopics ? '获取中...' : '获取主题' }}
+          </button>
+        </div>
+        <div style="display: inline-flex; align-items: center; gap: 8px; margin-right: 10px;">
+          <label style="font-size: 14px;">模式:</label>
+          <label class="switch-label" style="cursor: pointer;">
+            <input type="checkbox" v-model="isFastMode" class="switch-checkbox">
+            <span class="switch-slider"></span>
+            <span class="switch-text">{{ isFastMode ? '快速' : '正常' }}</span>
+          </label>
+        </div>
         <select v-model="selectedNumberType" class="group-select" style="margin-right: 10px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
           <option value="1">全部账户</option>
           <option value="2">1000个账户</option>
@@ -375,6 +401,8 @@
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
+              :disabled="!autoHedgeRunning && !isAccountConfigMapped"
+              :title="!autoHedgeRunning && !isAccountConfigMapped ? '请等待账户配置映射完成' : ''"
             >
               {{ autoHedgeRunning ? '停止自动分配' : '开始自动分配' }}
             </button>
@@ -1988,6 +2016,9 @@ const editConfigStatusFilter = ref('')  // 修改配置弹窗的状态筛选
 const editConfigBatchFilter = ref('')  // 修改配置弹窗的批次筛选
 const selectedGroup = ref('default')  // 当前选择的分组：default/1/2
 const selectedNumberType = ref('2')  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+const isFastMode = ref(false)  // 模式开关：false=正常模式(tp3=0), true=快速模式(tp3=1)
+const yesCountThreshold = ref(0)  // yes数量阈值
+const isFetchingTopics = ref(false)  // 是否正在获取主题
 
 // 分组执行相关
 const groupExecution = reactive({
@@ -2035,6 +2066,7 @@ const exchangeList = ref([])
 const configList = ref([])
 const accountConfigList = ref([])
 const browserToGroupMap = ref({})
+const isAccountConfigMapped = ref(false)  // 账户配置是否成功映射
 
 // 自动对冲相关
 const autoHedgeRunning = ref(false)
@@ -2216,13 +2248,18 @@ const fetchAccountConfig = async () => {
       })
       browserToGroupMap.value = mapping
       
+      // 检查映射是否成功（至少有一个映射关系）
+      isAccountConfigMapped.value = Object.keys(mapping).length > 0
+      
       console.log(`账户配置加载成功，共 ${response.data.data.length} 条记录`)
       console.log('浏览器编号到组号映射:', mapping)
     } else {
       console.warn('获取账户配置失败: 无数据')
+      isAccountConfigMapped.value = false
     }
   } catch (error) {
     console.error('获取账户配置失败:', error)
+    isAccountConfigMapped.value = false
   }
 }
 
@@ -2285,6 +2322,312 @@ const fetchExchangeConfig = async () => {
     console.error('获取配置失败:', error)
   } finally {
     isLoadingConfig.value = false
+  }
+}
+
+/**
+ * 根据yes数量获取主题并添加到自动对冲列表
+ */
+const fetchTopicsByYesCount = async () => {
+  if (!yesCountThreshold.value || yesCountThreshold.value <= 0) {
+    showToast('请输入有效的yes数量阈值', 'warning')
+    return
+  }
+  
+  isFetchingTopics.value = true
+  
+  try {
+    // 1. 请求 positions/summary/trades API
+    showToast('正在获取交易数据，请稍候...', 'info')
+    const tradesResponse = await axios.get('https://enstudyai.fatedreamer.com/t3/api/positions/summary/trades')
+    
+    // 检查数据结构，支持多种可能的数据格式
+    let items = []
+    if (tradesResponse.data) {
+      if (Array.isArray(tradesResponse.data)) {
+        items = tradesResponse.data
+      } else if (tradesResponse.data.items && Array.isArray(tradesResponse.data.items)) {
+        items = tradesResponse.data.items
+      } else if (tradesResponse.data.data && Array.isArray(tradesResponse.data.data)) {
+        items = tradesResponse.data.data
+      } else if (tradesResponse.data.list && Array.isArray(tradesResponse.data.list)) {
+        items = tradesResponse.data.list
+      }
+    }
+    
+    if (items.length === 0) {
+      console.error('API返回的完整数据结构:', tradesResponse.data)
+      throw new Error('获取交易数据失败：未找到有效的数据数组')
+    }
+    
+    console.log(`获取到 ${items.length} 条数据`)
+    console.log('API返回的原始数据示例（第1条）:', JSON.stringify(items[0], null, 2))
+    
+    // 2. 统计每个主题的yes数量（参照 dataweb/src/App.vue 的处理方式）
+    const topicYesCountMap = new Map()
+    
+    for (const item of items) {
+      if (item.wallet_address && item.markets) {
+        // 处理 markets 数据，类似于 formatChainMarkets 的逻辑
+        const markets = item.markets
+        if (typeof markets === 'string') {
+          // 如果是字符串，尝试解析
+          const marketPairs = markets.split(';').filter(pair => pair.trim())
+          for (const pair of marketPairs) {
+            const parts = pair.split('|||')
+            if (parts.length >= 2) {
+              const title = parts[0].trim()
+              const marketData = parts[1] || ''
+              
+              // 解析市场数据，提取yes数量
+              // 格式可能是 "YES:100,NO:50" 或其他格式
+              if (marketData) {
+                // 尝试从 marketData 中提取 yes 数量
+                // 这里需要根据实际数据结构调整
+                const yesMatch = marketData.match(/yes[:_]\s*([\d.]+)/i)
+                if (yesMatch) {
+                  const yesCount = parseFloat(yesMatch[1]) || 0
+                  const existingCount = topicYesCountMap.get(title) || 0
+                  topicYesCountMap.set(title, existingCount + yesCount)
+                }
+              }
+            }
+          }
+        } else if (Array.isArray(markets)) {
+          // 如果是数组格式（标准格式：markets: [{ title, yes_amount, no_amount, ... }]）
+          for (const market of markets) {
+            if (market && market.title) {
+              const title = market.title.trim()
+              // 使用 yes_amount 字段（这是API返回的标准字段名）
+              const yesAmount = parseFloat(market.yes_amount || market.yesAmount || 0) || 0
+              if (yesAmount > 0) {
+                const existingCount = topicYesCountMap.get(title) || 0
+                topicYesCountMap.set(title, existingCount + yesAmount)
+              }
+            }
+          }
+        } else if (typeof markets === 'object') {
+          // 如果是对象格式
+          if (markets.title) {
+            const title = markets.title.trim()
+            const yesCount = parseFloat(markets.yes_total || markets.yesCount || markets.yes || 0) || 0
+            const existingCount = topicYesCountMap.get(title) || 0
+            topicYesCountMap.set(title, existingCount + yesCount)
+          }
+        }
+      }
+      
+      // 也尝试直接从 item 中提取主题和yes数量
+      if (item.title || item.topic || item.market_title || item.marketName || item.market_name) {
+        const title = (item.title || item.topic || item.market_title || item.marketName || item.market_name || '').trim()
+        if (title) {
+          const yesCount = parseFloat(
+            item.yes_total || item.yesCount || item.yes || item.yes_amount || 
+            item.yesAmount || item.yesTotal || 0
+          ) || 0
+          if (yesCount > 0) {
+            const existingCount = topicYesCountMap.get(title) || 0
+            topicYesCountMap.set(title, existingCount + yesCount)
+          }
+        }
+      }
+      
+      // 如果是直接包含主题和数量的格式
+      if (item.market && typeof item.market === 'string') {
+        // 尝试解析 market 字符串格式
+        const marketPairs = item.market.split(';').filter(pair => pair.trim())
+        for (const pair of marketPairs) {
+          const parts = pair.split('|||')
+          if (parts.length >= 1) {
+            const title = parts[0].trim()
+            if (title) {
+              // 尝试从后续部分提取数值
+              let yesCount = 0
+              for (let i = 1; i < parts.length; i++) {
+                const num = parseFloat(parts[i])
+                if (!isNaN(num) && num > 0) {
+                  yesCount = num
+                  break
+                }
+              }
+              if (yesCount > 0) {
+                const existingCount = topicYesCountMap.get(title) || 0
+                topicYesCountMap.set(title, existingCount + yesCount)
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`统计完成，共找到 ${topicYesCountMap.size} 个主题`)
+    if (topicYesCountMap.size > 0) {
+      const sortedTopics = Array.from(topicYesCountMap.entries())
+        .sort((a, b) => b[1] - a[1])  // 按数量降序排序
+      console.log('主题yes数量统计（前20个，按数量排序）:', sortedTopics
+        .slice(0, 20)
+        .map(([title, count]) => ({ title, count })))
+      console.log('所有主题数量统计（完整列表）:', sortedTopics.map(([title, count]) => ({ title, count })))
+    } else {
+      console.warn('未找到任何主题数据')
+      console.warn('原始数据示例（前2条）:', items.slice(0, 2))
+      console.warn('原始数据结构:', items.length > 0 ? Object.keys(items[0]) : '空数据')
+      showToast('未找到任何主题数据，请检查API返回的数据格式', 'warning')
+      return
+    }
+    
+    // 3. 筛选yes数量大于阈值的主题
+    const filteredTopics = []
+    for (const [title, yesCount] of topicYesCountMap.entries()) {
+      if (yesCount > yesCountThreshold.value) {
+        filteredTopics.push({ title, yesCount })
+      }
+    }
+    
+    if (filteredTopics.length === 0) {
+      // 显示统计信息帮助用户调整阈值
+      const allCounts = Array.from(topicYesCountMap.values()).sort((a, b) => b - a)
+      const maxCount = allCounts[0] || 0
+      const minCount = allCounts[allCounts.length - 1] || 0
+      const avgCount = allCounts.length > 0 ? allCounts.reduce((a, b) => a + b, 0) / allCounts.length : 0
+      
+      console.log(`主题数量统计: 最大=${maxCount.toFixed(2)}, 最小=${minCount.toFixed(2)}, 平均=${avgCount.toFixed(2)}, 阈值=${yesCountThreshold.value}`)
+      
+      showToast(
+        `没有找到yes数量大于 ${yesCountThreshold.value} 的主题。` +
+        `当前最大数量为 ${maxCount.toFixed(2)}，请调整阈值重试。`,
+        'warning'
+      )
+      return
+    }
+    
+    console.log(`筛选出 ${filteredTopics.length} 个符合条件的主题:`, filteredTopics)
+    
+    // 4. 获取 exchangeConfig 数据
+    const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    
+    if (!configResponse.data || configResponse.data.code !== 0) {
+      throw new Error('获取配置数据失败')
+    }
+    
+    const exchangeConfigList = configResponse.data.data?.configList || []
+    const configMap = new Map()
+    exchangeConfigList.forEach(config => {
+      // 使用 trending 字段进行匹配（可能包含完整标题或部分标题）
+      if (config.trending) {
+        configMap.set(config.trending.trim().toLowerCase(), config)
+        // 也尝试使用 trendingPart1 和 trendingPart2 组合
+        if (config.trendingPart1 && config.trendingPart2) {
+          const combined = `${config.trendingPart1} ${config.trendingPart2}`.trim().toLowerCase()
+          configMap.set(combined, config)
+        }
+      }
+    })
+    
+    // 5. 匹配符合条件的主题并更新配置
+    const matchedConfigs = []
+    for (const topic of filteredTopics) {
+      const titleLower = topic.title.toLowerCase().trim()
+      
+      // 尝试精确匹配
+      let matchedConfig = configMap.get(titleLower)
+      
+      // 如果没有精确匹配，尝试部分匹配（标题包含配置的trending，或配置的trending包含标题）
+      if (!matchedConfig) {
+        for (const [configKey, config] of configMap.entries()) {
+          if (titleLower.includes(configKey) || configKey.includes(titleLower)) {
+            matchedConfig = config
+            break
+          }
+        }
+      }
+      
+      // 如果还是没有匹配，尝试在 configList 中查找
+      if (!matchedConfig) {
+        matchedConfig = configList.value.find(c => {
+          const configTitle = (c.trending || '').toLowerCase().trim()
+          return titleLower === configTitle || 
+                 titleLower.includes(configTitle) || 
+                 configTitle.includes(titleLower)
+        })
+      }
+      
+      if (matchedConfig) {
+        matchedConfigs.push({
+          config: matchedConfig,
+          topic: topic,
+          yesCount: topic.yesCount
+        })
+      }
+    }
+    
+    if (matchedConfigs.length === 0) {
+      showToast(`找到 ${filteredTopics.length} 个符合条件的主题，但在配置中未找到匹配项`, 'warning')
+      return
+    }
+    
+    console.log(`找到 ${matchedConfigs.length} 个匹配的配置:`, matchedConfigs.map(m => ({
+      trending: m.config.trending,
+      yesCount: m.yesCount
+    })))
+    
+    // 6. 批量更新配置：启用和显示
+    const updateData = {
+      list: matchedConfigs.map(m => ({
+        id: m.config.id,
+        trending: m.config.trending,
+        trendingPart1: m.config.trendingPart1 || null,
+        trendingPart2: m.config.trendingPart2 || null,
+        trendingPart3: m.config.trendingPart3 || null,
+        opUrl: m.config.opUrl || '',
+        polyUrl: m.config.polyUrl || '',
+        opTopicId: m.config.opTopicId || '',
+        weight: m.config.weight || 0,
+        isOpen: 1  // 启用
+      }))
+    }
+    
+    // 提交到服务器
+    const updateResponse = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      updateData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (updateResponse.data && updateResponse.data.code === 0) {
+      // 更新本地显示状态
+      const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+      matchedConfigs.forEach(m => {
+        visibleData[m.config.id] = true
+      })
+      localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+      
+      // 更新本地配置列表
+      matchedConfigs.forEach(m => {
+        const configInList = configList.value.find(c => c.id === m.config.id)
+        if (configInList) {
+          configInList.isOpen = 1
+          configInList.enabled = true
+        }
+      })
+      
+      // 刷新配置列表（重新获取最新数据）
+      await fetchExchangeConfig()
+      
+      showToast(`成功添加 ${matchedConfigs.length} 个主题到自动对冲列表`, 'success')
+    } else {
+      throw new Error(updateResponse.data?.msg || '更新配置失败')
+    }
+    
+  } catch (error) {
+    console.error('获取主题失败:', error)
+    showToast('获取主题失败: ' + (error.message || '网络错误'), 'error')
+  } finally {
+    isFetchingTopics.value = false
   }
 }
 
@@ -2411,6 +2754,12 @@ const handleSubmit = async () => {
     // 如果填写了价格，则添加价格字段
     if (formData.price !== null && formData.price !== '') {
       submitData.price = parseFloat(formData.price)
+    }
+    
+    // 如果是type=1或type=5，根据模式添加tp3参数
+    const taskType = parseInt(formData.type)
+    if (taskType === 1 || taskType === 5) {
+      submitData.tp3 = isFastMode.value ? "1" : "0"
     }
     
     console.log('正在提交任务...', submitData)
@@ -5350,7 +5699,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
             closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
             takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
-            numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+            numberType: parseInt(selectedNumberType.value),  // 账号类型：1-全部账户, 2-1000个账户,
+            //  3-1000个账户中未达标的
+            closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
           }
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
@@ -5362,7 +5713,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
             closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
-            takerMinAmt: hedgeMode.takerMinAmt  // 参数4：taker最小数量
+            takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
+            closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
             // 模式3不传 numberType
           }
         } else {
@@ -6418,9 +6770,9 @@ const executeHedgeTask = async (config, hedgeData) => {
   const firstPsSide = firstSide === 'YES' ? 1 : 2
   const secondPsSide = firstSide === 'YES' ? 2 : 1
   
-  // 获取电脑组ID
-  const yesGroupNo = browserToGroupMap.value[hedgeData.yesNumber] || '1'
-  const noGroupNo = browserToGroupMap.value[hedgeData.noNumber] || '1'
+  // 获取电脑组ID（优先使用返回的 yesGroup 和 noGroup 字段）
+  const yesGroupNo = hedgeData.yesGroup || browserToGroupMap.value[hedgeData.yesNumber] || '1'
+  const noGroupNo = hedgeData.noGroup || browserToGroupMap.value[hedgeData.noNumber] || '1'
   
   // 计算价格（一方是 currentPrice，另一方是 100 - currentPrice）
   const yesPrice = firstSide === 'YES' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
@@ -6472,7 +6824,9 @@ const executeHedgeTask = async (config, hedgeData) => {
   console.log(`开始对冲 ${config.id}:`, hedgeRecord)
   
   try {
-    const groupNo = browserToGroupMap.value[firstBrowser] || '1'
+    // 优先使用返回的 groupNo 字段，否则从映射中获取
+    const groupNo = (firstSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) || 
+                    browserToGroupMap.value[firstBrowser] || '1'
     
     const taskData = {
       groupNo: groupNo,
@@ -6483,7 +6837,8 @@ const executeHedgeTask = async (config, hedgeData) => {
       side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: firstPsSide,
       amt: roundedShare,  // 保留2位小数向下取整
-      price: hedgeData.currentPrice
+      price: hedgeData.currentPrice,
+      tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
     }
     
     const response = await axios.post(
@@ -6710,7 +7065,9 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
   const secondPsSide = secondSide === 'YES' ? 1 : 2
   
   try {
-    const groupNo = browserToGroupMap.value[secondBrowser] || '1'
+    // 优先使用返回的 groupNo 字段，否则从映射中获取
+    const groupNo = (secondSide === 'YES' ? hedgeRecord.yesGroupNo : hedgeRecord.noGroupNo) || 
+                    browserToGroupMap.value[secondBrowser] || '1'
     
     // 任务二的价格 = 100 - 任务一的价格
     const secondPrice = (100 - parseFloat(hedgeRecord.price)).toFixed(1)
@@ -6729,7 +7086,8 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       psSide: secondPsSide,
       amt: floorToTwoDecimals(hedgeRecord.share),  // 保留2位小数向下取整
       price: parseFloat(secondPrice),
-      tp1: firstTaskId  // 任务二需要传递任务一的ID
+      tp1: firstTaskId,  // 任务二需要传递任务一的ID
+      tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
     }
     
     const response = await axios.post(
@@ -6853,7 +7211,10 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
       try {
         const browserNo = item.number
         const share = floorToTwoDecimals(item.share)
-        const groupNo = browserToGroupMap.value[browserNo] || '1'
+        // 优先使用 item 中的 groupNo，否则使用返回的 yesGroup/noGroup，最后才从映射中获取
+        const groupNo = item.groupNo || 
+                       (firstSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) ||
+                       browserToGroupMap.value[browserNo] || '1'
         
         // 计算价格：先挂方使用 currentPrice（与模式1一致）
         const taskPrice = parseFloat(hedgeData.currentPrice)
@@ -6867,7 +7228,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
           psSide: firstPsSide,
           amt: share,
-          price: taskPrice
+          price: taskPrice,
+          tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
         }
         
         const response = await axios.post(
@@ -6948,7 +7310,10 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         try {
           const browserNo = item.number
           const share = floorToTwoDecimals(item.share)
-          const groupNo = browserToGroupMap.value[browserNo] || '1'
+          // 优先使用 item 中的 groupNo，否则使用返回的 yesGroup/noGroup，最后才从映射中获取
+          const groupNo = item.groupNo || 
+                         (secondSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) ||
+                         browserToGroupMap.value[browserNo] || '1'
           
           // 计算价格：后挂方使用 100 - currentPrice（与模式1一致）
           const taskPrice = 100 - parseFloat(hedgeData.currentPrice)
@@ -6962,7 +7327,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
             side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
             psSide: secondPsSide,
             amt: share,
-            price: taskPrice
+            price: taskPrice,
+            tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
             // 不再需要tp1
           }
           

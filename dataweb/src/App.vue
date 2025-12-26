@@ -246,30 +246,48 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
-          <label>打开时间大于:</label>
-          <el-input 
-            v-model.number="filters.openTimeGreaterThanHours" 
-            placeholder="小时数"
-            clearable
+          <label>打开时间:</label>
+          <el-select 
+            v-model="filters.openTimeOperator" 
+            placeholder="选择"
             size="small"
-            style="width: 120px"
-            type="number"
-            min="0"
+            style="width: 80px"
+          >
+            <el-option label="大于" value=">" />
+            <el-option label="小于" value="<" />
+          </el-select>
+          <el-date-picker
+            v-model="filters.openTimeValue"
+            type="datetime"
+            placeholder="选择时间"
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="x"
+            size="small"
+            style="width: 180px; margin-left: 8px"
+            clearable
           />
-          <span style="margin-left: 5px; color: #666;">小时</span>
         </div>
         <div class="filter-item">
-          <label>仓位抓取时间大于:</label>
-          <el-input 
-            v-model.number="filters.positionTimeGreaterThanHours" 
-            placeholder="小时数"
-            clearable
+          <label>仓位抓取时间:</label>
+          <el-select 
+            v-model="filters.positionTimeOperator" 
+            placeholder="选择"
             size="small"
-            style="width: 120px"
-            type="number"
-            min="0"
+            style="width: 80px"
+          >
+            <el-option label="大于" value=">" />
+            <el-option label="小于" value="<" />
+          </el-select>
+          <el-date-picker
+            v-model="filters.positionTimeValue"
+            type="datetime"
+            placeholder="选择时间"
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="x"
+            size="small"
+            style="width: 180px; margin-left: 8px"
+            clearable
           />
-          <span style="margin-left: 5px; color: #666;">小时</span>
         </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
@@ -1405,8 +1423,10 @@ const filters = ref({
   showNoPoints: false,  // 显示无积分
   showNoPosition: false,  // 显示无持有仓位
   showHasDifference: false,  // 显示与链上信息有差额
-  openTimeGreaterThanHours: null,  // 打开时间大于X小时
-  positionTimeGreaterThanHours: null  // 仓位抓取时间大于X小时
+  openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
+  openTimeValue: null,  // 打开时间值（时间戳）
+  positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
+  positionTimeValue: null  // 仓位抓取时间值（时间戳）
 })
 
 const activeFilters = ref({
@@ -1421,8 +1441,10 @@ const activeFilters = ref({
   showNoPoints: false,  // 显示无积分
   showNoPosition: false,  // 显示无持有仓位
   showHasDifference: false,  // 显示与链上信息有差额
-  openTimeGreaterThanHours: null,  // 打开时间大于X小时
-  positionTimeGreaterThanHours: null  // 仓位抓取时间大于X小时
+  openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
+  openTimeValue: null,  // 打开时间值（时间戳）
+  positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
+  positionTimeValue: null  // 仓位抓取时间值（时间戳）
 })
 
 /**
@@ -1471,15 +1493,13 @@ const applyFilters = () => {
   const balanceMin = filters.value.balanceMin ? parseFloat(filters.value.balanceMin) : null
   const balanceMax = filters.value.balanceMax ? parseFloat(filters.value.balanceMax) : null
   
-  // 解析打开时间大于X小时
-  const openTimeHours = filters.value.openTimeGreaterThanHours !== null && filters.value.openTimeGreaterThanHours !== undefined && filters.value.openTimeGreaterThanHours !== '' 
-    ? parseFloat(filters.value.openTimeGreaterThanHours) 
-    : null
+  // 解析打开时间
+  const openTimeValue = filters.value.openTimeValue ? parseInt(filters.value.openTimeValue) : null
+  const openTimeOperator = filters.value.openTimeOperator || '>'
   
-  // 解析仓位抓取时间大于X小时
-  const positionTimeHours = filters.value.positionTimeGreaterThanHours !== null && filters.value.positionTimeGreaterThanHours !== undefined && filters.value.positionTimeGreaterThanHours !== '' 
-    ? parseFloat(filters.value.positionTimeGreaterThanHours) 
-    : null
+  // 解析仓位抓取时间
+  const positionTimeValue = filters.value.positionTimeValue ? parseInt(filters.value.positionTimeValue) : null
+  const positionTimeOperator = filters.value.positionTimeOperator || '>'
   
   activeFilters.value = {
     computeGroup: parseInputValues(filters.value.computeGroup),
@@ -1493,8 +1513,10 @@ const applyFilters = () => {
     showNoPoints: filters.value.showNoPoints,
     showNoPosition: filters.value.showNoPosition,
     showHasDifference: filters.value.showHasDifference,
-    openTimeGreaterThanHours: isNaN(openTimeHours) ? null : openTimeHours,
-    positionTimeGreaterThanHours: isNaN(positionTimeHours) ? null : positionTimeHours
+    openTimeOperator: openTimeOperator,
+    openTimeValue: openTimeValue,
+    positionTimeOperator: positionTimeOperator,
+    positionTimeValue: positionTimeValue
   }
   ElMessage.success('筛选已应用')
 }
@@ -1515,8 +1537,10 @@ const clearFilters = () => {
     showNoPoints: false,
     showNoPosition: false,
     showHasDifference: false,
-    openTimeGreaterThanHours: null,
-    positionTimeGreaterThanHours: null
+    openTimeOperator: '>',
+    openTimeValue: null,
+    positionTimeOperator: '>',
+    positionTimeValue: null
   }
   activeFilters.value = {
     computeGroup: [],
@@ -1529,8 +1553,10 @@ const clearFilters = () => {
     showDuplicateAddress: false,
     showNoPoints: false,
     showHasDifference: false,
-    openTimeGreaterThanHours: null,
-    positionTimeGreaterThanHours: null
+    openTimeOperator: '>',
+    openTimeValue: null,
+    positionTimeOperator: '>',
+    positionTimeValue: null
   }
   ElMessage.info('筛选已清除')
 }
@@ -1565,8 +1591,8 @@ const filteredTableData = computed(() => {
                     filters.showNoPoints ||
                     filters.showNoPosition ||
                     filters.showHasDifference ||
-                    (filters.openTimeGreaterThanHours !== null && filters.openTimeGreaterThanHours !== undefined) ||
-                    (filters.positionTimeGreaterThanHours !== null && filters.positionTimeGreaterThanHours !== undefined)
+                    (filters.openTimeValue !== null && filters.openTimeValue !== undefined) ||
+                    (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined)
   
   let result = data
   
@@ -1655,35 +1681,45 @@ const filteredTableData = computed(() => {
         }
       }
       
-      // 打开时间大于X小时筛选
-      if (filters.openTimeGreaterThanHours !== null && filters.openTimeGreaterThanHours !== undefined) {
+      // 打开时间筛选
+      if (filters.openTimeValue !== null && filters.openTimeValue !== undefined) {
         if (!row.f) {
           return false  // 没有打开时间的数据不显示
         }
         const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
-        const now = Date.now()
-        const hoursAgo = parseFloat(filters.openTimeGreaterThanHours)
-        const thresholdTime = now - (hoursAgo * 60 * 60 * 1000)  // 转换为毫秒
+        const thresholdTime = filters.openTimeValue
         
-        // 如果打开时间大于阈值时间（即打开时间更早），则显示
-        if (openTime > thresholdTime) {
-          return false  // 打开时间不够早，不显示
+        if (filters.openTimeOperator === '>') {
+          // 大于：显示打开时间晚于阈值时间的记录
+          if (openTime <= thresholdTime) {
+            return false
+          }
+        } else if (filters.openTimeOperator === '<') {
+          // 小于：显示打开时间早于阈值时间的记录
+          if (openTime >= thresholdTime) {
+            return false
+          }
         }
       }
       
-      // 仓位抓取时间大于X小时筛选
-      if (filters.positionTimeGreaterThanHours !== null && filters.positionTimeGreaterThanHours !== undefined) {
+      // 仓位抓取时间筛选
+      if (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined) {
         if (!row.d) {
           return false  // 没有仓位抓取时间的数据不显示
         }
         const positionTime = typeof row.d === 'string' ? parseInt(row.d) : row.d
-        const now = Date.now()
-        const hoursAgo = parseFloat(filters.positionTimeGreaterThanHours)
-        const thresholdTime = now - (hoursAgo * 60 * 60 * 1000)  // 转换为毫秒
+        const thresholdTime = filters.positionTimeValue
         
-        // 如果仓位抓取时间大于阈值时间（即抓取时间更早），则显示
-        if (positionTime > thresholdTime) {
-          return false  // 仓位抓取时间不够早，不显示
+        if (filters.positionTimeOperator === '>') {
+          // 大于：显示仓位抓取时间晚于阈值时间的记录
+          if (positionTime <= thresholdTime) {
+            return false
+          }
+        } else if (filters.positionTimeOperator === '<') {
+          // 小于：显示仓位抓取时间早于阈值时间的记录
+          if (positionTime >= thresholdTime) {
+            return false
+          }
         }
       }
       
@@ -3222,7 +3258,7 @@ const refreshPosition = async (row) => {
     
     // 3. 获取更新后的数据
     const response = await axios.get(
-      `${API_BASE_URL}/boost/findAccountConfigByNo?no=${row.fingerprintNo}`
+      `${API_BASE_URL}/boost/findAccountConfigByNo?no=${row.fingerprintNo}&computeGroup=${row.computeGroup}`
     )
     
     if (response.data && response.data.data) {

@@ -215,6 +215,82 @@ def load_data():
         return []
 
 
+def upload_account_config_with_retry(data, browser_id=None, timeout=15, max_retries=5, retry_interval=10):
+    """
+    上传账户配置到服务器，带重试机制
+    
+    Args:
+        data: 要上传的数据（字典）
+        browser_id: 浏览器编号（可选，用于日志）
+        timeout: 请求超时时间（秒），默认15秒
+        max_retries: 最大重试次数，默认5次
+        retry_interval: 重试间隔时间（秒），默认10秒
+        
+    Returns:
+        tuple: (success: bool, response_data: dict or None, error_msg: str or None)
+    """
+    upload_url = f"{SERVER_BASE_URL}/boost/addAccountConfig"
+    log_prefix = f"[{browser_id}]" if browser_id else ""
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            if attempt > 1:
+                log_print(f"{log_prefix} 第 {attempt} 次尝试上传账户配置...")
+            else:
+                log_print(f"{log_prefix} 上传账户配置到服务器...")
+            
+            response = requests.post(upload_url, json=data, timeout=timeout)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if attempt > 1:
+                    log_print(f"{log_prefix} ✓ 上传成功（第 {attempt} 次尝试）")
+                else:
+                    log_print(f"{log_prefix} ✓ 上传成功")
+                return True, result, None
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                log_print(f"{log_prefix} ✗ 上传失败: {error_msg}")
+                
+                # 如果不是最后一次尝试，等待后重试
+                if attempt < max_retries:
+                    log_print(f"{log_prefix} ⏳ {retry_interval} 秒后重试...")
+                    time.sleep(retry_interval)
+                else:
+                    return False, None, error_msg
+                    
+        except requests.exceptions.Timeout:
+            error_msg = "请求超时"
+            log_print(f"{log_prefix} ✗ 上传失败: {error_msg}")
+            if attempt < max_retries:
+                log_print(f"{log_prefix} ⏳ {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+            else:
+                return False, None, error_msg
+                
+        except requests.exceptions.RequestException as e:
+            error_msg = f"网络错误: {str(e)}"
+            log_print(f"{log_prefix} ✗ 上传失败: {error_msg}")
+            if attempt < max_retries:
+                log_print(f"{log_prefix} ⏳ {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+            else:
+                return False, None, error_msg
+                
+        except Exception as e:
+            error_msg = f"未知错误: {str(e)}"
+            log_print(f"{log_prefix} ✗ 上传失败: {error_msg}")
+            if attempt < max_retries:
+                log_print(f"{log_prefix} ⏳ {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+            else:
+                return False, None, error_msg
+    
+    # 所有重试都失败
+    log_print(f"{log_prefix} ✗✗✗ 上传失败，已重试 {max_retries} 次")
+    return False, None, "所有重试均失败"
+
+
 def save_row_data(row_data):
     """
     保存单行数据到服务器
@@ -226,21 +302,24 @@ def save_row_data(row_data):
         bool: 保存成功返回 True，失败返回 False
     """
     try:
-        url = f"{SERVER_BASE_URL}/boost/addAccountConfig"
-        
         # 准备要保存的数据
         save_data = {**row_data}
         # 平台值保存到 e 字段
         if 'platform' in save_data:
             save_data['e'] = save_data['platform']
         
-        response = requests.post(url, json=save_data, timeout=10)
+        # 使用带重试机制的上传方法
+        success, result, error_msg = upload_account_config_with_retry(
+            save_data, 
+            browser_id=None, 
+            timeout=10
+        )
         
-        if response.status_code == 200:
+        if success:
             log_print(f"✓ 数据保存成功: fingerprintNo={row_data.get('fingerprintNo')}")
             return True
         else:
-            log_print(f"✗ 数据保存失败: HTTP状态码 {response.status_code}")
+            log_print(f"✗ 数据保存失败: {error_msg}")
             return False
     except Exception as e:
         log_print(f"✗ 保存数据异常: {str(e)}")

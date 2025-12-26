@@ -290,10 +290,278 @@
             display: flex;
             align-items: center;
         }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            margin-left: 15px;
+            gap: 15px;
+            font-size: 14px;
+            color: #495057;
+        }
+
+        .filter-option {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .filter-option input[type="radio"] {
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+            cursor: pointer;
+            accent-color: #667eea;
+        }
+
+        .filter-option label {
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .blacklist-mark {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 2px 6px;
+            background: #ff6b6b;
+            color: white;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            vertical-align: middle;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        .cancel-blacklist-btn {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
+        }
+
+        .cancel-blacklist-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 107, 107, 0.5);
+        }
+
+        .cancel-blacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .cancel-blacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .action-cell {
+            text-align: center;
+            width: 100px;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 500px;
+            animation: slideIn 0.3s ease-out;
+            font-size: 14px;
+        }
+
+        .toast.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .toast.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-message {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+
+        .toast.hide {
+            animation: slideOut 0.3s ease-out forwards;
+        }
+
+        .summary-row {
+            background: #e7f3ff;
+            font-weight: 600;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .summary-row td {
+            padding: 15px;
+            color: #495057;
+            font-size: 15px;
+        }
+
+        .summary-label {
+            text-align: center;
+            color: #667eea;
+        }
+
+        .settings-panel {
+            padding: 20px 30px;
+            background: #fff;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .settings-panel label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 14px;
+            margin-right: 8px;
+        }
+
+        .settings-panel input[type="number"] {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 120px;
+            transition: border-color 0.3s ease;
+        }
+
+        .settings-panel input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .settings-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .update-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+        }
+
+        .update-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.6);
+        }
+
+        .update-btn:active {
+            transform: translateY(0);
+        }
+
+        .update-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .mark-input {
+            padding: 6px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 120px;
+            transition: border-color 0.3s ease;
+        }
+
+        .mark-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
     </style>
 </head>
 <body>
     <div class="container">
+ 
+        
+        <div class="settings-panel">
+            <div class="settings-item">
+                <label>下单次数：</label>
+                <input type="number" id="judgeCount" min="0" step="1" placeholder="请输入">
+            </div>
+            <div class="settings-item">
+                <label>累计成交：</label>
+                <input type="number" id="judgeVolume" min="0" step="0.01" placeholder="请输入">
+            </div>
+            <button class="update-btn" id="updateJudgeBtn" onclick="updateJudgeParams()">
+                ✏️ 修改
+            </button>
+            <div class="settings-item" style="margin-left: 30px;">
+                <label>浏览器占用时间：</label>
+                <input type="number" id="maxWaitTime" min="0" step="1" placeholder="输入（分钟）">
+            </div>
+            <button class="update-btn" id="updateWaitTimeBtn" onclick="updateMaxWaitTime()">
+                ✏️ 修改
+            </button>
+        </div>
         
         <div class="controls">
             <div class="button-group">
@@ -303,6 +571,20 @@
                 <button class="export-btn" id="exportBtn" onclick="exportUnqualified()">
                     📋 导出不达标
                 </button>
+                <div class="filter-group">
+                    <div class="filter-option">
+                        <input type="radio" id="filterAll" name="filterType" value="all" checked onchange="toggleFilter()">
+                        <label for="filterAll">全部</label>
+                    </div>
+                    <div class="filter-option">
+                        <input type="radio" id="filterBlacklist" name="filterType" value="blacklist" onchange="toggleFilter()">
+                        <label for="filterBlacklist">重点 (isBlack=0)</label>
+                    </div>
+                    <div class="filter-option">
+                        <input type="radio" id="filterNormal" name="filterType" value="normal" onchange="toggleFilter()">
+                        <label for="filterNormal">普通 (isBlack=1)</label>
+                    </div>
+                </div>
             </div>
             <div class="stats">
                 <div>总计: <span id="totalCount">0</span> 条</div>
@@ -324,8 +606,193 @@
     <script>
         // 全局变量：保存原始数据和排序状态
         let currentData = [];
+        let accountConfigMap = {}; // 存储账户配置数据，key为fingerprintNo
         let sortColumn = null;
         let sortDirection = 'asc'; // 'asc' 或 'desc'
+        let filterType = 'all'; // 'all'（全部）、'blacklist'（重点 isBlack=0）、'normal'（普通 isBlack=1）
+
+        // 从localStorage加载标记数据
+        function loadMarks() {
+            try {
+                const marksJson = localStorage.getItem('browserMarks');
+                return marksJson ? JSON.parse(marksJson) : {};
+            } catch (error) {
+                return {};
+            }
+        }
+
+        // 保存标记到localStorage
+        function saveMark(number, mark) {
+            const marks = loadMarks();
+            if (mark && mark.trim()) {
+                marks[number] = mark.trim();
+            } else {
+                delete marks[number];
+            }
+            localStorage.setItem('browserMarks', JSON.stringify(marks));
+        }
+
+        // 获取标记
+        function getMark(number) {
+            const marks = loadMarks();
+            return marks[number] || '';
+        }
+
+        // 读取校验参数
+        async function loadJudgeParams() {
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/orderCountJudge');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data) {
+                    document.getElementById('judgeCount').value = result.data.count || 0;
+                    document.getElementById('judgeVolume').value = result.data.volume || 0;
+                } else {
+                    throw new Error(result.msg || '读取校验参数失败');
+                }
+            } catch (error) {
+                showToast('读取校验参数失败: ' + error.message, 'error');
+            }
+        }
+
+        // 更新校验参数
+        async function updateJudgeParams() {
+            const updateBtn = document.getElementById('updateJudgeBtn');
+            const countInput = document.getElementById('judgeCount');
+            const volumeInput = document.getElementById('judgeVolume');
+
+            const count = parseInt(countInput.value);
+            const volume = parseFloat(volumeInput.value);
+
+            // 验证输入
+            if (isNaN(count) || count < 0) {
+                showToast('请输入有效的下单次数（大于等于0的整数）', 'error');
+                return;
+            }
+
+            if (isNaN(volume) || volume < 0) {
+                showToast('请输入有效的累计成交（大于等于0的数字）', 'error');
+                return;
+            }
+
+            // 禁用按钮并显示加载状态
+            updateBtn.disabled = true;
+            updateBtn.textContent = '⏳ 更新中...';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/orderCountJudge', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        count: count,
+                        volume: volume
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('更新校验参数成功', 'success');
+                } else {
+                    throw new Error(result.msg || '更新失败');
+                }
+            } catch (error) {
+                showToast('更新校验参数失败: ' + error.message, 'error');
+            } finally {
+                updateBtn.disabled = false;
+                updateBtn.textContent = '✏️ 修改';
+            }
+        }
+
+        // 读取浏览器占用时间
+        async function loadMaxWaitTime() {
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/maxWaitTime');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data) {
+                    document.getElementById('maxWaitTime').value = result.data.maxWaitTime || 0;
+                } else {
+                    throw new Error(result.msg || '读取浏览器占用时间失败');
+                }
+            } catch (error) {
+                showToast('读取浏览器占用时间失败: ' + error.message, 'error');
+            }
+        }
+
+        // 更新浏览器占用时间
+        async function updateMaxWaitTime() {
+            const updateBtn = document.getElementById('updateWaitTimeBtn');
+            const waitTimeInput = document.getElementById('maxWaitTime');
+
+            const maxWaitTime = parseInt(waitTimeInput.value);
+
+            // 验证输入
+            if (isNaN(maxWaitTime) || maxWaitTime < 0) {
+                showToast('请输入有效的浏览器占用时间（大于等于0的整数，单位：分钟）', 'error');
+                return;
+            }
+
+            // 禁用按钮并显示加载状态
+            updateBtn.disabled = true;
+            updateBtn.textContent = '⏳ 更新中...';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/maxWaitTime', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        maxWaitTime: maxWaitTime
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('更新浏览器占用时间成功', 'success');
+                } else {
+                    throw new Error(result.msg || '更新失败');
+                }
+            } catch (error) {
+                showToast('更新浏览器占用时间失败: ' + error.message, 'error');
+            } finally {
+                updateBtn.disabled = false;
+                updateBtn.textContent = '✏️ 修改';
+            }
+        }
+
+        // 加载账户配置数据
+        async function loadAccountConfig() {
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data && Array.isArray(result.data)) {
+                    // 将数据转换为Map，key为fingerprintNo
+                    accountConfigMap = {};
+                    result.data.forEach(item => {
+                        if (item.fingerprintNo) {
+                            accountConfigMap[item.fingerprintNo] = {
+                                computeGroup: item.computeGroup || '-',
+                                balance: item.balance !== null && item.balance !== undefined 
+                                    ? parseFloat(item.balance).toFixed(2) 
+                                    : '-'
+                            };
+                        }
+                    });
+                } else {
+                    console.warn('加载账户配置失败:', result.msg || '数据格式错误');
+                    accountConfigMap = {};
+                }
+            } catch (error) {
+                console.warn('加载账户配置失败:', error.message);
+                accountConfigMap = {};
+            }
+        }
 
         async function loadData() {
             const refreshBtn = document.getElementById('refreshBtn');
@@ -341,14 +808,30 @@
             exportResult.classList.remove('show');
 
             try {
-                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/orderCount');
-                const result = await response.json();
+                // 并行加载订单数据和账户配置数据
+                const [orderResponse, accountConfigPromise] = await Promise.all([
+                    fetch('https://sg.bicoin.com.cn/99l/hedge/orderCount'),
+                    loadAccountConfig()
+                ]);
 
-                if (result.code === 0 && result.data && result.data.list) {
-                    currentData = result.data.list;
+                const orderResult = await orderResponse.json();
+
+                if (orderResult.code === 0 && orderResult.data && orderResult.data.list) {
+                    currentData = orderResult.data.list;
+                    // 合并账户配置数据到currentData
+                    currentData.forEach(item => {
+                        const config = accountConfigMap[item.number];
+                        if (config) {
+                            item.computeGroup = config.computeGroup;
+                            item.balance = config.balance;
+                        } else {
+                            item.computeGroup = '-';
+                            item.balance = '-';
+                        }
+                    });
                     displayData(currentData);
                 } else {
-                    throw new Error(result.msg || '数据格式错误');
+                    throw new Error(orderResult.msg || '数据格式错误');
                 }
             } catch (error) {
                 tableContainer.innerHTML = `
@@ -364,6 +847,18 @@
             }
         }
 
+        function toggleFilter() {
+            const selectedFilter = document.querySelector('input[name="filterType"]:checked');
+            filterType = selectedFilter ? selectedFilter.value : 'all';
+            
+            // 重新应用排序和筛选
+            if (sortColumn) {
+                sortData(sortColumn);
+            } else {
+                displayData(currentData);
+            }
+        }
+
         function sortData(column) {
             // 如果点击同一列，切换排序方向；否则设置为升序
             if (sortColumn === column) {
@@ -373,7 +868,7 @@
                 sortDirection = 'asc';
             }
 
-            // 创建数据副本进行排序
+            // 创建数据副本进行排序（对原始数据排序，筛选由 displayData 处理）
             const sortedData = [...currentData].sort((a, b) => {
                 let aVal, bVal;
 
@@ -402,6 +897,31 @@
                         aVal = parseFloat(a.volume || 0);
                         bVal = parseFloat(b.volume || 0);
                         break;
+                    case 'computeGroup':
+                        // 电脑组：按字符串排序，'-' 排在最后
+                        aVal = a.computeGroup || '-';
+                        bVal = b.computeGroup || '-';
+                        if (aVal === '-' && bVal !== '-') return 1;
+                        if (aVal !== '-' && bVal === '-') return -1;
+                        if (aVal === '-' && bVal === '-') return 0;
+                        // 尝试按数字排序，如果不是数字则按字符串排序
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            aVal = aNum;
+                            bVal = bNum;
+                        }
+                        break;
+                    case 'balance':
+                        // 余额：按数字排序，'-' 排在最后
+                        const aBalanceIsEmpty = a.balance === '-' || a.balance === null || a.balance === undefined;
+                        const bBalanceIsEmpty = b.balance === '-' || b.balance === null || b.balance === undefined;
+                        if (aBalanceIsEmpty && !bBalanceIsEmpty) return 1;
+                        if (!aBalanceIsEmpty && bBalanceIsEmpty) return -1;
+                        if (aBalanceIsEmpty && bBalanceIsEmpty) return 0;
+                        aVal = parseFloat(a.balance || 0);
+                        bVal = parseFloat(b.balance || 0);
+                        break;
                     default:
                         return 0;
                 }
@@ -421,13 +941,24 @@
         function displayData(list) {
             const tableContainer = document.getElementById('tableContainer');
             
-            if (!list || list.length === 0) {
+            // 应用筛选：根据筛选类型过滤数据
+            let filteredList = list;
+            if (filterType === 'blacklist') {
+                // 只显示重点标记 (isBlack == 0)
+                filteredList = list.filter(item => Number(item.isBlack) === 0);
+            } else if (filterType === 'normal') {
+                // 只显示普通 (isBlack == 1)
+                filteredList = list.filter(item => Number(item.isBlack) === 1);
+            }
+            // filterType === 'all' 时显示全部，不需要筛选
+            
+            if (!filteredList || filteredList.length === 0) {
                 tableContainer.innerHTML = '<div class="empty">暂无数据</div>';
-                updateStats(0, 0, 0);
+                updateStats(list.length, 0, 0);
                 return;
             }
 
-            // 统计数据
+            // 统计数据（基于原始列表，不基于筛选后的列表）
             let qualifiedCount = 0;
             let unqualifiedCount = 0;
             list.forEach(item => {
@@ -448,6 +979,22 @@
                 return '';
             };
 
+            // 计算总计：根据筛选后的数据计算交易次数、交易量和余额总和
+            let totalCount = 0;
+            let totalVolume = 0;
+            let totalBalance = 0;
+            filteredList.forEach(item => {
+                totalCount += parseInt(item.count || 0);
+                totalVolume += parseFloat(item.volume || 0);
+                // 计算余额总和，忽略 '-' 值
+                if (item.balance && item.balance !== '-') {
+                    const balance = parseFloat(item.balance);
+                    if (!isNaN(balance)) {
+                        totalBalance += balance;
+                    }
+                }
+            });
+
             // 生成表格HTML
             let tableHTML = `
                 <table>
@@ -455,26 +1002,69 @@
                         <tr>
                             <th class="index">序号</th>
                             <th class="sortable ${getSortClass('number')}" onclick="sortData('number')">浏览器</th>
+                            <th class="sortable ${getSortClass('computeGroup')}" onclick="sortData('computeGroup')">电脑组</th>
+                            <th class="sortable ${getSortClass('balance')}" onclick="sortData('balance')">余额</th>
+                            <th>标记</th>
                             <th class="sortable ${getSortClass('count')}" onclick="sortData('count')">交易次数</th>
                             <th class="sortable ${getSortClass('status')}" onclick="sortData('status')">是否达标</th>
                             <th class="sortable ${getSortClass('volume')}" onclick="sortData('volume')">交易量</th>
+                            <th class="action-cell">操作</th>
                         </tr>
                     </thead>
                     <tbody>
+                        <tr class="summary-row">
+                            <td class="summary-label">总计</td>
+                            <td><strong>${filteredList.length}</strong></td>
+                            <td>-</td>
+                            <td class="volume"><strong>${totalBalance.toFixed(2)}</strong></td>
+                            <td>-</td>
+                            <td><strong>${totalCount}</strong></td>
+                            <td>-</td>
+                            <td class="volume"><strong>${totalVolume.toFixed(2)}</strong></td>
+                            <td>-</td>
+                        </tr>
             `;
 
-            list.forEach((item, index) => {
+            filteredList.forEach((item, index) => {
                 const statusClass = item.status === 0 ? 'status-0' : 'status-1';
                 const statusText = item.status === 0 ? '达标' : '不达标';
                 const volume = parseFloat(item.volume || 0).toFixed(2);
+                const computeGroup = item.computeGroup || '-';
+                const balance = item.balance || '-';
+                const currentMark = getMark(item.number || '');
+                const number = (item.number || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
+                // 检查 isBlack 字段，如果为 0 则添加重点标记
+                const blacklistMark = Number(item.isBlack) === 0 
+                    ? '<span class="blacklist-mark">重点</span>' 
+                    : '';
+
+                // 如果 isBlack=0，显示取消重点按钮
+                const actionButton = Number(item.isBlack) === 0
+                    ? `<button class="cancel-blacklist-btn" onclick="cancelBlacklist('${number}')">取消重点</button>`
+                    : '';
+
+                // 转义标记值中的特殊字符
+                const escapedMark = currentMark.replace(/"/g, '&quot;').replace(/'/g, "&#39;");
 
                 tableHTML += `
                     <tr>
                         <td class="index">${index + 1}</td>
-                        <td><strong>${item.number || '-'}</strong></td>
+                        <td><strong>${item.number || '-'}</strong>${blacklistMark}</td>
+                        <td>${computeGroup}</td>
+                        <td>${balance}</td>
+                        <td>
+                            <input type="text" 
+                                   class="mark-input" 
+                                   value="${escapedMark}" 
+                                   placeholder="输入标记"
+                                   onchange="saveMark('${number}', this.value)"
+                                   onblur="saveMark('${number}', this.value)">
+                        </td>
                         <td>${item.count || 0}</td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td class="volume">${volume}</td>
+                        <td class="action-cell">${actionButton}</td>
                     </tr>
                 `;
             });
@@ -522,9 +1112,113 @@
             exportResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
+        function showToast(message, type = 'success') {
+            // 移除已存在的 toast
+            const existingToast = document.querySelector('.toast');
+            if (existingToast) {
+                existingToast.remove();
+            }
+
+            // 创建新的 toast
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'success' ? '✅' : '❌';
+            toast.innerHTML = `
+                <span class="toast-icon">${icon}</span>
+                <span class="toast-message">${message}</span>
+            `;
+
+            document.body.appendChild(toast);
+
+            // 3秒后自动移除
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        async function cancelBlacklist(number) {
+            if (!number) {
+                showToast('浏览器号不能为空', 'error');
+                return;
+            }
+
+            // 找到对应的按钮和行
+            const buttons = document.querySelectorAll('.cancel-blacklist-btn');
+            let targetButton = null;
+            let targetRow = null;
+            
+            buttons.forEach(btn => {
+                if (btn.getAttribute('onclick').includes(`'${number}'`)) {
+                    targetButton = btn;
+                    targetRow = btn.closest('tr');
+                }
+            });
+
+            if (targetButton) {
+                targetButton.disabled = true;
+                targetButton.textContent = '处理中...';
+            }
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/addOrderCountBlack', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ number: number })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('取消重点成功', 'success');
+                    
+                    // 更新 currentData 中的数据
+                    const item = currentData.find(item => item.number === number);
+                    if (item) {
+                        item.isBlack = 1; // 更新为普通状态
+                    }
+                    
+                    // 更新当前行的显示：移除重点标记和按钮
+                    if (targetRow) {
+                        const browserCell = targetRow.querySelector('td:nth-child(2)');
+                        if (browserCell) {
+                            // 移除重点标记
+                            const blacklistMark = browserCell.querySelector('.blacklist-mark');
+                            if (blacklistMark) {
+                                blacklistMark.remove();
+                            }
+                        }
+                        
+                        // 移除按钮
+                        const actionCell = targetRow.querySelector('td:last-child');
+                        if (actionCell) {
+                            actionCell.innerHTML = '';
+                        }
+                    }
+                } else {
+                    throw new Error(result.msg || '操作失败');
+                }
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+                if (targetButton) {
+                    targetButton.disabled = false;
+                    targetButton.textContent = '取消重点';
+                }
+            }
+        }
+
         // 页面加载时自动获取数据
         window.addEventListener('DOMContentLoaded', () => {
-            loadData();
+            loadJudgeParams(); // 加载校验参数
+            loadMaxWaitTime(); // 加载浏览器占用时间
+            loadData(); // 加载数据（内部会调用loadAccountConfig）
         });
     </script>
 </body>
