@@ -371,7 +371,44 @@
 
         .action-cell {
             text-align: center;
-            width: 100px;
+            width: 150px;
+        }
+
+        .temp-blacklist-btn {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3);
+            margin-left: 5px;
+        }
+
+        .temp-blacklist-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.5);
+        }
+
+        .temp-blacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .temp-blacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .temp-blacklist-btn.remove {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+        }
+
+        .temp-blacklist-btn.remove:hover {
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5);
         }
 
         .toast {
@@ -607,6 +644,7 @@
         // 全局变量：保存原始数据和排序状态
         let currentData = [];
         let accountConfigMap = {}; // 存储账户配置数据，key为fingerprintNo
+        let tempBlacklistSet = new Set(); // 存储临时黑名单，使用Set提高查找效率
         let sortColumn = null;
         let sortDirection = 'asc'; // 'asc' 或 'desc'
         let filterType = 'all'; // 'all'（全部）、'blacklist'（重点 isBlack=0）、'normal'（普通 isBlack=1）
@@ -794,6 +832,25 @@
             }
         }
 
+        // 加载临时黑名单列表
+        async function loadTempBlacklist() {
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/tempBlackList');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data && Array.isArray(result.data.list)) {
+                    // 将列表转换为Set，方便快速查找
+                    tempBlacklistSet = new Set(result.data.list.map(item => String(item.number || item)));
+                } else {
+                    console.warn('加载临时黑名单失败:', result.msg || '数据格式错误');
+                    tempBlacklistSet = new Set();
+                }
+            } catch (error) {
+                console.warn('加载临时黑名单失败:', error.message);
+                tempBlacklistSet = new Set();
+            }
+        }
+
         async function loadData() {
             const refreshBtn = document.getElementById('refreshBtn');
             const tableContainer = document.getElementById('tableContainer');
@@ -808,10 +865,11 @@
             exportResult.classList.remove('show');
 
             try {
-                // 并行加载订单数据和账户配置数据
-                const [orderResponse, accountConfigPromise] = await Promise.all([
+                // 并行加载订单数据、账户配置数据和临时黑名单
+                const [orderResponse, accountConfigPromise, tempBlacklistPromise] = await Promise.all([
                     fetch('https://sg.bicoin.com.cn/99l/hedge/orderCount'),
-                    loadAccountConfig()
+                    loadAccountConfig(),
+                    loadTempBlacklist()
                 ]);
 
                 const orderResult = await orderResponse.json();
@@ -1039,10 +1097,21 @@
                     ? '<span class="blacklist-mark">重点</span>' 
                     : '';
 
+                // 检查是否在临时黑名单中
+                const isInTempBlacklist = tempBlacklistSet.has(String(item.number || ''));
+                
                 // 如果 isBlack=0，显示取消重点按钮
-                const actionButton = Number(item.isBlack) === 0
-                    ? `<button class="cancel-blacklist-btn" onclick="cancelBlacklist('${number}')">取消重点</button>`
-                    : '';
+                let actionButtons = '';
+                if (Number(item.isBlack) === 0) {
+                    actionButtons += `<button class="cancel-blacklist-btn" onclick="cancelBlacklist('${number}')">取消重点</button>`;
+                }
+                
+                // 显示加入/取消临时黑名单按钮
+                if (isInTempBlacklist) {
+                    actionButtons += `<button class="temp-blacklist-btn remove" onclick="toggleTempBlacklist('${number}')">取消黑名单</button>`;
+                } else {
+                    actionButtons += `<button class="temp-blacklist-btn" onclick="toggleTempBlacklist('${number}')">加入黑名单</button>`;
+                }
 
                 // 转义标记值中的特殊字符
                 const escapedMark = currentMark.replace(/"/g, '&quot;').replace(/'/g, "&#39;");
@@ -1064,7 +1133,7 @@
                         <td>${item.count || 0}</td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td class="volume">${volume}</td>
-                        <td class="action-cell">${actionButton}</td>
+                        <td class="action-cell">${actionButtons}</td>
                     </tr>
                 `;
             });
@@ -1210,6 +1279,96 @@
                 if (targetButton) {
                     targetButton.disabled = false;
                     targetButton.textContent = '取消重点';
+                }
+            }
+        }
+
+        // 切换临时黑名单状态（加入/移除）
+        async function toggleTempBlacklist(number) {
+            if (!number) {
+                showToast('浏览器号不能为空', 'error');
+                return;
+            }
+
+            // 找到对应的按钮和行
+            const buttons = document.querySelectorAll('.temp-blacklist-btn');
+            let targetButton = null;
+            let targetRow = null;
+            
+            buttons.forEach(btn => {
+                if (btn.getAttribute('onclick').includes(`'${number}'`)) {
+                    targetButton = btn;
+                    targetRow = btn.closest('tr');
+                }
+            });
+
+            if (targetButton) {
+                targetButton.disabled = true;
+                targetButton.textContent = '处理中...';
+            }
+
+            const isInBlacklist = tempBlacklistSet.has(String(number));
+            const apiUrl = isInBlacklist 
+                ? 'https://sg.bicoin.com.cn/99l/hedge/removeTempBlack'
+                : 'https://sg.bicoin.com.cn/99l/hedge/addTempBlack';
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ number: number })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    // 更新本地黑名单Set
+                    if (isInBlacklist) {
+                        tempBlacklistSet.delete(String(number));
+                        showToast('移除临时黑名单成功', 'success');
+                    } else {
+                        tempBlacklistSet.add(String(number));
+                        showToast('加入临时黑名单成功', 'success');
+                    }
+                    
+                    // 更新按钮显示
+                    if (targetRow && targetButton) {
+                        const actionCell = targetRow.querySelector('td:last-child');
+                        if (actionCell) {
+                            // 重新生成操作按钮
+                            const item = currentData.find(item => item.number === number);
+                            if (item) {
+                                // 转义浏览器号
+                                const escapedNumber = String(number).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                                let newActionButtons = '';
+                                
+                                // 如果 isBlack=0，显示取消重点按钮
+                                if (Number(item.isBlack) === 0) {
+                                    newActionButtons += `<button class="cancel-blacklist-btn" onclick="cancelBlacklist('${escapedNumber}')">取消重点</button>`;
+                                }
+                                
+                                // 显示加入/取消临时黑名单按钮
+                                const nowInBlacklist = tempBlacklistSet.has(String(number));
+                                if (nowInBlacklist) {
+                                    newActionButtons += `<button class="temp-blacklist-btn remove" onclick="toggleTempBlacklist('${escapedNumber}')">取消黑名单</button>`;
+                                } else {
+                                    newActionButtons += `<button class="temp-blacklist-btn" onclick="toggleTempBlacklist('${escapedNumber}')">加入黑名单</button>`;
+                                }
+                                
+                                actionCell.innerHTML = newActionButtons;
+                            }
+                        }
+                    }
+                } else {
+                    throw new Error(result.msg || '操作失败');
+                }
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+                if (targetButton) {
+                    targetButton.disabled = false;
+                    targetButton.textContent = isInBlacklist ? '取消黑名单' : '加入黑名单';
                 }
             }
         }

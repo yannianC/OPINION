@@ -3262,7 +3262,7 @@ const refreshPosition = async (row) => {
     
     // 3. 获取更新后的数据
     const response = await axios.get(
-      `${API_BASE_URL}/boost/findAccountConfigByNo?no=${row.fingerprintNo}&computeGroup=${row.computeGroup}`
+      `${API_BASE_URL}/boost/findAccountConfigByNo?no=${row.fingerprintNo}`
     )
     
     if (response.data && response.data.data) {

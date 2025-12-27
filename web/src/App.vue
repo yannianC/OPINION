@@ -521,7 +521,7 @@
                 <div class="trending-header">
                   <div class="trending-name-row">
                     <span class="trending-name">
-                      {{ config.trendingPart1 ? `${config.trending}` : config.trending }}
+                      {{ config.trending }}
                     </span>
                     <button 
                       v-if="config.opUrl" 
@@ -923,14 +923,30 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="numberList">浏览器编号 *</label>
-                <input
-                  id="numberList"
-                  v-model="formData.numberList"
-                  type="text"
-                  placeholder="请输入浏览器编号"
-                  required
-                  @blur="updateGroupNoFromBrowser"
-                />
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <input
+                    id="numberList"
+                    v-model="formData.numberList"
+                    type="text"
+                    placeholder="请输入浏览器编号"
+                    required
+                    @blur="updateGroupNoFromBrowser"
+                    style="flex: 1;"
+                  />
+                  <button 
+                    type="button" 
+                    class="btn btn-info btn-sm" 
+                    @click="handleQuickSelectOrderAcc"
+                    :disabled="isQuickSelecting || !canQuickSelect"
+                    style="white-space: nowrap;"
+                  >
+                    <span v-if="isQuickSelecting">获取中...</span>
+                    <span v-else>自动获取</span>
+                  </button>
+                </div>
+                <div v-if="blackListText" class="blacklist-display" style="margin-top: 8px; color: #ff6b6b; font-size: 14px;">
+                  拉黑的浏览器: {{ blackListText }}
+                </div>
               </div>
 
               <div class="form-group">
@@ -949,21 +965,33 @@
 
               <div class="form-group">
                 <label for="trendingId">Trending *</label>
-                <select 
-                  id="trendingId" 
-                  v-model="formData.trendingId" 
-                  required
-                  :disabled="isLoadingConfig"
-                >
-                  <option value="" disabled>{{ isLoadingConfig ? '加载中...' : '请选择Trending' }}</option>
-                  <option 
-                    v-for="config in configList" 
-                    :key="config.id" 
-                    :value="String(config.id)"
+                <div class="trending-autocomplete-wrapper">
+                  <input
+                    id="trendingId"
+                    v-model="trendingSearchText"
+                    type="text"
+                    placeholder="输入文字筛选或选择Trending"
+                    required
+                    :disabled="isLoadingConfig"
+                    @input="onTrendingSearchInput"
+                    @focus="showTrendingDropdown = true"
+                    @blur="handleTrendingBlur"
+                    autocomplete="off"
+                  />
+                  <div 
+                    v-if="showTrendingDropdown && filteredTrendingList.length > 0" 
+                    class="trending-dropdown"
                   >
-                    {{ config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending }}
-                  </option>
-                </select>
+                    <div
+                      v-for="config in filteredTrendingList"
+                      :key="config.id"
+                      class="trending-dropdown-item"
+                      @mousedown.prevent="selectTrending(config)"
+                    >
+                      {{ config.trending }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1040,10 +1068,10 @@
                 <span v-if="isSubmitting">提交中...</span>
                 <span v-else>添加任务</span>
               </button>
-              <button type="button" class="btn btn-info" @click="submitOrderbookTask" :disabled="isSubmittingOrderbook">
+              <!-- <button type="button" class="btn btn-info" @click="submitOrderbookTask" :disabled="isSubmittingOrderbook">
                 <span v-if="isSubmittingOrderbook">提交中...</span>
                 <span v-else>📊 获取订单薄</span>
-              </button>
+              </button> -->
               <button type="button" class="btn btn-secondary" @click="resetForm">
                 重置
               </button>
@@ -1083,7 +1111,7 @@
                       :key="config.id" 
                       :value="String(config.id)"
                     >
-                      {{ config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending }}
+                      {{ config.trending }}
                     </option>
                   </select>
                 </div>
@@ -2050,6 +2078,10 @@ const isRetrying = ref(false)
 const isLoadingList = ref(false)
 const isLoadingConfig = ref(true)
 const isLoadingHedgeHistory = ref(false)
+const isQuickSelecting = ref(false)  // 是否正在自动获取
+const trendingSearchText = ref('')  // Trending搜索文本
+const showTrendingDropdown = ref(false)  // 是否显示Trending下拉列表
+const blackListText = ref('')  // 拉黑的浏览器列表
 const missionList = ref([])
 const hedgeHistoryList = ref([])
 const hedgeHistorySection = ref(null)
@@ -2341,6 +2373,146 @@ const updateGroupNoFromBrowser = () => {
 }
 
 /**
+ * 过滤后的Trending列表
+ */
+const filteredTrendingList = computed(() => {
+  if (!trendingSearchText.value || trendingSearchText.value.trim() === '') {
+    return configList.value
+  }
+  const searchLower = trendingSearchText.value.toLowerCase().trim()
+  return configList.value.filter(config => {
+    return config.trending.toLowerCase().includes(searchLower)
+  })
+})
+
+/**
+ * Trending搜索输入处理
+ */
+const onTrendingSearchInput = () => {
+  showTrendingDropdown.value = true
+  // 如果输入的内容完全匹配某个选项，自动选择
+  const exactMatch = configList.value.find(config => {
+    return config.trending === trendingSearchText.value
+  })
+  if (exactMatch) {
+    formData.trendingId = String(exactMatch.id)
+  }
+}
+
+/**
+ * 选择Trending
+ */
+const selectTrending = (config) => {
+  formData.trendingId = String(config.id)
+  trendingSearchText.value = config.trending
+  showTrendingDropdown.value = false
+}
+
+/**
+ * Trending输入框失焦处理
+ */
+const handleTrendingBlur = () => {
+  // 延迟隐藏，以便点击下拉项时能触发
+  setTimeout(() => {
+    showTrendingDropdown.value = false
+  }, 200)
+}
+
+/**
+ * 判断是否可以点击自动获取按钮
+ * 需要：预测方向、买卖方向、Trending和价格
+ */
+const canQuickSelect = computed(() => {
+  return formData.trendingId && 
+         formData.psSide && 
+         formData.side && 
+         formData.price !== null && 
+         formData.price !== '' &&
+         !isNaN(parseFloat(formData.price))
+})
+
+/**
+ * 自动获取订单账户信息
+ */
+const handleQuickSelectOrderAcc = async () => {
+  if (!canQuickSelect.value) {
+    showToast('请先选择预测方向、买卖方向、Trending和价格', 'warning')
+    return
+  }
+
+  isQuickSelecting.value = true
+  blackListText.value = ''  // 清空之前的拉黑列表
+
+  try {
+    // 构建请求参数
+    const requestData = {
+      trendingId: parseInt(formData.trendingId),
+      outcome: parseInt(formData.psSide),  // 1=Yes, 2=No
+      price: parseFloat(formData.price),
+      isClose: false,  // 根据需求设置，这里默认false
+      share: parseFloat(formData.amt) || 0  // 如果数量为空，传0
+    }
+
+    console.log('正在自动获取订单账户信息...', requestData)
+
+    // 发送请求
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/quickSelectOrderAcc',
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (response.data && response.data.data) {
+      const responseData = response.data.data
+      
+      // 处理blackList
+      if (responseData.blackList && Array.isArray(responseData.blackList) && responseData.blackList.length > 0) {
+        blackListText.value = responseData.blackList.join(', ')
+      } else {
+        blackListText.value = ''
+      }
+      
+      // 处理list数据
+      if (responseData.list && responseData.list.length > 0) {
+        const result = responseData.list[0]
+        
+        // 填充表单
+        if (result.number) {
+          formData.numberList = String(result.number)
+          // 自动更新组号
+          updateGroupNoFromBrowser()
+        }
+        
+        if (result.group) {
+          formData.groupNo = String(result.group)
+        }
+        
+        if (result.share) {
+          formData.amt = parseFloat(result.share)
+        }
+
+        showToast('自动获取成功！', 'success')
+        console.log('自动获取成功:', result)
+      } else {
+        showToast('未找到匹配的账户信息', 'warning')
+      }
+    } else {
+      showToast('未找到匹配的账户信息', 'warning')
+    }
+  } catch (error) {
+    console.error('自动获取失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    showToast(`自动获取失败: ${errorMsg}`, 'error')
+  } finally {
+    isQuickSelecting.value = false
+  }
+}
+
+/**
  * 获取交易所和Trending配置
  */
 const fetchExchangeConfig = async () => {
@@ -2368,10 +2540,21 @@ const fetchExchangeConfig = async () => {
       
       if (configList.value.length > 0 && !formData.trendingId) {
         formData.trendingId = String(configList.value[0].id)
+        // 同步搜索文本
+        const defaultConfig = configList.value[0]
+        trendingSearchText.value = defaultConfig.trending
       }
       
       if (configList.value.length > 0 && !hedgeData.eventLink) {
         hedgeData.eventLink = String(configList.value[0].id)
+      }
+      
+      // 如果已有trendingId，同步搜索文本
+      if (formData.trendingId && configList.value.length > 0) {
+        const selectedConfig = configList.value.find(c => String(c.id) === formData.trendingId)
+        if (selectedConfig) {
+          trendingSearchText.value = selectedConfig.trending
+        }
       }
       
       console.log(`配置加载成功：${exchangeList.value.length} 个交易所，${configList.value.length} 个Trending`)
@@ -2952,7 +3135,7 @@ const showToast = (message, type = 'info') => {
 const getTrendingById = (id) => {
   const config = configList.value.find(c => c.id === id)
   if (!config) return `ID: ${id}`
-  return config.trendingPart1 ? `${config.trending}-${config.trendingPart1}` : config.trending
+  return config.trending
 }
 
 /**
@@ -3334,6 +3517,18 @@ const resetForm = () => {
   formData.psSide = '1'
   formData.amt = null
   formData.price = null
+  
+  // 重置Trending搜索文本
+  if (configList.value.length > 0 && formData.trendingId) {
+    const defaultConfig = configList.value.find(c => String(c.id) === formData.trendingId) || configList.value[0]
+    trendingSearchText.value = defaultConfig.trending
+  } else {
+    trendingSearchText.value = ''
+  }
+  
+  // 清空拉黑浏览器列表
+  blackListText.value = ''
+  
   console.log('表单已重置')
 }
 
@@ -3393,6 +3588,23 @@ watch(
     if (hedgeMode.isClose && hedgeMode.hedgeMode === 2 && newDelayMs !== null && newDelayMs < 20000) {
       hedgeData.delayMs = 20000
       console.log('平仓模式2：延时时间已自动调整为20秒（20000ms）')
+    }
+  }
+)
+
+/**
+ * 监听trendingId变化，同步搜索文本
+ */
+watch(
+  () => formData.trendingId,
+  (newTrendingId) => {
+    if (newTrendingId && configList.value.length > 0) {
+      const selectedConfig = configList.value.find(c => String(c.id) === newTrendingId)
+      if (selectedConfig) {
+        if (trendingSearchText.value !== selectedConfig.trending) {
+          trendingSearchText.value = selectedConfig.trending
+        }
+      }
     }
   }
 )
@@ -5913,7 +6125,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
             numberType: parseInt(selectedNumberType.value),  // 账号类型：1-全部账户, 2-1000个账户,
             //  3-1000个账户中未达标的
-            closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+            // closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
           }
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
@@ -5926,7 +6138,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
             closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
             takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
-            closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+            // closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
             // 模式3不传 numberType
           }
         } else {
@@ -6997,9 +7209,9 @@ const executeHedgeTask = async (config, hedgeData) => {
   const firstPsSide = firstSide === 'YES' ? 1 : 2
   const secondPsSide = firstSide === 'YES' ? 2 : 1
   
-  // 获取电脑组ID（优先使用返回的 yesGroup 和 noGroup 字段）
-  const yesGroupNo = hedgeData.yesGroup || browserToGroupMap.value[hedgeData.yesNumber] || '1'
-  const noGroupNo = hedgeData.noGroup || browserToGroupMap.value[hedgeData.noNumber] || '1'
+  // 获取电脑组ID
+  const yesGroupNo = browserToGroupMap.value[hedgeData.yesNumber] || '1'
+  const noGroupNo = browserToGroupMap.value[hedgeData.noNumber] || '1'
   
   // 计算价格（一方是 currentPrice，另一方是 100 - currentPrice）
   const yesPrice = firstSide === 'YES' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
@@ -7051,9 +7263,7 @@ const executeHedgeTask = async (config, hedgeData) => {
   console.log(`开始对冲 ${config.id}:`, hedgeRecord)
   
   try {
-    // 优先使用返回的 groupNo 字段，否则从映射中获取
-    const groupNo = (firstSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) || 
-                    browserToGroupMap.value[firstBrowser] || '1'
+    const groupNo = browserToGroupMap.value[firstBrowser] || '1'
     
     const taskData = {
       groupNo: groupNo,
@@ -7292,9 +7502,7 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
   const secondPsSide = secondSide === 'YES' ? 1 : 2
   
   try {
-    // 优先使用返回的 groupNo 字段，否则从映射中获取
-    const groupNo = (secondSide === 'YES' ? hedgeRecord.yesGroupNo : hedgeRecord.noGroupNo) || 
-                    browserToGroupMap.value[secondBrowser] || '1'
+    const groupNo = browserToGroupMap.value[secondBrowser] || '1'
     
     // 任务二的价格 = 100 - 任务一的价格
     const secondPrice = (100 - parseFloat(hedgeRecord.price)).toFixed(1)
@@ -7438,12 +7646,7 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
       try {
         const browserNo = item.number
         const share = floorToTwoDecimals(item.share)
-        // 优先使用返回的 group 字段，否则使用 item 中的 groupNo，再使用返回的 yesGroup/noGroup，最后才从映射中获取
-        const groupNo = hedgeData.group || 
-                       item.groupNo || 
-                       item.group ||
-                       (firstSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) ||
-                       browserToGroupMap.value[browserNo] || '1'
+        const groupNo = browserToGroupMap.value[browserNo] || '1'
         
         // 计算价格：先挂方使用 currentPrice（与模式1一致）
         const taskPrice = parseFloat(hedgeData.currentPrice)
@@ -7539,12 +7742,7 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         try {
           const browserNo = item.number
           const share = floorToTwoDecimals(item.share)
-          // 优先使用返回的 group 字段，否则使用 item 中的 groupNo，再使用返回的 yesGroup/noGroup，最后才从映射中获取
-          const groupNo = hedgeData.group || 
-                         item.groupNo || 
-                         item.group ||
-                         (secondSide === 'YES' ? hedgeData.yesGroup : hedgeData.noGroup) ||
-                         browserToGroupMap.value[browserNo] || '1'
+          const groupNo = browserToGroupMap.value[browserNo] || '1'
           
           // 计算价格：后挂方使用 100 - currentPrice（与模式1一致）
           const taskPrice = 100 - parseFloat(hedgeData.currentPrice)
@@ -10140,6 +10338,63 @@ onUnmounted(() => {
   background-color: #f5f5f5;
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+/* Trending自动完成下拉框样式 */
+.trending-autocomplete-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.trending-autocomplete-wrapper input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  transition: all 0.3s;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.trending-autocomplete-wrapper input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.trending-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1000;
+  margin-top: 4px;
+}
+
+.trending-dropdown-item {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.trending-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.trending-dropdown-item:hover {
+  background-color: #f8f9fa;
+}
+
+.trending-dropdown-item:active {
+  background-color: #e9ecef;
 }
 
 .form-actions {

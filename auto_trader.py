@@ -4820,7 +4820,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         
         # 根据交易所类型选择不同的处理流程
         if exchange_type == "OP":
-            success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending)
+            success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url)
         else:
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser)
             available_balance = None  # Polymarket 暂不支持
@@ -5515,6 +5515,7 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
             p_tags = accordion_div.find_elements(By.TAG_NAME, "p")
             
             for p in p_tags:
+                log_print(f"[{browser_id}] ✓ 子主题内容 {p.text.strip()}")
                 if p.text.strip() == trending_part1:
                     log_print(f"[{browser_id}] ✓ 找到匹配的 p 标签: {trending_part1}")
                     
@@ -5538,7 +5539,7 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
         return False
 
 
-def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0, trending=''):
+def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0, trending='', target_url=''):
     """
     处理 Opinion Trade 交易流程
     
@@ -5653,8 +5654,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         if trending_part1:
             log_print(f"[{browser_id}] 步骤6.1.6: 检查并点击子主题 {trending_part1}...")
             if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
-                log_print(f"[{browser_id}] ⚠ 点击子主题失败，继续执行...")
-        
+                time.sleep(10)
+                if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
+                    time.sleep(20)
+                    if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
+                        time.sleep(40)
+                        if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
+                            return False, "点击子主题失败！查看配置是否正确", None
+            
         # 6.2 检查仓位和挂单，记录初始数量
         log_print(f"[{browser_id}] 步骤6.2: 检查并记录初始仓位和挂单数量...")
         
@@ -5725,7 +5732,15 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                 break
                         time.sleep(2)  # 等待页面切换完成
                     
-                    log_print(f"[{browser_id}] ⚠ 第{retry_count}次重试，刷新页面...")
+                    log_print(f"[{browser_id}] ⚠ 第{retry_count}次重试，先导航到目标页面...")
+                    try:
+                        driver.get(target_url)
+                        log_print(f"[{browser_id}] ✓ 已导航到目标页面")
+                        time.sleep(2)  # 等待页面加载
+                    except Exception as e:
+                        log_print(f"[{browser_id}] ✗ 导航到目标页面失败: {str(e)}")
+                    
+                    log_print(f"[{browser_id}] 刷新页面...")
                     refresh_page_with_opinion_check(driver, browser_id)
                     
                     # 重新等待页面加载
@@ -5754,7 +5769,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                         log_print(f"[{browser_id}] 重新点击子主题 {trending_part1}...")
                         if not click_trending_part1_if_needed(driver, browser_id, trending_part1):
                             log_print(f"[{browser_id}] ⚠ 点击子主题失败，继续执行...")
-                
+                            retry_count += 1
+                            continue
                 
                 
                 
@@ -5771,12 +5787,12 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
                     return False, "未找到 trade-box div", None
                 
-                trade_box = trade_box_divs[0]
+                trade_box1 = trade_box_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 trade-box div")
                 
                 # 在 trade-box 中查找 tabs content div
                 log_print(f"[{browser_id}] 查找 tabs content div...")
-                tabs_content_divs = trade_box.find_elements(By.CSS_SELECTOR, 
+                tabs_content_divs = trade_box1.find_elements(By.CSS_SELECTOR, 
                     'div[data-scope="tabs"][data-part="content"][data-state="open"]')
                 
                 if not tabs_content_divs:
@@ -5811,7 +5827,27 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     continue
                 
                 
-
+                trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+        
+                if not trade_box_divs:
+                    log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
+                    return False, "未找到 trade-box div", None
+                
+                trade_box1 = trade_box_divs[0]
+                log_print(f"[{browser_id}] ✓ 找到 trade-box div")
+                
+                # 在 trade-box 中查找 tabs content div
+                log_print(f"[{browser_id}] 查找 tabs content div...")
+                tabs_content_divs = trade_box1.find_elements(By.CSS_SELECTOR, 
+                    'div[data-scope="tabs"][data-part="content"][data-state="open"]')
+                
+                if not tabs_content_divs:
+                    log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
+                    return False, "未找到 tabs content div", None
+                
+                tabs_content = tabs_content_divs[0]
+                log_print(f"[{browser_id}] ✓ 找到 tabs content div")
+                
                 
                 # 9. 选择种类
                 log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
@@ -8317,7 +8353,7 @@ def update_browser_timestamp(browser_id):
         
         # 1. 获取现有配置
         get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
-        params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
+        params = {"no": browser_id,"computeGroup":COMPUTER_GROUP}
         
         response = requests.get(get_url, params=params, timeout=10)
         
@@ -8376,7 +8412,7 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
         # 1. 先获取现有配置
         log_print(f"[{browser_id}] 步骤1: 获取现有账户配置...")
         get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
-        params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
+        params = {"no": browser_id,"computeGroup":COMPUTER_GROUP}
         
         response = requests.get(get_url, params=params, timeout=10)
         
@@ -9386,7 +9422,7 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
             driver.get(profile_url)
             log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
             
-            time.sleep(2)
+            time.sleep(15)
             
             # 检查并连接钱包
             log_print(f"[{browser_id}] 检查并连接钱包...")
@@ -9410,6 +9446,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(1)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             connect_wallet_if_needed(driver, browser_id)
@@ -9429,6 +9467,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(1)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             connect_wallet_if_needed(driver, browser_id)
@@ -9455,6 +9495,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             retry_attempt += 1
                             if retry_attempt < max_data_collection_retries:
                                 log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                                driver.get(profile_url)
+                                time.sleep(1)
                                 refresh_page_with_opinion_check(driver, browser_id)
                                 time.sleep(5)
                                 connect_wallet_if_needed(driver, browser_id)
@@ -9473,6 +9515,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(1)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             connect_wallet_if_needed(driver, browser_id)
@@ -9491,6 +9535,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(1)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             connect_wallet_if_needed(driver, browser_id)
@@ -9523,8 +9569,10 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                     retry_attempt += 1
                     if retry_attempt < max_data_collection_retries:
                         log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                        driver.get(profile_url)
+                        time.sleep(1)
                         refresh_page_with_opinion_check(driver, browser_id)
-                        time.sleep(5)
+                        time.sleep(2)
                         connect_wallet_if_needed(driver, browser_id)
                         time.sleep(2)
                     else:
@@ -9880,6 +9928,8 @@ def process_type2_mission(task_data, retry_count=0):
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(2)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             # 重新连接钱包
@@ -9899,6 +9949,8 @@ def process_type2_mission(task_data, retry_count=0):
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(2)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             # 重新连接钱包
@@ -9926,6 +9978,8 @@ def process_type2_mission(task_data, retry_count=0):
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(2)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             # 重新连接钱包
@@ -9944,6 +9998,8 @@ def process_type2_mission(task_data, retry_count=0):
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(2)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             # 重新连接钱包
@@ -9962,6 +10018,8 @@ def process_type2_mission(task_data, retry_count=0):
                         retry_attempt += 1
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                            driver.get(profile_url)
+                            time.sleep(2)
                             refresh_page_with_opinion_check(driver, browser_id)
                             time.sleep(5)
                             # 重新连接钱包
@@ -9990,6 +10048,8 @@ def process_type2_mission(task_data, retry_count=0):
                     retry_attempt += 1
                     if retry_attempt < max_data_collection_retries:
                         log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
+                        driver.get(profile_url)
+                        time.sleep(2)
                         refresh_page_with_opinion_check(driver, browser_id)
                         time.sleep(5)
                         connect_wallet_if_needed(driver, browser_id)
@@ -10454,7 +10514,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 process_browser_waiting_queue(browser_id)
             return
             
-        elif mission_type == 2:
+        elif mission_type == 2 or mission_type == 4:
             # Type 2: 数据获取任务
             # 初始化变量（放在最前面，确保即使前面发生异常也能访问）
             success = False
@@ -10462,7 +10522,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             
             # Type 2 任务开始时调用 addNumberInUse
             try:
-                log_print(f"[{browser_id}] Type 2 任务开始，调用 addNumberInUse 接口...")
+                log_print(f"[{browser_id}] Type {mission_type} 任务开始，调用 addNumberInUse 接口...")
                 add_url = "https://sg.bicoin.com.cn/99l/hedge/addNumberInUse"
                 add_resp = requests.post(add_url, json={"number": browser_id, "group": COMPUTER_GROUP}, timeout=10)
                 log_print(f"[{browser_id}] addNumberInUse 响应: {add_resp.status_code}")
@@ -10473,7 +10533,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 # 将浏览器ID和任务ID加入正在执行的映射
                 with active_type2_browsers_lock:
                     active_type2_browsers[browser_id] = mission_id
-                    log_print(f"[{browser_id}] Type 2 任务 {mission_id} 开始，浏览器已标记为繁忙")
+                    log_print(f"[{browser_id}] Type {mission_type} 任务 {mission_id} 开始，浏览器已标记为繁忙")
                 
                 try:
                     success, failure_reason, collected_data = process_type2_mission(task_data)
