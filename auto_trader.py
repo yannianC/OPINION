@@ -182,7 +182,7 @@ GROUP_PASSWORDS = {
     "3": "Qrfv*Fjh87gg",  # 电脑组3的密码
     "4": "@#nsgaSBF224",  # 电脑组4的密码
     "5": "Qsst-455fgdf8",  # 电脑组5的密码
-    "6": "zxcvbnm123#",  # 电脑组6的密码
+    "6": "5cx2Wsn#0kQnj*w240L",  # 电脑组6的密码
     "7": "cx142359.",  # 电脑组7的密码
     "8": "ywj000805*",  # 电脑组8的密码
     "9": "Qwer009qaz`",  # 电脑组9的密码（浏览器941-1000使用特定密码，其他使用此密码）
@@ -10306,8 +10306,19 @@ def process_type2_mission(task_data, retry_count=0):
                         # 步骤11: 获取可用余额
                         log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤11: 获取可用余额...")
                     try:
-                            # 前往指定页面
-                            target_url = "https://app.opinion.trade/detail?topicId=79&type=multi"
+                            # 前往指定页面（随机选择一个）
+                            target_urls = [
+                                "https://app.opinion.trade/detail?topicId=213&type=multi",
+                                "https://app.opinion.trade/detail?topicId=79&type=multi",
+                                "https://app.opinion.trade/detail?topicId=210&type=multi",
+                                "https://app.opinion.trade/detail?topicId=80&type=multi",
+                                "https://app.opinion.trade/detail?topicId=211&type=multi",
+                                "https://app.opinion.trade/detail?topicId=175&type=multi",
+                                "https://app.opinion.trade/detail?topicId=78&type=multi",
+                                "https://app.opinion.trade/detail?topicId=115&type=multi",
+                                "https://app.opinion.trade/detail?topicId=193&type=multi"
+                            ]
+                            target_url = random.choice(target_urls)
                             log_print(f"[{browser_id}] 前往页面: {target_url}")
                             driver.get(target_url)
                             time.sleep(3)
