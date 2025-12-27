@@ -465,6 +465,12 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="可用" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.p, b.p)">
+        <template #default="scope">
+          {{ formatNumber(scope.row.p) }}
+        </template>
+      </el-table-column>
+
       <el-table-column label="Portfolio" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.c, b.c)">
         <template #default="scope">
           {{ scope.row.c || '0' }}
@@ -852,6 +858,12 @@
         <el-table-column label="余额" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.balance, b.balance)">
           <template #default="scope">
             {{ formatNumber(scope.row.balance) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="可用" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.p, b.p)">
+          <template #default="scope">
+            {{ formatNumber(scope.row.p) }}
           </template>
         </el-table-column>
 

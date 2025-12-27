@@ -108,7 +108,7 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "2057": "kaznb3969*m%",
     "2058": "kaznb3969*m%",
     "2059": "kaznb3969*m%",
-    
+    "4001": "Ok123456",
     # 电脑组9的特定浏览器配置
     "941": "cx142359.",  # 电脑组9的浏览器941-1000
     "942": "cx142359.",
@@ -4997,7 +4997,7 @@ def connect_wallet_if_needed(driver, browser_id):
     """
     try:
         log_print(f"[{browser_id}] 在10秒内检查是否需要连接钱包...")
-        
+        time.sleep(10)
         # 在10秒内查找是否有 "Connect Wallet" 按钮或 "OKX Wallet" 的 p 标签
         connect_wallet_button = None
         okx_wallet_p = None
@@ -6969,6 +6969,224 @@ def get_p_tag_text_from_element(element):
         return ""
 
 
+def cancel_opinion_open_orders_by_tp1(driver, serial_number, tp1):
+    """
+    根据 tp1 值取消 Opinion Trade Open Orders 中的订单
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        tp1: 目标标题，如果为 "all" 则取消所有订单，否则只取消匹配的订单
+        
+    Returns:
+        bool: 是否成功完成取消操作
+    """
+    try:
+        log_print(f"[{serial_number}] [OP] 开始执行 Type 4 取消订单任务，tp1: {tp1}")
+        
+        # 先点击 Open Orders 按钮
+        log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Open Orders 按钮...")
+        open_orders_clicked = False
+        start_time = time.time()
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                for button in buttons:
+                    if button.text.strip() == "Open Orders":
+                        button.click()
+                        log_print(f"[{serial_number}] [OP] ✓ 已点击 Open Orders 按钮")
+                        open_orders_clicked = True
+                        break
+                if open_orders_clicked:
+                    break
+                time.sleep(0.5)
+            except:
+                time.sleep(0.5)
+        
+        if not open_orders_clicked:
+            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮")
+            return False
+        
+        time.sleep(5)
+        
+        # 解析 tp1 值
+        target_main_title = None
+        target_sub_title = None
+        
+        if tp1 and tp1 != "all":
+            if "###" in tp1:
+                # 有子标题，格式为主标题###子标题
+                parts = tp1.split("###", 1)
+                if len(parts) == 2:
+                    target_main_title = parts[0].strip()
+                    target_sub_title = parts[1].strip()
+                    log_print(f"[{serial_number}] [OP] 解析tp1: 主标题='{target_main_title}', 子标题='{target_sub_title}'")
+            else:
+                # 只有主标题
+                target_main_title = tp1.strip()
+                log_print(f"[{serial_number}] [OP] 解析tp1: 主标题='{target_main_title}'")
+        
+        # 循环取消订单
+        while True:
+            try:
+                # 获取 open_orders_div
+                log_print(f"[{serial_number}] [OP] 获取 Open Orders 内容区域...")
+                open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                
+                # 检查是否有 "No data yet"
+                all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
+                has_no_data = False
+                for p in all_p_tags_in_div:
+                    if "No data yet" in p.text:
+                        log_print(f"[{serial_number}] [OP] ✓ 发现 'No data yet'，取消订单任务完成")
+                        has_no_data = True
+                        break
+                
+                if has_no_data:
+                    break
+                
+                # 获取 tbody 和 tr 列表
+                try:
+                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                    tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                except:
+                    log_print(f"[{serial_number}] [OP] ⚠ 未找到 tbody 或 tr 列表")
+                    break
+                
+                if len(tr_list) == 0:
+                    log_print(f"[{serial_number}] [OP] ⚠ tr 列表为空")
+                    break
+                
+                # 解析 tr 列表，找到需要取消的订单
+                current_main_title = ""
+                found_order_to_cancel = False
+                i = 0
+                
+                while i < len(tr_list):
+                    tr = tr_list[i]
+                    try:
+                        td_list = tr.find_elements(By.TAG_NAME, "td")
+                        
+                        # 如果只有一个td，这是主标题
+                        if len(td_list) == 1:
+                            main_title_text = get_p_tag_text_from_element(td_list[0])
+                            if main_title_text:
+                                current_main_title = main_title_text.strip()
+                            i += 1
+                            continue
+                        
+                        # 如果有多个td，这是挂单仓位信息
+                        if len(td_list) >= 6 and current_main_title:
+                            # 判断是否需要取消这个订单
+                            should_cancel = False
+                            
+                            if tp1 == "all":
+                                # 取消所有订单
+                                should_cancel = True
+                            elif target_main_title:
+                                # 检查主标题是否匹配
+                                if current_main_title == target_main_title:
+                                    if target_sub_title:
+                                        # 需要检查子标题
+                                        second_td_text = get_p_tag_text_from_element(td_list[1]).strip()
+                                        if " - " in second_td_text:
+                                            parts = second_td_text.split(" - ", 1)
+                                            if len(parts) == 2:
+                                                sub_title = parts[0].strip()
+                                                if sub_title == target_sub_title:
+                                                    should_cancel = True
+                                    else:
+                                        # 只需要主标题匹配
+                                        should_cancel = True
+                            
+                            if should_cancel:
+                                # 找到最后一个td，点击svg
+                                last_td = td_list[-1]
+                                svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
+                                
+                                if svg_elements and len(svg_elements) > 0:
+                                    log_print(f"[{serial_number}] [OP] 找到需要取消的订单，点击取消按钮...")
+                                    svg_elements[0].click()
+                                    time.sleep(2)
+                                    
+                                    # 在10秒内找到"Confirm"按钮并点击
+                                    log_print(f"[{serial_number}] [OP] 查找Confirm按钮...")
+                                    confirm_found = False
+                                    confirm_timeout = 10
+                                    confirm_start_time = time.time()
+                                    
+                                    while time.time() - confirm_start_time < confirm_timeout:
+                                        try:
+                                            all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                                            for btn in all_buttons:
+                                                if btn.text.strip() == "Confirm":
+                                                    log_print(f"[{serial_number}] [OP] ✓ 找到Confirm按钮，点击...")
+                                                    btn.click()
+                                                    confirm_found = True
+                                                    break
+                                            
+                                            if confirm_found:
+                                                break
+                                            
+                                            time.sleep(0.5)
+                                        except Exception as e:
+                                            log_print(f"[{serial_number}] [OP] ⚠ 查找Confirm按钮时出错: {str(e)}")
+                                            time.sleep(0.5)
+                                    
+                                    if not confirm_found:
+                                        log_print(f"[{serial_number}] [OP] ⚠ 10秒内未找到Confirm按钮")
+                                        return False
+                                    
+                                    found_order_to_cancel = True
+                                    log_print(f"[{serial_number}] [OP] ✓ 订单取消成功")
+                                    break
+                                else:
+                                    log_print(f"[{serial_number}] [OP] ⚠ 未找到svg元素")
+                        
+                        i += 1
+                    except Exception as e:
+                        log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
+                        i += 1
+                        continue
+                
+                # 如果没有找到需要取消的订单，退出循环
+                if not found_order_to_cancel:
+                    if tp1 == "all":
+                        # tp1=all 时，如果没有找到订单，可能是已经全部取消了
+                        # 再次检查是否有 "No data yet"
+                        all_p_tags_in_div_check = open_orders_div.find_elements(By.TAG_NAME, "p")
+                        has_no_data_check = False
+                        for p in all_p_tags_in_div_check:
+                            if "No data yet" in p.text:
+                                log_print(f"[{serial_number}] [OP] ✓ 所有订单已取消完成（tp1=all）")
+                                has_no_data_check = True
+                                break
+                        if has_no_data_check:
+                            break
+                        else:
+                            log_print(f"[{serial_number}] [OP] ⚠ 未找到需要取消的订单（tp1=all），可能已全部取消")
+                            break
+                    else:
+                        log_print(f"[{serial_number}] [OP] ✓ 未找到匹配tp1的订单，取消任务完成")
+                        break
+                
+                # 等待3秒后重新获取
+                log_print(f"[{serial_number}] [OP] 等待3秒后重新获取订单列表...")
+                time.sleep(3)
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 取消订单过程中出错: {str(e)}")
+                break
+        
+        log_print(f"[{serial_number}] [OP] ✓ Type 4 取消订单任务完成")
+        return True
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [OP] ✗ Type 4 取消订单任务失败: {str(e)}")
+        return False
+
+
 def click_opinion_open_orders_and_get_data(driver, serial_number):
     """
     点击 Opinion Trade Open Orders 按钮并获取数据，返回标准格式字符串（支持分页）
@@ -7009,7 +7227,18 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         tr_list = tbody.find_elements(By.TAG_NAME, "tr")
         
         if len(tr_list) == 0:
-            return result_parts, False  # 返回空列表，但不是"No data yet"
+            time.sleep(10)
+             # 先检查是否有"No data yet"
+            all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
+            for p in all_p_tags_in_div:
+                if "No data yet" in p.text:
+                    log_print(f"[{serial_number}] [OP] ✓ Open Orders 发现 'No data yet'，无数据")
+                    return result_parts, True  # 返回空列表和"无数据"标记
+              # 再找这个 div 下的 tbody
+            tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            if len(tr_list) == 0:
+                return result_parts, False  # 返回空列表，但不是"No data yet"
         
         log_print(f"[{serial_number}] [OP] ✓ 当前页找到 {len(tr_list)} 个 tr 标签")
         
@@ -8526,17 +8755,39 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
         # 更新字段 p（可用余额）
         if available_balance is not None:
             try:
-                # 尝试转换为数字（去掉$符号和逗号）
+                # 判断可用余额是否是无效值（0、""、null、"-"）
+                is_invalid = False
+                
                 if isinstance(available_balance, str):
                     available_balance_clean = available_balance.replace('$', '').replace(',', '').strip()
-                    if available_balance_clean:
-                        account_config['p'] = available_balance_clean
-                        log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance_clean}")
+                    # 检查是否是无效值
+                    if available_balance_clean == "" or available_balance_clean == "-" or available_balance_clean.lower() == "null":
+                        is_invalid = True
+                    elif available_balance_clean:
+                        # 尝试转换为数字，检查是否为0
+                        try:
+                            balance_value = float(available_balance_clean)
+                            if balance_value == 0:
+                                is_invalid = True
+                            else:
+                                account_config['p'] = available_balance_clean
+                                log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance_clean}")
+                        except ValueError:
+                            # 无法转换为数字，但非空，仍然更新
+                            account_config['p'] = available_balance_clean
+                            log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance_clean}")
                     else:
-                        log_print(f"[{browser_id}] ⚠ 可用余额为空字符串，不更新字段 p")
+                        is_invalid = True
                 else:
-                    account_config['p'] = str(available_balance)
-                    log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance}")
+                    # 非字符串类型
+                    if available_balance == 0 or available_balance is None:
+                        is_invalid = True
+                    else:
+                        account_config['p'] = str(available_balance)
+                        log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance}")
+                
+                if is_invalid:
+                    log_print(f"[{browser_id}] ⚠ 可用余额为无效值（0、空字符串、null 或 '-'），不更新字段 p")
             except Exception as e:
                 log_print(f"[{browser_id}] ⚠ 更新字段 p 失败: {str(e)}")
         else:
@@ -9703,8 +9954,9 @@ def process_type2_mission(task_data, retry_count=0):
     browser_id = mission.get("numberList", "")
     mission_id = mission.get("id", "")
     exchange_name = mission.get("exchangeName", "")
+    mission_type = mission.get("type", 2)  # 默认为 Type 2
     
-    log_print(f"\n[{browser_id}] ========== 开始处理 Type 2 任务 {'(重试第' + str(retry_count) + '次)' if retry_count > 0 else ''} ==========")
+    log_print(f"\n[{browser_id}] ========== 开始处理 Type {mission_type} 任务 {'(重试第' + str(retry_count) + '次)' if retry_count > 0 else ''} ==========")
     log_print(f"[{browser_id}] 任务ID: {mission_id}")
     log_print(f"[{browser_id}] 交易所: {exchange_name}")
     
@@ -9990,6 +10242,18 @@ def process_type2_mission(task_data, retry_count=0):
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
                             return False,""
                     
+                    # Type 4 任务特殊处理：在获取 Open Orders 数据之前，先执行取消订单操作
+                    if mission_type == 4:
+                        log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7.5: Type 4 任务 - 执行取消订单操作...")
+                        tp1 = mission.get('tp1')
+                        if tp1:
+                            log_print(f"[{browser_id}] Type 4 任务 tp1 值: {tp1}")
+                            cancel_success = cancel_opinion_open_orders_by_tp1(driver, browser_id, tp1)
+                            if not cancel_success:
+                                log_print(f"[{browser_id}] ⚠ Type 4 任务取消订单操作失败，继续执行后续步骤")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ Type 4 任务未找到 tp1 值，跳过取消订单操作")
+                    
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤8: 点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
                     
@@ -10029,15 +10293,96 @@ def process_type2_mission(task_data, retry_count=0):
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
                             break
+                    if mission_type == 2:
+                        # 步骤10: 获取 Points History 数据
+                        log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤10: 获取 Points History 数据...")
+                        points_history_data = get_points_history_data(driver, browser_id)
+                        if points_history_data:
+                            collected_data['k'] = points_history_data
+                            log_print(f"[{browser_id}] ✓ Points History 数据已保存: {points_history_data[:100]}...")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ Points History 数据获取失败或为空，继续执行后续步骤")
+                        
+                        # 步骤11: 获取可用余额
+                        log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤11: 获取可用余额...")
+                    try:
+                            # 前往指定页面
+                            target_url = "https://app.opinion.trade/detail?topicId=79&type=multi"
+                            log_print(f"[{browser_id}] 前往页面: {target_url}")
+                            driver.get(target_url)
+                            time.sleep(3)
+                            
+                            # 在30s内获取 trade_box_divs
+                            start_time = time.time()
+                            max_wait_time = 30
+                            check_interval = 0.5
+                            available_balance = None
+                            
+                            while time.time() - start_time < max_wait_time:
+                                try:
+                                    # 查找 trade_box_divs
+                                    trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                                    if not trade_box_divs:
+                                        log_print(f"[{browser_id}] ⚠ 未找到 trade-box div，等待后重试...")
+                                        time.sleep(check_interval)
+                                        continue
+                                    
+                                    current_trade_box = trade_box_divs[0]
+                                    
+                                    # 点击 Buy 按钮以确保显示正确的 tabs_content
+                                    if not click_opinion_trade_type_button(current_trade_box, "Buy", browser_id):
+                                        log_print(f"[{browser_id}] ⚠ 点击 Buy 按钮失败，等待后重试...")
+                                        time.sleep(check_interval)
+                                        continue
+                                    
+                                    # 重新获取 trade_box（点击后可能需要重新获取）
+                                    trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                                    if not trade_box_divs:
+                                        log_print(f"[{browser_id}] ⚠ 未找到 trade-box div，等待后重试...")
+                                        time.sleep(check_interval)
+                                        continue
+                                    
+                                    current_trade_box = trade_box_divs[0]
+                                    
+                                    # 查找 tabs content div
+                                    tabs_content_divs = current_trade_box.find_elements(By.CSS_SELECTOR, 
+                                        'div[data-scope="tabs"][data-part="content"][data-state="open"]')
+                                    
+                                    if not tabs_content_divs:
+                                        log_print(f"[{browser_id}] ⚠ 未找到 tabs content div，等待后重试...")
+                                        time.sleep(check_interval)
+                                        continue
+                                    
+                                    tabs_content = tabs_content_divs[0]
+                                    
+                                    # 获取当前可用余额
+                                    available_balance = get_available_balance_from_tabs_content(tabs_content, browser_id)
+                                    
+                                    if available_balance is not None:
+                                        collected_data['p'] = available_balance
+                                        log_print(f"[{browser_id}] ✓ 可用余额已获取并保存: {available_balance}")
+                                        break
+                                    else:
+                                        log_print(f"[{browser_id}] ⚠ 无法获取可用余额，等待后重试...")
+                                        time.sleep(check_interval)
+                                        continue
+                                    
+                                except Exception as e:
+                                    log_print(f"[{browser_id}] ⚠ 获取可用余额时发生异常: {str(e)}")
+                                    time.sleep(check_interval)
+                                    continue
+                            
+                            if available_balance is None:
+                                log_print(f"[{browser_id}] ⚠ 30秒内未能获取到可用余额，继续执行后续步骤")
+                            else:
+                                log_print(f"[{browser_id}] ✓ 步骤11完成: 可用余额 = {available_balance}")
+                                
+                    except Exception as e:
+                            log_print(f"[{browser_id}] ✗ 步骤11执行异常: {str(e)}")
+                            import traceback
+                            log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+                            log_print(f"[{browser_id}] ⚠ 继续执行后续步骤")
                     
-                    # 步骤10: 获取 Points History 数据
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤10: 获取 Points History 数据...")
-                    points_history_data = get_points_history_data(driver, browser_id)
-                    if points_history_data:
-                        collected_data['k'] = points_history_data
-                        log_print(f"[{browser_id}] ✓ Points History 数据已保存: {points_history_data[:100]}...")
-                    else:
-                        log_print(f"[{browser_id}] ⚠ Points History 数据获取失败或为空，继续执行后续步骤")
                     
                     # 全部成功，跳出重试循环
                     log_print(f"[{browser_id}] ✓ 所有数据获取成功")
@@ -10117,7 +10462,9 @@ def process_type2_mission(task_data, retry_count=0):
             
             # 上传数据
             log_print(f"[{browser_id}] 步骤10: 上传数据到服务器...")
-            upload_success = upload_type2_data(browser_id, collected_data, 'OP')
+            # 从 collected_data 中获取可用余额（字段 p）
+            available_balance = collected_data.get('p')
+            upload_success = upload_type2_data(browser_id, collected_data, 'OP', available_balance)
             
             if upload_success:
                 log_print(f"[{browser_id}] ✓ 数据上传成功")
@@ -10230,7 +10577,9 @@ def process_type2_mission(task_data, retry_count=0):
             
             # 上传数据
             log_print(f"[{browser_id}] 步骤10: 上传数据到服务器...")
-            upload_success = upload_type2_data(browser_id, collected_data, 'Ploy')
+            # 从 collected_data 中获取可用余额（字段 p）
+            available_balance = collected_data.get('p')
+            upload_success = upload_type2_data(browser_id, collected_data, 'Ploy', available_balance)
             
             if upload_success:
                 log_print(f"[{browser_id}] ✓ 数据上传成功")

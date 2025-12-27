@@ -241,6 +241,11 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
+          <el-checkbox v-model="filters.showHasOrder" @change="applyFilters">
+            显示有挂单
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
           <el-checkbox v-model="filters.showHasDifference" @change="applyFilters">
             显示与链上信息有差额
           </el-checkbox>
@@ -297,6 +302,16 @@
         <el-button type="success" size="small" @click="refreshFilteredPositions" :loading="refreshingFiltered">
           刷新筛选结果仓位
         </el-button>
+        <el-button type="info" size="small" @click="exportFilteredBrowserIds">
+          导出筛选结果的浏览器编号
+        </el-button>
+      </div>
+      <!-- 导出的浏览器编号显示区域 -->
+      <div v-if="exportedBrowserIds" class="exported-browser-ids-container" style="margin-top: 16px; padding: 12px; background-color: #f5f7fa; border-radius: 4px;">
+        <div style="margin-bottom: 8px; font-weight: bold; color: #606266;">筛选结果的浏览器编号：</div>
+        <div style="padding: 8px; background-color: #fff; border: 1px solid #dcdfe6; border-radius: 4px; word-break: break-all; cursor: text; user-select: all;">
+          {{ exportedBrowserIds }}
+        </div>
       </div>
     </div>
 
@@ -498,13 +513,42 @@
 
       <el-table-column label="余额 (Balance)" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.balance, b.balance)">
         <template #default="scope">
-          <span>{{ formatNumber(scope.row.balance) }}</span>
+          <el-input 
+            v-if="parseFloat(scope.row.balance) === 0 || scope.row.balance === '' || scope.row.balance === null || scope.row.balance === undefined"
+            v-model.number="scope.row.balance" 
+            placeholder="余额"
+            size="small"
+            type="number"
+            @blur="saveRowData(scope.row)"
+          />
+          <span v-else>{{ formatNumber(scope.row.balance) }}</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="可用" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.p, b.p)">
+        <template #default="scope">
+          <el-input 
+            v-if="parseFloat(scope.row.p) === 0 || scope.row.p === '' || scope.row.p === null || scope.row.p === undefined"
+            v-model.number="scope.row.p" 
+            placeholder="可用"
+            size="small"
+            type="number"
+            @blur="saveRowData(scope.row)"
+          />
+          <span v-else>{{ formatNumber(scope.row.p) }}</span>
         </template>
       </el-table-column>
 
       <el-table-column label="Portfolio" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.c, b.c)">
         <template #default="scope">
-          <span>{{ formatNumber(scope.row.c) }}</span>
+          <el-input 
+            v-if="parseFloat(scope.row.c) === 0 || scope.row.c === '' || scope.row.c === '0' || scope.row.c === null || scope.row.c === undefined"
+            v-model="scope.row.c" 
+            placeholder="Portfolio"
+            size="small"
+            @blur="saveRowData(scope.row)"
+          />
+          <span v-else>{{ formatNumber(scope.row.c) }}</span>
         </template>
       </el-table-column>
 
@@ -901,6 +945,15 @@
             :loading="scope.row.refreshing"
           >
             刷新仓位
+          </el-button>
+          <el-button 
+            type="success" 
+            size="small"
+            @click="syncChainToPosition(scope.row)"
+            :loading="scope.row.syncing"
+            :disabled="!getChainInfo(scope.row)"
+          >
+            同步
           </el-button>
           <el-button 
             type="info" 
@@ -1404,6 +1457,11 @@ const exportAddressInput = ref('')
 const exportingAddresses = ref(false)
 
 /**
+ * 导出的浏览器编号
+ */
+const exportedBrowserIds = ref('')
+
+/**
  * 本地新增的行（未保存到服务器的）
  */
 const localNewRows = ref(new Set())
@@ -1422,6 +1480,7 @@ const filters = ref({
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
   showNoPosition: false,  // 显示无持有仓位
+  showHasOrder: false,  // 显示有挂单
   showHasDifference: false,  // 显示与链上信息有差额
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
@@ -1440,6 +1499,7 @@ const activeFilters = ref({
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
   showNoPosition: false,  // 显示无持有仓位
+  showHasOrder: false,  // 显示有挂单
   showHasDifference: false,  // 显示与链上信息有差额
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
@@ -1512,6 +1572,7 @@ const applyFilters = () => {
     showDuplicateAddress: filters.value.showDuplicateAddress,
     showNoPoints: filters.value.showNoPoints,
     showNoPosition: filters.value.showNoPosition,
+    showHasOrder: filters.value.showHasOrder,
     showHasDifference: filters.value.showHasDifference,
     openTimeOperator: openTimeOperator,
     openTimeValue: openTimeValue,
@@ -1536,6 +1597,7 @@ const clearFilters = () => {
     showDuplicateAddress: false,
     showNoPoints: false,
     showNoPosition: false,
+    showHasOrder: false,
     showHasDifference: false,
     openTimeOperator: '>',
     openTimeValue: null,
@@ -1552,6 +1614,8 @@ const clearFilters = () => {
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
+    showNoPosition: false,
+    showHasOrder: false,
     showHasDifference: false,
     openTimeOperator: '>',
     openTimeValue: null,
@@ -1590,6 +1654,7 @@ const filteredTableData = computed(() => {
                     filters.showDuplicateAddress ||
                     filters.showNoPoints ||
                     filters.showNoPosition ||
+                    filters.showHasOrder ||
                     filters.showHasDifference ||
                     (filters.openTimeValue !== null && filters.openTimeValue !== undefined) ||
                     (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined)
@@ -1671,6 +1736,13 @@ const filteredTableData = computed(() => {
       if (filters.showNoPosition) {
         if (row.a && row.a.trim()) {
           return false  // 有持有仓位，不显示
+        }
+      }
+      
+      // 显示有挂单筛选
+      if (filters.showHasOrder) {
+        if (!row.b || !row.b.trim()) {
+          return false  // 没有挂单，不显示
         }
       }
       
@@ -3323,6 +3395,127 @@ const refreshPosition = async (row) => {
 }
 
 /**
+ * 同步链上信息到持有仓位
+ */
+const syncChainToPosition = async (row) => {
+  // 获取链上信息
+  const chainInfo = getChainInfo(row)
+  if (!chainInfo) {
+    ElMessage.warning('该账户没有链上信息，无法同步')
+    return
+  }
+  
+  // 找到行在数组中的索引
+  const currentData = [...tableData.value]
+  const rowIndex = currentData.findIndex(r => {
+    if (row.id && r.id) {
+      return r.id === row.id
+    }
+    return r.fingerprintNo === row.fingerprintNo && 
+           r.computeGroup === row.computeGroup
+  })
+  
+  if (rowIndex === -1) {
+    ElMessage.warning('无法找到对应的数据行，请刷新列表后重试')
+    return
+  }
+  
+  // 设置同步状态
+  currentData[rowIndex] = { ...currentData[rowIndex], syncing: true }
+  tableData.value = currentData
+  
+  try {
+    // 解析链上信息的仓位
+    const chainPositions = parsePositions(chainInfo)
+    
+    if (chainPositions.length === 0) {
+      ElMessage.warning('链上信息中没有仓位数据')
+      currentData[rowIndex] = { ...currentData[rowIndex], syncing: false }
+      tableData.value = currentData
+      return
+    }
+    
+    // 解析现有的持有仓位
+    const existingPositions = row.a ? parsePositions(row.a) : []
+    
+    // 创建现有仓位的映射（用于去重和合并）
+    const existingMap = new Map()
+    for (const pos of existingPositions) {
+      // 使用 title|||option 作为唯一键
+      const key = `${pos.title}|||${pos.option}`
+      existingMap.set(key, pos)
+    }
+    
+    // 将链上仓位添加到映射中（如果已存在则跳过，避免重复）
+    for (const chainPos of chainPositions) {
+      const key = `${chainPos.title}|||${chainPos.option}`
+      // 如果不存在，则添加（价格设为0）
+      if (!existingMap.has(key)) {
+        existingMap.set(key, {
+          title: chainPos.title,
+          option: chainPos.option,
+          amount: chainPos.amount,
+          avgPrice: '0'  // 价格设为0
+        })
+      }
+    }
+    
+    // 将映射转换回字符串格式：主题|||方向|||数量|||价格
+    const newPositionItems = []
+    for (const pos of existingMap.values()) {
+      const item = `${pos.title}|||${pos.option}|||${pos.amount}|||${pos.avgPrice || '0'}`
+      newPositionItems.push(item)
+    }
+    
+    const newPositionStr = newPositionItems.join(';')
+    
+    // 更新数据
+    const updatedData = [...tableData.value]
+    const updatedRow = {
+      ...updatedData[rowIndex],
+      a: newPositionStr,
+      syncing: false
+    }
+    updatedData[rowIndex] = updatedRow
+    
+    // 清除相关缓存
+    parsedDataCache.delete(`pos_${row.a}`)
+    parsedDataCache.delete(`pos_${newPositionStr}`)
+    
+    // 从已解析集合中移除该行
+    const rowKey = updatedRow.id || `${updatedRow.computeGroup}_${updatedRow.fingerprintNo}`
+    const newSet = new Set(parsedRowsSet.value)
+    newSet.delete(rowKey)
+    parsedRowsSet.value = newSet
+    
+    tableData.value = updatedData
+    
+    // 异步解析该行数据
+    setTimeout(() => {
+      if (updatedRow.a) parsePositions(updatedRow.a)
+      markRowAsParsed(updatedRow)
+    }, 10)
+    
+    // 保存到服务器
+    await saveRowData(updatedRow)
+    
+    ElMessage.success(`已成功将 ${chainPositions.length} 个链上仓位同步到持有仓位`)
+  } catch (error) {
+    console.error('同步失败:', error)
+    const errorMsg = error.response?.data?.msg || error.message || '网络错误'
+    ElMessage.error('同步失败: ' + errorMsg)
+    
+    // 重置 syncing 状态
+    const updatedData = [...tableData.value]
+    const idx = updatedData.findIndex(r => r.fingerprintNo === row.fingerprintNo)
+    if (idx !== -1) {
+      updatedData[idx] = { ...updatedData[idx], syncing: false }
+      tableData.value = updatedData
+    }
+  }
+}
+
+/**
  * 删除账户配置
  */
 const deleteAccount = async (row) => {
@@ -4534,6 +4727,40 @@ const exportAddresses = () => {
     ElMessage.error('导出地址失败: ' + (error.message || '未知错误'))
   } finally {
     exportingAddresses.value = false
+  }
+}
+
+/**
+ * 导出筛选结果的浏览器编号
+ */
+const exportFilteredBrowserIds = () => {
+  try {
+    const filteredData = filteredTableData.value
+    if (filteredData.length === 0) {
+      ElMessage.warning('当前没有筛选结果')
+      exportedBrowserIds.value = ''
+      return
+    }
+    
+    // 提取浏览器编号，过滤掉空值
+    const browserIds = filteredData
+      .map(row => row.fingerprintNo)
+      .filter(id => id !== null && id !== undefined && id !== '')
+      .map(id => String(id))
+    
+    if (browserIds.length === 0) {
+      ElMessage.warning('筛选结果中没有有效的浏览器编号')
+      exportedBrowserIds.value = ''
+      return
+    }
+    
+    // 用逗号拼接
+    exportedBrowserIds.value = browserIds.join(',')
+    ElMessage.success(`已导出 ${browserIds.length} 个浏览器编号`)
+  } catch (error) {
+    console.error('导出浏览器编号失败:', error)
+    ElMessage.error('导出浏览器编号失败: ' + (error.message || '未知错误'))
+    exportedBrowserIds.value = ''
   }
 }
 
