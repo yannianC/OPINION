@@ -818,7 +818,7 @@ def send_feishu_message(serial_number):
         return False
     
     # 使用获取到的 token 发送消息
-    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
     headers = {
         'Authorization': f'Bearer {tenant_access_token}',
         'Content-Type': 'application/json; charset=utf-8'
@@ -6304,7 +6304,7 @@ def get_opinion_portfolio_value(driver, serial_number):
         log_print(f"[{serial_number}] [OP] 查找 Portfolio 值...")
         
         # 在180秒内多次尝试查找
-        max_retry_time = 180
+        max_retry_time = 60
         retry_start_time = time.time()
         
         while time.time() - retry_start_time < max_retry_time:
@@ -9902,6 +9902,18 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
                     else:
                         log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
+                        connect_wallet_if_needed(driver, browser_id)
+                        time.sleep(20)
+                        current_url = driver.current_url
+                        if current_url == profile_url:
+                            log_print(f"[{browser_id}] ✓ 当前页面已经是 profile 页面，跳过打开步骤")
+                        else:
+                            try:
+                                driver.get(profile_url)
+                                log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+                            except WebDriverException as e:
+                                error_msg = str(e)
+                                log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
                         
                         
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Portfolio 值...")
@@ -9925,8 +9937,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Portfolio 数据获取失败")
-                            break
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Portfolio 数据获取失败，不提交数据")
+                            return False, ""
                     
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Balance 值...")
@@ -9950,8 +9962,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
-                            break
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败，不提交数据")
+                            return False, ""
                     if tp3 != "1":
                         log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Balance Spot 地址...")
                         balance_spot_address, address_success = get_balance_spot_address(driver, browser_id)
@@ -10012,8 +10024,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Open Orders 数据获取失败")
-                            break
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Open Orders 数据获取失败，不提交数据")
+                            return False, ""
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Transactions 并获取数据...")
                     transactions_data, need_retry_transactions = click_opinion_transactions_and_get_data(driver, browser_id)
@@ -10036,8 +10048,8 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
-                            break
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败，不提交数据")
+                            return False, ""
                     
                     if tp3 != "1":
                         # 获取 Points History 数据（仅在周一）
@@ -10436,6 +10448,95 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] 步骤4.0.5: 预打开OKX钱包...")
             main_window = preopen_okx_wallet(driver, browser_id)
             
+            # 4.0.6 检查URL并验证Macro标签（仅当URL包含profile或macro时）
+            log_print(f"[{browser_id}] 步骤4.0.6: 检查当前URL并验证Macro标签...")
+            try:
+                current_url = driver.current_url
+                log_print(f"[{browser_id}] 当前URL: {current_url}")
+                
+                # 判断当前网址是否包含 profile 或 macro
+                if "profile" in current_url.lower() or "macro" in current_url.lower():
+                    log_print(f"[{browser_id}] ✓ URL包含profile或macro，开始验证页面...")
+                    
+                    # 等待页面加载完成
+                    log_print(f"[{browser_id}] 等待页面加载完成...")
+                    try:
+                        # 使用WebDriverWait等待页面readyState为complete
+                        WebDriverWait(driver, 30).until(
+                            lambda d: d.execute_script("return document.readyState") == "complete"
+                        )
+                        log_print(f"[{browser_id}] ✓ 页面加载完成")
+                    except TimeoutException:
+                        log_print(f"[{browser_id}] ⚠ 页面加载超时，继续检查...")
+                    
+                    # 额外等待2秒确保DOM完全渲染
+                    time.sleep(2)
+                    
+                    # 检查页面上是否有内容为 "Macro" 的 p 标签
+                    log_print(f"[{browser_id}] 检查页面上是否存在内容为 'Macro' 的 p 标签...")
+                    macro_p_found = False
+                    try:
+                        p_tags = driver.find_elements(By.TAG_NAME, "p")
+                        for p in p_tags:
+                            if p.text.strip() == "Macro":
+                                macro_p_found = True
+                                log_print(f"[{browser_id}] ✓ 找到内容为 'Macro' 的 p 标签")
+                                break
+                    except Exception as e:
+                        log_print(f"[{browser_id}] ⚠ 查找 p 标签时出现异常: {str(e)}")
+                    
+                    # 如果没有找到 Macro 的 p 标签，执行换IP重试
+                    if not macro_p_found:
+                        log_print(f"[{browser_id}] ✗ 未找到内容为 'Macro' 的 p 标签，需要换IP重试")
+                        
+                        # 如果是代理错误且重试次数小于2，执行换IP重试
+                        if retry_count < 2:
+                            log_print(f"[{browser_id}] Type=2 任务检测到Macro标签缺失，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
+                            
+                            # 1. 关闭浏览器
+                            log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                            try:
+                                if driver:
+                                    driver.quit()
+                            except:
+                                pass
+                            close_adspower_browser(browser_id)
+                            # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                            call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
+                            time.sleep(15)
+                            
+                            # 2. 根据重试次数获取IP
+                            log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                            proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                            
+                            if not proxy_config:
+                                log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                                return False, "换IP失败", collected_data
+                            
+                            log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                            
+                            # 3. 更新代理配置
+                            log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                            if not update_adspower_proxy(browser_id, proxy_config):
+                                log_print(f"[{browser_id}] ✗ 更新代理失败")
+                                return False, "更新代理失败", collected_data
+                            
+                            log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                            time.sleep(10)
+                            
+                            # 4. 递归重试任务（retry_count+1）
+                            log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                            return process_type2_mission(task_data, retry_count=retry_count+1)
+                        else:
+                            log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
+                            return False, "Macro标签缺失且已重试2次", collected_data
+                    else:
+                        log_print(f"[{browser_id}] ✓ Macro标签验证通过，继续执行后续步骤")
+                else:
+                    log_print(f"[{browser_id}] URL不包含profile或macro，跳过Macro标签验证")
+            except Exception as e:
+                log_print(f"[{browser_id}] ⚠ 检查URL和Macro标签时出现异常: {str(e)}，继续执行...")
+            
             # 4.1 检查并连接钱包
             log_print(f"[{browser_id}] 步骤4.1: 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
@@ -10537,6 +10638,19 @@ def process_type2_mission(task_data, retry_count=0):
                         log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
                     else:
                         log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
+                        connect_wallet_if_needed(driver, browser_id)
+                        time.sleep(20)
+                        current_url = driver.current_url
+                        if current_url == profile_url:
+                            log_print(f"[{browser_id}] ✓ 当前页面已经是 profile 页面，跳过打开步骤")
+                        else:
+                            try:
+                                driver.get(profile_url)
+                                log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+                            except WebDriverException as e:
+                                error_msg = str(e)
+                                log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
+                       
                         
                         
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤5: 获取 Portfolio 值...")
@@ -10651,8 +10765,8 @@ def process_type2_mission(task_data, retry_count=0):
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Open Orders 数据获取失败")
-                            break
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Open Orders 数据获取失败，不提交数据")
+                            return False, ""
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤9: 点击 Transactions 并获取数据...")
                     transactions_data, need_retry_transactions = click_opinion_transactions_and_get_data(driver, browser_id)
@@ -10674,8 +10788,8 @@ def process_type2_mission(task_data, retry_count=0):
                             time.sleep(2)
                             continue
                         else:
-                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败")
-                            break
+                            log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Transactions 数据获取失败，不提交数据")
+                            return False, ""
                     if mission_type == 2:
                         # 步骤10: 获取 Points History 数据
                         log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤10: 获取 Points History 数据...")

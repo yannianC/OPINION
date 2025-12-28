@@ -49,16 +49,16 @@
         <span>秒</span>
       </div>
       
-      <el-button type="warning" @click="refreshAllPositions" :loading="refreshingAll">
+      <el-button type="warning" @click="showDelayDialogForRefreshAll" :loading="refreshingAll">
         一键抓所有
       </el-button>
-      <el-button type="danger" @click="refreshRedPositions" :loading="refreshingRed">
+      <el-button type="danger" @click="showDelayDialogForRefreshRed" :loading="refreshingRed">
         一键抓异常
       </el-button>
-      <el-button type="warning" @click="cancelAndRefreshAll" :loading="cancelingAndRefreshingAll">
+      <el-button type="warning" @click="showDelayDialogForCancelAndRefreshAll" :loading="cancelingAndRefreshingAll">
         一键撤单后抓所有
       </el-button>
-      <el-button type="danger" @click="cancelAndRefreshRed" :loading="cancelingAndRefreshingRed">
+      <el-button type="danger" @click="showDelayDialogForCancelAndRefreshRed" :loading="cancelingAndRefreshingRed">
         异常撤单抓取
       </el-button>
       <el-button type="danger" @click="refreshRedPositionsOld" :loading="refreshingRedOld">
@@ -3735,13 +3735,13 @@ const fetchAccountConfig = async () => {
 }
 
 /**
- * 提交单个浏览器ID的撤单任务（带重试）
+ * 提交单个浏览器ID的撤单任务（带重试机制，直到成功）
  * @param {number} browserId - 浏览器ID
  * @param {number} groupNo - 电脑组
- * @param {number} maxRetries - 最大重试次数
- * @returns {Promise<{success: boolean, error?: string}>}
+ * @param {number} retryDelay - 重试延迟（毫秒）
+ * @returns {Promise<{success: boolean}>}
  */
-const submitSingleCancel = async (browserId, groupNo, maxRetries = 3) => {
+const submitSingleCancel = async (browserId, groupNo, retryDelay = 5000) => {
   const payload = {
     type: 4,
     groupNo: groupNo,
@@ -3750,14 +3750,14 @@ const submitSingleCancel = async (browserId, groupNo, maxRetries = 3) => {
     tp1: 'all'
   }
   
-  let lastError = null
+  let attempt = 0
   
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  while (true) {
     try {
       if (attempt > 0) {
-        // 重试前等待5秒
-        console.log(`浏览器ID ${browserId} 撤单任务第 ${attempt} 次重试，等待5秒...`)
-        await new Promise(resolve => setTimeout(resolve, 5000))
+        // 重试前等待
+        console.log(`浏览器ID ${browserId} 撤单任务第 ${attempt} 次重试，等待${retryDelay/1000}秒...`)
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
       }
       
       const response = await axios.post(`${API_BASE_URL}/mission/add`, payload)
@@ -3766,17 +3766,17 @@ const submitSingleCancel = async (browserId, groupNo, maxRetries = 3) => {
         console.log(`浏览器ID ${browserId} 撤单任务提交成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
         return { success: true }
       } else {
-        lastError = response.data?.msg || '未知错误'
-        console.error(`浏览器ID ${browserId} 撤单任务提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+        const errorMsg = response.data?.msg || '未知错误'
+        console.error(`浏览器ID ${browserId} 撤单任务提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, errorMsg)
       }
     } catch (error) {
-      lastError = error.message || '未知错误'
-      console.error(`浏览器ID ${browserId} 撤单任务提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      const errorMsg = error.message || '未知错误'
+      console.error(`浏览器ID ${browserId} 撤单任务提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, errorMsg)
     }
+    
+    attempt++
+    // 继续循环重试，直到成功
   }
-  
-  // 所有重试都失败
-  return { success: false, error: lastError }
 }
 
 /**
@@ -3818,6 +3818,162 @@ const submitRefreshTaskWithRetry = async (row, retryDelay = 2000) => {
       // 等待后重试
       await new Promise(resolve => setTimeout(resolve, retryDelay))
       // 继续循环重试，直到成功
+    }
+  }
+}
+
+/**
+ * 显示延迟时间输入对话框（一键抓所有）
+ */
+const showDelayDialogForRefreshAll = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      inputPlaceholder: '0',
+      inputValue: '0',
+      inputValidator: (value) => {
+        if (value === null || value === '') {
+          return '请输入延迟时间'
+        }
+        const num = Number(value)
+        if (isNaN(num) || num < 0) {
+          return '请输入有效的数字（>= 0）'
+        }
+        return true
+      }
+    })
+    
+    const delayMinutes = Number(value) || 0
+    const delayMs = delayMinutes * 60 * 1000
+    
+    if (delayMs > 0) {
+      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+    
+    await refreshAllPositions()
+  } catch (error) {
+    // 用户点击取消，不执行任何操作
+    if (error !== 'cancel') {
+      console.error('显示延迟对话框失败:', error)
+    }
+  }
+}
+
+/**
+ * 显示延迟时间输入对话框（一键抓异常）
+ */
+const showDelayDialogForRefreshRed = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      inputPlaceholder: '0',
+      inputValue: '0',
+      inputValidator: (value) => {
+        if (value === null || value === '') {
+          return '请输入延迟时间'
+        }
+        const num = Number(value)
+        if (isNaN(num) || num < 0) {
+          return '请输入有效的数字（>= 0）'
+        }
+        return true
+      }
+    })
+    
+    const delayMinutes = Number(value) || 0
+    const delayMs = delayMinutes * 60 * 1000
+    
+    if (delayMs > 0) {
+      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+    
+    await refreshRedPositions()
+  } catch (error) {
+    // 用户点击取消，不执行任何操作
+    if (error !== 'cancel') {
+      console.error('显示延迟对话框失败:', error)
+    }
+  }
+}
+
+/**
+ * 显示延迟时间输入对话框（一键撤单后抓所有）
+ */
+const showDelayDialogForCancelAndRefreshAll = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      inputPlaceholder: '0',
+      inputValue: '0',
+      inputValidator: (value) => {
+        if (value === null || value === '') {
+          return '请输入延迟时间'
+        }
+        const num = Number(value)
+        if (isNaN(num) || num < 0) {
+          return '请输入有效的数字（>= 0）'
+        }
+        return true
+      }
+    })
+    
+    const delayMinutes = Number(value) || 0
+    const delayMs = delayMinutes * 60 * 1000
+    
+    if (delayMs > 0) {
+      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+    
+    await cancelAndRefreshAll()
+  } catch (error) {
+    // 用户点击取消，不执行任何操作
+    if (error !== 'cancel') {
+      console.error('显示延迟对话框失败:', error)
+    }
+  }
+}
+
+/**
+ * 显示延迟时间输入对话框（异常撤单抓取）
+ */
+const showDelayDialogForCancelAndRefreshRed = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      inputPlaceholder: '0',
+      inputValue: '0',
+      inputValidator: (value) => {
+        if (value === null || value === '') {
+          return '请输入延迟时间'
+        }
+        const num = Number(value)
+        if (isNaN(num) || num < 0) {
+          return '请输入有效的数字（>= 0）'
+        }
+        return true
+      }
+    })
+    
+    const delayMinutes = Number(value) || 0
+    const delayMs = delayMinutes * 60 * 1000
+    
+    if (delayMs > 0) {
+      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+    
+    await cancelAndRefreshRed()
+  } catch (error) {
+    // 用户点击取消，不执行任何操作
+    if (error !== 'cancel') {
+      console.error('显示延迟对话框失败:', error)
     }
   }
 }
@@ -3953,11 +4109,12 @@ const cancelAndRefreshAll = async () => {
   
   try {
     let cancelSuccessCount = 0
-    let cancelFailCount = 0
+    let skippedCount = 0
     
-    // 提交所有撤单任务（type=4, tp1='all'）
+    // 提交所有撤单任务（type=4, tp1='all'），失败会重试直到成功
     for (const row of validRows) {
       if (row.platform !== 'OP') {
+        skippedCount++
         continue
       }
       
@@ -3966,19 +4123,16 @@ const cancelAndRefreshAll = async () => {
       
       if (!groupNo) {
         console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过撤单`)
-        cancelFailCount++
+        skippedCount++
         continue
       }
       
-      const cancelResult = await submitSingleCancel(browserId, groupNo, 3)
-      if (cancelResult.success) {
-        cancelSuccessCount++
-      } else {
-        cancelFailCount++
-      }
+      // 提交撤单任务，失败会重试直到成功
+      await submitSingleCancel(browserId, groupNo, 5000)
+      cancelSuccessCount++
     }
     
-    ElMessage.success(`撤单任务提交完成：成功 ${cancelSuccessCount} 个，失败 ${cancelFailCount} 个`)
+    ElMessage.success(`撤单任务提交完成：成功 ${cancelSuccessCount} 个${skippedCount > 0 ? `，${skippedCount} 个跳过（非OP平台或无电脑组）` : ''}`)
     
     // 等待 70 秒后自动刷新列表
     ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
@@ -4026,11 +4180,12 @@ const cancelAndRefreshRed = async () => {
   
   try {
     let cancelSuccessCount = 0
-    let cancelFailCount = 0
+    let skippedCount = 0
     
-    // 提交所有撤单任务（type=4, tp1='all'）
+    // 提交所有撤单任务（type=4, tp1='all'），失败会重试直到成功
     for (const row of redRows) {
       if (row.platform !== 'OP') {
+        skippedCount++
         continue
       }
       
@@ -4039,19 +4194,16 @@ const cancelAndRefreshRed = async () => {
       
       if (!groupNo) {
         console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过撤单`)
-        cancelFailCount++
+        skippedCount++
         continue
       }
       
-      const cancelResult = await submitSingleCancel(browserId, groupNo, 3)
-      if (cancelResult.success) {
-        cancelSuccessCount++
-      } else {
-        cancelFailCount++
-      }
+      // 提交撤单任务，失败会重试直到成功
+      await submitSingleCancel(browserId, groupNo, 5000)
+      cancelSuccessCount++
     }
     
-    ElMessage.success(`撤单任务提交完成：成功 ${cancelSuccessCount} 个，失败 ${cancelFailCount} 个`)
+    ElMessage.success(`撤单任务提交完成：成功 ${cancelSuccessCount} 个${skippedCount > 0 ? `，${skippedCount} 个跳过（非OP平台或无电脑组）` : ''}`)
     
     // 等待 70 秒后自动刷新列表
     ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
