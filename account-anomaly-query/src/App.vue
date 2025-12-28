@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <header class="header">
-      <h1>任务异常查询</h1>
+      <h1>页面2-异常查询</h1>
     </header>
     
     <nav class="navigation">

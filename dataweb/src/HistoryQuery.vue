@@ -1641,10 +1641,10 @@ const getPositionDifferences = (row) => {
   // 解析链上仓位
   const chainPositions = chainInfo ? parsePositions(chainInfo) : []
   
-  // 创建链上仓位的映射（按title匹配，支持基础title匹配）
+  // 创建链上仓位的映射（按完整title匹配，仓位主题必须完全一致）
   const chainMap = new Map()
   for (const chainPos of chainPositions) {
-    const titleKey = chainPos.title.split('###')[0].trim()
+    const titleKey = chainPos.title.trim()
     const existing = chainMap.get(titleKey)
     if (existing) {
       existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(chainPos.amount) || 0)
@@ -1659,7 +1659,7 @@ const getPositionDifferences = (row) => {
   // 创建持有仓位的映射
   const holdingMap = new Map()
   for (const holdingPos of holdingPositions) {
-    const titleKey = holdingPos.title.split('###')[0].trim()
+    const titleKey = holdingPos.title.trim()
     const existing = holdingMap.get(titleKey)
     if (existing) {
       existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(holdingPos.amount) || 0)
@@ -2306,10 +2306,10 @@ const getPositionDifferences2 = (row) => {
   // 解析链上仓位
   const chainPositions = chainInfo ? parsePositions(chainInfo) : []
   
-  // 创建链上仓位的映射（按title匹配，支持基础title匹配）
+  // 创建链上仓位的映射（按完整title匹配，仓位主题必须完全一致）
   const chainMap = new Map()
   for (const chainPos of chainPositions) {
-    const titleKey = chainPos.title.split('###')[0].trim()
+    const titleKey = chainPos.title.trim()
     const existing = chainMap.get(titleKey)
     if (existing) {
       existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(chainPos.amount) || 0)
@@ -2324,7 +2324,7 @@ const getPositionDifferences2 = (row) => {
   // 创建持有仓位的映射
   const holdingMap = new Map()
   for (const holdingPos of holdingPositions) {
-    const titleKey = holdingPos.title.split('###')[0].trim()
+    const titleKey = holdingPos.title.trim()
     const existing = holdingMap.get(titleKey)
     if (existing) {
       existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(holdingPos.amount) || 0)

@@ -24,7 +24,7 @@
 
     <!-- 数据列表页面 -->
     <div v-if="currentPage === 'list'">
-      <h1 class="app-title">OP数据</h1>
+      <h1 class="app-title">页面8-数据</h1>
       
       <!-- 顶部操作按钮 -->
       <div class="toolbar">
@@ -50,10 +50,16 @@
       </div>
       
       <el-button type="warning" @click="refreshAllPositions" :loading="refreshingAll">
-        刷新全部仓位
+        一键抓所有
       </el-button>
       <el-button type="danger" @click="refreshRedPositions" :loading="refreshingRed">
-        刷新变红仓位
+        一键抓异常
+      </el-button>
+      <el-button type="warning" @click="cancelAndRefreshAll" :loading="cancelingAndRefreshingAll">
+        一键撤单后抓所有
+      </el-button>
+      <el-button type="danger" @click="cancelAndRefreshRed" :loading="cancelingAndRefreshingRed">
+        异常撤单抓取
       </el-button>
       <el-button type="danger" @click="refreshRedPositionsOld" :loading="refreshingRedOld">
         刷新变红且超过30分钟仓位
@@ -248,6 +254,21 @@
         <div class="filter-item">
           <el-checkbox v-model="filters.showHasDifference" @change="applyFilters">
             显示与链上信息有差额
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showAvailableGreaterThanBalance" @change="applyFilters">
+            显示可用大于余额
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showAvailableEqualBalance" @change="applyFilters">
+            显示可用等于余额
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showBalanceGreaterThanZeroButAvailableZero" @change="applyFilters">
+            显示余额大于0但可用为0或空
           </el-checkbox>
         </div>
         <div class="filter-item">
@@ -1163,6 +1184,14 @@ const refreshingAll = ref(false)
 const refreshingRed = ref(false)  // 刷新变红仓位的加载状态
 const refreshingRedOld = ref(false)  // 刷新变红且超过30分钟仓位的加载状态
 const refreshingFiltered = ref(false)  // 刷新筛选结果仓位的加载状态
+const cancelingAndRefreshingAll = ref(false)  // 一键撤单后抓所有的加载状态
+const cancelingAndRefreshingRed = ref(false)  // 异常撤单抓取的加载状态
+
+// 账户配置映射相关
+const accountConfigData = ref([])
+const accountConfigLoaded = ref(false)
+const isLoadingAccountConfig = ref(false)
+const browserToGroupMap = ref({})  // 浏览器ID -> 电脑组
 const parsingAll = ref(false)  // 是否正在全部解析
 const deduplicating = ref(false)  // 地址去重的加载状态
 const gettingWalletAddresses = ref(false)  // 获取钱包地址的加载状态
@@ -1482,6 +1511,8 @@ const filters = ref({
   showNoPosition: false,  // 显示无持有仓位
   showHasOrder: false,  // 显示有挂单
   showHasDifference: false,  // 显示与链上信息有差额
+  showAvailableGreaterThanBalance: false,  // 显示可用大于余额
+  showAvailableEqualBalance: false,  // 显示可用等于余额
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
@@ -1501,6 +1532,9 @@ const activeFilters = ref({
   showNoPosition: false,  // 显示无持有仓位
   showHasOrder: false,  // 显示有挂单
   showHasDifference: false,  // 显示与链上信息有差额
+  showAvailableGreaterThanBalance: false,  // 显示可用大于余额
+  showAvailableEqualBalance: false,  // 显示可用等于余额
+  showBalanceGreaterThanZeroButAvailableZero: false,  // 显示余额大于0但可用为0或空
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
@@ -1516,6 +1550,18 @@ const positionTimeConfig = ref({
   updateThresholdMinutes: 30  // 更新阈值（分钟）
 })
 let autoUpdateTimer = null
+
+/**
+ * 向下取整（取整数部分）
+ * @param {number} value - 要处理的值
+ * @returns {number} - 向下取整后的整数值
+ */
+const floorToInteger = (value) => {
+  if (value === null || value === undefined || isNaN(value)) {
+    return 0
+  }
+  return Math.floor(value)
+}
 
 /**
  * 解析输入值（支持单个、逗号分隔、区间）
@@ -1574,6 +1620,9 @@ const applyFilters = () => {
     showNoPosition: filters.value.showNoPosition,
     showHasOrder: filters.value.showHasOrder,
     showHasDifference: filters.value.showHasDifference,
+    showAvailableGreaterThanBalance: filters.value.showAvailableGreaterThanBalance,
+    showAvailableEqualBalance: filters.value.showAvailableEqualBalance,
+    showBalanceGreaterThanZeroButAvailableZero: filters.value.showBalanceGreaterThanZeroButAvailableZero,
     openTimeOperator: openTimeOperator,
     openTimeValue: openTimeValue,
     positionTimeOperator: positionTimeOperator,
@@ -1599,6 +1648,9 @@ const clearFilters = () => {
     showNoPosition: false,
     showHasOrder: false,
     showHasDifference: false,
+    showAvailableGreaterThanBalance: false,
+    showAvailableEqualBalance: false,
+    showBalanceGreaterThanZeroButAvailableZero: false,
     openTimeOperator: '>',
     openTimeValue: null,
     positionTimeOperator: '>',
@@ -1617,6 +1669,9 @@ const clearFilters = () => {
     showNoPosition: false,
     showHasOrder: false,
     showHasDifference: false,
+    showAvailableGreaterThanBalance: false,
+    showAvailableEqualBalance: false,
+    showBalanceGreaterThanZeroButAvailableZero: false,
     openTimeOperator: '>',
     openTimeValue: null,
     positionTimeOperator: '>',
@@ -1656,6 +1711,9 @@ const filteredTableData = computed(() => {
                     filters.showNoPosition ||
                     filters.showHasOrder ||
                     filters.showHasDifference ||
+                    filters.showAvailableGreaterThanBalance ||
+                    filters.showAvailableEqualBalance ||
+                    filters.showBalanceGreaterThanZeroButAvailableZero ||
                     (filters.openTimeValue !== null && filters.openTimeValue !== undefined) ||
                     (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined)
   
@@ -1750,6 +1808,43 @@ const filteredTableData = computed(() => {
       if (filters.showHasDifference) {
         if (!hasPositionDifference(row)) {
           return false  // 没有差额，不显示
+        }
+      }
+      
+      // 显示可用大于余额筛选
+      if (filters.showAvailableGreaterThanBalance) {
+        const available = floorToInteger(parseFloat(row.p) || 0)
+        const balance = floorToInteger(parseFloat(row.balance) || 0)
+        if (available <= balance) {
+          return false  // 可用不大于余额，不显示
+        }
+      }
+      
+      // 显示可用等于余额筛选
+      if (filters.showAvailableEqualBalance) {
+        const available = floorToInteger(parseFloat(row.p) || 0)
+        const balance = floorToInteger(parseFloat(row.balance) || 0)
+        // 向下取整后直接比较
+        if (available !== balance) {
+          return false  // 可用不等于余额，不显示
+        }
+      }
+      
+      // 显示余额大于0但可用为0或空筛选
+      if (filters.showBalanceGreaterThanZeroButAvailableZero) {
+        const balance = floorToInteger(parseFloat(row.balance) || 0)
+        const available = row.p !== null && row.p !== undefined && row.p !== '' 
+          ? floorToInteger(parseFloat(row.p)) 
+          : null
+        
+        // 余额必须大于0（向下取整后）
+        if (balance <= 0) {
+          return false  // 余额不大于0，不显示
+        }
+        
+        // 可用必须为0或空（向下取整后）
+        if (available !== null && available !== undefined && available > 0) {
+          return false  // 可用不为0或空，不显示
         }
       }
       
@@ -2449,13 +2544,13 @@ const getPositionDifferences = (row) => {
   // 解析链上仓位
   const chainPositions = chainInfo ? parsePositions(chainInfo) : []
   
-  // 创建链上仓位的映射（按title匹配，支持基础title匹配）
+  // 创建链上仓位的映射（按完整title匹配，仓位主题必须完全一致）
   const chainMap = new Map()
   for (const chainPos of chainPositions) {
-    const titleKey = chainPos.title.split('###')[0].trim()
+    const titleKey = chainPos.title.trim()
     const existing = chainMap.get(titleKey)
     if (existing) {
-      // 如果已有相同基础title，累加数量
+      // 如果已有相同完整title，累加数量
       existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(chainPos.amount) || 0)
     } else {
       chainMap.set(titleKey, {
@@ -2468,7 +2563,7 @@ const getPositionDifferences = (row) => {
   // 创建持有仓位的映射
   const holdingMap = new Map()
   for (const holdingPos of holdingPositions) {
-    const titleKey = holdingPos.title.split('###')[0].trim()
+    const titleKey = holdingPos.title.trim()
     const existing = holdingMap.get(titleKey)
     if (existing) {
       existing.amount = (parseFloat(existing.amount) || 0) + (parseFloat(holdingPos.amount) || 0)
@@ -3588,6 +3683,103 @@ const resetAutoRefresh = () => {
 }
 
 /**
+ * 获取账户配置并建立映射
+ */
+const fetchAccountConfig = async () => {
+  if (accountConfigLoaded.value && accountConfigData.value.length > 0) {
+    return true
+  }
+  
+  isLoadingAccountConfig.value = true
+  try {
+    const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`)
+    
+    if (response.data && response.data.data) {
+      accountConfigData.value = response.data.data
+      
+      // 建立浏览器编号到组号的映射（同时支持字符串和数字作为key）
+      const browserToGroup = {}
+      
+      response.data.data.forEach(item => {
+        if (item.fingerprintNo && item.computeGroup) {
+          const fingerprintNo = item.fingerprintNo
+          const fingerprintNoStr = String(fingerprintNo)
+          const fingerprintNoNum = Number(fingerprintNo)
+          const computeGroup = item.computeGroup
+          
+          // 浏览器ID -> 电脑组
+          browserToGroup[fingerprintNoStr] = computeGroup
+          if (!isNaN(fingerprintNoNum)) {
+            browserToGroup[fingerprintNoNum] = computeGroup
+          }
+        }
+      })
+      
+      browserToGroupMap.value = browserToGroup
+      accountConfigLoaded.value = true
+      console.log(`账户配置加载成功，共 ${response.data.data.length} 条记录`)
+      
+      return true
+    } else {
+      console.warn('获取账户配置失败: 无数据')
+      accountConfigLoaded.value = true
+      return false
+    }
+  } catch (error) {
+    console.error('获取账户配置失败:', error)
+    accountConfigLoaded.value = true
+    return false
+  } finally {
+    isLoadingAccountConfig.value = false
+  }
+}
+
+/**
+ * 提交单个浏览器ID的撤单任务（带重试）
+ * @param {number} browserId - 浏览器ID
+ * @param {number} groupNo - 电脑组
+ * @param {number} maxRetries - 最大重试次数
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+const submitSingleCancel = async (browserId, groupNo, maxRetries = 3) => {
+  const payload = {
+    type: 4,
+    groupNo: groupNo,
+    numberList: String(browserId),
+    exchangeName: 'OP',
+    tp1: 'all'
+  }
+  
+  let lastError = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // 重试前等待5秒
+        console.log(`浏览器ID ${browserId} 撤单任务第 ${attempt} 次重试，等待5秒...`)
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+      
+      const response = await axios.post(`${API_BASE_URL}/mission/add`, payload)
+      
+      if (response.data && response.data.code === 0) {
+        console.log(`浏览器ID ${browserId} 撤单任务提交成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+        return { success: true }
+      } else {
+        lastError = response.data?.msg || '未知错误'
+        console.error(`浏览器ID ${browserId} 撤单任务提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      }
+    } catch (error) {
+      lastError = error.message || '未知错误'
+      console.error(`浏览器ID ${browserId} 撤单任务提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+    }
+  }
+  
+  // 所有重试都失败
+  return { success: false, error: lastError }
+}
+
+/**
  * 提交刷新任务（带重试机制，直到成功）
  */
 const submitRefreshTaskWithRetry = async (row, retryDelay = 2000) => {
@@ -3732,6 +3924,147 @@ const refreshRedPositions = async () => {
     ElMessage.error('刷新变红仓位失败: ' + (error.message || '网络错误'))
   } finally {
     refreshingRed.value = false
+  }
+}
+
+/**
+ * 一键撤单后抓所有
+ */
+const cancelAndRefreshAll = async () => {
+  // 先获取账户配置映射
+  const configLoaded = await fetchAccountConfig()
+  if (!configLoaded) {
+    ElMessage.warning('获取账户配置失败，无法执行撤单操作')
+    return
+  }
+  
+  // 获取所有有浏览器编号和电脑组的行
+  const validRows = tableData.value.filter(row => 
+    row.fingerprintNo && row.computeGroup && row.platform
+  )
+  
+  if (validRows.length === 0) {
+    ElMessage.warning('没有可操作的账户')
+    return
+  }
+  
+  cancelingAndRefreshingAll.value = true
+  ElMessage.info(`开始对 ${validRows.length} 个账户执行撤单任务，请稍候...`)
+  
+  try {
+    let cancelSuccessCount = 0
+    let cancelFailCount = 0
+    
+    // 提交所有撤单任务（type=4, tp1='all'）
+    for (const row of validRows) {
+      if (row.platform !== 'OP') {
+        continue
+      }
+      
+      const browserId = row.fingerprintNo
+      const groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)] || row.computeGroup
+      
+      if (!groupNo) {
+        console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过撤单`)
+        cancelFailCount++
+        continue
+      }
+      
+      const cancelResult = await submitSingleCancel(browserId, groupNo, 3)
+      if (cancelResult.success) {
+        cancelSuccessCount++
+      } else {
+        cancelFailCount++
+      }
+    }
+    
+    ElMessage.success(`撤单任务提交完成：成功 ${cancelSuccessCount} 个，失败 ${cancelFailCount} 个`)
+    
+    // 等待 70 秒后自动刷新列表
+    ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
+    setTimeout(async () => {
+      await loadData(true)  // 静默刷新
+      ElMessage.success('数据已自动更新')
+    }, 70000)
+    
+  } catch (error) {
+    console.error('一键撤单后抓所有失败:', error)
+    ElMessage.error('一键撤单后抓所有失败: ' + (error.message || '网络错误'))
+  } finally {
+    cancelingAndRefreshingAll.value = false
+  }
+}
+
+/**
+ * 异常撤单抓取
+ */
+const cancelAndRefreshRed = async () => {
+  // 先获取账户配置映射
+  const configLoaded = await fetchAccountConfig()
+  if (!configLoaded) {
+    ElMessage.warning('获取账户配置失败，无法执行撤单操作')
+    return
+  }
+  
+  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中）
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const redRows = tableData.value.filter(row => 
+    row.fingerprintNo && 
+    row.computeGroup && 
+    row.platform &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row)
+  )
+  
+  if (redRows.length === 0) {
+    ElMessage.warning('没有需要操作的变红仓位')
+    return
+  }
+  
+  cancelingAndRefreshingRed.value = true
+  ElMessage.info(`开始对 ${redRows.length} 个变红仓位执行撤单任务，请稍候...`)
+  
+  try {
+    let cancelSuccessCount = 0
+    let cancelFailCount = 0
+    
+    // 提交所有撤单任务（type=4, tp1='all'）
+    for (const row of redRows) {
+      if (row.platform !== 'OP') {
+        continue
+      }
+      
+      const browserId = row.fingerprintNo
+      const groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)] || row.computeGroup
+      
+      if (!groupNo) {
+        console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过撤单`)
+        cancelFailCount++
+        continue
+      }
+      
+      const cancelResult = await submitSingleCancel(browserId, groupNo, 3)
+      if (cancelResult.success) {
+        cancelSuccessCount++
+      } else {
+        cancelFailCount++
+      }
+    }
+    
+    ElMessage.success(`撤单任务提交完成：成功 ${cancelSuccessCount} 个，失败 ${cancelFailCount} 个`)
+    
+    // 等待 70 秒后自动刷新列表
+    ElMessage.info('任务已全部提交，70秒后自动刷新列表...')
+    setTimeout(async () => {
+      await loadData(true)  // 静默刷新
+      ElMessage.success('数据已自动更新')
+    }, 70000)
+    
+  } catch (error) {
+    console.error('异常撤单抓取失败:', error)
+    ElMessage.error('异常撤单抓取失败: ' + (error.message || '网络错误'))
+  } finally {
+    cancelingAndRefreshingRed.value = false
   }
 }
 

@@ -103,7 +103,7 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "4": "mj@w2ndJ*kX0g8!rnsf",
     "9": "qwer1234",
     "10": "qwer1234",
-    
+    "6": "5cx2Wsn#0kQnj*w240L",
     "2060": "kaznb3969*m%",  # 电脑组23的浏览器2057,2058,2059,2060
     "2057": "kaznb3969*m%",
     "2058": "kaznb3969*m%",
@@ -182,7 +182,7 @@ GROUP_PASSWORDS = {
     "3": "Qrfv*Fjh87gg",  # 电脑组3的密码
     "4": "@#nsgaSBF224",  # 电脑组4的密码
     "5": "Qsst-455fgdf8",  # 电脑组5的密码
-    "6": "5cx2Wsn#0kQnj*w240L",  # 电脑组6的密码
+    "6": "zxcvbnm123#",  # 电脑组6的密码
     "7": "cx142359.",  # 电脑组7的密码
     "8": "ywj000805*",  # 电脑组8的密码
     "9": "Qwer009qaz`",  # 电脑组9的密码（浏览器941-1000使用特定密码，其他使用此密码）
@@ -411,7 +411,7 @@ def get_new_ip_for_browser(browser_id, timeout=15):
                     port = data.get("port")
                     username = data.get("username")
                     password = data.get("password")
-                    # isNew = data.get("isNew")
+                    isNew = data.get("isNew")
                     
                     if ip and port and username and password:
                         proxy_config = {
@@ -421,7 +421,7 @@ def get_new_ip_for_browser(browser_id, timeout=15):
                             "password": password,
                             "type": "http",
                             "isMain": is_main,
-                            # "isNew": isNew
+                            "isNew": isNew
                         }
                         log_print(f"[{browser_id}] ✓ 成功获取新代理配置 (isMain=1): IP={ip}, Port={port}, Type=http")
                         return proxy_config
@@ -597,6 +597,41 @@ def force_change_ip_for_browser(browser_id, timeout=15):
         return None
 
 
+def get_ip_for_retry(browser_id, retry_count, timeout=15):
+    """
+    根据重试次数获取代理配置（支持两次IP更换）
+    
+    Args:
+        browser_id: 浏览器编号
+        retry_count: 当前重试次数（0=第一次更换，1=第二次更换）
+        timeout: 请求超时时间（秒），默认15秒
+        
+    Returns:
+        dict: 代理配置信息，包含 ip, port, username, password, type，失败返回None
+    """
+    if retry_count == 0:
+        # 第一次更换：使用 get_new_ip_for_browser，但端口改为50100，类型改为http
+        log_print(f"[{browser_id}] 第一次IP更换：使用 get_new_ip_for_browser，端口改为50100，类型改为http...")
+        proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout)
+        
+        if proxy_config:
+            # 修改端口和类型
+            proxy_config["port"] = "50100"
+            proxy_config["type"] = "http"
+            log_print(f"[{browser_id}] ✓ 第一次IP更换成功: IP={proxy_config['ip']}, Port=50100, Type=http")
+            return proxy_config
+        else:
+            log_print(f"[{browser_id}] ✗ 第一次IP更换失败")
+            return None
+    elif retry_count == 1:
+        # 第二次更换：使用 force_change_ip_for_browser
+        log_print(f"[{browser_id}] 第二次IP更换：使用 force_change_ip_for_browser...")
+        return force_change_ip_for_browser(browser_id, timeout=timeout)
+    else:
+        log_print(f"[{browser_id}] ⚠ 重试次数超出范围: {retry_count}，最多支持2次IP更换")
+        return None
+
+
 def try_update_ip_before_start(browser_id):
     """
     在打开浏览器前尝试获取并更新代理配置（8秒超时）
@@ -612,7 +647,7 @@ def try_update_ip_before_start(browser_id):
         
         proxy_config = get_new_ip_for_browser(browser_id, timeout=8)
         
-        if proxy_config :
+        if proxy_config and proxy_config.get("isNew") == 1:
             log_print(f"[{browser_id}] 在8秒内获取到新代理配置: IP={proxy_config['ip']}, 开始更新...")
             update_success = update_adspower_proxy(browser_id, proxy_config)
             
@@ -733,6 +768,94 @@ def start_adspower_browser(serial_number):
     return None
 
 
+def send_feishu_message(serial_number):
+    """
+    发送飞书消息通知浏览器关闭失败
+    
+    Args:
+        serial_number: 浏览器序列号
+        
+    Returns:
+        bool: 成功返回True，失败返回False
+    """
+    # 先获取 tenant_access_token
+    token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+    token_payload = {
+        "app_id": "cli_a6010dfab0b1500b",
+        "app_secret": "vwSJuuQLiPelg3QJQeQmrcTpSa2uQrW0"
+    }
+    
+    tenant_access_token = None
+    token_max_retries = 3
+    for token_attempt in range(token_max_retries):
+        try:
+            log_print(f"[{serial_number}] 正在获取飞书访问令牌 (第 {token_attempt + 1}/{token_max_retries} 次)...")
+            token_response = requests.post(token_url, json=token_payload, timeout=10)
+            token_data = token_response.json()
+            
+            if token_data.get("code") != 0:
+                log_print(f"[{serial_number}] ✗ 获取飞书访问令牌失败: {token_data.get('msg')}")
+                if token_attempt < token_max_retries - 1:
+                    time.sleep(2)
+                continue
+            
+            tenant_access_token = token_data.get("tenant_access_token")
+            if not tenant_access_token:
+                log_print(f"[{serial_number}] ✗ 获取飞书访问令牌失败: 响应中未找到 tenant_access_token")
+                if token_attempt < token_max_retries - 1:
+                    time.sleep(2)
+                continue
+            
+            log_print(f"[{serial_number}] ✓ 飞书访问令牌获取成功")
+            break
+        except Exception as e:
+            log_print(f"[{serial_number}] ✗ 获取飞书访问令牌时发生错误: {str(e)}")
+            if token_attempt < token_max_retries - 1:
+                time.sleep(2)
+    
+    if not tenant_access_token:
+        log_print(f"[{serial_number}] ✗ 获取飞书访问令牌失败，已达到最大重试次数")
+        return False
+    
+    # 使用获取到的 token 发送消息
+    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    headers = {
+        'Authorization': f'Bearer {tenant_access_token}',
+        'Content-Type': 'application/json; charset=utf-8'
+    }
+    
+    content_text = f"电脑组{COMPUTER_GROUP}浏览器编号{serial_number} 关闭失败，需要人工关闭"
+    payload = {
+        "receive_id": "oc_ce7c949dd73b573a28063d76f0d02e24",
+        "msg_type": "text",
+        "content": json.dumps({"text": content_text})
+    }
+    
+    max_retries = 10
+    for attempt in range(max_retries):
+        try:
+            log_print(f"[{serial_number}] 尝试发送飞书消息 (第 {attempt + 1}/{max_retries} 次)")
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            data = response.json()
+            
+            if data.get("code") == 0:
+                log_print(f"[{serial_number}] ✓ 飞书消息发送成功")
+                return True
+            else:
+                log_print(f"[{serial_number}] ✗ 飞书消息发送失败: {data.get('msg')}")
+                
+                if attempt < max_retries - 1:
+                    time.sleep(30)
+        except Exception as e:
+            log_print(f"[{serial_number}] ✗ 发送飞书消息时发生错误: {str(e)}")
+            
+            if attempt < max_retries - 1:
+                time.sleep(30)
+    
+    log_print(f"[{serial_number}] ✗ 飞书消息发送失败，已达到最大重试次数")
+    return False
+
+
 def close_adspower_browser(serial_number, max_retries=3):
     """
     关闭AdsPower浏览器
@@ -760,20 +883,22 @@ def close_adspower_browser(serial_number, max_retries=3):
             
             if data.get("code") == 0:
                 log_print(f"[{serial_number}] ✓ 浏览器关闭命令已发送")
-                time.sleep(2)
+                time.sleep(10)
                 return True
             else:
                 log_print(f"[{serial_number}] ✗ 关闭浏览器失败: {data.get('msg')}")
                 
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(10)
         except Exception as e:
             log_print(f"[{serial_number}] ✗ 关闭浏览器时发生错误: {str(e)}")
             
             if attempt < max_retries - 1:
-                time.sleep(2)
+                time.sleep(10)
     
     log_print(f"[{serial_number}] ✗ 浏览器关闭失败，已达到最大重试次数")
+    # 异步发送飞书消息通知，不阻塞主流程
+    threading.Thread(target=send_feishu_message, args=(serial_number,), daemon=True).start()
     return False
 
 
@@ -976,7 +1101,7 @@ def call_remove_number_in_use(browser_id, log_prefix=""):
     """
     remove_url = "https://sg.bicoin.com.cn/99l/hedge/removeNumberInUse"
     max_retries = 3
-    retry_interval = 10  # 秒
+    retry_interval = 20  # 秒
     
     for attempt in range(max_retries):
         try:
@@ -1200,6 +1325,25 @@ def preopen_okx_wallet(driver, serial_number):
     
     # 保存主窗口句柄
     main_window = driver.current_window_handle
+    
+    # 先预打开 beijing_time.html 页面
+    try:
+        log_print(f"[{serial_number}] → 预打开 beijing_time.html 页面...")
+        beijing_time_url = "https://oss.w3id.info/OpsStatistics/beijing_time.html"
+        success = open_new_tab_with_url(driver, beijing_time_url, serial_number)
+        if success:
+            log_print(f"[{serial_number}] ✓ beijing_time.html 页面已打开")
+        else:
+            log_print(f"[{serial_number}] ⚠ 预打开 beijing_time.html 失败，继续执行...")
+        # 切换回主窗口
+        driver.switch_to.window(main_window)
+        time.sleep(1)
+    except Exception as e:
+        log_print(f"[{serial_number}] ⚠ 预打开 beijing_time.html 异常: {str(e)}，继续执行...")
+        try:
+            driver.switch_to.window(main_window)
+        except:
+            pass
     
     okx_extension_id = "mcohilncbfahbmgdjkbpemcciiolgcge"
     okx_popup_url = f"chrome-extension://{okx_extension_id}/popup.html"
@@ -1928,6 +2072,7 @@ def click_opinion_open_orders_tab(driver, serial_number):
                 buttons = driver.find_elements(By.TAG_NAME, "button")
                 
                 for button in buttons:
+                    log_print(f"[{serial_number}] [OP] {button.text.strip() }")
                     if button.text.strip() == "Open Orders":
                         button.click()
                         log_print(f"[{serial_number}] [OP] ✓ 已点击 'Open Orders' 按钮")
@@ -4670,7 +4815,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             if not browser_data:
                 log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
                 if keep_browser_open:
-                    return False, "浏览器启动失败", None, None, None
+                    return False, "浏览器启动失败", None, None, None, None
                 else:
                     return False, "浏览器启动失败"
             
@@ -4714,15 +4859,12 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         
         # 如果页面加载失败（3次重试都失败），执行换IP重试（仅type=5任务且未重试过）
         if not page_load_success:
-            error_msg = str(last_error) if last_error else "未知错误"
-            # 检查是否是代理连接错误
-            is_proxy_error = "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg or isinstance(last_error, TimeoutException)
-            
-            if is_proxy_error:
+                error_msg = str(last_error) if last_error else "未知错误"
+   
                 log_print(f"[{browser_id}] ✗ 检测到页面加载错误（代理或超时）: {error_msg}")
                 mission_type = mission.get("type")
-                if mission_type == 5 and retry_count == 0:
-                    log_print(f"[{browser_id}] Type=5 任务页面加载失败，需要换IP重试，开始执行重试流程...")
+                if mission_type == 5 and retry_count < 2:
+                    log_print(f"[{browser_id}] Type=5 任务页面加载失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                     
                     # 1. 关闭浏览器
                     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -4735,9 +4877,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待2分钟...")
                     time.sleep(120)  # Type=5任务等待2分钟
                     
-                    # 2. 强制更换IP
-                    log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                    proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                    # 2. 根据重试次数获取IP
+                    log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                     
                     if not proxy_config:
                         log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -4761,22 +4903,19 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     time.sleep(10)
                     
                     # 4. 递归重试任务（retry_count+1）
-                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                    return process_trading_mission(task_data, keep_browser_open, retry_count=1)
+                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                    return process_trading_mission(task_data, keep_browser_open, retry_count=retry_count+1)
                 else:
-                    # 不是type=5任务或已重试过，直接抛出错误
+                    # 不是type=5任务或已重试过2次，直接抛出错误
                     raise last_error
-            else:
-                # 其他类型的错误，直接抛出
-                raise last_error
         
         # 5.5 检查并点击 "I Understand and Agree" p标签（如果存在）
         log_print(f"[{browser_id}] 步骤5.5: 检查是否存在 'I Understand and Agree' p标签...")
         if check_and_click_understand_agree(driver, browser_id, timeout=5):
-            # 如果存在并点击了，需要换IP重试（仅type=5任务且未重试过）
+            # 如果存在并点击了，需要换IP重试（仅type=5任务且重试次数小于2）
             mission_type = mission.get("type")
-            if mission_type == 5 and retry_count == 0:
-                log_print(f"[{browser_id}] Type=5 任务检测到 'I Understand and Agree'，需要换IP重试，开始执行重试流程...")
+            if mission_type == 5 and retry_count < 2:
+                log_print(f"[{browser_id}] Type=5 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                 
                 # 1. 关闭浏览器
                 log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -4789,9 +4928,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待2分钟...")
                 time.sleep(120)  # Type=5任务等待2分钟
                 
-                # 2. 强制更换IP
-                log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                # 2. 根据重试次数获取IP
+                log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                 
                 if not proxy_config:
                     log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -4807,7 +4946,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 if not update_adspower_proxy(browser_id, proxy_config):
                     log_print(f"[{browser_id}] ✗ 更新代理失败")
                     if keep_browser_open:
-                        return False, "更新代理失败", None, None, None
+                        return False, "更新代理失败", None, None, None, None
                     else:
                         return False, "更新代理失败"
                 
@@ -4815,8 +4954,8 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 time.sleep(10)
                 
                 # 4. 递归重试任务（retry_count+1）
-                log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                return process_trading_mission(task_data, keep_browser_open, retry_count=1)
+                log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                return process_trading_mission(task_data, keep_browser_open, retry_count=retry_count+1)
         
         # 根据交易所类型选择不同的处理流程
         if exchange_type == "OP":
@@ -4825,11 +4964,11 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser)
             available_balance = None  # Polymarket 暂不支持
         
-        # 检查是否需要换IP重试（仅type=5任务且未重试过）
-        if not success and failure_reason == "NEED_IP_RETRY" and retry_count == 0:
+        # 检查是否需要换IP重试（仅type=5或type=1任务且重试次数小于2）
+        if not success and failure_reason == "NEED_IP_RETRY" and retry_count < 2:
             mission_type = mission.get("type")
             if mission_type == 5 or mission_type == 1:
-                log_print(f"[{browser_id}] Type=5 任务需要换IP重试，开始执行重试流程...")
+                log_print(f"[{browser_id}] Type={mission_type} 任务需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                 
                 # 1. 关闭浏览器
                 log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -4841,9 +4980,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 close_adspower_browser(browser_id)
                 time.sleep(15)
                 
-                # 2. 强制更换IP
-                log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                # 2. 根据重试次数获取IP
+                log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                 
                 if not proxy_config:
                     log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -4859,7 +4998,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 if not update_adspower_proxy(browser_id, proxy_config):
                     log_print(f"[{browser_id}] ✗ 更新代理失败")
                     if keep_browser_open:
-                        return False, "更新代理失败", None, None, None
+                        return False, "更新代理失败", None, None, None, None
                     else:
                         return False, "更新代理失败"
                 
@@ -4867,8 +5006,8 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 time.sleep(10)
                 
                 # 4. 递归重试任务（retry_count+1）
-                log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                return process_trading_mission(task_data, keep_browser_open, retry_count=1)
+                log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                return process_trading_mission(task_data, keep_browser_open, retry_count=retry_count+1)
         
         # 根据 keep_browser_open 返回不同的格式
         if keep_browser_open:
@@ -5640,12 +5779,12 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         # 6.1.5 等待Position按钮出现（带重试机制）
         log_print(f"[{browser_id}] 步骤6.1.5: 等待Position按钮出现...")
         if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
-            # 检查是否是 type=5 任务且未重试过
+            # 检查是否是 type=5 任务且重试次数小于2
             mission = task_data.get('mission', {}) if task_data else {}
             mission_type = mission.get('type')
             
-            if mission_type == 5 and retry_count == 0:
-                log_print(f"[{browser_id}] Type=5 任务Position按钮未出现，需要换IP重试...")
+            if mission_type == 5 and retry_count < 2:
+                log_print(f"[{browser_id}] Type=5 任务Position按钮未出现，需要换IP重试（第{retry_count+1}次）...")
                 return False, "NEED_IP_RETRY", None
             else:
                 return False, "Position按钮未出现，页面加载可能失败", None
@@ -6270,20 +6409,20 @@ def get_balance_spot_address(driver, browser_id):
             - 如果失败: (None, False)
     """
     try:
-        log_print(f"[{browser_id}] 查找包含 'Balance Spot' 的 P 标签...")
+        log_print(f"[{browser_id}] 等待包含 'Balance Spot' 的 P 标签出现（最多等待60秒）...")
         
-        # 1. 找到包含 "Balance Spot" 的 P 标签
-        p_tags = driver.find_elements(By.TAG_NAME, "p")
-        target_p = None
-        
-        for p in p_tags:
-            if "Balance Spot" in p.text.strip():
-                target_p = p
-                log_print(f"[{browser_id}] ✓ 找到包含 'Balance Spot' 的 P 标签")
-                break
-        
-        if not target_p:
-            log_print(f"[{browser_id}] ⚠ 未找到包含 'Balance Spot' 的 P 标签")
+        # 1. 在60秒内等待包含 "Balance Spot" 的 P 标签出现
+        try:
+            target_p = WebDriverWait(driver, 45).until(
+                lambda d: next(
+                    (p for p in d.find_elements(By.TAG_NAME, "p")
+                     if "Balance Spot" in p.text.strip()),
+                    None
+                )
+            )
+            log_print(f"[{browser_id}] ✓ 找到包含 'Balance Spot' 的 P 标签")
+        except Exception as e:
+            log_print(f"[{browser_id}] ⚠ 60秒内未找到包含 'Balance Spot' 的 P 标签: {str(e)}")
             return None, False
         
         # 2. 找到 P 标签的父节点
@@ -6586,9 +6725,11 @@ def click_opinion_position_and_get_data(driver, serial_number):
         serial_number: 浏览器序列号
         
     Returns:
-        tuple: (标准格式字符串, 是否需要刷新重试)
-            - 如果正常获取数据或找到"No data yet": (标准格式字符串, False)
-            - 如果超时且没有"No data yet": ("", True)
+        tuple: (标准格式字符串, 是否需要刷新重试, 是否任务失败)
+            - 如果正常获取数据: (标准格式字符串, False, False)
+            - 如果找到"No data yet": ("", False, False) - 可以提交空数据
+            - 如果超时且没有"No data yet"，需要刷新重试: ("", True, False)
+            - 如果重试后仍然失败: ("", False, True) - 任务失败，不提交数据
             标准格式: "唯一标题|||方向|||数量|||均价;唯一标题|||方向|||数量|||均价"
     """
     
@@ -6841,7 +6982,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
         
         if not position_clicked:
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Position 按钮")
-            return "", True
+            return "", True, False
         
         time.sleep(3)
         
@@ -6885,12 +7026,12 @@ def click_opinion_position_and_get_data(driver, serial_number):
                         else:
                             # 超过3次重试，返回任务失败
                             log_print(f"[{serial_number}] [OP] ✗ 重试 {max_parse_retries} 次后仍无数据，返回任务失败")
-                            return "", True  # 返回空字符串和需要刷新重试标记
+                            return "", False, True  # 返回空字符串，不需要刷新重试，但任务失败
                     
                     if is_no_data:
-                        # 如果是"No data yet"，直接返回
+                        # 如果是"No data yet"，直接返回（可以提交空数据）
                         if len(all_result_parts) == 0:
-                            return "", False
+                            return "", False, False  # 正常无数据，可以提交
                         else:
                             # 已经有数据了，说明之前有数据，现在没数据了，返回已有数据
                             break
@@ -6931,18 +7072,18 @@ def click_opinion_position_and_get_data(driver, serial_number):
             if len(all_result_parts) > 0:
                 result_str = ";".join(all_result_parts)
                 log_print(f"[{serial_number}] [OP] ✓ Position 所有页面解析完成，共 {len(all_result_parts)} 个仓位")
-                return result_str, False
+                return result_str, False, False
             else:
-                log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Position 数据且无'No data yet'，需要刷新重试")
-                return "", True
+                log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Position 数据且无'No data yet'，返回任务失败")
+                return "", False, True  # 任务失败，不提交数据
             
         except Exception as e:
-            log_print(f"[{serial_number}] [OP] ⚠ 获取 Position 数据失败: {str(e)}")
-            return "", True
+            log_print(f"[{serial_number}] [OP] ⚠ 获取 Position 数据失败: {str(e)}，返回任务失败")
+            return "", False, True  # 任务失败，不提交数据
         
     except Exception as e:
-        log_print(f"[{serial_number}] [OP] ✗ 点击 Position 按钮失败: {str(e)}")
-        return "", True
+        log_print(f"[{serial_number}] [OP] ✗ 点击 Position 按钮失败: {str(e)}，返回任务失败")
+        return "", False, True  # 任务失败，不提交数据
 
 
 def get_p_tag_text_from_element(element):
@@ -7334,6 +7475,7 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
                 buttons = driver.find_elements(By.TAG_NAME, "button")
                 
                 for button in buttons:
+                    log_print(f"[{serial_number}] [OP] ✓ {button.text.strip()}")
                     if button.text.strip() == "Open Orders":
                         button.click()
                         log_print(f"[{serial_number}] [OP] ✓ 已点击 Open Orders 按钮")
@@ -7348,8 +7490,8 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
                 time.sleep(0.5)
         
         if not open_orders_clicked:
-            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮")
-            return "", False
+            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮，需要刷新页面重试")
+            return "", True
         
         time.sleep(5)
         
@@ -8635,330 +8777,378 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
     Returns:
         bool: 上传成功返回True，失败返回False
     """
-    try:
-        log_print(f"[{browser_id}] 开始上传数据...")
-        
-        # 1. 先获取现有配置
-        log_print(f"[{browser_id}] 步骤1: 获取现有账户配置...")
-        get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
-        params = {"no": browser_id,"computeGroup":COMPUTER_GROUP}
-        
-        response = requests.get(get_url, params=params, timeout=10)
-        
-        if response.status_code != 200:
-            log_print(f"[{browser_id}] ✗ 获取账户配置失败: HTTP {response.status_code}")
-            return False
-        
-        result = response.json()
-        if not result or not result.get('data'):
-            log_print(f"[{browser_id}] ✗ 账户配置不存在")
-            return False
-        
-        account_config = result['data']
-        log_print(f"[{browser_id}] ✓ 已获取现有账户配置")
-        
-        # 2. 格式化 position 数据（使用 ||| 作为字段分隔符，避免标题中的逗号）
-        positions = collected_data.get('positions', [])
-        position_str_list = []
-        for pos in positions:
-            title = pos['title']
-            option = pos.get('option', '')
-            amount = pos['amount']
-            avg_price = pos.get('avg_price', '')
-            position_str_list.append(f"{title}|||{option}|||{amount:+.2f}|||{avg_price}")
-        position_str = ";".join(position_str_list)
-        
-        # 3. 格式化 open orders 数据（使用 ||| 作为字段分隔符，避免标题中的逗号）
-        open_orders = collected_data.get('open_orders', [])
-        
-        # 判断 open_orders 的类型：OP 返回的是字符串，Polymarket 返回的是列表
-        if isinstance(open_orders, str):
-            # OP 交易所：已经是标准格式字符串，直接使用
-            open_orders_str = open_orders
-            log_print(f"[{browser_id}] Open Orders 数据已经是字符串格式，直接使用")
-        elif isinstance(open_orders, list):
-            # Polymarket：需要转换为字符串格式
-            open_orders_str_list = []
-            for order in open_orders:
-                if isinstance(order, dict):
-                    title = order.get('title', '')
-                    price = order.get('price', '')
-                    progress = order.get('progress', '')
-                    open_orders_str_list.append(f"{title}|||{price}|||{progress}")
-                else:
-                    log_print(f"[{browser_id}] ⚠ Open Orders 列表项不是字典格式，跳过")
-            open_orders_str = ";".join(open_orders_str_list)
-        else:
-            # 其他类型，设为空字符串
-            open_orders_str = ""
-            log_print(f"[{browser_id}] ⚠ Open Orders 数据类型未知: {type(open_orders)}")
-        
-        # 4. 获取 balance 和 portfolio
-        # Polymarket 使用 cash，OP 使用 balance
-        if exchange_name.upper() == 'PLOY':
-            balance_str = collected_data.get('cash', '')
-            log_print(f"[{browser_id}] 使用 Polymarket 的 cash 作为余额")
-        else:
-            balance_str = collected_data.get('balance', '')
-            log_print(f"[{browser_id}] 使用 OP 的 balance 作为余额")
-        
-        portfolio_str = collected_data.get('portfolio', '')
-        
-        # 5. 判断数据是否收集成功（必须至少成功获取到portfolio或balance其中一个）
-        data_collected_success = False
-        
-        # 检查是否成功获取到 balance 或 portfolio（不是None，不是空字符串）
-        balance_found = balance_str is not None and balance_str != ''
-        portfolio_found = portfolio_str is not None and portfolio_str != ''
-        
-        if balance_found or portfolio_found:
-            data_collected_success = True
-            log_print(f"[{browser_id}] ✓ 数据收集成功（balance: {'已获取' if balance_found else '未获取'}, portfolio: {'已获取' if portfolio_found else '未获取'}），将更新时间戳")
-        else:
-            log_print(f"[{browser_id}] ✗ 数据收集失败：portfolio 和 balance 组件都未找到，不更新时间戳")
-        
-        # 转换为数字（去掉$符号）
+    import time
+    max_retries = 3
+    retry_interval = 5  # 秒
+    
+    for attempt in range(max_retries + 1):
         try:
-            if isinstance(balance_str, str):
-                balance = float(balance_str.replace('$', '').replace(',', ''))
+            if attempt > 0:
+                log_print(f"[{browser_id}] 第 {attempt} 次重试上传数据（共 {max_retries} 次重试机会）...")
             else:
-                balance = float(balance_str) if balance_str else 0
-        except:
-            balance = 0
-        
-        try:
-            if isinstance(portfolio_str, str):
-                portfolio = float(portfolio_str.replace('$', '').replace(',', ''))
+                log_print(f"[{browser_id}] 开始上传数据...")
+            
+            # 1. 先获取现有配置
+            log_print(f"[{browser_id}] 步骤1: 获取现有账户配置...")
+            get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
+            params = {"no": browser_id,"computeGroup":COMPUTER_GROUP}
+            
+            response = requests.get(get_url, params=params, timeout=10)
+            
+            if response.status_code != 200:
+                log_print(f"[{browser_id}] ✗ 获取账户配置失败: HTTP {response.status_code}")
+                return False
+            
+            result = response.json()
+            if not result or not result.get('data'):
+                log_print(f"[{browser_id}] ✗ 账户配置不存在")
+                return False
+            
+            account_config = result['data']
+            log_print(f"[{browser_id}] ✓ 已获取现有账户配置")
+            
+            # 2. 格式化 position 数据（使用 ||| 作为字段分隔符，避免标题中的逗号）
+            positions = collected_data.get('positions', [])
+            position_str_list = []
+            for pos in positions:
+                title = pos['title']
+                option = pos.get('option', '')
+                amount = pos['amount']
+                avg_price = pos.get('avg_price', '')
+                position_str_list.append(f"{title}|||{option}|||{amount:+.2f}|||{avg_price}")
+            position_str = ";".join(position_str_list)
+            
+            # 3. 格式化 open orders 数据（使用 ||| 作为字段分隔符，避免标题中的逗号）
+            open_orders = collected_data.get('open_orders', [])
+            
+            # 判断 open_orders 的类型：OP 返回的是字符串，Polymarket 返回的是列表
+            if isinstance(open_orders, str):
+                # OP 交易所：已经是标准格式字符串，直接使用
+                open_orders_str = open_orders
+                log_print(f"[{browser_id}] Open Orders 数据已经是字符串格式，直接使用")
+            elif isinstance(open_orders, list):
+                # Polymarket：需要转换为字符串格式
+                open_orders_str_list = []
+                for order in open_orders:
+                    if isinstance(order, dict):
+                        title = order.get('title', '')
+                        price = order.get('price', '')
+                        progress = order.get('progress', '')
+                        open_orders_str_list.append(f"{title}|||{price}|||{progress}")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Open Orders 列表项不是字典格式，跳过")
+                open_orders_str = ";".join(open_orders_str_list)
             else:
-                portfolio = float(portfolio_str) if portfolio_str else 0
-        except:
-            portfolio = 0
-        
-        # 5.5. 判断 balance 和 portfolio 是否都为空或都是 0
-        should_skip_balance_and_portfolio = (balance == 0 or balance_str == '' or balance_str is None) and (portfolio == 0 or portfolio_str == '' or portfolio_str is None)
-        
-        if should_skip_balance_and_portfolio:
-            log_print(f"[{browser_id}] ⚠ balance 和 portfolio 都为空或都是 0，不上传 balance 和 c 字段，且不更新 d 字段")
-            return False
-        
-        # 6. 更新字段
-        account_config['a'] = position_str
-        account_config['b'] = open_orders_str
-        
-        # 只有在 balance 和 portfolio 不全为空或全为 0 时才更新这些字段
-        if not should_skip_balance_and_portfolio:
-            account_config['balance'] = balance
-            account_config['c'] = str(portfolio)
-        else:
-            log_print(f"[{browser_id}] ℹ 跳过更新 balance 和 c 字段")
-        
-        # 更新字段 p（可用余额）
-        if available_balance is not None:
+                # 其他类型，设为空字符串
+                open_orders_str = ""
+                log_print(f"[{browser_id}] ⚠ Open Orders 数据类型未知: {type(open_orders)}")
+            
+            # 4. 获取 balance 和 portfolio
+            # Polymarket 使用 cash，OP 使用 balance
+            if exchange_name.upper() == 'PLOY':
+                balance_str = collected_data.get('cash', '')
+                log_print(f"[{browser_id}] 使用 Polymarket 的 cash 作为余额")
+            else:
+                balance_str = collected_data.get('balance', '')
+                log_print(f"[{browser_id}] 使用 OP 的 balance 作为余额")
+            
+            portfolio_str = collected_data.get('portfolio', '')
+            
+            # 5. 判断数据是否收集成功（必须至少成功获取到portfolio或balance其中一个）
+            data_collected_success = False
+            
+            # 检查是否成功获取到 balance 或 portfolio（不是None，不是空字符串）
+            balance_found = balance_str is not None and balance_str != ''
+            portfolio_found = portfolio_str is not None and portfolio_str != ''and portfolio_str != '-'
+            
+            if balance_found and portfolio_found:
+                data_collected_success = True
+                log_print(f"[{browser_id}] ✓ 数据收集成功（balance: {'已获取' if balance_found else '未获取'}, portfolio: {'已获取' if portfolio_found else '未获取'}），将更新时间戳")
+            else:
+                log_print(f"[{browser_id}] ✗ 数据收集失败：portfolio 和 balance 组件都未找到，不更新时间戳")
+            
+            # 转换为数字（去掉$符号）
             try:
-                # 判断可用余额是否是无效值（0、""、null、"-"）
-                is_invalid = False
-                
+                if isinstance(balance_str, str):
+                    balance = float(balance_str.replace('$', '').replace(',', ''))
+                else:
+                    balance = float(balance_str) if balance_str else 0
+            except:
+                balance = 0
+            
+            try:
+                if isinstance(portfolio_str, str):
+                    portfolio = float(portfolio_str.replace('$', '').replace(',', ''))
+                else:
+                    portfolio = float(portfolio_str) if portfolio_str else 0
+            except:
+                portfolio = 0
+            
+            # 5.4. 判断：如果 positions 是空的（包括空列表[]），但是 portfolio_found 获取成功且大于0，则不上传数据
+            if (not positions or len(positions) == 0) and portfolio_found and portfolio > 0:
+                log_print(f"[{browser_id}] ⚠ positions 为空（空列表），但 portfolio 获取成功且大于0（portfolio={portfolio}），不上传数据")
+                return False
+            
+            # 5.5. 判断 balance 和 portfolio 是否都为空或都是 0
+            should_skip_balance_and_portfolio = (balance == 0 or balance_str == '' or balance_str is None) and (portfolio == 0 or portfolio_str == '' or portfolio_str is None)
+            
+            if should_skip_balance_and_portfolio:
+                log_print(f"[{browser_id}] ⚠ balance 和 portfolio 都为空或都是 0，不上传 balance 和 c 字段，且不更新 d 字段")
+                return False
+            
+            # 5.6. 解析并验证可用余额（在上传之前进行判断）
+            available_balance_value = None  # 用于存储转换后的数值
+            
+            # 判断1: 如果可用余额为 None，则不上传数据
+            if available_balance is None:
+                log_print(f"[{browser_id}] ✗ 可用余额为 None，不上传数据")
+                return False
+            
+            # 解析可用余额
+            try:
                 if isinstance(available_balance, str):
                     available_balance_clean = available_balance.replace('$', '').replace(',', '').strip()
-                    # 检查是否是无效值
-                    if available_balance_clean == "" or available_balance_clean == "-" or available_balance_clean.lower() == "null":
-                        is_invalid = True
-                    elif available_balance_clean:
-                        # 尝试转换为数字，检查是否为0
+                    if available_balance_clean and available_balance_clean != "-" and available_balance_clean.lower() != "null":
                         try:
-                            balance_value = float(available_balance_clean)
-                            if balance_value == 0:
-                                is_invalid = True
-                            else:
-                                account_config['p'] = available_balance_clean
-                                log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance_clean}")
+                            available_balance_value = float(available_balance_clean)
                         except ValueError:
-                            # 无法转换为数字，但非空，仍然更新
+                            # 无法转换为数字
+                            available_balance_value = None
+                    else:
+                        # 空字符串或无效值
+                        available_balance_value = None
+                else:
+                    # 非字符串类型
+                    if available_balance == 0:
+                        available_balance_value = 0
+                    elif available_balance is not None:
+                        try:
+                            available_balance_value = float(available_balance)
+                        except (ValueError, TypeError):
+                            available_balance_value = None
+                    else:
+                        available_balance_value = None
+            except Exception as e:
+                log_print(f"[{browser_id}] ⚠ 解析可用余额时发生异常: {str(e)}")
+                available_balance_value = None
+            
+            # 判断2: 如果可用余额解析不出来，或者等于0，则不上传数据
+            if available_balance_value is None or available_balance_value == 0:
+                log_print(f"[{browser_id}] ✗ 可用余额解析不出来或等于0（available_balance_value={available_balance_value}），不上传数据")
+                return False
+            
+            # 判断3: 如果可用余额和余额的相差的绝对值大于0.1，并且open_orders_str是空字符串，则不上传数据
+            if open_orders_str == "":
+                balance_diff = abs(available_balance_value - balance)
+                if balance_diff > 0.1:
+                    log_print(f"[{browser_id}] ✗ 可用余额和余额相差过大（可用余额={available_balance_value}, 余额={balance}, 差值={balance_diff}），且open_orders为空，不上传数据")
+                    return False
+            
+            # 6. 更新字段
+            account_config['a'] = position_str
+            account_config['b'] = open_orders_str
+            
+            # 只有在 balance 和 portfolio 不全为空或全为 0 时才更新这些字段
+            if not should_skip_balance_and_portfolio:
+                account_config['balance'] = balance
+                account_config['c'] = str(portfolio)
+            else:
+                log_print(f"[{browser_id}] ℹ 跳过更新 balance 和 c 字段")
+            
+            # 更新字段 p（可用余额）
+            # 注意：可用余额的有效性已经在前面判断过了，这里直接更新
+            if available_balance is not None and available_balance_value is not None:
+                try:
+                    # 格式化可用余额字符串（保留原始格式用于上传）
+                    if isinstance(available_balance, str):
+                        available_balance_clean = available_balance.replace('$', '').replace(',', '').strip()
+                        if available_balance_clean and available_balance_clean != "-" and available_balance_clean.lower() != "null":
                             account_config['p'] = available_balance_clean
                             log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance_clean}")
                     else:
-                        is_invalid = True
-                else:
-                    # 非字符串类型
-                    if available_balance == 0 or available_balance is None:
-                        is_invalid = True
-                    else:
                         account_config['p'] = str(available_balance)
                         log_print(f"[{browser_id}] ✓ 更新字段 p (可用余额): {available_balance}")
-                
-                if is_invalid:
-                    log_print(f"[{browser_id}] ⚠ 可用余额为无效值（0、空字符串、null 或 '-'），不更新字段 p")
-            except Exception as e:
-                log_print(f"[{browser_id}] ⚠ 更新字段 p 失败: {str(e)}")
-        else:
-            log_print(f"[{browser_id}] ℹ 未提供可用余额，字段 p 保持不变")
-        
-        # 只有在数据收集成功时才更新时间戳 d
-        if data_collected_success:
-            import time
-            timestamp = int(time.time() * 1000)
-            account_config['d'] = str(timestamp)
-            log_print(f"[{browser_id}] ✓ 更新时间戳: {timestamp}")
-        else:
-            log_print(f"[{browser_id}] ℹ 保持原有时间戳不变")
-        
-        account_config['e'] = exchange_name  # 平台名称
-        
-        # 6.5. 处理 Points History 数据（字段 k）
-        points_history_data = collected_data.get('k', '')
-        if points_history_data:
-            # 如果返回的数据是"0"，则判断原本的"k"字段是否包含"|||"
-            if points_history_data == "0":
-                original_k = account_config.get('k', '')
-                if original_k and '|||' in original_k:
-                    # 服务器有有效数据，不更新无效数据
-                    log_print(f"[{browser_id}] ℹ Points History 数据为 '0'，但服务器已有有效数据（包含|||），不更新字段 k")
-                else:
-                    # 服务器没有有效数据，更新为"0"
-                    account_config['k'] = "0"
-                    log_print(f"[{browser_id}] ✓ 更新字段 k: 0（无数据）")
-            else:
-                # 有有效数据，直接更新
-                account_config['k'] = points_history_data
-                log_print(f"[{browser_id}] ✓ 更新字段 k: {points_history_data[:100]}...")
-        else:
-            log_print(f"[{browser_id}] ℹ 未获取到 Points History 数据，字段 k 保持不变")
-        
-        # 6.6. 如果获取到了 Balance Spot 地址，更新字段 h
-        balance_spot_address = collected_data.get('balance_spot_address')
-        if balance_spot_address and balance_spot_address.startswith('0x') and account_config['i'] != "1":
-            account_config['h'] = balance_spot_address
-            log_print(f"[{browser_id}] ✓ 更新字段 h: {balance_spot_address}")
-        else:
-            log_print(f"[{browser_id}] ℹ 未获取到有效的 Balance Spot 地址，字段 h 保持不变")
-        
-        # 6. 格式化 transactions 数据并上传到新接口
-        transactions = collected_data.get('transactions', [])
-        log_print(f"[{browser_id}] 开始格式化 {len(transactions)} 条交易记录...")
-        
-        if transactions:
-            # 将时间字符串转换为时间戳的函数
-            def parse_time_to_timestamp(time_str):
-                """
-                将时间字符串转换为时间戳（毫秒）
-                格式: Nov 26, 2025 19:38:42
-                """
-                try:
-                    from datetime import datetime
-                    # 解析时间字符串
-                    dt = datetime.strptime(time_str, "%b %d, %Y %H:%M:%S")
-                    # 转换为时间戳（毫秒）
-                    timestamp = int(dt.timestamp() * 1000)
-                    return timestamp
                 except Exception as e:
-                    log_print(f"[{browser_id}] ⚠ 时间解析失败 '{time_str}': {str(e)}")
-                    return 0
+                    log_print(f"[{browser_id}] ⚠ 更新字段 p 失败: {str(e)}")
+            else:
+                log_print(f"[{browser_id}] ℹ 未提供可用余额，字段 p 保持不变")
             
-            # 清理金额和价格字段，只保留数字和小数点
-            def clean_number_string(value_str):
-                """
-                去除字符串中的货币符号，只保留数字和小数点
-                例如: "$1.49" -> "1.49", "1.5 ¢" -> "1.5"
-                """
-                if not value_str:
-                    return "0"
-                
-                # 去除所有非数字、非小数点、非负号的字符
-                import re
-                cleaned = re.sub(r'[^\d\.\-]', '', value_str)
-                
-                # 如果清理后为空，返回 "0"
-                if not cleaned or cleaned == '.':
-                    return "0"
-                
-                return cleaned
             
-            # 格式化为新接口所需的格式
-            transactions_list = []
-            for idx, trans in enumerate(transactions, 1):
-                # 清理 shares, amount 和 price，去除符号
-                cleaned_shares = clean_number_string(trans['amount'])
-                cleaned_amount = clean_number_string(trans['value'])
-                cleaned_price = clean_number_string(trans['price'])
-                cleaned_fee = clean_number_string(trans['fee'])
-                
-                transaction_data = {
-                    "trending": trans['title'],
-                    "side": trans['direction'],
-                    "outCome": trans['option'],
-                    "shares": cleaned_shares,    # 原 amount 字段映射到 shares (去除逗号)
-                    "amount": cleaned_amount,    # 原 value 字段映射到 amount (去除符号)
-                    "price": cleaned_price,      # price (去除符号)
-                    "fee": cleaned_fee,          # fee (去除符号)
-                    "time": parse_time_to_timestamp(trans['time'])
-                }
-                transactions_list.append(transaction_data)
-                log_print(f"[{browser_id}]   交易 {idx}: {trans['title']} | {trans['direction']} | {trans['option']} | shares={cleaned_shares} (原:{trans['amount']}) | amount={cleaned_amount} (原:{trans['value']}) | price={cleaned_price} (原:{trans['price']}) | fee={cleaned_fee} (原:{trans['fee']}) | time={transaction_data['time']}")
             
-            log_print(f"[{browser_id}] ✓ 交易记录格式化完成，共 {len(transactions_list)} 条")
+            # 只有在数据收集成功时才更新时间戳 d
+            if data_collected_success:
+                timestamp = int(time.time() * 1000)
+                account_config['d'] = str(timestamp)
+                log_print(f"[{browser_id}] ✓ 更新时间戳: {timestamp}")
+            else:
+                log_print(f"[{browser_id}] ℹ 保持原有时间戳不变")
             
-            # 上传交易记录到新接口
-            try:
-                insert_order_url = f"{SERVER_BASE_URL}/boost/insertOrderHist"
-                order_data = {
-                    "number": str(browser_id),
-                    "list": transactions_list
-                }
-                
-                # 打印 order_data 的字符串格式
-                import json
-                order_data_str = json.dumps(order_data, ensure_ascii=False, indent=2)
-                log_print(f"[{browser_id}] ==================== order_data 详细内容 ====================")
-                log_print(f"[{browser_id}] {order_data_str}")
-                log_print(f"[{browser_id}] =================================================================")
-                
-                log_print(f"[{browser_id}] 开始上传交易记录到 /boost/insertOrderHist...")
-                order_response = requests.post(insert_order_url, json=order_data, timeout=15)
-                
-                if order_response.status_code == 200:
-                    log_print(f"[{browser_id}] ✓ 交易记录上传成功")
-                    log_print(f"[{browser_id}] 服务器响应: {order_response.json()}")
+            account_config['e'] = exchange_name  # 平台名称
+            
+            # 6.5. 处理 Points History 数据（字段 k）
+            points_history_data = collected_data.get('k', '')
+            if points_history_data:
+                # 如果返回的数据是"0"，则判断原本的"k"字段是否包含"|||"
+                if points_history_data == "0":
+                    original_k = account_config.get('k', '')
+                    if original_k and '|||' in original_k:
+                        # 服务器有有效数据，不更新无效数据
+                        log_print(f"[{browser_id}] ℹ Points History 数据为 '0'，但服务器已有有效数据（包含|||），不更新字段 k")
+                    else:
+                        # 服务器没有有效数据，更新为"0"
+                        account_config['k'] = "0"
+                        log_print(f"[{browser_id}] ✓ 更新字段 k: 0（无数据）")
                 else:
-                    log_print(f"[{browser_id}] ⚠ 交易记录上传失败: HTTP {order_response.status_code}")
-            except Exception as e:
-                log_print(f"[{browser_id}] ✗ 交易记录上传异常: {str(e)}")
-        else:
-            log_print(f"[{browser_id}] 无交易记录需要上传")
-        
-        log_print(f"[{browser_id}] 步骤2: 更新数据字段...")
-        log_print(f"[{browser_id}]   a (positions): {position_str[:100]}...")
-        log_print(f"[{browser_id}]   b (open_orders): {open_orders_str[:100]}...")
-        log_print(f"[{browser_id}]   balance: {balance}")
-        log_print(f"[{browser_id}]   c (portfolio): {portfolio}")
-        log_print(f"[{browser_id}]   d (timestamp): {'已更新' if data_collected_success else '保持不变'}")
-        log_print(f"[{browser_id}]   e (platform): {exchange_name}")
-        log_print(f"[{browser_id}]   transactions: {len(transactions)} 条交易记录已上传到 insertOrderHist 接口")
-        
-        # 7. 上传更新（带重试机制）
-        log_print(f"[{browser_id}] 步骤3: 上传更新到服务器...")
-        upload_data = account_config
-        
-        success, result, error_msg = upload_account_config_with_retry(
-            upload_data, 
-            browser_id=browser_id, 
-            timeout=15
-        )
-        
-        if not success:
-            log_print(f"[{browser_id}] ✗ 上传失败: {error_msg}")
-            return False
-        
-        log_print(f"[{browser_id}] ✓ 数据上传成功")
-        if result:
-            log_print(f"[{browser_id}] 服务器响应: {result}")
-        
-        return True
-        
-    except Exception as e:
-        log_print(f"[{browser_id}] ✗ 上传数据失败: {str(e)}")
-        import traceback
-        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
-        return False
+                    # 有有效数据，直接更新
+                    account_config['k'] = points_history_data
+                    log_print(f"[{browser_id}] ✓ 更新字段 k: {points_history_data[:100]}...")
+            else:
+                log_print(f"[{browser_id}] ℹ 未获取到 Points History 数据，字段 k 保持不变")
+            
+            # 6.6. 如果获取到了 Balance Spot 地址，更新字段 h
+            balance_spot_address = collected_data.get('balance_spot_address')
+            if balance_spot_address and balance_spot_address.startswith('0x') and account_config['i'] != "1":
+                account_config['h'] = balance_spot_address
+                log_print(f"[{browser_id}] ✓ 更新字段 h: {balance_spot_address}")
+            else:
+                log_print(f"[{browser_id}] ℹ 未获取到有效的 Balance Spot 地址，字段 h 保持不变")
+            
+            # 6. 格式化 transactions 数据并上传到新接口
+            transactions = collected_data.get('transactions', [])
+            log_print(f"[{browser_id}] 开始格式化 {len(transactions)} 条交易记录...")
+            
+            if transactions:
+                # 将时间字符串转换为时间戳的函数
+                def parse_time_to_timestamp(time_str):
+                    """
+                    将时间字符串转换为时间戳（毫秒）
+                    格式: Nov 26, 2025 19:38:42
+                    """
+                    try:
+                        from datetime import datetime
+                        # 解析时间字符串
+                        dt = datetime.strptime(time_str, "%b %d, %Y %H:%M:%S")
+                        # 转换为时间戳（毫秒）
+                        timestamp = int(dt.timestamp() * 1000)
+                        return timestamp
+                    except Exception as e:
+                        log_print(f"[{browser_id}] ⚠ 时间解析失败 '{time_str}': {str(e)}")
+                        return 0
+                
+                # 清理金额和价格字段，只保留数字和小数点
+                def clean_number_string(value_str):
+                    """
+                    去除字符串中的货币符号，只保留数字和小数点
+                    例如: "$1.49" -> "1.49", "1.5 ¢" -> "1.5"
+                    """
+                    if not value_str:
+                        return "0"
+                    
+                    # 去除所有非数字、非小数点、非负号的字符
+                    import re
+                    cleaned = re.sub(r'[^\d\.\-]', '', value_str)
+                    
+                    # 如果清理后为空，返回 "0"
+                    if not cleaned or cleaned == '.':
+                        return "0"
+                    
+                    return cleaned
+                
+                # 格式化为新接口所需的格式
+                transactions_list = []
+                for idx, trans in enumerate(transactions, 1):
+                    # 清理 shares, amount 和 price，去除符号
+                    cleaned_shares = clean_number_string(trans['amount'])
+                    cleaned_amount = clean_number_string(trans['value'])
+                    cleaned_price = clean_number_string(trans['price'])
+                    cleaned_fee = clean_number_string(trans['fee'])
+                    
+                    transaction_data = {
+                        "trending": trans['title'],
+                        "side": trans['direction'],
+                        "outCome": trans['option'],
+                        "shares": cleaned_shares,    # 原 amount 字段映射到 shares (去除逗号)
+                        "amount": cleaned_amount,    # 原 value 字段映射到 amount (去除符号)
+                        "price": cleaned_price,      # price (去除符号)
+                        "fee": cleaned_fee,          # fee (去除符号)
+                        "time": parse_time_to_timestamp(trans['time'])
+                    }
+                    transactions_list.append(transaction_data)
+                    log_print(f"[{browser_id}]   交易 {idx}: {trans['title']} | {trans['direction']} | {trans['option']} | shares={cleaned_shares} (原:{trans['amount']}) | amount={cleaned_amount} (原:{trans['value']}) | price={cleaned_price} (原:{trans['price']}) | fee={cleaned_fee} (原:{trans['fee']}) | time={transaction_data['time']}")
+                
+                log_print(f"[{browser_id}] ✓ 交易记录格式化完成，共 {len(transactions_list)} 条")
+                
+                # 上传交易记录到新接口
+                try:
+                    insert_order_url = f"{SERVER_BASE_URL}/boost/insertOrderHist"
+                    order_data = {
+                        "number": str(browser_id),
+                        "list": transactions_list
+                    }
+                    
+                    # 打印 order_data 的字符串格式
+                    import json
+                    order_data_str = json.dumps(order_data, ensure_ascii=False, indent=2)
+                    log_print(f"[{browser_id}] ==================== order_data 详细内容 ====================")
+                    log_print(f"[{browser_id}] {order_data_str}")
+                    log_print(f"[{browser_id}] =================================================================")
+                    
+                    log_print(f"[{browser_id}] 开始上传交易记录到 /boost/insertOrderHist...")
+                    order_response = requests.post(insert_order_url, json=order_data, timeout=15)
+                    
+                    if order_response.status_code == 200:
+                        log_print(f"[{browser_id}] ✓ 交易记录上传成功")
+                        log_print(f"[{browser_id}] 服务器响应: {order_response.json()}")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ 交易记录上传失败: HTTP {order_response.status_code}")
+                except Exception as e:
+                    log_print(f"[{browser_id}] ✗ 交易记录上传异常: {str(e)}")
+            else:
+                log_print(f"[{browser_id}] 无交易记录需要上传")
+            
+            log_print(f"[{browser_id}] 步骤2: 更新数据字段...")
+            log_print(f"[{browser_id}]   a (positions): {position_str[:100]}...")
+            log_print(f"[{browser_id}]   b (open_orders): {open_orders_str[:100]}...")
+            log_print(f"[{browser_id}]   balance: {balance}")
+            log_print(f"[{browser_id}]   c (portfolio): {portfolio}")
+            log_print(f"[{browser_id}]   d (timestamp): {'已更新' if data_collected_success else '保持不变'}")
+            log_print(f"[{browser_id}]   e (platform): {exchange_name}")
+            log_print(f"[{browser_id}]   transactions: {len(transactions)} 条交易记录已上传到 insertOrderHist 接口")
+            
+            # 7. 上传更新（带重试机制）
+            log_print(f"[{browser_id}] 步骤3: 上传更新到服务器...")
+            upload_data = account_config
+            
+            success, result, error_msg = upload_account_config_with_retry(
+                upload_data, 
+                browser_id=browser_id, 
+                timeout=15
+            )
+            
+            if not success:
+                log_print(f"[{browser_id}] ✗ 上传失败: {error_msg}")
+                return False
+            
+            log_print(f"[{browser_id}] ✓ 数据上传成功")
+            if result:
+                log_print(f"[{browser_id}] 服务器响应: {result}")
+            
+            return True
+            
+        except Exception as e:
+            log_print(f"[{browser_id}] ✗ 上传数据失败: {str(e)}")
+            import traceback
+            log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+            
+            # 如果还有重试机会，等待后重试
+            if attempt < max_retries:
+                log_print(f"[{browser_id}] ⏳ 等待 {retry_interval} 秒后进行第 {attempt + 1} 次重试...")
+                time.sleep(retry_interval)
+                continue
+            else:
+                # 所有重试都失败，返回False
+                log_print(f"[{browser_id}] ✗ 已达到最大重试次数（{max_retries}次），上传失败")
+                return False
 
 
 # ============================================================================
@@ -9679,6 +9869,9 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
             log_print(f"[{browser_id}] 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
             
+            time.sleep(15)
+            driver.get(profile_url)
+            time.sleep(15)
             # 获取数据（带重试机制）
             max_data_collection_retries = 3
             retry_attempt = 0
@@ -9687,7 +9880,30 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
             transactions_data = []
             
             while retry_attempt < max_data_collection_retries:
+                  # 判断当前页面是否是 profile_url，如果不是则打开
+                current_url = driver.current_url
+                if current_url == profile_url:
+                    log_print(f"[{browser_id}] ✓ 当前页面已经是 profile 页面，跳过打开步骤")
+                else:
+                    try:
+                        time.sleep(15)
+                        driver.get(profile_url)
+                        log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+                    except WebDriverException as e:
+                        error_msg = str(e)
+                        log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
+                        
                 try:
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤6.5: 获取 Balance Spot 地址...")
+                    balance_spot_address, address_success = get_balance_spot_address(driver, browser_id)
+                    if address_success:
+                        collected_data['balance_spot_address'] = balance_spot_address
+                        log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
+                        
+                        
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}获取 Portfolio 值...")
                     portfolio_value, need_retry_portfolio = get_opinion_portfolio_value(driver, browser_id)
                     collected_data['portfolio'] = portfolio_value
@@ -9698,10 +9914,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(1)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -9719,10 +9939,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(1)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -9738,7 +9962,13 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
                         
                         log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Position 并获取数据...")
-                        position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
+                        position_data, need_retry_position, task_failed = click_opinion_position_and_get_data(driver, browser_id)
+                        
+                        # 如果任务失败，不提交数据
+                        if task_failed:
+                            log_print(f"[{browser_id}] ✗ Position 数据获取任务失败，不提交数据")
+                            return False, ""
+                        
                         collected_data['position'] = position_data
                         
                         if need_retry_position:
@@ -9747,10 +9977,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             if retry_attempt < max_data_collection_retries:
                                 log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                                 driver.get(profile_url)
-                                time.sleep(1)
-                                refresh_page_with_opinion_check(driver, browser_id)
-                                time.sleep(5)
-                                connect_wallet_if_needed(driver, browser_id)
+                                time.sleep(15)
+                                # 判断当前页面的网址是否还包含 'profile'
+                                current_url = driver.current_url
+                                if 'profile' not in current_url:
+                                    log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                    connect_wallet_if_needed(driver, browser_id)
+                                else:
+                                    log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                                 time.sleep(2)
                                 continue
                             else:
@@ -9767,10 +10001,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(1)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -9787,10 +10025,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(1)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -9813,6 +10055,106 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                     
                     # 全部成功，跳出重试循环
                     log_print(f"[{browser_id}] ✓ 所有数据获取成功")
+                    
+                    # 检查传入的可用余额是否有效
+                    if available_balance is None or available_balance == "" or available_balance == 0 or str(available_balance).strip() == "":
+                        log_print(f"[{browser_id}] ⚠ 传入的可用余额无效（{available_balance}），将尝试获取可用余额...")
+                        
+                        # 只对 OP 交易所执行获取可用余额的逻辑
+                        if exchange_name.upper() == "OP":
+                            try:
+                                # 前往指定页面（随机选择一个）
+                                target_urls = [
+                                    "https://app.opinion.trade/detail?topicId=213&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=79&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=210&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=80&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=211&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=175&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=78&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=115&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=193&type=multi"
+                                ]
+                                target_url = random.choice(target_urls)
+                                log_print(f"[{browser_id}] 前往页面获取可用余额: {target_url}")
+                                driver.get(target_url)
+                                time.sleep(3)
+                                
+                                # 在30s内获取 trade_box_divs
+                                start_time = time.time()
+                                max_wait_time = 30
+                                check_interval = 0.5
+                                fetched_available_balance = None
+                                
+                                while time.time() - start_time < max_wait_time:
+                                    try:
+                                        # 查找 trade_box_divs
+                                        trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                                        if not trade_box_divs:
+                                            log_print(f"[{browser_id}] ⚠ 未找到 trade-box div，等待后重试...")
+                                            time.sleep(check_interval)
+                                            continue
+                                        
+                                        current_trade_box = trade_box_divs[0]
+                                        
+                                        # 点击 Buy 按钮以确保显示正确的 tabs_content
+                                        if not click_opinion_trade_type_button(current_trade_box, "Buy", browser_id):
+                                            log_print(f"[{browser_id}] ⚠ 点击 Buy 按钮失败，等待后重试...")
+                                            time.sleep(check_interval)
+                                            continue
+                                        
+                                        # 重新获取 trade_box（点击后可能需要重新获取）
+                                        trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                                        if not trade_box_divs:
+                                            log_print(f"[{browser_id}] ⚠ 未找到 trade-box div，等待后重试...")
+                                            time.sleep(check_interval)
+                                            continue
+                                        
+                                        current_trade_box = trade_box_divs[0]
+                                        
+                                        # 查找 tabs content div
+                                        tabs_content_divs = current_trade_box.find_elements(By.CSS_SELECTOR, 
+                                            'div[data-scope="tabs"][data-part="content"][data-state="open"]')
+                                        
+                                        if not tabs_content_divs:
+                                            log_print(f"[{browser_id}] ⚠ 未找到 tabs content div，等待后重试...")
+                                            time.sleep(check_interval)
+                                            continue
+                                        
+                                        tabs_content = tabs_content_divs[0]
+                                        
+                                        # 获取当前可用余额
+                                        fetched_available_balance = get_available_balance_from_tabs_content(tabs_content, browser_id)
+                                        
+                                        if fetched_available_balance is not None:
+                                            available_balance = fetched_available_balance
+                                            log_print(f"[{browser_id}] ✓ 可用余额已获取: {available_balance}")
+                                            break
+                                        else:
+                                            log_print(f"[{browser_id}] ⚠ 无法获取可用余额，等待后重试...")
+                                            time.sleep(check_interval)
+                                            continue
+                                        
+                                    except Exception as e:
+                                        log_print(f"[{browser_id}] ⚠ 获取可用余额时发生异常: {str(e)}")
+                                        time.sleep(check_interval)
+                                        continue
+                                
+                                if fetched_available_balance is None:
+                                    log_print(f"[{browser_id}] ⚠ 30秒内未能获取到可用余额，将使用 None 继续执行")
+                                else:
+                                    log_print(f"[{browser_id}] ✓ 可用余额获取完成: {available_balance}")
+                                    
+                            except Exception as e:
+                                log_print(f"[{browser_id}] ✗ 获取可用余额执行异常: {str(e)}")
+                                import traceback
+                                log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+                                log_print(f"[{browser_id}] ⚠ 继续执行后续步骤，使用 None 作为可用余额")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 交易所 {exchange_name} 暂不支持自动获取可用余额")
+                    else:
+                        log_print(f"[{browser_id}] ✓ 使用传入的可用余额: {available_balance}")
+                    
                     break
                     
                 except Exception as e:
@@ -9821,10 +10163,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                     if retry_attempt < max_data_collection_retries:
                         log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                         driver.get(profile_url)
-                        time.sleep(1)
-                        refresh_page_with_opinion_check(driver, browser_id)
-                        time.sleep(2)
-                        connect_wallet_if_needed(driver, browser_id)
+                        time.sleep(15)
+                        # 判断当前页面的网址是否还包含 'profile'
+                        current_url = driver.current_url
+                        if 'profile' not in current_url:
+                            log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                            connect_wallet_if_needed(driver, browser_id)
+                        else:
+                            log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                         time.sleep(2)
                     else:
                         log_print(f"[{browser_id}] ✗ 已达到最大重试次数")
@@ -9993,13 +10339,12 @@ def process_type2_mission(task_data, retry_count=0):
                 driver.get(profile_url)
                 log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
             except WebDriverException as e:
-                error_msg = str(e)
+                    error_msg = str(e)
                 # 检查是否是代理连接错误
-                if "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg:
                     log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
-                    # 如果是代理错误且未重试过，执行换IP重试
-                    if retry_count == 0:
-                        log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试，开始执行重试流程...")
+                    # 如果是代理错误且重试次数小于2，执行换IP重试
+                    if retry_count < 2:
+                        log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                         
                         # 1. 关闭浏览器
                         log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -10013,9 +10358,9 @@ def process_type2_mission(task_data, retry_count=0):
                         call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         time.sleep(15)
                         
-                        # 2. 强制更换IP
-                        log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                        proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                        # 2. 根据重试次数获取IP
+                        log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -10033,23 +10378,20 @@ def process_type2_mission(task_data, retry_count=0):
                         time.sleep(10)
                         
                         # 4. 递归重试任务（retry_count+1）
-                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                        return process_type2_mission(task_data, retry_count=1)
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                        return process_type2_mission(task_data, retry_count=retry_count+1)
                     else:
-                        log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
-                        return False, "代理连接失败且已重试", collected_data
-                else:
-                    # 其他类型的错误，直接抛出
-                    raise
+                        log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
+                        return False, "代理连接失败且已重试2次", collected_data
             
             time.sleep(2)
             
             # 4.0.4 检查并点击 "I Understand and Agree" p标签（如果存在）
             log_print(f"[{browser_id}] 步骤4.0.4: 检查是否存在 'I Understand and Agree' p标签...")
             if check_and_click_understand_agree(driver, browser_id, timeout=5):
-                # 如果存在并点击了，需要换IP重试（仅未重试过）
-                if retry_count == 0:
-                    log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试，开始执行重试流程...")
+                # 如果存在并点击了，需要换IP重试（重试次数小于2）
+                if retry_count < 2:
+                    log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                     
                     # 1. 关闭浏览器
                     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -10064,9 +10406,9 @@ def process_type2_mission(task_data, retry_count=0):
                     log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
                     time.sleep(120)  # Type=2任务等待2分钟
                     
-                    # 2. 强制更换IP
-                    log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                    proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                    # 2. 根据重试次数获取IP
+                    log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                     
                     if not proxy_config:
                         log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -10084,11 +10426,11 @@ def process_type2_mission(task_data, retry_count=0):
                     time.sleep(10)
                     
                     # 4. 递归重试任务（retry_count+1）
-                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                    return process_type2_mission(task_data, retry_count=1)
+                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                    return process_type2_mission(task_data, retry_count=retry_count+1)
                 else:
-                    log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
-                    return False, "检测到 'I Understand and Agree' 且已重试", collected_data
+                    log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
+                    return False, "检测到 'I Understand and Agree' 且已重试2次", collected_data
             
             # 4.0.5 预打开OKX钱包
             log_print(f"[{browser_id}] 步骤4.0.5: 预打开OKX钱包...")
@@ -10115,9 +10457,9 @@ def process_type2_mission(task_data, retry_count=0):
                 if check_okx_wallet_p_exists(driver, browser_id, timeout=5):
                     log_print(f"[{browser_id}] ✗✗✗ OKX Wallet P标签依然存在，需要换IP重试...")
                     
-                    # 检查是否已经重试过
-                    if retry_count == 0:
-                        log_print(f"[{browser_id}] Type=2 任务需要换IP重试，开始执行重试流程...")
+                    # 检查是否已经重试过（重试次数小于2）
+                    if retry_count < 2:
+                        log_print(f"[{browser_id}] Type=2 任务需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                         
                         # 1. 关闭浏览器
                         log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -10131,9 +10473,9 @@ def process_type2_mission(task_data, retry_count=0):
                         call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         time.sleep(2)
                         
-                        # 2. 强制更换IP
-                        log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                        proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                        # 2. 根据重试次数获取IP
+                        log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -10151,17 +10493,20 @@ def process_type2_mission(task_data, retry_count=0):
                         time.sleep(2)
                         
                         # 4. 递归重试任务（retry_count+1）
-                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                        return process_type2_mission(task_data, retry_count=1)
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                        return process_type2_mission(task_data, retry_count=retry_count+1)
                     else:
-                        log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
-                        return False, "OKX Wallet连接失败且已重试", collected_data
+                        log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
+                        return False, "OKX Wallet连接失败且已重试2次", collected_data
                 else:
                     log_print(f"[{browser_id}] ✓ 第二次检查通过，OKX Wallet 已正常连接")
             else:
                 log_print(f"[{browser_id}] ✓ 第一次检查通过，OKX Wallet 已正常连接")
             
             
+            
+
+                    
             # 获取数据（步骤5-9带重试机制）
             max_data_collection_retries = 3
             retry_attempt = 0
@@ -10170,7 +10515,30 @@ def process_type2_mission(task_data, retry_count=0):
             transactions_data = []
             
             while retry_attempt < max_data_collection_retries:
+                # 判断当前页面是否是 profile_url，如果不是则打开
+                current_url = driver.current_url
+                if current_url == profile_url:
+                    log_print(f"[{browser_id}] ✓ 当前页面已经是 profile 页面，跳过打开步骤")
+                else:
+                    try:
+                        time.sleep(15)
+                        driver.get(profile_url)
+                        log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+                    except WebDriverException as e:
+                        error_msg = str(e)
+                        log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
+                    
                 try:
+                    
+                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤6.5: 获取 Balance Spot 地址...")
+                    balance_spot_address, address_success = get_balance_spot_address(driver, browser_id)
+                    if address_success:
+                        collected_data['balance_spot_address'] = balance_spot_address
+                        log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
+                    else:
+                        log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
+                        
+                        
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤5: 获取 Portfolio 值...")
                     portfolio_value, need_retry_portfolio = get_opinion_portfolio_value(driver, browser_id)
                     collected_data['portfolio'] = portfolio_value
@@ -10181,11 +10549,14 @@ def process_type2_mission(task_data, retry_count=0):
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(2)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            # 重新连接钱包
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -10202,27 +10573,30 @@ def process_type2_mission(task_data, retry_count=0):
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(2)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            # 重新连接钱包
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
                             break
                     
-                    log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤6.5: 获取 Balance Spot 地址...")
-                    balance_spot_address, address_success = get_balance_spot_address(driver, browser_id)
-                    if address_success:
-                        collected_data['balance_spot_address'] = balance_spot_address
-                        log_print(f"[{browser_id}] ✓ Balance Spot 地址已保存: {balance_spot_address}")
-                    else:
-                        log_print(f"[{browser_id}] ⚠ Balance Spot 地址获取失败，继续执行后续步骤")
+                   
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并获取数据...")
-                    position_data, need_retry_position = click_opinion_position_and_get_data(driver, browser_id)
+                    position_data, need_retry_position, task_failed = click_opinion_position_and_get_data(driver, browser_id)
+                    
+                    # 如果任务失败，不提交数据
+                    if task_failed:
+                        log_print(f"[{browser_id}] ✗ Position 数据获取任务失败，不提交数据")
+                        return False, ""
+                    
                     collected_data['position'] = position_data
                     
                     if need_retry_position:
@@ -10231,11 +10605,14 @@ def process_type2_mission(task_data, retry_count=0):
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(2)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            # 重新连接钱包
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -10263,11 +10640,14 @@ def process_type2_mission(task_data, retry_count=0):
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(2)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            # 重新连接钱包
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -10283,11 +10663,14 @@ def process_type2_mission(task_data, retry_count=0):
                         if retry_attempt < max_data_collection_retries:
                             log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                             driver.get(profile_url)
-                            time.sleep(2)
-                            refresh_page_with_opinion_check(driver, browser_id)
-                            time.sleep(5)
-                            # 重新连接钱包
-                            connect_wallet_if_needed(driver, browser_id)
+                            time.sleep(15)
+                            # 判断当前页面的网址是否还包含 'profile'
+                            current_url = driver.current_url
+                            if 'profile' not in current_url:
+                                log_print(f"[{browser_id}] 当前页面不包含 'profile'，执行连接钱包操作")
+                                connect_wallet_if_needed(driver, browser_id)
+                            else:
+                                log_print(f"[{browser_id}] 当前页面仍包含 'profile'，跳过连接钱包操作")
                             time.sleep(2)
                             continue
                         else:
@@ -10405,9 +10788,9 @@ def process_type2_mission(task_data, retry_count=0):
                     if retry_attempt < max_data_collection_retries:
                         log_print(f"[{browser_id}] 刷新页面进行第 {retry_attempt + 1} 次尝试...")
                         driver.get(profile_url)
-                        time.sleep(2)
-                        refresh_page_with_opinion_check(driver, browser_id)
-                        time.sleep(5)
+                        time.sleep(15)
+                        # refresh_page_with_opinion_check(driver, browser_id)
+                        # time.sleep(5)
                         connect_wallet_if_needed(driver, browser_id)
                         time.sleep(2)
                     else:
@@ -10493,13 +10876,12 @@ def process_type2_mission(task_data, retry_count=0):
                 driver.get(portfolio_url)
                 log_print(f"[{browser_id}] ✓ 已打开页面: {portfolio_url}")
             except WebDriverException as e:
-                error_msg = str(e)
+                    error_msg = str(e)
                 # 检查是否是代理连接错误
-                if "ERR_SOCKS_CONNECTION_FAILED" in error_msg or "net::ERR" in error_msg:
                     log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
-                    # 如果是代理错误且未重试过，执行换IP重试
-                    if retry_count == 0:
-                        log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试，开始执行重试流程...")
+                    # 如果是代理错误且重试次数小于2，执行换IP重试
+                    if retry_count < 2:
+                        log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                         
                         # 1. 关闭浏览器
                         log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -10513,9 +10895,9 @@ def process_type2_mission(task_data, retry_count=0):
                         call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         time.sleep(15)
                         
-                        # 2. 强制更换IP
-                        log_print(f"[{browser_id}] 步骤2: 强制更换IP...")
-                        proxy_config = force_change_ip_for_browser(browser_id, timeout=15)
+                        # 2. 根据重试次数获取IP
+                        log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -10533,14 +10915,12 @@ def process_type2_mission(task_data, retry_count=0):
                         time.sleep(10)
                         
                         # 4. 递归重试任务（retry_count+1）
-                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: 1）...")
-                        return process_type2_mission(task_data, retry_count=1)
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                        return process_type2_mission(task_data, retry_count=retry_count+1)
                     else:
-                        log_print(f"[{browser_id}] ✗ 已经重试过一次，不再重试")
-                        return False, "代理连接失败且已重试", collected_data
-                else:
-                    # 其他类型的错误，直接抛出
-                    raise
+                        log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
+                        return False, "代理连接失败且已重试2次", collected_data
+                
             
             time.sleep(2)
             

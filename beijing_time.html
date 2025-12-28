@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">北京时间</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 60px 80px;
+            text-align: center;
+        }
+
+        .time-display {
+            font-size: 72px;
+            font-weight: 600;
+            color: #333;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="time-display" id="timeDisplay"></div>
+    </div>
+
+    <script>
+        // 获取北京时间（UTC+8）
+        function getBeijingTime() {
+            const now = new Date();
+            // 获取UTC时间
+            const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+            // 转换为北京时间（UTC+8）
+            const beijingTime = new Date(utc + (8 * 3600000));
+            return beijingTime;
+        }
+
+        // 格式化显示（格式：28日 14:30:25）
+        function formatDisplay(date) {
+            const day = date.getDate();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${day}日 ${hours}:${minutes}:${seconds}`;
+        }
+
+        // 更新页面显示
+        function updateDisplay() {
+            const beijingTime = getBeijingTime();
+            const displayStr = formatDisplay(beijingTime);
+            
+            // 更新页面内容
+            document.getElementById('timeDisplay').textContent = displayStr;
+            
+            // 更新页面标题
+            document.getElementById('pageTitle').textContent = displayStr;
+        }
+
+        // 页面加载时立即显示时间
+        updateDisplay();
+    </script>
+</body>
+</html>

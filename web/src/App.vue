@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <header class="top-header">
-      <h1>任务管理系统</h1>
+      <h1>页面1-对冲</h1>
       <div class="header-actions">
         <div style="display: inline-flex; align-items: center; gap: 8px; margin-right: 10px;">
           <label style="font-size: 14px;">yes数量大于:</label>
@@ -104,6 +104,18 @@
                 type="text" 
                 class="filter-input" 
                 placeholder="输入 Trending 关键词筛选"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>ip最大延迟(毫秒):</label>
+              <input 
+                v-model="hedgeMode.maxIpDelay" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                placeholder=""
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
               />
             </div>
             <div class="trending-filter">
@@ -450,6 +462,16 @@
                 style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
                 :disabled="autoHedgeRunning"
                 title="输入一个主题同时执行的对冲任务数量"
+              />
+              <label style="font-size: 14px; margin-left: 8px;">任务间隔(分钟)：</label>
+              <input 
+                type="number" 
+                v-model.number="hedgeTaskInterval" 
+                min="0" 
+                max="60"
+                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="一组任务结束后，等待多少分钟再请求分配新任务"
               />
               <label style="font-size: 14px; margin-left: 8px;">可加仓时间（小时）：</label>
               <input 
@@ -2169,6 +2191,7 @@ const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
 const hedgeTasksPerTopic = ref(2)  // 一个主题同时执行的对冲任务数量，默认为2
+const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不等待）
 
 // 分批执行相关
 const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
@@ -2207,7 +2230,8 @@ const hedgeMode = reactive({
   priceRangeMax: 85,  // 先挂方价格区间最大值
   minTotalDepth: 2000,  // 买1-N和卖1-N累加的最小深度
   maxOpenHour: 4,  // 可加仓时间（小时）
-  closeOpenHourArea: '12,36'  // 可平仓随机区间（小时）
+  closeOpenHourArea: '12,36',  // 可平仓随机区间（小时）
+  maxIpDelay: ''  // ip最大延迟（毫秒）
 })
 
 // 交易费查询
@@ -5284,6 +5308,23 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
           continue
         }
+      } else {
+        // 没有运行中的任务，检查任务间隔
+        if (config.lastGroupFinishTime && hedgeTaskInterval.value > 0) {
+          const now = Date.now()
+          const elapsed = (now - config.lastGroupFinishTime) / 1000 / 60  // 转换为分钟
+          const intervalMinutes = hedgeTaskInterval.value
+          
+          if (elapsed < intervalMinutes) {
+            const remaining = Math.ceil((intervalMinutes - elapsed) * 60)
+            console.log(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
+            continue
+          } else {
+            // 间隔时间已过，清除记录
+            config.lastGroupFinishTime = null
+            console.log(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
+          }
+        }
       }
       
       // 检查是否正在请求中
@@ -6127,6 +6168,10 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             //  3-1000个账户中未达标的
             // closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
           }
+          // 如果 maxIpDelay 有值，则添加到请求参数中
+          if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+            requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
+          }
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
@@ -6140,6 +6185,10 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
             // closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
             // 模式3不传 numberType
+          }
+          // 如果 maxIpDelay 有值，则添加到请求参数中
+          if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+            requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
           }
         } else {
           // 模式1：使用原有接口
@@ -6156,6 +6205,10 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
             numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+          }
+          // 如果 maxIpDelay 有值，则添加到请求参数中
+          if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+            requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
           }
         }
         
@@ -6912,8 +6965,10 @@ const saveHedgeSettings = () => {
       priceRangeMin: hedgeMode.priceRangeMin,
       priceRangeMax: hedgeMode.priceRangeMax,
       minTotalDepth: hedgeMode.minTotalDepth,
+      maxIpDelay: hedgeMode.maxIpDelay,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
+      hedgeTaskInterval: hedgeTaskInterval.value,
       randomGetCount: randomGetCount.value,
       enableBatchMode: enableBatchMode.value,
       batchSize: batchSize.value,
@@ -6998,10 +7053,16 @@ const loadHedgeSettings = () => {
     if (settings.minTotalDepth !== undefined) {
       hedgeMode.minTotalDepth = settings.minTotalDepth
     }
+    if (settings.maxIpDelay !== undefined) {
+      hedgeMode.maxIpDelay = settings.maxIpDelay
+    }
     
     // 其他设置
     if (settings.hedgeTasksPerTopic !== undefined) {
       hedgeTasksPerTopic.value = settings.hedgeTasksPerTopic
+    }
+    if (settings.hedgeTaskInterval !== undefined) {
+      hedgeTaskInterval.value = settings.hedgeTaskInterval
     }
     if (settings.randomGetCount !== undefined) {
       randomGetCount.value = settings.randomGetCount
@@ -8004,6 +8065,9 @@ const finishHedge = (config, hedgeRecord) => {
       config.currentHedge = null
       // 解除暂停状态，允许新的对冲任务
       pausedType3Tasks.value.delete(config.id)
+      // 记录任务组结束时间（用于任务间隔控制）
+      config.lastGroupFinishTime = Date.now()
+      console.log(`配置 ${config.id} - 所有任务已结束，记录结束时间，等待间隔后再分配新任务`)
     }
   } else {
     // 兼容旧代码
@@ -8387,6 +8451,23 @@ const executeAutoHedgeTasks = async () => {
         if (remainingRunning >= maxTasks) {
           console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
           continue
+        }
+      } else {
+        // 没有运行中的任务，检查任务间隔
+        if (config.lastGroupFinishTime && hedgeTaskInterval.value > 0) {
+          const now = Date.now()
+          const elapsed = (now - config.lastGroupFinishTime) / 1000 / 60  // 转换为分钟
+          const intervalMinutes = hedgeTaskInterval.value
+          
+          if (elapsed < intervalMinutes) {
+            const remaining = Math.ceil((intervalMinutes - elapsed) * 60)
+            console.log(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
+            continue
+          } else {
+            // 间隔时间已过，清除记录
+            config.lastGroupFinishTime = null
+            console.log(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
+          }
         }
       }
       
