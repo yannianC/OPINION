@@ -740,7 +740,7 @@ def start_adspower_browser(serial_number):
         "user_id": "",
         "open_tabs": 1
     }
-    launch_args = [f"--window-size={1500},{1000}"]
+    launch_args = [f"--window-size={1500},{1700}"]
     params["launch_args"] = json.dumps(launch_args)
     headers = {
         'Authorization': f'Bearer {ADSPOWER_API_KEY}'
@@ -874,7 +874,7 @@ def close_adspower_browser(serial_number, max_retries=3):
     headers = {
         'Authorization': f'Bearer {ADSPOWER_API_KEY}'
     }
-    
+    errmsg = ''
     for attempt in range(max_retries):
         try:
             log_print(f"[{serial_number}] 尝试关闭浏览器 (第 {attempt + 1}/{max_retries} 次)")
@@ -887,7 +887,7 @@ def close_adspower_browser(serial_number, max_retries=3):
                 return True
             else:
                 log_print(f"[{serial_number}] ✗ 关闭浏览器失败: {data.get('msg')}")
-                
+                errmsg = data.get('msg')
                 if attempt < max_retries - 1:
                     time.sleep(10)
         except Exception as e:
@@ -898,7 +898,8 @@ def close_adspower_browser(serial_number, max_retries=3):
     
     log_print(f"[{serial_number}] ✗ 浏览器关闭失败，已达到最大重试次数")
     # 异步发送飞书消息通知，不阻塞主流程
-    threading.Thread(target=send_feishu_message, args=(serial_number,), daemon=True).start()
+    if 'User_id is not open' in errmsg:
+        threading.Thread(target=send_feishu_message, args=(serial_number,), daemon=True).start()
     return False
 
 
