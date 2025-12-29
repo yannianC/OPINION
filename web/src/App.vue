@@ -1688,6 +1688,26 @@
             </table>
           </div>
         </div>
+        <div class="quick-blacklist-section" style="padding: 15px; border-top: 1px solid #e0e0e0; background-color: #f9f9f9;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label style="font-size: 14px; font-weight: 500; white-space: nowrap;">快速拉黑主题:</label>
+            <input 
+              v-model="quickBlacklistInput" 
+              type="text" 
+              class="filter-input" 
+              placeholder="输入主题名，用分号(;)分隔，可从事件异常页面复制"
+              style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+            />
+            <button 
+              type="button" 
+              class="btn btn-danger" 
+              @click="quickBlacklist"
+              style="padding: 8px 16px; font-size: 14px; white-space: nowrap;"
+            >
+              快速拉黑
+            </button>
+          </div>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-primary" @click="submitEditConfig" :disabled="isSubmittingConfig">
             <span v-if="isSubmittingConfig">保存中...</span>
@@ -2127,6 +2147,7 @@ const editConfigFilter = ref('')  // 修改配置弹窗的筛选
 const showOnlyValid = ref(false)  // 是否只显示符合对冲条件的
 const editConfigStatusFilter = ref('')  // 修改配置弹窗的状态筛选
 const editConfigBatchFilter = ref('')  // 修改配置弹窗的批次筛选
+const quickBlacklistInput = ref('')  // 快速拉黑输入框内容
 const selectedGroup = ref('default')  // 当前选择的分组：default/1/2
 const selectedNumberType = ref('2')  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
 const isFastMode = ref(false)  // 模式开关：false=正常模式(tp3=0), true=快速模式(tp3=1)
@@ -3715,6 +3736,115 @@ watch(
 /**
  * 从 markets 同步配置到 exchangeConfig
  */
+/**
+ * 分页获取所有市场数据（带重试机制）
+ */
+const fetchAllMarkets = async () => {
+  const allMarkets = []
+  let page = 1
+  const limit = 20
+  const maxRetries = 3
+  
+  while (true) {
+    let retries = 0
+    let success = false
+    let response = null
+    
+    // 重试逻辑
+    while (retries < maxRetries && !success) {
+      try {
+        response = await axios.get('https://openapi.opinion.trade/openapi/market', {
+          params: {
+            page: page,
+            limit: limit,
+            status: 'activated',
+            marketType: 2
+          },
+          headers: {
+            'apikey': ORDERBOOK_API_KEY
+          }
+        })
+        
+        if (response.data?.errno === 0 && response.data?.result) {
+          success = true
+        } else {
+          throw new Error(`API返回错误: ${response.data?.errmsg || '未知错误'}`)
+        }
+      } catch (error) {
+        retries++
+        if (retries >= maxRetries) {
+          throw new Error(`获取第 ${page} 页数据失败，已重试 ${maxRetries} 次: ${error.message}`)
+        }
+        console.warn(`获取第 ${page} 页数据失败，正在重试 (${retries}/${maxRetries})...`)
+        // 等待一段时间后重试
+        await new Promise(resolve => setTimeout(resolve, 1000 * retries))
+      }
+    }
+    
+    const result = response.data.result
+    const markets = result.list || []
+    
+    if (markets.length === 0) {
+      break
+    }
+    
+    allMarkets.push(...markets)
+    console.log(`已获取第 ${page} 页，共 ${markets.length} 个市场，累计 ${allMarkets.length} 个`)
+    
+    // 如果当前页数量小于 limit，说明已经是最后一页
+    if (markets.length < limit) {
+      break
+    }
+    
+    page++
+  }
+  
+  console.log(`总共获取 ${allMarkets.length} 个市场`)
+  return allMarkets
+}
+
+/**
+ * 处理市场数据，转换为完整主题列表
+ */
+const processMarketsToFullTopics = (markets) => {
+  const fullTopics = []
+  
+  markets.forEach(mainMarket => {
+    if (mainMarket.childMarkets && mainMarket.childMarkets.length > 0) {
+      // 有子主题的情况
+      mainMarket.childMarkets.forEach(childMarket => {
+        // 只处理有yesTokenId和noTokenId的子主题
+        if (!childMarket.yesTokenId || !childMarket.noTokenId) {
+          console.warn(`子主题 ${childMarket.marketTitle} 缺少tokenId，跳过`)
+          return
+        }
+        
+        fullTopics.push({
+          trending: `${mainMarket.marketTitle}###${childMarket.marketTitle}`,
+          yesTokenId: childMarket.yesTokenId,
+          noTokenId: childMarket.noTokenId,
+          marketId: childMarket.marketId
+        })
+      })
+    } else {
+      // 没有子主题，使用主主题自己
+      if (!mainMarket.yesTokenId || !mainMarket.noTokenId) {
+        console.warn(`主主题 ${mainMarket.marketTitle} 缺少tokenId，跳过`)
+        return
+      }
+      
+      fullTopics.push({
+        trending: mainMarket.marketTitle,
+        yesTokenId: mainMarket.yesTokenId,
+        noTokenId: mainMarket.noTokenId,
+        marketId: mainMarket.marketId
+      })
+    }
+  })
+  
+  return fullTopics
+}
+
 const syncConfigFromMarkets = async () => {
   try {
     showToast('正在同步配置...', 'info')
@@ -3725,96 +3855,81 @@ const syncConfigFromMarkets = async () => {
       return
     }
     
-    // 默认模式：保持原有逻辑
-    // 1. 并行请求两个接口
-    const [marketsResponse, configResponse] = await Promise.all([
-      axios.get('https://predictscan.dev/api/markets'),
-      axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
-    ])
+    // 默认模式：使用新的 openapi
+    // 1. 分页获取所有市场数据
+    showToast('正在获取市场数据...', 'info')
+    const allMarkets = await fetchAllMarkets()
     
-    if (!marketsResponse.data?.success || !marketsResponse.data?.data) {
-      throw new Error('获取 markets 数据失败')
-    }
+    // 2. 处理市场数据，转换为完整主题列表
+    const fullTopics = processMarketsToFullTopics(allMarkets)
+    console.log(`处理后的完整主题数量: ${fullTopics.length}`)
+    
+    // 3. 获取现有配置
+    const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     
     if (configResponse.data?.code !== 0) {
       throw new Error('获取配置数据失败')
     }
     
-    const markets = marketsResponse.data.data
     const existingConfigs = configResponse.data.data.configList || []
     
-    // 2. 创建 trending 到 config 的映射
+    // 4. 创建 marketId 到 fullTopic 的映射
+    const topicMap = new Map()
+    fullTopics.forEach(topic => {
+      topicMap.set(String(topic.marketId), topic)
+    })
+    
+    // 5. 创建 opTopicId 到 config 的映射
     const configMap = new Map()
     existingConfigs.forEach(config => {
-      configMap.set(config.trending, config)
+      if (config.opTopicId) {
+        configMap.set(String(config.opTopicId), config)
+      }
     })
     
-    // 3. 创建 trending 到 market 的映射
-    const marketMap = new Map()
-    let skippedCount = 0
-    let addedCount = 0
-    
-    markets.forEach(market => {
-      // 只处理有yesTokenId和noTokenId的市场
-      if (!market.yesTokenId || !market.noTokenId) {
-        console.warn(`市场 ${market.marketTitle} 缺少tokenId (yesTokenId: ${market.yesTokenId}, noTokenId: ${market.noTokenId})，跳过`)
-        skippedCount++
-        return
-      }
-      
-      let trending
-      if (market.parentEvent) {
-        trending = `${market.parentEvent.title}###${market.title}`
-      } else {
-        trending = market.title
-      }
-      marketMap.set(trending, market)
-      addedCount++
-    })
-    
-    console.log(`Markets API: 总共 ${markets.length} 个市场，有效 ${addedCount} 个，跳过 ${skippedCount} 个`)
-    
-    // 4. 更新现有配置
+    // 6. 更新现有配置
     const updatedConfigs = []
     let matchedCount = 0
     let unmatchedCount = 0
     
     for (const config of existingConfigs) {
-      const market = marketMap.get(config.trending)
-      if (market) {
-        // 找到匹配的 market，更新配置
+      const opTopicId = String(config.opTopicId || '')
+      const topic = topicMap.get(opTopicId)
+      
+      if (topic) {
+        // 找到匹配的 topic，更新配置
         matchedCount++
-        console.log(`✅ 匹配成功: ${config.trending} -> yesToken: ${market.yesTokenId?.substring(0, 20)}...`)
+        console.log(`✅ 匹配成功: opTopicId=${opTopicId} -> ${topic.trending}`)
         updatedConfigs.push({
           id: config.id,
-          trending: config.trending,
-          trendingPart1: market.yesTokenId,
-          trendingPart2: market.noTokenId,
+          trending: topic.trending,
+          trendingPart1: topic.yesTokenId,
+          trendingPart2: topic.noTokenId,
           trendingPart3: config.trendingPart3,
-          opUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
-          polyUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
-          opTopicId: String(market.marketId),
-          weight: 2,
+          opUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
+          polyUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
+          opTopicId: String(topic.marketId),
+          weight: config.weight || 2,
           isOpen: config.isOpen || 0
         })
         // 从 map 中移除已处理的
-        marketMap.delete(config.trending)
+        topicMap.delete(opTopicId)
       } else {
-        // 没有匹配的 market，保持原配置
+        // 没有匹配的 topic，在 trending 后添加 ###undefined，其他字段置空
         unmatchedCount++
         if (unmatchedCount <= 5) {
-          console.log(`❌ 未匹配: ${config.trending}`)
+          console.log(`❌ 未匹配: opTopicId=${opTopicId}, trending=${config.trending}`)
         }
         updatedConfigs.push({
           id: config.id,
-          trending: config.trending,
-          trendingPart1: config.trendingPart1,
-          trendingPart2: config.trendingPart2,
+          trending: config.trending ? `${config.trending}###undefined` : '###undefined',
+          trendingPart1: '',
+          trendingPart2: '',
           trendingPart3: config.trendingPart3,
-          opUrl: config.opUrl,
-          polyUrl: config.polyUrl,
-          opTopicId: config.opTopicId,
-          weight: config.weight,
+          opUrl: '',
+          polyUrl: '',
+          opTopicId: '',
+          weight: config.weight || 2,
           isOpen: config.isOpen || 0
         })
       }
@@ -3822,26 +3937,26 @@ const syncConfigFromMarkets = async () => {
     
     console.log(`配置匹配结果: 匹配 ${matchedCount} 个，未匹配 ${unmatchedCount} 个`)
     
-    // 5. 添加新配置（markets 中有但 exchangeConfig 中没有的）
+    // 7. 添加新配置（openapi 中有但 exchangeConfig 中没有的）
     const newConfigs = []
-    for (const [trending, market] of marketMap) {
+    for (const [marketId, topic] of topicMap) {
       newConfigs.push({
-        trending: trending,
-        trendingPart1: market.yesTokenId,
-        trendingPart2: market.noTokenId,
+        trending: topic.trending,
+        trendingPart1: topic.yesTokenId,
+        trendingPart2: topic.noTokenId,
         trendingPart3: null,
-        opUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
-        polyUrl: `https://app.opinion.trade/detail?topicId=${market.marketId}`,
-        opTopicId: String(market.marketId),
+        opUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
+        polyUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
+        opTopicId: String(topic.marketId),
         weight: 2,
         isOpen: 0
       })
     }
     
-    // 6. 合并更新的配置和新配置
+    // 8. 合并更新的配置和新配置
     const allConfigs = [...updatedConfigs, ...newConfigs]
     
-    // 7. 提交到服务器
+    // 9. 提交到服务器
     const submitData = {
       list: allConfigs
     }
@@ -3972,7 +4087,7 @@ const showEditConfigDialog = () => {
   loadConfigRatings()
   
   // 加载拉黑状态
-  // loadConfigBlacklist()
+  loadConfigBlacklist()
   
   // 保存原始配置数据的副本，用于比较是否修改
   originalConfigList.value = JSON.parse(JSON.stringify(editConfigList.value))
@@ -3990,6 +4105,7 @@ const closeEditConfigDialog = () => {
   editConfigStatusFilter.value = ''
   editConfigBatchFilter.value = ''
   showOnlyValid.value = false
+  quickBlacklistInput.value = ''  // 清空快速拉黑输入框
   // 清空原始配置数据
   originalConfigList.value = []
 }
@@ -4089,6 +4205,160 @@ const saveConfigRating = (config) => {
   } catch (error) {
     console.error('保存评分数据失败:', error)
   }
+}
+
+/**
+ * 加载配置拉黑状态
+ */
+const loadConfigBlacklist = () => {
+  try {
+    const blacklistStr = localStorage.getItem('configBlacklist')
+    if (blacklistStr) {
+      const blacklist = JSON.parse(blacklistStr)
+      editConfigList.value.forEach(config => {
+        // 根据trending字段判断是否在拉黑列表中
+        config.isBlacklisted = !!blacklist[config.trending]
+      })
+    } else {
+      // 如果没有拉黑列表，初始化所有配置为未拉黑
+      editConfigList.value.forEach(config => {
+        config.isBlacklisted = false
+      })
+    }
+  } catch (error) {
+    console.error('加载拉黑状态失败:', error)
+    // 出错时初始化所有配置为未拉黑
+    editConfigList.value.forEach(config => {
+      config.isBlacklisted = false
+    })
+  }
+}
+
+/**
+ * 保存配置拉黑状态
+ */
+const saveConfigBlacklist = (config) => {
+  try {
+    const blacklistStr = localStorage.getItem('configBlacklist')
+    const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
+    
+    if (config.isBlacklisted) {
+      // 添加到拉黑列表
+      blacklist[config.trending] = true
+    } else {
+      // 从拉黑列表中移除
+      delete blacklist[config.trending]
+    }
+    
+    localStorage.setItem('configBlacklist', JSON.stringify(blacklist))
+    
+    // 更新活动配置列表，确保拉黑的主题立即从自动分配中移除
+    updateActiveConfigs()
+    
+    console.log(`配置 ${config.trending} ${config.isBlacklisted ? '已拉黑' : '已解除拉黑'}`)
+  } catch (error) {
+    console.error('保存拉黑状态失败:', error)
+  }
+}
+
+/**
+ * 快速拉黑功能
+ * 将输入框中的主题（按分号分隔）都设置为拉黑状态
+ */
+const quickBlacklist = () => {
+  if (!quickBlacklistInput.value || !quickBlacklistInput.value.trim()) {
+    alert('请输入要拉黑的主题，用分号(;)分隔')
+    return
+  }
+  
+  // 按分号分割，去除空字符串和首尾空格
+  const topics = quickBlacklistInput.value
+    .split(';')
+    .map(t => t.trim())
+    .filter(t => t.length > 0)
+  
+  if (topics.length === 0) {
+    alert('未找到有效的主题')
+    return
+  }
+  
+  // 获取拉黑列表
+  let blacklist = {}
+  try {
+    const blacklistStr = localStorage.getItem('configBlacklist')
+    if (blacklistStr) {
+      blacklist = JSON.parse(blacklistStr)
+    }
+  } catch (error) {
+    console.error('读取拉黑列表失败:', error)
+    blacklist = {}
+  }
+  
+  let matchedCount = 0
+  let notFoundTopics = []
+  
+  // 遍历所有配置，匹配主题并设置为拉黑（只进行完全匹配）
+  editConfigList.value.forEach(config => {
+    // 只进行完全匹配，包括###后面的部分
+    const configTrending = config.trending ? config.trending.trim() : ''
+    
+    for (const topic of topics) {
+      const topicTrimmed = topic.trim()
+      
+      // 完全匹配：去除首尾空格后完全相同
+      if (configTrending === topicTrimmed) {
+        config.isBlacklisted = true
+        blacklist[config.trending] = true
+        matchedCount++
+        break
+      }
+    }
+  })
+  
+  // 检查哪些主题没有匹配到
+  topics.forEach(topic => {
+    const topicTrimmed = topic.trim()
+    let found = false
+    
+    for (const config of editConfigList.value) {
+      const configTrending = config.trending ? config.trending.trim() : ''
+      
+      // 只进行完全匹配
+      if (configTrending === topicTrimmed) {
+        found = true
+        break
+      }
+    }
+    
+    if (!found) {
+      notFoundTopics.push(topicTrimmed)
+    }
+  })
+  
+  // 保存拉黑列表到 localStorage
+  try {
+    localStorage.setItem('configBlacklist', JSON.stringify(blacklist))
+  } catch (error) {
+    console.error('保存拉黑列表失败:', error)
+    alert('保存拉黑列表失败，请重试')
+    return
+  }
+  
+  // 更新活动配置列表
+  updateActiveConfigs()
+  
+  // 显示结果
+  let message = `已成功拉黑 ${matchedCount} 个主题`
+  if (notFoundTopics.length > 0) {
+    message += `\n\n未找到以下主题（${notFoundTopics.length} 个）:\n${notFoundTopics.slice(0, 10).join('\n')}`
+    if (notFoundTopics.length > 10) {
+      message += `\n... 还有 ${notFoundTopics.length - 10} 个未显示`
+    }
+  }
+  alert(message)
+  
+  console.log('[快速拉黑] 匹配的主题数量:', matchedCount)
+  console.log('[快速拉黑] 未找到的主题:', notFoundTopics)
 }
 
 /**
@@ -4625,6 +4895,9 @@ const toggleAutoHedge = () => {
  * 开始自动对冲
  */
 const startAutoHedge = () => {
+  // 在开始自动分配时，先更新活动配置列表，过滤掉拉黑的主题
+  updateActiveConfigs()
+  
   if (activeConfigs.value.length === 0) {
     alert('没有启用的主题配置')
     return

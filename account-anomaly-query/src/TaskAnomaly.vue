@@ -91,11 +91,148 @@
             {{ loading ? '查询中...' : '快速查询' }}
           </button>
         </div>
+        
+        <div class="time-range-query-form">
+          <div class="form-group">
+            <label>时间区间查询:</label>
+            <div class="time-range-inputs">
+              <input 
+                v-model="timeRangeStart" 
+                type="text" 
+                class="time-range-input"
+                placeholder="开始时间，如: 24-16"
+                pattern="\d{1,2}-\d{1,2}"
+              />
+              <span class="time-range-separator">到</span>
+              <input 
+                v-model="timeRangeEnd" 
+                type="text" 
+                class="time-range-input"
+                placeholder="结束时间，如: 24-18"
+                pattern="\d{1,2}-\d{1,2}"
+              />
+            </div>
+            <span class="time-range-hint">格式：日-时，如 24-16 表示24日16时</span>
+          </div>
+          <button 
+            class="time-range-query-btn" 
+            @click="queryTimeRange"
+            :disabled="loading || !timeRangeStart || !timeRangeEnd"
+          >
+            {{ loading ? '查询中...' : '时间区间查询' }}
+          </button>
+        </div>
       </section>
 
       <!-- 结果区域 -->
       <section class="results-section" v-if="Object.keys(results).length > 0">
         <div class="results-header">
+          <!-- 统计信息 -->
+          <div class="statistics-section">
+            <div class="statistics-title">
+              任务统计（共 {{ taskStatistics.total.total }} 个任务，
+              <span class="buy-count">买入: {{ taskStatistics.total.buy }}</span>，
+              <span class="sell-count">卖出: {{ taskStatistics.total.sell }}</span>）
+            </div>
+            <div class="statistics-items">
+              <div class="stat-item">
+                <span class="stat-label">全部成交:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.allFilled.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.allFilled.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">部分成交:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.partialFilled.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.partialFilled.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">单边成交:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.singleSideFilled.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.singleSideFilled.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">IP问题:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.ipProblem.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.ipProblem.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">余额或仓位不对:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.balanceOrPosition.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.balanceOrPosition.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item stat-item-expandable">
+                <div class="stat-item-header">
+                  <span class="stat-label">挂单失败:</span>
+                  <span class="stat-value">
+                    <span class="buy-count">买入: {{ taskStatistics.orderFailed.buy }}</span>
+                    <span>/</span>
+                    <span class="sell-count">卖出: {{ taskStatistics.orderFailed.sell }}</span>
+                  </span>
+                  <button 
+                    v-if="(taskStatistics.orderFailed.buy + taskStatistics.orderFailed.sell) > 0"
+                    class="expand-msg-btn"
+                    @click="showOrderFailedMsgs = !showOrderFailedMsgs"
+                  >
+                    {{ showOrderFailedMsgs ? '收起' : '查看msg' }}
+                  </button>
+                </div>
+                <div v-if="showOrderFailedMsgs && (taskStatistics.orderFailed.buy + taskStatistics.orderFailed.sell) > 0" class="msg-list">
+                  <div class="msg-list-title">挂单失败的不同msg（共 {{ uniqueOrderFailedMsgs.length }} 种）:</div>
+                  <div class="msg-list-items">
+                    <div 
+                      v-for="(item, index) in uniqueOrderFailedMsgs" 
+                      :key="index"
+                      class="msg-list-item"
+                    >
+                      <span class="msg-count">[{{ item.count }}次]</span>
+                      <span class="msg-content">{{ item.msg }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 汇总统计 -->
+            <div class="summary-statistics">
+              <div class="summary-item buy-summary">
+                <div class="summary-title">开仓（买入）统计：</div>
+                <div class="summary-content">
+                  开仓成功率{{ buyStatistics.successRate }}%，
+                  其中部分成交{{ buyStatistics.partialFilled }}%，
+                  单边成交{{ buyStatistics.singleSideFilled }}%，
+                  IP问题{{ buyStatistics.ipProblem }}%，
+                  余额或仓位错误{{ buyStatistics.balanceOrPosition }}%，
+                  挂单失败{{ buyStatistics.orderFailed }}%
+                </div>
+              </div>
+              <div class="summary-item sell-summary">
+                <div class="summary-title">平仓（卖出）统计：</div>
+                <div class="summary-content">
+                  平仓成功率{{ sellStatistics.successRate }}%，
+                  其中部分成交{{ sellStatistics.partialFilled }}%，
+                  单边成交{{ sellStatistics.singleSideFilled }}%，
+                  IP问题{{ sellStatistics.ipProblem }}%，
+                  余额或仓位错误{{ sellStatistics.balanceOrPosition }}%，
+                  挂单失败{{ sellStatistics.orderFailed }}%
+                </div>
+              </div>
+            </div>
+          </div>
           <h2>查询结果 (共 {{ Object.keys(results).length }} 个任务组)</h2>
           
           <!-- 筛选区域 -->
@@ -557,6 +694,8 @@ export default {
         endTime: ''
       },
       recentHours: 3, // 默认查询最近3小时
+      timeRangeStart: '', // 时间区间开始：格式为"日-时"，如"24-16"
+      timeRangeEnd: '', // 时间区间结束：格式为"日-时"，如"24-18"
       loading: false,
       results: {},
       hasQueried: false,
@@ -566,6 +705,17 @@ export default {
       selectedGroup: 'default', // 当前选择的分组
       groupConfigList: [], // 分组配置列表
       sideFilter: 'all', // 模式1的交易方向筛选：'all'全部, 'buy'买入, 'sell'卖出
+      taskStatistics: {
+        total: { buy: 0, sell: 0, total: 0 },
+        allFilled: { buy: 0, sell: 0 },        // 全部成交的
+        partialFilled: { buy: 0, sell: 0 },    // 部分成交的
+        singleSideFilled: { buy: 0, sell: 0 }, // Position未检测到变化超时，但对方已变化，保留挂单的（单边成交的）
+        ipProblem: { buy: 0, sell: 0 },        // ip问题（包含执行异常）
+        balanceOrPosition: { buy: 0, sell: 0 }, // 余额或仓位不对（包含开仓有对向仓位）
+        orderFailed: { buy: 0, sell: 0 }       // 挂单失败
+      },
+      orderFailedMsgs: [], // 存储"挂单失败"的所有不同msg（包含重复，用于统计）
+      showOrderFailedMsgs: false, // 是否显示"挂单失败"的msg列表
       toast: {
         show: false,
         message: '',
@@ -726,6 +876,70 @@ export default {
           colorIndex: index % 4
         }
       })
+    },
+    
+    // 获取"挂单失败"的唯一msg列表及出现次数
+    uniqueOrderFailedMsgs() {
+      const msgCountMap = new Map()
+      
+      // 统计每个msg出现的次数
+      this.orderFailedMsgs.forEach(msg => {
+        const count = msgCountMap.get(msg) || 0
+        msgCountMap.set(msg, count + 1)
+      })
+      
+      // 转换为数组并按出现次数降序排序
+      return Array.from(msgCountMap.entries())
+        .map(([msg, count]) => ({ msg, count }))
+        .sort((a, b) => b.count - a.count)
+    },
+    
+    // 计算开仓（买入）成功率统计
+    buyStatistics() {
+      const total = this.taskStatistics.total.buy
+      if (total === 0) {
+        return {
+          successRate: 0,
+          partialFilled: 0,
+          singleSideFilled: 0,
+          ipProblem: 0,
+          balanceOrPosition: 0,
+          orderFailed: 0
+        }
+      }
+      
+      return {
+        successRate: ((this.taskStatistics.allFilled.buy / total) * 100).toFixed(2),
+        partialFilled: ((this.taskStatistics.partialFilled.buy / total) * 100).toFixed(2),
+        singleSideFilled: ((this.taskStatistics.singleSideFilled.buy / total) * 100).toFixed(2),
+        ipProblem: ((this.taskStatistics.ipProblem.buy / total) * 100).toFixed(2),
+        balanceOrPosition: ((this.taskStatistics.balanceOrPosition.buy / total) * 100).toFixed(2),
+        orderFailed: ((this.taskStatistics.orderFailed.buy / total) * 100).toFixed(2)
+      }
+    },
+    
+    // 计算平仓（卖出）成功率统计
+    sellStatistics() {
+      const total = this.taskStatistics.total.sell
+      if (total === 0) {
+        return {
+          successRate: 0,
+          partialFilled: 0,
+          singleSideFilled: 0,
+          ipProblem: 0,
+          balanceOrPosition: 0,
+          orderFailed: 0
+        }
+      }
+      
+      return {
+        successRate: ((this.taskStatistics.allFilled.sell / total) * 100).toFixed(2),
+        partialFilled: ((this.taskStatistics.partialFilled.sell / total) * 100).toFixed(2),
+        singleSideFilled: ((this.taskStatistics.singleSideFilled.sell / total) * 100).toFixed(2),
+        ipProblem: ((this.taskStatistics.ipProblem.sell / total) * 100).toFixed(2),
+        balanceOrPosition: ((this.taskStatistics.balanceOrPosition.sell / total) * 100).toFixed(2),
+        orderFailed: ((this.taskStatistics.orderFailed.sell / total) * 100).toFixed(2)
+      }
     }
   },
   methods: {
@@ -1022,6 +1236,84 @@ export default {
       return msg
     },
     
+    // 根据msg分类任务
+    classifyTaskByMsg(msg, status) {
+      if (!msg || msg.trim() === '') {
+        // 如果没有msg，只要status不等于3，就算全部成交（成功）
+        if (status !== 3) {
+          return 'allFilled' // 状态不等于3，视为全部成交
+        }
+        return 'orderFailed' // status === 3 归为挂单失败
+      }
+      
+      // 先尝试解析JSON格式（优先级最高，因为JSON格式的消息有明确的类型）
+      try {
+        const data = JSON.parse(msg)
+        
+        if (data.type === 'TYPE1_SUCCESS' || data.type === 'TYPE5_SUCCESS') {
+          // 全部成交
+          return 'allFilled'
+        } else if (data.type === 'TYPE1_PARTIAL' || data.type === 'TYPE5_PARTIAL') {
+          // 部分成交
+          return 'partialFilled'
+        }
+      } catch (e) {
+        // 不是JSON格式，继续处理文本匹配
+      }
+      
+      // Position未检测到变化超时，但对方已变化，保留挂单的（单边成交的）
+      if (msg.includes('Position未检测到变化超时') && msg.includes('对方已变化')) {
+        return 'singleSideFilled'
+      }
+      
+      // ip问题：NEED_IP_RETRY、"okx确认交易按钮不能点击,检查okx是否正常" 和 "执行异常"
+      if (msg.includes('NEED_IP_RETRY') || msg.includes('okx确认交易按钮不能点击') || msg.includes('检查okx是否正常') || msg.includes('执行异常')) {
+        return 'ipProblem'
+      }
+      
+      // 余额或仓位不对："提交订单失败"、包含"无仓位可平" 或 包含"对向仓位且数量"
+      if (msg.includes('提交订单失败') || msg.includes('无仓位可平') || msg.includes('对向仓位且数量')) {
+        return 'balanceOrPosition'
+      }
+      
+      // 其他错误都归为挂单失败
+      return 'orderFailed'
+    },
+    
+    // 重置统计数据
+    resetStatistics() {
+      this.taskStatistics = {
+        total: { buy: 0, sell: 0, total: 0 },
+        allFilled: { buy: 0, sell: 0 },
+        partialFilled: { buy: 0, sell: 0 },
+        singleSideFilled: { buy: 0, sell: 0 },
+        ipProblem: { buy: 0, sell: 0 },
+        balanceOrPosition: { buy: 0, sell: 0 },
+        orderFailed: { buy: 0, sell: 0 }
+      }
+      this.orderFailedMsgs = []
+    },
+    
+    // 统计任务
+    countTask(task) {
+      const category = this.classifyTaskByMsg(task.msg, task.status)
+      // 判断是买入还是卖出：side === 1 为买入，否则为卖出
+      const side = task.side === 1 ? 'buy' : 'sell'
+      
+      // 统计总数
+      this.taskStatistics.total[side]++
+      this.taskStatistics.total.total++
+      
+      // 统计对应类别
+      this.taskStatistics[category][side]++
+      
+      // 如果是挂单失败，收集msg
+      if (category === 'orderFailed') {
+        const msg = task.msg || '(无msg)'
+        this.orderFailedMsgs.push(msg)
+      }
+    },
+    
     showToast(message, type = 'info') {
       this.toast = {
         show: true,
@@ -1057,6 +1349,80 @@ export default {
       // 设置查询时间
       this.query.startTime = formatDateTime(startTime)
       this.query.endTime = formatDateTime(endTime)
+      
+      // 执行查询
+      this.queryAnomalies()
+    },
+    
+    queryTimeRange() {
+      if (!this.timeRangeStart || !this.timeRangeEnd) {
+        this.showToast('请输入开始时间和结束时间', 'warning')
+        return
+      }
+      
+      // 解析时间格式：日-时，如 "24-16"
+      const parseTimeRange = (timeStr) => {
+        const parts = timeStr.trim().split('-')
+        if (parts.length !== 2) {
+          return null
+        }
+        const day = parseInt(parts[0], 10)
+        const hour = parseInt(parts[1], 10)
+        
+        if (isNaN(day) || isNaN(hour) || day < 1 || day > 31 || hour < 0 || hour > 23) {
+          return null
+        }
+        
+        return { day, hour }
+      }
+      
+      const startParts = parseTimeRange(this.timeRangeStart)
+      const endParts = parseTimeRange(this.timeRangeEnd)
+      
+      if (!startParts || !endParts) {
+        this.showToast('时间格式不正确，请输入"日-时"格式，如：24-16', 'warning')
+        return
+      }
+      
+      // 获取当前年月
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = now.getMonth() // 0-11
+      
+      // 构造开始和结束时间
+      const startDate = new Date(year, month, startParts.day, startParts.hour, 0, 0)
+      const endDate = new Date(year, month, endParts.day, endParts.hour, 0, 0)
+      
+      // 验证日期是否有效（防止输入无效日期，如2月30日）
+      if (startDate.getDate() !== startParts.day || startDate.getMonth() !== month) {
+        this.showToast(`无效的开始日期：${startParts.day}日（当前月没有这一天）`, 'warning')
+        return
+      }
+      
+      if (endDate.getDate() !== endParts.day || endDate.getMonth() !== month) {
+        this.showToast(`无效的结束日期：${endParts.day}日（当前月没有这一天）`, 'warning')
+        return
+      }
+      
+      // 转换为 datetime-local 格式 (YYYY-MM-DDTHH:mm)
+      const formatDateTime = (date) => {
+        const y = date.getFullYear()
+        const m = String(date.getMonth() + 1).padStart(2, '0')
+        const d = String(date.getDate()).padStart(2, '0')
+        const h = String(date.getHours()).padStart(2, '0')
+        const min = String(date.getMinutes()).padStart(2, '0')
+        return `${y}-${m}-${d}T${h}:${min}`
+      }
+      
+      // 验证时间范围
+      if (startDate.getTime() >= endDate.getTime()) {
+        this.showToast('开始时间必须早于结束时间', 'warning')
+        return
+      }
+      
+      // 设置查询时间
+      this.query.startTime = formatDateTime(startDate)
+      this.query.endTime = formatDateTime(endDate)
       
       // 执行查询
       this.queryAnomalies()
@@ -1113,6 +1479,9 @@ export default {
     
     // 处理模式1的数据
     processMode1Data(missions) {
+      // 重置统计数据
+      this.resetStatistics()
+      
       // 处理数据：先收集所有任务，建立任务1和任务2的映射关系
           const allTasksMap = new Map() // id -> task (所有任务，包括成功的)
           const task2ToTask1Map = new Map() // task2Id -> task1Id (任务2的id -> 任务1的id)
@@ -1333,6 +1702,15 @@ export default {
             }
           })
           
+      // 统计所有任务（包括成功和失败的任务）
+      allTasksMap.forEach((task) => {
+        // 如果是分组模式，检查主题是否在分组配置中
+        if (this.selectedGroup !== 'default' && !this.isTopicInGroupConfig(task.trending)) {
+          return
+        }
+        this.countTask(task)
+      })
+      
       this.results = sortedGroups
       
       // 不再自动加载链上余额，改为点击按钮时加载
@@ -1344,6 +1722,9 @@ export default {
     
     // 处理模式2的数据
     processMode2Data(missions) {
+      // 重置统计数据
+      this.resetStatistics()
+      
       // 按trendingId分组
       const groupsByTrendingId = new Map()
       
@@ -1470,6 +1851,17 @@ export default {
           failYesTasks: failYesTasks,
           failNoTasks: failNoTasks
         }
+      })
+      
+      // 统计所有任务（包括成功和失败的任务）
+      groupsByTrendingId.forEach((group) => {
+        // 如果是分组模式，检查主题是否在分组配置中
+        if (this.selectedGroup !== 'default' && !this.isTopicInGroupConfig(group.trending)) {
+          return
+        }
+        group.tasks.forEach(task => {
+          this.countTask(task)
+        })
       })
       
       this.results = processedGroups
@@ -1803,6 +2195,79 @@ export default {
   cursor: not-allowed;
 }
 
+/* 时间区间查询区域 */
+.time-range-query-form {
+  display: flex;
+  gap: 15px;
+  align-items: flex-end;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.time-range-query-form .form-group {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.time-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.time-range-input {
+  padding: 10px 15px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  width: 120px;
+  transition: border-color 0.3s;
+}
+
+.time-range-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.time-range-separator {
+  font-weight: 500;
+  color: #555;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.time-range-hint {
+  font-size: 12px;
+  color: #999;
+  margin-top: -4px;
+}
+
+.time-range-query-btn {
+  padding: 10px 25px;
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  height: 42px;
+  white-space: nowrap;
+}
+
+.time-range-query-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(79, 172, 254, 0.4);
+}
+
+.time-range-query-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* 结果区域 */
 .results-section {
   background: white;
@@ -1819,6 +2284,196 @@ export default {
   margin-bottom: 15px;
   color: #333;
   font-size: 20px;
+}
+
+/* 统计信息区域 */
+.statistics-section {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.statistics-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 15px;
+}
+
+.statistics-title .buy-count {
+  color: #27ae60;
+  font-weight: 600;
+}
+
+.statistics-title .sell-count {
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+.statistics-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.statistics-items .stat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.statistics-items .stat-label {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+.statistics-items .stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.statistics-items .stat-value .buy-count {
+  color: #27ae60;
+}
+
+.statistics-items .stat-value .sell-count {
+  color: #e74c3c;
+}
+
+.statistics-items .stat-item-expandable {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+
+.stat-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.expand-msg-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.expand-msg-btn:hover {
+  background: #764ba2;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.msg-list {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
+.msg-list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 10px;
+}
+
+.msg-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.msg-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.msg-count {
+  flex-shrink: 0;
+  color: #667eea;
+  font-weight: 600;
+}
+
+.msg-content {
+  flex: 1;
+  color: #333;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 汇总统计 */
+.summary-statistics {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 2px solid rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.summary-item {
+  padding: 15px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.summary-item.buy-summary {
+  border-left: 4px solid #27ae60;
+}
+
+.summary-item.sell-summary {
+  border-left: 4px solid #e74c3c;
+}
+
+.summary-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.summary-item.buy-summary .summary-title {
+  color: #27ae60;
+}
+
+.summary-item.sell-summary .summary-title {
+  color: #e74c3c;
+}
+
+.summary-content {
+  font-size: 14px;
+  color: #555;
+  line-height: 1.6;
 }
 
 /* 筛选区域 */
@@ -2301,6 +2956,28 @@ export default {
     width: 100%;
   }
   
+  .time-range-query-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .time-range-query-form .form-group {
+    align-items: stretch;
+  }
+  
+  .time-range-inputs {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .time-range-input {
+    width: 100%;
+  }
+  
+  .time-range-query-btn {
+    width: 100%;
+  }
+  
   .filter-section {
     flex-direction: column;
     align-items: stretch;
@@ -2343,6 +3020,33 @@ export default {
   
   .task-info.msg-value {
     max-width: 100%;
+  }
+  
+  .statistics-items {
+    flex-direction: column;
+  }
+  
+  .statistics-items .stat-item {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .stat-item-header {
+    flex-wrap: wrap;
+  }
+  
+  .expand-msg-btn {
+    margin-left: 0;
+    margin-top: 4px;
+    width: 100%;
+  }
+  
+  .msg-list-items {
+    max-height: 200px;
+  }
+  
+  .summary-content {
+    font-size: 13px;
   }
 }
 </style>

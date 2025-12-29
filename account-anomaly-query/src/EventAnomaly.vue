@@ -6,6 +6,15 @@
       <el-button type="primary" @click="loadAndCalculate" :loading="loading">
         刷新数据
       </el-button>
+      <el-button type="success" @click="exportAndCopy" :disabled="selectedCount === 0" style="margin-left: 10px;">
+        导出主题并复制 ({{ selectedCount }})
+      </el-button>
+      <el-button type="warning" @click="exportAllBrowsers" :disabled="selectedCount === 0" style="margin-left: 10px;">
+        导出勾选主题相关的所有浏览器编号 ({{ selectedCount }})
+      </el-button>
+      <el-button type="danger" @click="exportRedBrowsers" :disabled="selectedCount === 0" style="margin-left: 10px;">
+        导出勾选主题相关的变红浏览器编号 ({{ selectedCount }})
+      </el-button>
       <el-select 
         v-model="selectedGroup" 
         @change="handleGroupChange"
@@ -26,9 +35,17 @@
       v-loading="loading"
       height="calc(100vh - 300px)"
     >
+      <el-table-column type="index" label="序号" width="60" align="center" :index="indexMethod" fixed />
       <el-table-column prop="eventName" label="事件名" width="400" fixed>
         <template #default="scope">
-          <div class="event-name-cell">{{ scope.row.eventName }}</div>
+          <div class="event-name-cell">
+            <el-checkbox 
+              v-model="scope.row.selected" 
+              style="margin-right: 10px;"
+              @change="() => handleSelectionChange(scope.row)"
+            />
+            {{ scope.row.eventName }}
+          </div>
         </template>
       </el-table-column>
 
@@ -124,7 +141,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
@@ -135,6 +152,67 @@ const loading = ref(false)
 const eventTableData = ref([])
 const selectedGroup = ref('all')
 const groupConfigList = ref([]) // 存储当前分组的事件名列表
+const accountDataCache = ref([]) // 存储原始账户数据，用于导出浏览器编号
+
+/**
+ * 计算选中的事件数量
+ */
+const selectedCount = computed(() => {
+  return eventTableData.value.filter(item => item.selected).length
+})
+
+/**
+ * 序号计算方法（从1开始）
+ */
+const indexMethod = (index) => {
+  return index + 1
+}
+
+/**
+ * 保存勾选状态到本地存储
+ */
+const saveSelectionState = () => {
+  try {
+    const selectedEvents = eventTableData.value
+      .filter(item => item.selected)
+      .map(item => item.eventName)
+    
+    localStorage.setItem('eventAnomaly_selectedEvents', JSON.stringify(selectedEvents))
+    console.log('[事件异常] 勾选状态已保存到本地，共', selectedEvents.length, '个')
+  } catch (error) {
+    console.error('[事件异常] 保存勾选状态失败:', error)
+  }
+}
+
+/**
+ * 从本地存储加载勾选状态
+ */
+const loadSelectionState = () => {
+  try {
+    const saved = localStorage.getItem('eventAnomaly_selectedEvents')
+    if (saved) {
+      const selectedEvents = JSON.parse(saved)
+      const selectedSet = new Set(selectedEvents)
+      
+      // 恢复勾选状态
+      eventTableData.value.forEach(event => {
+        event.selected = selectedSet.has(event.eventName)
+      })
+      
+      console.log('[事件异常] 从本地存储恢复勾选状态，共', selectedEvents.length, '个')
+    }
+  } catch (error) {
+    console.error('[事件异常] 加载勾选状态失败:', error)
+  }
+}
+
+/**
+ * 处理选择变化
+ */
+const handleSelectionChange = (row) => {
+  // 选择变化时保存到本地存储
+  saveSelectionState()
+}
 
 /**
  * 格式化数字
@@ -567,6 +645,9 @@ const loadAndCalculate = async () => {
       const data = accountResponse.data.data
       console.log(`[事件异常] 获取到 ${data.length} 条数据，开始解析...`)
       
+      // 保存原始账户数据，用于导出浏览器编号
+      accountDataCache.value = data
+      
       // 使用 Map 存储每个事件的统计数据
       const eventMap = new Map()
       
@@ -757,6 +838,11 @@ const loadAndCalculate = async () => {
         return Math.abs(b.finalDiff) - Math.abs(a.finalDiff)
       })
       
+      // 初始化选中状态（先设为false，后面会从本地存储恢复）
+      allEvents.forEach(event => {
+        event.selected = false
+      })
+      
       // 根据选择的分组进行过滤
       if (selectedGroup.value !== 'all' && groupConfigList.value.length > 0) {
         // 创建事件名集合用于快速查找（支持完全匹配和去除空格后的匹配）
@@ -805,6 +891,9 @@ const loadAndCalculate = async () => {
       
       eventTableData.value = allEvents
       
+      // 从本地存储恢复勾选状态
+      loadSelectionState()
+      
       console.log('[事件异常] 计算完成')
       ElMessage.success(`数据加载并计算完成，共 ${eventTableData.value.length} 个事件`)
     } else {
@@ -841,6 +930,247 @@ const handleGroupChange = async (value) => {
       // 重新加载数据（会根据分组配置过滤）
       await loadAndCalculate()
     }
+  }
+}
+
+/**
+ * 导出并复制选中的事件名
+ */
+const exportAndCopy = async () => {
+  const selectedEvents = eventTableData.value
+    .filter(item => item.selected)
+    .map(item => item.eventName)
+  
+  if (selectedEvents.length === 0) {
+    ElMessage.warning('请至少选择一个事件')
+    return
+  }
+  
+  // 按分号拼接
+  const result = selectedEvents.join(';')
+  
+  try {
+    // 复制到剪切板
+    await navigator.clipboard.writeText(result)
+    ElMessage.success(`已复制 ${selectedEvents.length} 个事件名到剪切板`)
+    console.log('[事件异常] 导出的内容:', result)
+  } catch (error) {
+    // 如果 clipboard API 不可用，使用备用方法
+    const textArea = document.createElement('textarea')
+    textArea.value = result
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+    try {
+      document.execCommand('copy')
+      ElMessage.success(`已复制 ${selectedEvents.length} 个事件名到剪切板`)
+      console.log('[事件异常] 导出的内容:', result)
+    } catch (err) {
+      ElMessage.error('复制失败，请手动复制')
+      console.error('[事件异常] 复制失败:', err)
+    }
+    document.body.removeChild(textArea)
+  }
+}
+
+/**
+ * 导出所有浏览器编号（包含选中主题的）
+ */
+const exportAllBrowsers = async () => {
+  const selectedEvents = eventTableData.value
+    .filter(item => item.selected)
+    .map(item => item.eventName)
+  
+  if (selectedEvents.length === 0) {
+    ElMessage.warning('请至少选择一个事件')
+    return
+  }
+  
+  if (accountDataCache.value.length === 0) {
+    ElMessage.warning('请先刷新数据')
+    return
+  }
+  
+  // 创建选中主题的集合（支持完全匹配）
+  const selectedEventSet = new Set(selectedEvents.map(e => e.trim()))
+  
+  // 收集包含选中主题的浏览器编号
+  const browserSet = new Set()
+  
+  for (const row of accountDataCache.value) {
+    let hasSelectedEvent = false
+        
+    // 检查持仓（a字段）
+    if (row.a) {
+      const positions = parsePositions(row.a)
+      for (const pos of positions) {
+        if (selectedEventSet.has(pos.title.trim())) {
+          hasSelectedEvent = true
+          break
+        }
+      }
+    }
+    
+    // 检查挂单（b字段）
+    if (!hasSelectedEvent && row.b) {
+      const orders = parseOrders(row.b)
+      for (const order of orders) {
+        if (selectedEventSet.has(order.title.trim())) {
+          hasSelectedEvent = true
+          break
+        }
+      }
+    }
+    
+    // 检查链上持仓（需要从链上数据中获取，这里暂时不处理，因为链上数据是单独加载的）
+    // 如果需要链上持仓，需要额外处理
+    
+    if (hasSelectedEvent && row.fingerprintNo) {
+      browserSet.add(String(row.fingerprintNo))
+    }
+  }
+  
+  if (browserSet.size === 0) {
+    ElMessage.warning('未找到包含选中主题的浏览器')
+    return
+  }
+  
+  // 按逗号拼接
+  const result = Array.from(browserSet).sort((a, b) => parseInt(a) - parseInt(b)).join(',')
+  
+  try {
+    // 复制到剪切板
+    await navigator.clipboard.writeText(result)
+    ElMessage.success(`已复制 ${browserSet.size} 个浏览器编号到剪切板`)
+    console.log('[事件异常] 导出的浏览器编号:', result)
+  } catch (error) {
+    // 如果 clipboard API 不可用，使用备用方法
+    const textArea = document.createElement('textarea')
+    textArea.value = result
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+    try {
+      document.execCommand('copy')
+      ElMessage.success(`已复制 ${browserSet.size} 个浏览器编号到剪切板`)
+      console.log('[事件异常] 导出的浏览器编号:', result)
+    } catch (err) {
+      ElMessage.error('复制失败，请手动复制')
+      console.error('[事件异常] 复制失败:', err)
+    }
+    document.body.removeChild(textArea)
+  }
+}
+
+/**
+ * 导出变红浏览器编号（包含选中主题的，且 d < f）
+ */
+const exportRedBrowsers = async () => {
+  const selectedEvents = eventTableData.value
+    .filter(item => item.selected)
+    .map(item => item.eventName)
+  
+  if (selectedEvents.length === 0) {
+    ElMessage.warning('请至少选择一个事件')
+    return
+  }
+  
+  if (accountDataCache.value.length === 0) {
+    ElMessage.warning('请先刷新数据')
+    return
+  }
+  
+  // 创建选中主题的集合（支持完全匹配）
+  const selectedEventSet = new Set(selectedEvents.map(e => e.trim()))
+  
+  // 收集包含选中主题且变红的浏览器编号
+  const browserSet = new Set()
+  
+  for (const row of accountDataCache.value) {
+    // 判断是否变红：d < f（仓位抓取时间 < 打开时间）
+    // 监控类型不需要检测
+    if (row.e === '监控' || row.platform === '监控') {
+      continue
+    }
+    
+    if (!row.d || !row.f) {
+      continue
+    }
+    
+    const positionTime = typeof row.d === 'string' ? parseInt(row.d) : row.d
+    const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+    
+    if (isNaN(positionTime) || isNaN(openTime)) {
+      continue
+    }
+    
+    // 判断是否变红：打开时间 > 仓位抓取时间，即 d < f
+    if (openTime <= positionTime) {
+      continue
+    }
+    
+    // 检查是否包含选中的主题
+    let hasSelectedEvent = false
+        
+    // 检查持仓（a字段）
+    if (row.a) {
+      const positions = parsePositions(row.a)
+      for (const pos of positions) {
+        if (selectedEventSet.has(pos.title.trim())) {
+          hasSelectedEvent = true
+          break
+        }
+      }
+    }
+    
+    // 检查挂单（b字段）
+    if (!hasSelectedEvent && row.b) {
+      const orders = parseOrders(row.b)
+      for (const order of orders) {
+        if (selectedEventSet.has(order.title.trim())) {
+          hasSelectedEvent = true
+          break
+        }
+      }
+    }
+    
+    if (hasSelectedEvent && row.fingerprintNo) {
+      browserSet.add(String(row.fingerprintNo))
+    }
+  }
+  
+  if (browserSet.size === 0) {
+    ElMessage.warning('未找到包含选中主题的变红浏览器')
+    return
+  }
+  
+  // 按逗号拼接
+  const result = Array.from(browserSet).sort((a, b) => parseInt(a) - parseInt(b)).join(',')
+  
+  try {
+    // 复制到剪切板
+    await navigator.clipboard.writeText(result)
+    ElMessage.success(`已复制 ${browserSet.size} 个变红浏览器编号到剪切板`)
+    console.log('[事件异常] 导出的变红浏览器编号:', result)
+  } catch (error) {
+    // 如果 clipboard API 不可用，使用备用方法
+    const textArea = document.createElement('textarea')
+    textArea.value = result
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+    try {
+      document.execCommand('copy')
+      ElMessage.success(`已复制 ${browserSet.size} 个变红浏览器编号到剪切板`)
+      console.log('[事件异常] 导出的变红浏览器编号:', result)
+    } catch (err) {
+      ElMessage.error('复制失败，请手动复制')
+      console.error('[事件异常] 复制失败:', err)
+    }
+    document.body.removeChild(textArea)
   }
 }
 

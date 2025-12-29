@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面4-浏览器IP延迟查询</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            text-align: center;
+            color: #667eea;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            font-weight: bold;
+            text-align: center;
+        }
+
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            padding-right: 25px;
+        }
+
+        th.sortable:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        th.sortable::after {
+            content: ' ↕';
+            position: absolute;
+            right: 8px;
+            opacity: 0.5;
+            font-size: 12px;
+        }
+
+        th.sortable.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+
+        th.sortable.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+
+        td {
+            text-align: center;
+        }
+
+        tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        tbody tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .delay-good {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .delay-medium {
+            color: #ffc107;
+            font-weight: bold;
+        }
+
+        .delay-bad {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .btn-view-more {
+            padding: 6px 12px;
+            background: #17a2b8;
+            font-size: 14px;
+        }
+
+        .btn-view-more:hover {
+            background: #138496;
+        }
+
+        /* 弹窗样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideDown 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+        }
+
+        .modal-header h2 {
+            color: #333;
+            margin: 0;
+        }
+
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+
+        .close:hover {
+            color: #000;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-1 {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .status-9 {
+            background-color: #ffc107;
+            color: #333;
+        }
+
+        .status-other {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .error-count {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-size: 16px;
+        }
+
+        .filter-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .filter-section.active {
+            display: block;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-item {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .filter-item label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .filter-item input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .filter-item input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .filter-item .hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 3px;
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .btn-filter {
+            padding: 8px 16px;
+            background: #17a2b8;
+            font-size: 14px;
+        }
+
+        .btn-filter:hover {
+            background: #138496;
+        }
+
+        .btn-clear-filter {
+            padding: 8px 16px;
+            background: #6c757d;
+            font-size: 14px;
+        }
+
+        .btn-clear-filter:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>页面4-浏览器IP延迟查询</h1>
+        
+        <div class="toolbar">
+            <div id="statusText" style="color: #666;">正在加载账户配置...</div>
+            <button id="refreshBtn" onclick="loadData()" disabled>🔄 刷新数据</button>
+        </div>
+
+        <div id="loadingDiv" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>正在加载数据，请稍候...</p>
+        </div>
+
+        <div id="filterSection" class="filter-section">
+            <div class="filter-row">
+                <div class="filter-item">
+                    <label for="filterComputeGroup">电脑组筛选：</label>
+                    <input type="text" id="filterComputeGroup" placeholder="例如: 1 或 1,2,3 或 1-4">
+                    <div class="hint">支持单个值、逗号分隔、范围（如1-4）</div>
+                </div>
+                <div class="filter-item">
+                    <label for="filterBrowserNumber">浏览器编号筛选：</label>
+                    <input type="text" id="filterBrowserNumber" placeholder="例如: 1 或 1,2,3 或 1-4">
+                    <div class="hint">支持单个值、逗号分隔、范围（如1-4）</div>
+                </div>
+            </div>
+            <div class="filter-row">
+                <div class="filter-item">
+                    <label for="filterDelayMin">延迟大于（ms）：</label>
+                    <input type="number" id="filterDelayMin" placeholder="例如: 1000" min="0">
+                </div>
+                <div class="filter-item">
+                    <label for="filterDelayMax">延迟小于（ms）：</label>
+                    <input type="number" id="filterDelayMax" placeholder="例如: 2000" min="0">
+                </div>
+            </div>
+            <div class="filter-actions">
+                <button class="btn-filter" onclick="applyFilter()">🔍 应用筛选</button>
+                <button class="btn-clear-filter" onclick="clearFilter()">🗑️ 清除筛选</button>
+            </div>
+        </div>
+
+        <div id="tableContainer" style="display: none;">
+            <table id="dataTable">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th class="sortable" data-column="computeGroup" onclick="sortTable('computeGroup')">电脑组</th>
+                        <th class="sortable" data-column="number" onclick="sortTable('number')">浏览器编号</th>
+                        <th>最快的IP</th>
+                        <th class="sortable" data-column="delay" onclick="sortTable('delay')">延迟</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noDataDiv" class="no-data" style="display: none;">
+            暂无数据
+        </div>
+    </div>
+
+    <!-- 弹窗 -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>浏览器编号 <span id="modalBrowserNumber"></span> 的IP详情</h2>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modalLoading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>正在加载详情...</p>
+            </div>
+            <div id="modalContent" style="display: none;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>序号</th>
+                            <th>IP</th>
+                            <th>延迟</th>
+                            <th>上一次测试时间</th>
+                            <th>错误次数</th>
+                            <th>当前状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 浏览器编号到电脑组的映射
+        let browserToGroupMap = {};
+        
+        // 当前数据列表和排序状态
+        let currentDataList = [];
+        let originalDataList = []; // 保存原始数据，用于筛选
+        let sortColumn = null;
+        let sortDirection = 'asc'; // 'asc' 或 'desc'
+
+        // 页面加载时初始化
+        window.onload = async function() {
+            // 设置筛选输入框的回车键支持
+            const filterInputs = [
+                'filterComputeGroup',
+                'filterBrowserNumber',
+                'filterDelayMin',
+                'filterDelayMax'
+            ];
+            
+            filterInputs.forEach(inputId => {
+                const input = document.getElementById(inputId);
+                if (input) {
+                    input.addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            applyFilter();
+                        }
+                    });
+                }
+            });
+
+            await loadAccountConfig();
+            await loadData();
+        };
+
+        /**
+         * 加载账户配置（浏览器和电脑组映射）
+         */
+        async function loadAccountConfig() {
+            const statusText = document.getElementById('statusText');
+            statusText.textContent = '正在加载账户配置...';
+            
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data && data.data) {
+                    // 建立浏览器编号到组号的映射（同时支持字符串和数字作为key）
+                    const browserToGroup = {};
+                    
+                    data.data.forEach(item => {
+                        if (item.fingerprintNo && item.computeGroup) {
+                            const fingerprintNo = item.fingerprintNo;
+                            const fingerprintNoStr = String(fingerprintNo);
+                            const fingerprintNoNum = Number(fingerprintNo);
+                            const computeGroup = item.computeGroup;
+                            
+                            // 浏览器ID -> 电脑组
+                            browserToGroup[fingerprintNoStr] = computeGroup;
+                            if (!isNaN(fingerprintNoNum)) {
+                                browserToGroup[fingerprintNoNum] = computeGroup;
+                            }
+                        }
+                    });
+                    
+                    browserToGroupMap = browserToGroup;
+                    console.log(`账户配置加载成功，共 ${data.data.length} 条记录`);
+                    console.log('浏览器编号到组号映射:', browserToGroup);
+                    statusText.textContent = `账户配置加载成功 (${data.data.length} 条记录)`;
+                } else {
+                    console.warn('获取账户配置失败: 无数据');
+                    statusText.textContent = '账户配置加载失败: 无数据';
+                }
+            } catch (error) {
+                console.error('获取账户配置失败:', error);
+                statusText.textContent = '账户配置加载失败: ' + (error.message || '未知错误');
+            }
+        }
+
+        /**
+         * 加载IP状态数据
+         */
+        async function loadData() {
+            const loadingDiv = document.getElementById('loadingDiv');
+            const tableContainer = document.getElementById('tableContainer');
+            const noDataDiv = document.getElementById('noDataDiv');
+            const refreshBtn = document.getElementById('refreshBtn');
+            const statusText = document.getElementById('statusText');
+            
+            refreshBtn.disabled = true;
+            loadingDiv.style.display = 'block';
+            tableContainer.style.display = 'none';
+            noDataDiv.style.display = 'none';
+            statusText.textContent = '正在加载IP状态数据...';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/bro/ipStatus');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data && data.code === 0 && data.data && data.data.list) {
+                    displayData(data.data.list);
+                    statusText.textContent = `数据加载成功 (${data.data.list.length} 条记录)`;
+                } else {
+                    noDataDiv.style.display = 'block';
+                    statusText.textContent = '数据加载失败: 无数据';
+                }
+            } catch (error) {
+                console.error('获取IP状态失败:', error);
+                statusText.textContent = '数据加载失败: ' + (error.message || '未知错误');
+                noDataDiv.style.display = 'block';
+            } finally {
+                loadingDiv.style.display = 'none';
+                refreshBtn.disabled = false;
+            }
+        }
+
+        /**
+         * 显示数据表格
+         */
+        function displayData(list) {
+            // 按浏览器编号分组，找到每个浏览器编号下延迟最小的IP
+            const browserMap = {};
+            
+            list.forEach(item => {
+                const number = item.number;
+                if (!browserMap[number]) {
+                    browserMap[number] = [];
+                }
+                browserMap[number].push(item);
+            });
+
+            // 对每个浏览器编号，找到延迟最小的IP
+            const resultList = [];
+            Object.keys(browserMap).forEach(number => {
+                const ips = browserMap[number];
+                // 找到延迟最小的IP（排除无效的延迟值）
+                const validIPs = ips.filter(ip => ip.delay !== null && ip.delay !== undefined && ip.delay >= 0);
+                if (validIPs.length > 0) {
+                    const fastestIP = validIPs.reduce((min, current) => 
+                        current.delay < min.delay ? current : min
+                    );
+                    resultList.push({
+                        number: number,
+                        fastestIP: fastestIP
+                    });
+                } else if (ips.length > 0) {
+                    // 如果没有有效的延迟值，使用第一个IP
+                    resultList.push({
+                        number: number,
+                        fastestIP: ips[0]
+                    });
+                }
+            });
+
+            // 保存数据到全局变量
+            originalDataList = resultList.map(item => {
+                const number = item.number;
+                const computeGroup = browserToGroupMap[number] || browserToGroupMap[String(number)] || '-';
+                return {
+                    number: number,
+                    computeGroup: computeGroup,
+                    fastestIP: item.fastestIP
+                };
+            });
+
+            // 重置筛选和排序状态
+            currentDataList = [...originalDataList];
+            sortColumn = null;
+            sortDirection = 'asc';
+            updateSortHeaders();
+
+            // 显示筛选区域
+            document.getElementById('filterSection').classList.add('active');
+
+            // 渲染表格
+            renderTable();
+        }
+
+        /**
+         * 渲染表格
+         */
+        function renderTable() {
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = '';
+
+            if (currentDataList.length === 0) {
+                document.getElementById('noDataDiv').style.display = 'block';
+                document.getElementById('tableContainer').style.display = 'none';
+                return;
+            }
+
+            currentDataList.forEach((item, index) => {
+                const row = document.createElement('tr');
+                const number = item.number;
+                const fastestIP = item.fastestIP;
+                const computeGroup = item.computeGroup;
+                
+                // 延迟样式
+                let delayClass = 'delay-medium';
+                if (fastestIP.delay !== null && fastestIP.delay !== undefined) {
+                    if (fastestIP.delay < 1000) {
+                        delayClass = 'delay-good';
+                    } else if (fastestIP.delay > 2000) {
+                        delayClass = 'delay-bad';
+                    }
+                }
+
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${computeGroup}</td>
+                    <td>${number}</td>
+                    <td>${fastestIP.ip}</td>
+                    <td class="${delayClass}">${fastestIP.delay !== null && fastestIP.delay !== undefined ? fastestIP.delay + 'ms' : '-'}</td>
+                    <td>
+                        <button class="btn-view-more" onclick="viewMore('${number}')">查看更多</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+
+            document.getElementById('tableContainer').style.display = 'block';
+            document.getElementById('noDataDiv').style.display = 'none';
+        }
+
+        /**
+         * 排序表格
+         */
+        function sortTable(column) {
+            if (currentDataList.length === 0) return;
+
+            // 如果点击的是同一列，切换排序方向；否则设置为升序
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            // 执行排序
+            currentDataList.sort((a, b) => {
+                let aValue, bValue;
+
+                switch (column) {
+                    case 'delay':
+                        aValue = a.fastestIP.delay !== null && a.fastestIP.delay !== undefined ? a.fastestIP.delay : Infinity;
+                        bValue = b.fastestIP.delay !== null && b.fastestIP.delay !== undefined ? b.fastestIP.delay : Infinity;
+                        break;
+                    case 'number':
+                        aValue = Number(a.number) || 0;
+                        bValue = Number(b.number) || 0;
+                        break;
+                    case 'computeGroup':
+                        aValue = a.computeGroup === '-' ? '' : String(a.computeGroup);
+                        bValue = b.computeGroup === '-' ? '' : String(b.computeGroup);
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (aValue < bValue) {
+                    return sortDirection === 'asc' ? -1 : 1;
+                } else if (aValue > bValue) {
+                    return sortDirection === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+
+            // 更新表头状态
+            updateSortHeaders();
+
+            // 重新渲染表格
+            renderTable();
+        }
+
+        /**
+         * 更新表头排序状态
+         */
+        function updateSortHeaders() {
+            const headers = document.querySelectorAll('th.sortable');
+            headers.forEach(header => {
+                header.classList.remove('sort-asc', 'sort-desc');
+                const columnName = header.getAttribute('data-column');
+                if (columnName === sortColumn) {
+                    header.classList.add(sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
+        /**
+         * 解析筛选输入（支持单个值、逗号分隔、范围）
+         * @param {string} input - 输入字符串
+         * @returns {Array} 解析后的值数组
+         */
+        function parseFilterInput(input) {
+            if (!input || !input.trim()) {
+                return null; // 空输入表示不过滤
+            }
+
+            const values = new Set();
+            const parts = input.split(',').map(p => p.trim()).filter(p => p);
+
+            parts.forEach(part => {
+                // 检查是否是范围格式（如 1-4）
+                if (part.includes('-')) {
+                    const range = part.split('-').map(r => r.trim());
+                    if (range.length === 2) {
+                        const start = Number(range[0]);
+                        const end = Number(range[1]);
+                        if (!isNaN(start) && !isNaN(end) && start <= end) {
+                            for (let i = start; i <= end; i++) {
+                                values.add(i);
+                            }
+                        }
+                    }
+                } else {
+                    // 单个值
+                    const num = Number(part);
+                    if (!isNaN(num)) {
+                        values.add(num);
+                    } else {
+                        // 如果不是数字，作为字符串处理
+                        values.add(part);
+                    }
+                }
+            });
+
+            return values.size > 0 ? Array.from(values) : null;
+        }
+
+        /**
+         * 应用筛选
+         */
+        function applyFilter() {
+            // 获取筛选条件
+            const computeGroupFilter = document.getElementById('filterComputeGroup').value.trim();
+            const browserNumberFilter = document.getElementById('filterBrowserNumber').value.trim();
+            const delayMin = document.getElementById('filterDelayMin').value.trim();
+            const delayMax = document.getElementById('filterDelayMax').value.trim();
+
+            // 解析筛选条件
+            const computeGroupValues = parseFilterInput(computeGroupFilter);
+            const browserNumberValues = parseFilterInput(browserNumberFilter);
+            const delayMinValue = delayMin ? Number(delayMin) : null;
+            const delayMaxValue = delayMax ? Number(delayMax) : null;
+
+            // 从原始数据开始筛选
+            currentDataList = originalDataList.filter(item => {
+                // 电脑组筛选
+                if (computeGroupValues) {
+                    const groupValue = item.computeGroup === '-' ? '' : String(item.computeGroup);
+                    const groupNum = Number(item.computeGroup);
+                    const matchesGroup = computeGroupValues.some(val => {
+                        if (typeof val === 'number') {
+                            return groupNum === val || String(val) === groupValue;
+                        } else {
+                            return String(val) === groupValue;
+                        }
+                    });
+                    if (!matchesGroup) return false;
+                }
+
+                // 浏览器编号筛选
+                if (browserNumberValues) {
+                    const numberNum = Number(item.number);
+                    const numberStr = String(item.number);
+                    const matchesNumber = browserNumberValues.some(val => {
+                        if (typeof val === 'number') {
+                            return numberNum === val || String(val) === numberStr;
+                        } else {
+                            return String(val) === numberStr;
+                        }
+                    });
+                    if (!matchesNumber) return false;
+                }
+
+                // 延迟筛选
+                const delay = item.fastestIP.delay;
+                if (delay !== null && delay !== undefined) {
+                    // 延迟大于某个值（delay > delayMinValue）
+                    if (delayMinValue !== null && delay <= delayMinValue) {
+                        return false;
+                    }
+                    // 延迟小于某个值（delay < delayMaxValue）
+                    if (delayMaxValue !== null && delay >= delayMaxValue) {
+                        return false;
+                    }
+                } else {
+                    // 如果延迟值为空，且设置了延迟筛选，则排除
+                    if (delayMinValue !== null || delayMaxValue !== null) {
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+
+            // 重置排序状态
+            sortColumn = null;
+            sortDirection = 'asc';
+            updateSortHeaders();
+
+            // 重新渲染表格
+            renderTable();
+        }
+
+        /**
+         * 清除筛选
+         */
+        function clearFilter() {
+            // 清空输入框
+            document.getElementById('filterComputeGroup').value = '';
+            document.getElementById('filterBrowserNumber').value = '';
+            document.getElementById('filterDelayMin').value = '';
+            document.getElementById('filterDelayMax').value = '';
+
+            // 恢复原始数据
+            currentDataList = [...originalDataList];
+
+            // 重置排序状态
+            sortColumn = null;
+            sortDirection = 'asc';
+            updateSortHeaders();
+
+            // 重新渲染表格
+            renderTable();
+        }
+
+        /**
+         * 查看更多详情
+         */
+        async function viewMore(number) {
+            const modal = document.getElementById('detailModal');
+            const modalBrowserNumber = document.getElementById('modalBrowserNumber');
+            const modalLoading = document.getElementById('modalLoading');
+            const modalContent = document.getElementById('modalContent');
+            const modalTableBody = document.getElementById('modalTableBody');
+
+            modal.style.display = 'block';
+            modalBrowserNumber.textContent = number;
+            modalLoading.style.display = 'block';
+            modalContent.style.display = 'none';
+            modalTableBody.innerHTML = '';
+
+            try {
+                const response = await fetch(`https://sg.bicoin.com.cn/99l/bro/ipStatusByNumber?number=${number}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data && data.code === 0 && data.data && data.data.list) {
+                    displayModalData(data.data.list);
+                } else {
+                    modalTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #999;">暂无数据</td></tr>';
+                }
+            } catch (error) {
+                console.error('获取详情失败:', error);
+                modalTableBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: #dc3545;">加载失败: ${error.message}</td></tr>`;
+            } finally {
+                modalLoading.style.display = 'none';
+                modalContent.style.display = 'block';
+            }
+        }
+
+        /**
+         * 显示弹窗数据
+         */
+        function displayModalData(list) {
+            const modalTableBody = document.getElementById('modalTableBody');
+            modalTableBody.innerHTML = '';
+
+            if (list.length === 0) {
+                modalTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #999;">暂无数据</td></tr>';
+                return;
+            }
+
+            // 按延迟排序
+            const sortedList = [...list].sort((a, b) => {
+                const delayA = a.delay !== null && a.delay !== undefined ? a.delay : Infinity;
+                const delayB = b.delay !== null && b.delay !== undefined ? b.delay : Infinity;
+                return delayA - delayB;
+            });
+
+            sortedList.forEach((item, index) => {
+                const row = document.createElement('tr');
+                
+                // 延迟样式
+                let delayClass = 'delay-medium';
+                if (item.delay !== null && item.delay !== undefined) {
+                    if (item.delay < 1000) {
+                        delayClass = 'delay-good';
+                    } else if (item.delay > 2000) {
+                        delayClass = 'delay-bad';
+                    }
+                }
+
+                // 状态样式
+                let statusClass = 'status-other';
+                let statusText = item.status || '-';
+                if (item.status === 1) {
+                    statusClass = 'status-1';
+                    statusText = '正常';
+                } else if (item.status === 9) {
+                    statusClass = 'status-9';
+                    statusText = '异常';
+                }
+
+                // 格式化时间
+                let timeText = '-';
+                if (item.lastPingTime) {
+                    const date = new Date(item.lastPingTime);
+                    timeText = date.toLocaleString('zh-CN');
+                }
+
+                // 错误次数
+                const errorCount = item.errCount !== null && item.errCount !== undefined ? item.errCount : 0;
+                const errorClass = errorCount > 0 ? 'error-count' : '';
+
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${item.ip}</td>
+                    <td class="${delayClass}">${item.delay !== null && item.delay !== undefined ? item.delay + 'ms' : '-'}</td>
+                    <td>${timeText}</td>
+                    <td class="${errorClass}">${errorCount}</td>
+                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                `;
+                modalTableBody.appendChild(row);
+            });
+        }
+
+        /**
+         * 关闭弹窗
+         */
+        function closeModal() {
+            document.getElementById('detailModal').style.display = 'none';
+        }
+
+        // 点击弹窗外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('detailModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>
+

@@ -4,6 +4,7 @@ import requests
 import threading
 import os
 import json
+import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from selenium import webdriver
@@ -898,7 +899,7 @@ def close_adspower_browser(serial_number, max_retries=3):
     
     log_print(f"[{serial_number}] ✗ 浏览器关闭失败，已达到最大重试次数")
     # 异步发送飞书消息通知，不阻塞主流程
-    if 'User_id is not open' in errmsg:
+    if 'User_id is not open' not in errmsg:
         threading.Thread(target=send_feishu_message, args=(serial_number,), daemon=True).start()
     return False
 
@@ -4964,6 +4965,58 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         else:
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser)
             available_balance = None  # Polymarket 暂不支持
+        
+        # 处理 available_balance 并更新 p 字段
+        if available_balance is not None:
+            try:
+                # 提取数字和小数点，去掉其他所有字符
+                cleaned_balance = re.sub(r'[^\d.]', '', str(available_balance))
+                
+                # 尝试转换为数字
+                if cleaned_balance:
+                    numeric_balance = float(cleaned_balance)
+                    log_print(f"[{browser_id}] 提取到可用余额: {numeric_balance}")
+                    
+                    # 更新浏览器配置的 p 字段
+                    log_print(f"[{browser_id}] 更新浏览器配置的 p 字段...")
+                    
+                    # 1. 获取现有配置
+                    get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
+                    params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
+                    
+                    response = requests.get(get_url, params=params, timeout=10)
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result and result.get('data'):
+                            account_config = result['data']
+                            
+                            # 2. 更新 p 字段为转化后的正确数字
+                            account_config['p'] = str(numeric_balance)
+                            
+                            log_print(f"[{browser_id}] 更新 p 字段: {numeric_balance}")
+                            
+                            # 3. 上传更新（带重试机制）
+                            success_upload, result_upload, error_msg = upload_account_config_with_retry(
+                                account_config, 
+                                browser_id=browser_id, 
+                                timeout=10
+                            )
+                            
+                            if success_upload:
+                                log_print(f"[{browser_id}] ✓ p 字段更新成功")
+                            else:
+                                log_print(f"[{browser_id}] ✗ 上传 p 字段失败: {error_msg}")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 账户配置不存在，跳过更新 p 字段")
+                    else:
+                        log_print(f"[{browser_id}] ✗ 获取账户配置失败: HTTP {response.status_code}")
+                else:
+                    log_print(f"[{browser_id}] ⚠ available_balance 提取后为空，跳过更新")
+            except ValueError:
+                log_print(f"[{browser_id}] ⚠ available_balance 无法转换为数字: {available_balance}")
+            except Exception as e:
+                log_print(f"[{browser_id}] ⚠ 更新 p 字段异常: {str(e)}")
         
         # 检查是否需要换IP重试（仅type=5或type=1任务且重试次数小于2）
         if not success and failure_reason == "NEED_IP_RETRY" and retry_count < 2:
@@ -9870,9 +9923,23 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
             log_print(f"[{browser_id}] 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
             
-            time.sleep(15)
-            driver.get(profile_url)
-            time.sleep(15)
+            
+            try:
+                # 使用WebDriverWait等待页面readyState为complete
+                WebDriverWait(driver, 30).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                time.sleep(5)
+                current_url = driver.current_url
+                if 'profile' not in current_url:
+                    connected = connect_wallet_if_needed(driver, browser_id)
+                    time.sleep(2)
+                    driver.get(profile_url)
+                else:
+                    log_print(f"[{browser_id}] ✓ 页面加载完成")
+            except TimeoutException:
+                            log_print(f"[{browser_id}] ⚠ 页面加载超时，继续检查...")
+                            
             # 获取数据（带重试机制）
             max_data_collection_retries = 3
             retry_attempt = 0
@@ -9890,6 +9957,20 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                         time.sleep(15)
                         driver.get(profile_url)
                         log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+                        
+                        # 等待页面加载完成
+                        log_print(f"[{browser_id}] 等待页面加载完成...")
+                        try:
+                            # 使用WebDriverWait等待页面readyState为complete
+                            WebDriverWait(driver, 30).until(
+                                lambda d: d.execute_script("return document.readyState") == "complete"
+                            )
+                            log_print(f"[{browser_id}] ✓ 页面加载完成")
+                        except TimeoutException:
+                            log_print(f"[{browser_id}] ⚠ 页面加载超时，继续检查...")
+                        
+                        # 额外等待2秒确保DOM完全渲染
+                        time.sleep(2)
                     except WebDriverException as e:
                         error_msg = str(e)
                         log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
@@ -10626,6 +10707,20 @@ def process_type2_mission(task_data, retry_count=0):
                         time.sleep(15)
                         driver.get(profile_url)
                         log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
+                        
+                        # 等待页面加载完成
+                        log_print(f"[{browser_id}] 等待页面加载完成...")
+                        try:
+                            # 使用WebDriverWait等待页面readyState为complete
+                            WebDriverWait(driver, 30).until(
+                                lambda d: d.execute_script("return document.readyState") == "complete"
+                            )
+                            log_print(f"[{browser_id}] ✓ 页面加载完成")
+                        except TimeoutException:
+                            log_print(f"[{browser_id}] ⚠ 页面加载超时，继续检查...")
+                        
+                        # 额外等待2秒确保DOM完全渲染
+                        time.sleep(2)
                     except WebDriverException as e:
                         error_msg = str(e)
                         log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
@@ -11144,41 +11239,39 @@ def check_and_submit_completed_missions():
     
     # 处理每个已完成的任务
     for mission_id in completed_missions:
-        with active_tasks_lock:
-            task_info = active_tasks.get(mission_id)
-            if not task_info:
-                continue
-            
-            results = task_info['results']
-            task_type = task_info.get('type')
+        try:
+            with active_tasks_lock:
+                task_info = active_tasks.get(mission_id)
+                if not task_info:
+                    continue
+                
+                results = task_info['results']
+                task_type = task_info.get('type')
             
             # Type 3任务特殊处理
             if task_type == 3:
                 # Type 3任务的结果在单浏览器处理时已提交
                 log_print(f"[系统] ✓ Type 3 任务 {mission_id} 已完成")
             elif task_type == 5 or task_type == 1:
-                # Type 5任务特殊处理：直接使用详细的msg
+                # Type 1/5任务特殊处理：直接使用详细的msg
                 success_count = sum(1 for r in results.values() if r['success'])
                 failed_count = sum(1 for r in results.values() if not r['success'])
                 
-                # 获取详细msg（优先使用第一个结果的msg）
+                # 获取详细msg（Type 1/5任务总是使用 'msg' 字段，优先使用第一个非空的msg）
                 detailed_msg = None
                 for browser_id, result in results.items():
-                    if 'msg' in result and result['msg']:
-                        detailed_msg = result['msg']
+                    # Type 1/5 任务使用 'msg' 字段（而不是 'reason'）
+                    msg_value = result.get('msg', '')
+                    if msg_value:  # 非空字符串
+                        detailed_msg = msg_value
                         break
+                    elif detailed_msg is None:  # 保存第一个msg（即使是空字符串），作为备选
+                        detailed_msg = msg_value
                 
-                # 如果有详细msg，直接使用；否则使用默认格式
-                if detailed_msg:
-                    # 使用 submit_mission_result 提交详细msg（带重试机制）
-                    status = 2 if success_count > 0 else 3
-                    log_print(f"\n[系统] Type {task_type} 任务提交详细结果...")
-                    submit_mission_result(mission_id, success_count, failed_count, {}, status, custom_msg=detailed_msg)
-                else:
-                    # 没有详细msg，使用默认格式
-                    failed_info = {bid: r['reason'] for bid, r in results.items() if not r['success']}
-                    status = 2 if success_count > 0 else 3
-                    submit_mission_result(mission_id, success_count, failed_count, failed_info, status)
+                # 总是使用msg字段（即使为空字符串）
+                status = 2 if success_count > 0 else 3
+                log_print(f"\n[系统] Type {task_type} 任务提交详细结果...")
+                submit_mission_result(mission_id, success_count, failed_count, {}, status, custom_msg=detailed_msg or '')
             else:
                 # 其他类型任务
                 # 统计成功和失败数
@@ -11191,8 +11284,19 @@ def check_and_submit_completed_missions():
                 submit_mission_result(mission_id, success_count, failed_count, failed_info, status)
             
             # 从活动任务列表中移除
-            del active_tasks[mission_id]
-            log_print(f"[系统] 任务 {mission_id} 已从活动任务列表中移除")
+            with active_tasks_lock:
+                if mission_id in active_tasks:
+                    del active_tasks[mission_id]
+                    log_print(f"[系统] 任务 {mission_id} 已从活动任务列表中移除")
+        except Exception as e:
+            log_print(f"[系统] ✗ 提交任务 {mission_id} 结果时发生异常: {str(e)}")
+            import traceback
+            log_print(f"[系统] 错误详情:\n{traceback.format_exc()}")
+            # 即使发生异常，也要从活动任务列表中移除，避免重复处理
+            with active_tasks_lock:
+                if mission_id in active_tasks:
+                    del active_tasks[mission_id]
+                    log_print(f"[系统] 任务 {mission_id} 已从活动任务列表中移除（异常情况）")
 
 
 def process_browser_waiting_queue(browser_id):
@@ -11305,7 +11409,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 if mission_id in active_tasks:
                     active_tasks[mission_id]['results'][browser_id] = {
                         'success': success,
-                        'reason': failure_reason if not success else '',
+                        'reason': failure_reason,
                         'msg': failure_reason  # 保存完整的 msg（成功或失败都保存）
                     }
                     active_tasks[mission_id]['completed'] += 1
