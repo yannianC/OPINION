@@ -43,6 +43,22 @@
         {{ message.text }}
       </div>
 
+      <!-- 确认弹窗 -->
+      <div v-if="showConfirmDialog" class="modal-overlay" @click="showConfirmDialog = false">
+        <div class="modal-content" @click.stop>
+          <h3>确认清除任务</h3>
+          <p>您确定要清除以下电脑组的所有任务吗？</p>
+          <div class="confirm-group-list">
+            <span v-for="groupNo in validCleanGroupNos" :key="groupNo" class="group-tag">{{ groupNo }}</span>
+          </div>
+          <p style="color: #dc3545; font-size: 14px; margin-top: 12px;">此操作不可撤销，请谨慎操作！</p>
+          <div class="modal-actions">
+            <button class="btn btn-danger" @click="confirmCleanMission">确认清除</button>
+            <button class="btn btn-secondary" @click="showConfirmDialog = false">取消</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 失败列表 -->
       <section v-if="failedBrowserIds.length > 0" class="section">
         <h2>提交失败的浏览器ID</h2>
@@ -56,6 +72,42 @@
               {{ isRetrying ? '重试中...' : '重试失败的浏览器ID' }}
             </button>
             <button class="btn btn-secondary" @click="clearFailedList">清除列表</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 清除任务表单 -->
+      <section class="section">
+        <h2>清除任务</h2>
+        <div class="task-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cleanGroupNos">电脑组 *</label>
+              <input
+                id="cleanGroupNos"
+                v-model="cleanGroupNosInput"
+                type="text"
+                placeholder="支持格式: 1 或 1,2,3 或 1-40"
+              />
+              <div v-if="parsedCleanGroupNos.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
+                已解析: {{ parsedCleanGroupNos.join(', ') }}
+              </div>
+              <div v-if="validCleanGroupNos.length > 0" style="margin-top: 8px; color: #28a745; font-size: 12px;">
+                有效电脑组: {{ validCleanGroupNos.join(', ') }}
+              </div>
+              <div v-if="parsedCleanGroupNos.length > 0 && validCleanGroupNos.length === 0" style="margin-top: 8px; color: #dc3545; font-size: 12px;">
+                警告: 输入的电脑组在配置中不存在
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-danger" @click="handleCleanMission" :disabled="isCleaning || validCleanGroupNos.length === 0">
+              <span v-if="isCleaning">清除中...</span>
+              <span v-else>清除任务</span>
+            </button>
+            <button type="button" class="btn btn-secondary" @click="cleanGroupNosInput = ''">
+              清空
+            </button>
           </div>
         </div>
       </section>
@@ -171,9 +223,13 @@
 
           <!-- 提交按钮 -->
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
+            <button type="submit" class="btn btn-primary" :disabled="isSubmitting || isUpdatingPosition">
               <span v-if="isSubmitting">提交中...</span>
-              <span v-else>提交任务</span>
+              <span v-else>撤单并更新</span>
+            </button>
+            <button type="button" class="btn btn-primary" @click="handlePositionUpdate" :disabled="isSubmitting || isUpdatingPosition">
+              <span v-if="isUpdatingPosition">更新中...</span>
+              <span v-else>更新仓位</span>
             </button>
             <button type="button" class="btn btn-secondary" @click="resetForm">
               重置
@@ -206,8 +262,14 @@ const selectedTrending = ref('all') // 默认全部
 const trendingSearchText = ref('全部') // 默认显示"全部"
 const showTrendingDropdown = ref(false)
 const isSubmitting = ref(false)
+const isUpdatingPosition = ref(false)
 const isRetrying = ref(false)
 const failedBrowserIds = ref([]) // 存储失败的浏览器ID [{browserId, error, groupNo, tp1}]
+
+// 清除任务相关
+const cleanGroupNosInput = ref('')
+const isCleaning = ref(false)
+const showConfirmDialog = ref(false)
 
 // 映射关系
 const browserToGroupMap = ref({}) // 浏览器ID -> 电脑组
@@ -258,6 +320,24 @@ const parsedBrowserIds = computed(() => {
 // 解析后的电脑组列表
 const parsedGroupNos = computed(() => {
   return parseInput(groupNosInput.value)
+})
+
+// 解析后的清除任务电脑组列表
+const parsedCleanGroupNos = computed(() => {
+  return parseInput(cleanGroupNosInput.value)
+})
+
+// 验证清除任务的电脑组是否存在（从配置中检查）
+const validCleanGroupNos = computed(() => {
+  if (parsedCleanGroupNos.value.length === 0) {
+    return []
+  }
+  
+  // 从groupToBrowserMap中获取所有存在的电脑组
+  const existingGroups = Object.keys(groupToBrowserMap.value).map(Number)
+  
+  // 过滤出存在的电脑组
+  return parsedCleanGroupNos.value.filter(groupNo => existingGroups.includes(groupNo)).sort((a, b) => a - b)
 })
 
 /**
@@ -516,6 +596,50 @@ const submitSingleBrowser = async (browserId, groupNo, tp1, maxRetries = 3) => {
 }
 
 /**
+ * 提交单个浏览器ID的更新仓位任务（带重试，type=2，不传tp1）
+ * @param {number} browserId - 浏览器ID
+ * @param {number} groupNo - 电脑组
+ * @param {number} maxRetries - 最大重试次数
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+const submitSinglePositionUpdate = async (browserId, groupNo, maxRetries = 3) => {
+  const payload = {
+    type: 2,
+    groupNo: groupNo,
+    numberList: String(browserId),
+    exchangeName: 'OP'
+  }
+  
+  let lastError = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // 重试前等待5秒
+        console.log(`浏览器ID ${browserId} 更新仓位第 ${attempt} 次重试，等待5秒...`)
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+      
+      const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/add', payload)
+      
+      if (response.data && response.data.code === 0) {
+        console.log(`浏览器ID ${browserId} 更新仓位成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+        return { success: true }
+      } else {
+        lastError = response.data?.msg || '未知错误'
+        console.error(`浏览器ID ${browserId} 更新仓位失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      }
+    } catch (error) {
+      lastError = error.message || '未知错误'
+      console.error(`浏览器ID ${browserId} 更新仓位失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+    }
+  }
+  
+  // 所有重试都失败
+  return { success: false, error: lastError }
+}
+
+/**
  * 提交任务
  */
 const handleSubmit = async () => {
@@ -669,6 +793,151 @@ const clearFailedList = () => {
   showMessage('失败列表已清除', 'info')
 }
 
+/**
+ * 处理清除任务（显示确认弹窗）
+ */
+const handleCleanMission = () => {
+  if (isCleaning.value || validCleanGroupNos.value.length === 0) return
+  
+  // 验证输入
+  if (parsedCleanGroupNos.value.length === 0) {
+    showMessage('请正确输入电脑组', 'error')
+    return
+  }
+  
+  if (validCleanGroupNos.value.length === 0) {
+    showMessage('输入的电脑组在配置中不存在', 'error')
+    return
+  }
+  
+  // 显示确认弹窗
+  showConfirmDialog.value = true
+}
+
+/**
+ * 确认清除任务
+ */
+const confirmCleanMission = async () => {
+  if (isCleaning.value || validCleanGroupNos.value.length === 0) return
+  
+  showConfirmDialog.value = false
+  isCleaning.value = true
+  
+  try {
+    const payload = {
+      list: validCleanGroupNos.value
+    }
+    
+    const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/cleanAllMissionByGroup', payload)
+    
+    if (response.data && response.data.code === 0) {
+      showMessage(`清除任务成功：已清除电脑组 ${validCleanGroupNos.value.join(', ')} 的所有任务`, 'success')
+      cleanGroupNosInput.value = '' // 清空输入框
+    } else {
+      showMessage(`清除任务失败: ${response.data?.msg || '未知错误'}`, 'error')
+    }
+  } catch (error) {
+    console.error('清除任务失败:', error)
+    showMessage('清除任务失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isCleaning.value = false
+  }
+}
+
+/**
+ * 更新仓位
+ */
+const handlePositionUpdate = async () => {
+  if (isUpdatingPosition.value) return
+  
+  // 验证输入
+  if (inputType.value === 'browser' && parsedBrowserIds.value.length === 0) {
+    showMessage('请正确输入浏览器ID', 'error')
+    return
+  }
+  
+  if (inputType.value === 'group' && parsedGroupNos.value.length === 0) {
+    showMessage('请正确输入电脑组', 'error')
+    return
+  }
+  
+  // 获取要提交的浏览器ID列表
+  let browserIdsToSubmit = []
+  
+  if (inputType.value === 'browser') {
+    // 直接使用解析的浏览器ID
+    browserIdsToSubmit = parsedBrowserIds.value
+  } else {
+    // 从电脑组映射到浏览器ID
+    for (const groupNo of parsedGroupNos.value) {
+      const browserIds = groupToBrowserMap.value[groupNo] || []
+      browserIdsToSubmit.push(...browserIds)
+    }
+    
+    if (browserIdsToSubmit.length === 0) {
+      showMessage('所选电脑组没有对应的浏览器ID', 'error')
+      return
+    }
+  }
+  
+  // 去重并排序
+  browserIdsToSubmit = [...new Set(browserIdsToSubmit)].sort((a, b) => a - b)
+  
+  isUpdatingPosition.value = true
+  failedBrowserIds.value = [] // 清空之前的失败列表
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    
+    // 为每个浏览器ID提交一个请求（带重试）
+    for (const browserId of browserIdsToSubmit) {
+      // 获取对应的电脑组
+      const groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+      
+      if (!groupNo) {
+        console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过`)
+        failCount++
+        failedBrowserIds.value.push({
+          browserId: browserId,
+          error: '没有对应的电脑组',
+          groupNo: null,
+          tp1: null
+        })
+        continue
+      }
+      
+      const result = await submitSinglePositionUpdate(browserId, groupNo, 3)
+      
+      if (result.success) {
+        successCount++
+      } else {
+        failCount++
+        failedBrowserIds.value.push({
+          browserId: browserId,
+          error: result.error || '更新仓位失败',
+          groupNo: groupNo,
+          tp1: null
+        })
+      }
+    }
+    
+    if (successCount > 0) {
+      showMessage(`更新仓位完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+    } else {
+      showMessage(`更新仓位失败：所有请求都失败了`, 'error')
+    }
+    
+    // 重置表单
+    resetForm()
+  } catch (error) {
+    console.error('更新仓位失败:', error)
+    showMessage('更新仓位失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isUpdatingPosition.value = false
+  }
+}
+
 // 监听输入类型变化，清空另一个输入框
 watch(inputType, () => {
   if (inputType.value === 'browser') {
@@ -704,6 +973,79 @@ onMounted(() => {
 
 .task-form {
   margin-top: 20px;
+}
+
+/* 危险按钮样式 */
+.btn-danger {
+  background: #dc3545;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #c82333;
+}
+
+/* 确认弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.modal-content h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #333;
+}
+
+.modal-content p {
+  margin-bottom: 16px;
+  color: #555;
+  line-height: 1.5;
+}
+
+.confirm-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.group-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #4a90e2;
+  color: white;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
 }
 </style>
 

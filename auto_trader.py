@@ -374,9 +374,9 @@ MAX_RETRIES = 3
 # 代理IP管理相关函数
 # ============================================================================
 
-def get_new_ip_for_browser(browser_id, timeout=15):
+def add_more_ip_for_browser(browser_id, timeout=15):
     """
-    获取浏览器新代理配置的接口
+    请求添加更多IP的接口（用于IP延迟过高时）
     
     Args:
         browser_id: 浏览器编号
@@ -386,16 +386,16 @@ def get_new_ip_for_browser(browser_id, timeout=15):
         dict: 代理配置信息，包含 ip, port, username, password, type, isMain，失败返回None
     """
     try:
-        log_print(f"[{browser_id}] 调用获取新IP接口（超时: {timeout}秒）...")
+        log_print(f"[{browser_id}] 调用添加更多IP接口（超时: {timeout}秒）...")
         
-        url = "https://sg.bicoin.com.cn/99l/bro/getIp"
+        url = "https://sg.bicoin.com.cn/99l/bro/addMoreIp"
         payload = {"number": browser_id}
         
         response = requests.post(url, json=payload, timeout=timeout)
         
         if response.status_code == 200:
             result = response.json()
-            log_print(f"[{browser_id}] 获取IP接口返回: {result}")
+            log_print(f"[{browser_id}] 添加IP接口返回: {result}")
             
             code = result.get("code")
             if code == 0:
@@ -407,6 +407,7 @@ def get_new_ip_for_browser(browser_id, timeout=15):
                     log_print(f"[{browser_id}] ⚠ 返回数据中没有IP字段")
                     return None
                 
+                is_main = 1
                 # 根据 isMain 字段决定如何构建代理配置
                 if is_main == 1:
                     port = data.get("port")
@@ -441,20 +442,131 @@ def get_new_ip_for_browser(browser_id, timeout=15):
                     log_print(f"[{browser_id}] ✓ 成功获取新代理配置 (isMain={is_main}): IP={ip}, 其他字段使用默认值")
                     return proxy_config
             else:
-                log_print(f"[{browser_id}] ⚠ 获取IP失败: code={code}, msg={result.get('msg')}")
+                log_print(f"[{browser_id}] ⚠ 添加IP失败: code={code}, msg={result.get('msg')}")
                 return None
         else:
-            log_print(f"[{browser_id}] ✗ 获取IP请求失败: HTTP状态码 {response.status_code}")
+            log_print(f"[{browser_id}] ✗ 添加IP请求失败: HTTP状态码 {response.status_code}")
             return None
         
     except requests.exceptions.Timeout:
-        log_print(f"[{browser_id}] ✗ 获取IP请求超时（{timeout}秒）")
+        log_print(f"[{browser_id}] ✗ 添加IP请求超时（{timeout}秒）")
         return None
     except requests.exceptions.RequestException as e:
-        log_print(f"[{browser_id}] ✗ 获取IP网络请求失败: {str(e)}")
+        log_print(f"[{browser_id}] ✗ 添加IP网络请求失败: {str(e)}")
         return None
     except Exception as e:
-        log_print(f"[{browser_id}] ✗ 获取IP异常: {str(e)}")
+        log_print(f"[{browser_id}] ✗ 添加IP异常: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        return None
+
+
+def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
+    """
+    获取浏览器新代理配置的接口（从IP状态列表中按延迟选择）
+    
+    Args:
+        browser_id: 浏览器编号
+        timeout: 请求超时时间（秒），默认15秒
+        ip_index: 使用第几个最小的IP（0=最小的，1=第二小的），默认0
+        
+    Returns:
+        dict: 代理配置信息，包含 ip, port, username, password, type, isMain，失败返回None
+    """
+    try:
+        log_print(f"[{browser_id}] 调用获取IP状态列表接口（超时: {timeout}秒，选择第{ip_index+1}小的延迟IP）...")
+        
+        url = "https://sg.bicoin.com.cn/99l/bro/ipStatusByNumber"
+        params = {"number": browser_id}
+        
+        response = requests.get(url, params=params, timeout=timeout)
+        
+        if response.status_code == 200:
+            result = response.json()
+            log_print(f"[{browser_id}] IP状态列表接口返回: {result}")
+            
+            code = result.get("code")
+            if code == 0:
+                data = result.get("data", {})
+                ip_list = data.get("list", [])
+                
+                if not ip_list:
+                    log_print(f"[{browser_id}] ⚠ 返回数据中没有IP列表")
+                    return None
+                
+                # 按delay排序
+                sorted_ip_list = sorted(ip_list, key=lambda x: x.get("delay", 999999))
+                log_print(f"[{browser_id}] IP列表已按延迟排序，共{len(sorted_ip_list)}个IP")
+                
+                # 检查是否有足够的IP
+                if ip_index >= len(sorted_ip_list):
+                    log_print(f"[{browser_id}] ⚠ 请求的IP索引{ip_index}超出列表范围（共{len(sorted_ip_list)}个IP）")
+                    return None
+                
+                # 获取指定索引的IP
+                selected_ip = sorted_ip_list[ip_index]
+                ip = selected_ip.get("ip")
+                delay = selected_ip.get("delay", 999999)
+                is_main = selected_ip.get("isMain", 0)
+                
+                log_print(f"[{browser_id}] 选择第{ip_index+1}小的延迟IP: IP={ip}, Delay={delay}")
+                
+                # 检查延迟是否大于等于20000
+                if delay >= 20000:
+                    log_print(f"[{browser_id}] ⚠ 所选IP延迟({delay})>=20000，请求添加更多IP...")
+                    return add_more_ip_for_browser(browser_id, timeout=timeout)
+                
+                is_main = 1;
+                # 根据 isMain 字段决定如何构建代理配置
+                if is_main == 1:
+                    port = selected_ip.get("port")
+                    username = selected_ip.get("username")
+                    password = selected_ip.get("password")
+                    isNew = selected_ip.get("isNew", False)
+                    
+                    if ip and port and username and password:
+                        proxy_config = {
+                            "ip": ip,
+                            "port": str(port),
+                            "username": username,
+                            "password": password,
+                            "type": "http",
+                            "isMain": is_main,
+                            "isNew": isNew,
+                            "delay": delay
+                        }
+                        log_print(f"[{browser_id}] ✓ 成功获取代理配置 (isMain=1): IP={ip}, Port={port}, Delay={delay}, Type=http")
+                        return proxy_config
+                    else:
+                        log_print(f"[{browser_id}] ⚠ isMain=1 但数据中缺少必要字段")
+                        return None
+                else:
+                    proxy_config = {
+                        "ip": ip,
+                        "port": "50101",
+                        "username": selected_ip.get("username", "nolanwang"),
+                        "password": selected_ip.get("password", "HFVsyegfeyigrfkjb"),
+                        "type": "socks5",
+                        "isMain": is_main,
+                        "delay": delay
+                    }
+                    log_print(f"[{browser_id}] ✓ 成功获取代理配置 (isMain={is_main}): IP={ip}, Delay={delay}, Type=socks5")
+                    return proxy_config
+            else:
+                log_print(f"[{browser_id}] ⚠ 获取IP状态列表失败: code={code}, msg={result.get('msg')}")
+                return None
+        else:
+            log_print(f"[{browser_id}] ✗ 获取IP状态列表请求失败: HTTP状态码 {response.status_code}")
+            return None
+        
+    except requests.exceptions.Timeout:
+        log_print(f"[{browser_id}] ✗ 获取IP状态列表请求超时（{timeout}秒）")
+        return None
+    except requests.exceptions.RequestException as e:
+        log_print(f"[{browser_id}] ✗ 获取IP状态列表网络请求失败: {str(e)}")
+        return None
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ 获取IP状态列表异常: {str(e)}")
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
         return None
@@ -598,6 +710,98 @@ def force_change_ip_for_browser(browser_id, timeout=15):
         return None
 
 
+def call_change_ip_to_err(browser_id, current_ip, timeout=15):
+    """
+    调用 changeIpToErr 接口，标记IP为错误
+    
+    Args:
+        browser_id: 浏览器编号
+        current_ip: 当前使用的IP地址
+        timeout: 请求超时时间（秒），默认15秒
+        
+    Returns:
+        bool: 是否调用成功
+    """
+    try:
+        if not current_ip:
+            log_print(f"[{browser_id}] ⚠ 无法调用 changeIpToErr：current_ip 为空")
+            return False
+            
+        log_print(f"[{browser_id}] 调用 changeIpToErr 接口（IP: {current_ip}，超时: {timeout}秒）...")
+        
+        url = "https://sg.bicoin.com.cn/99l/bro/changeIpToErr"
+        payload = {
+            "number": browser_id,
+            "ip": current_ip
+        }
+        
+        response = requests.post(url, json=payload, timeout=timeout)
+        
+        if response.status_code == 200:
+            result = response.json()
+            log_print(f"[{browser_id}] changeIpToErr 接口返回: {result}")
+            
+            code = result.get("code")
+            if code == 0:
+                log_print(f"[{browser_id}] ✓ 成功调用 changeIpToErr 接口")
+                return True
+            else:
+                log_print(f"[{browser_id}] ⚠ changeIpToErr 调用失败: code={code}, msg={result.get('msg')}")
+                return False
+        else:
+            log_print(f"[{browser_id}] ✗ changeIpToErr 请求失败: HTTP状态码 {response.status_code}")
+            return False
+        
+    except requests.exceptions.Timeout:
+        log_print(f"[{browser_id}] ✗ changeIpToErr 请求超时（{timeout}秒）")
+        return False
+    except requests.exceptions.RequestException as e:
+        log_print(f"[{browser_id}] ✗ changeIpToErr 网络请求失败: {str(e)}")
+        return False
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ changeIpToErr 异常: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        return False
+
+
+def get_ip_list_by_number(browser_id, timeout=15):
+    """
+    获取浏览器IP状态列表
+    
+    Args:
+        browser_id: 浏览器编号
+        timeout: 请求超时时间（秒），默认15秒
+        
+    Returns:
+        list: IP列表（已按delay排序），失败返回None
+    """
+    try:
+        url = "https://sg.bicoin.com.cn/99l/bro/ipStatusByNumber"
+        params = {"number": browser_id}
+        
+        response = requests.get(url, params=params, timeout=timeout)
+        
+        if response.status_code == 200:
+            result = response.json()
+            code = result.get("code")
+            if code == 0:
+                data = result.get("data", {})
+                ip_list = data.get("list", [])
+                # 按delay排序
+                sorted_ip_list = sorted(ip_list, key=lambda x: x.get("delay", 999999))
+                return sorted_ip_list
+            else:
+                log_print(f"[{browser_id}] ⚠ 获取IP列表失败: code={code}, msg={result.get('msg')}")
+                return None
+        else:
+            log_print(f"[{browser_id}] ✗ 获取IP列表请求失败: HTTP状态码 {response.status_code}")
+            return None
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ 获取IP列表异常: {str(e)}")
+        return None
+
+
 def get_ip_for_retry(browser_id, retry_count, timeout=15):
     """
     根据重试次数获取代理配置（支持两次IP更换）
@@ -610,24 +814,44 @@ def get_ip_for_retry(browser_id, retry_count, timeout=15):
     Returns:
         dict: 代理配置信息，包含 ip, port, username, password, type，失败返回None
     """
-    if retry_count == 0:
-        # 第一次更换：使用 get_new_ip_for_browser，但端口改为50100，类型改为http
-        log_print(f"[{browser_id}] 第一次IP更换：使用 get_new_ip_for_browser，端口改为50100，类型改为http...")
-        proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout)
+    # if retry_count == 0:
+    #     # 第一次更换：使用 get_new_ip_for_browser（选择delay最小的IP），但端口改为50100，类型改为http
+    #     log_print(f"[{browser_id}] 第一次IP更换：使用 delay最小的IP，端口改为50100，类型改为http...")
+    #     proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=0)
         
+    #     if proxy_config:
+    #         # 修改端口和类型
+    #         proxy_config["port"] = "50100"
+    #         proxy_config["type"] = "http"
+    #         log_print(f"[{browser_id}] ✓ 第一次IP更换成功: IP={proxy_config['ip']}, Port=50100, Type=http")
+    #         return proxy_config
+    #     else:
+    #         log_print(f"[{browser_id}] ✗ 第一次IP更换失败")
+    #         return None
+    # elif retry_count == 1:
+    if retry_count == 0:
+        # 第二次更换：获取IP列表，判断个数是否大于2，使用第二小的IP
+        log_print(f"[{browser_id}] 第二次IP更换：获取IP列表，使用 delay第二小的IP...")
+        
+        # 获取IP列表
+        ip_list = get_ip_list_by_number(browser_id, timeout=timeout)
+        if not ip_list:
+            log_print(f"[{browser_id}] ✗ 第二次IP更换失败：无法获取IP列表")
+            return None
+        
+        # 判断IP个数是否大于2
+        if len(ip_list) <= 2:
+            log_print(f"[{browser_id}] ⚠ IP列表个数({len(ip_list)})<=2，请求添加更多IP...")
+            return add_more_ip_for_browser(browser_id, timeout=timeout)
+        
+        # 使用第二小的IP（ip_index=1）
+        proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=1)
         if proxy_config:
-            # 修改端口和类型
-            proxy_config["port"] = "50100"
-            proxy_config["type"] = "http"
-            log_print(f"[{browser_id}] ✓ 第一次IP更换成功: IP={proxy_config['ip']}, Port=50100, Type=http")
+            log_print(f"[{browser_id}] ✓ 第二次IP更换成功: IP={proxy_config['ip']}")
             return proxy_config
         else:
-            log_print(f"[{browser_id}] ✗ 第一次IP更换失败")
+            log_print(f"[{browser_id}] ✗ 第二次IP更换失败")
             return None
-    elif retry_count == 1:
-        # 第二次更换：使用 force_change_ip_for_browser
-        log_print(f"[{browser_id}] 第二次IP更换：使用 force_change_ip_for_browser...")
-        return force_change_ip_for_browser(browser_id, timeout=timeout)
     else:
         log_print(f"[{browser_id}] ⚠ 重试次数超出范围: {retry_count}，最多支持2次IP更换")
         return None
@@ -641,30 +865,50 @@ def try_update_ip_before_start(browser_id):
         browser_id: 浏览器编号
         
     Returns:
-        bool: 是否成功更新了代理配置
+        tuple: (bool, str, int) - (是否成功更新了代理配置, 当前使用的IP, 延迟)
+               如果未获取到新配置或更新失败，返回 (False, None, None)
     """
     try:
         log_print(f"[{browser_id}] 尝试在打开浏览器前获取新代理配置...")
         
         proxy_config = get_new_ip_for_browser(browser_id, timeout=8)
         
-        if proxy_config and proxy_config.get("isNew") == 1:
-            log_print(f"[{browser_id}] 在8秒内获取到新代理配置: IP={proxy_config['ip']}, 开始更新...")
+        if proxy_config:
+            current_ip = proxy_config.get("ip")
+            current_delay = proxy_config.get("delay")
+            log_print(f"[{browser_id}] 在8秒内获取到新代理配置: IP={current_ip}, Delay={current_delay}, 开始更新...")
             update_success = update_adspower_proxy(browser_id, proxy_config)
             
             if update_success:
                 log_print(f"[{browser_id}] ✓ 代理配置更新成功")
-                return True
+                return True, current_ip, current_delay
             else:
                 log_print(f"[{browser_id}] ⚠ 代理配置更新失败")
-                return False
+                return False, None, None
         else:
             log_print(f"[{browser_id}] 8秒内未获取到新代理配置")
-            return False
+            # 尝试从LAST_PROXY_CONFIG获取当前使用的IP和延迟
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
+                log_print(f"[{browser_id}] 使用上次的代理配置: IP={current_ip}, Delay={current_delay}")
+                return False, current_ip, current_delay
+            return False, None, None
             
     except Exception as e:
         log_print(f"[{browser_id}] ⚠ 尝试更新代理配置时发生异常: {str(e)}")
-        return False
+        # 尝试从LAST_PROXY_CONFIG获取当前使用的IP和延迟
+        try:
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
+                log_print(f"[{browser_id}] 异常时使用上次的代理配置: IP={current_ip}, Delay={current_delay}")
+                return False, current_ip, current_delay
+        except:
+            pass
+        return False, None, None
 
 
 # ============================================================================
@@ -1312,13 +1556,15 @@ def refresh_page_with_opinion_check(driver, serial_number=""):
                 log_print(f"[{serial_number}] ✗ 刷新页面失败: {str(e)}")
 
 
-def preopen_okx_wallet(driver, serial_number):
+def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=None):
     """
     预先打开OKX钱包页面，解锁钱包并处理所有待确认的弹窗
     
     Args:
         driver: Selenium WebDriver对象
         serial_number: 浏览器序列号
+        current_ip: 当前使用的IP地址（可选）
+        current_delay: 当前IP的延迟（可选，单位：毫秒）
         
     Returns:
         str: 主窗口句柄
@@ -1331,7 +1577,14 @@ def preopen_okx_wallet(driver, serial_number):
     # 先预打开 beijing_time.html 页面
     try:
         log_print(f"[{serial_number}] → 预打开 beijing_time.html 页面...")
-        beijing_time_url = "https://oss.w3id.info/OpsStatistics/beijing_time.html"
+        
+        # 构建URL，包含IP和延迟参数
+        beijing_time_url = f"https://oss.w3id.info/OpsStatistics/beijing_time.html?browser={serial_number}"
+        if current_ip:
+            beijing_time_url += f"&ip={current_ip}"
+        if current_delay is not None:
+            beijing_time_url += f"&delay={current_delay}"
+        
         success = open_new_tab_with_url(driver, beijing_time_url, serial_number)
         if success:
             log_print(f"[{serial_number}] ✓ beijing_time.html 页面已打开")
@@ -4796,33 +5049,88 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
     
     driver = None
     is_new_browser = False  # 标记是否是新启动的浏览器
+    current_ip = None
+    current_delay = None
     
     try:
-        # 1. 检查浏览器是否已经运行
-        log_print(f"[{browser_id}] 步骤1: 检查浏览器状态...")
-        is_active, browser_data = check_browser_active(browser_id)
-        
-        if is_active and browser_data:
-            log_print(f"[{browser_id}] ✓ 浏览器已在运行，直接使用")
-            is_new_browser = False
-        else:
-            # 2. 检查IP并更新代理（仅在需要启动浏览器时）
-            log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
-            try_update_ip_before_start(browser_id)
+        # 1. 检查IP并更新代理（仅在第一次进入且需要启动浏览器时更新，重试时跳过因为已经在重试流程中更新过了）
+        if retry_count == 0:
+            # 第一次进入，检查浏览器是否已经运行
+            log_print(f"[{browser_id}] 步骤1: 检查浏览器状态...")
+            is_active, browser_data = check_browser_active(browser_id)
             
-            # 3. 启动浏览器
-            log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
-            browser_data = start_adspower_browser(browser_id)
-            
-            if not browser_data:
-                log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
-                if keep_browser_open:
-                    return False, "浏览器启动失败", None, None, None, None
+            if is_active and browser_data:
+                log_print(f"[{browser_id}] ✓ 浏览器已在运行，直接使用")
+                is_new_browser = False
+                # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
+                last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                if last_config:
+                    current_ip = last_config.get("ip")
+                    current_delay = last_config.get("delay")
+                    log_print(f"[{browser_id}] 使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                 else:
-                    return False, "浏览器启动失败"
+                    log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
+                    _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+            else:
+                # 浏览器未运行，需要更新IP并启动浏览器
+                log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+                
+                # 3. 启动浏览器
+                log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
+                browser_data = start_adspower_browser(browser_id)
+                
+                if not browser_data:
+                    log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
+                    if keep_browser_open:
+                        return False, "浏览器启动失败", None, None, None, None
+                    else:
+                        return False, "浏览器启动失败"
+                
+                is_new_browser = True
+                log_print(f"[{browser_id}] ✓ 浏览器已新启动")
+        else:
+            # 递归重试时，跳过IP更新（IP已在重试流程中更新）
+            log_print(f"[{browser_id}] 步骤1: 跳过IP更新（重试中，IP已在重试流程中更新）...")
+            # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
+                log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
+            else:
+                log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id)
             
-            is_new_browser = True
-            log_print(f"[{browser_id}] ✓ 浏览器已新启动")
+            # 检查浏览器状态（重试时浏览器应该已关闭，需要重新启动）
+            log_print(f"[{browser_id}] 步骤2: 检查浏览器状态...")
+            is_active, browser_data = check_browser_active(browser_id)
+            
+            if is_active and browser_data:
+                log_print(f"[{browser_id}] ✓ 浏览器已在运行，直接使用")
+                is_new_browser = False
+            else:
+                # 启动浏览器
+                log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
+                browser_data = start_adspower_browser(browser_id)
+                
+                if not browser_data:
+                    log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
+                    if keep_browser_open:
+                        return False, "浏览器启动失败", None, None, None, None
+                    else:
+                        return False, "浏览器启动失败"
+                
+                is_new_browser = True
+                log_print(f"[{browser_id}] ✓ 浏览器已新启动")
+        
+        # 确保 current_ip 和 current_delay 已初始化（用于后续代码使用）
+        if current_ip is None:
+            log_print(f"[{browser_id}] ⚠ current_ip 为 None，尝试从 LAST_PROXY_CONFIG 获取...")
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
         
         # 4. 创建Selenium驱动
         log_print(f"[{browser_id}] 步骤4: 创建Selenium驱动...")
@@ -4865,7 +5173,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
    
                 log_print(f"[{browser_id}] ✗ 检测到页面加载错误（代理或超时）: {error_msg}")
                 mission_type = mission.get("type")
-                if mission_type == 5 and retry_count < 2:
+                if mission_type == 5 and retry_count < 1:
                     log_print(f"[{browser_id}] Type=5 任务页面加载失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                     
                     # 1. 关闭浏览器
@@ -4916,8 +5224,18 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         if check_and_click_understand_agree(driver, browser_id, timeout=5):
             # 如果存在并点击了，需要换IP重试（仅type=5任务且重试次数小于2）
             mission_type = mission.get("type")
-            if mission_type == 5 and retry_count < 2:
+            if mission_type == 5 and retry_count < 1:
                 log_print(f"[{browser_id}] Type=5 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
+                
+                # 获取 current_ip（如果未定义，从 LAST_PROXY_CONFIG 获取）
+                ip_to_report = current_ip
+                if not ip_to_report:
+                    last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                    if last_config:
+                        ip_to_report = last_config.get("ip")
+                
+                # 调用 changeIpToErr 接口
+                call_change_ip_to_err(browser_id, ip_to_report)
                 
                 # 1. 关闭浏览器
                 log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -4961,9 +5279,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         
         # 根据交易所类型选择不同的处理流程
         if exchange_type == "OP":
-            success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url)
+            success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url, current_ip, current_delay)
         else:
-            success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser)
+            success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, current_ip, current_delay)
             available_balance = None  # Polymarket 暂不支持
         
         # 处理 available_balance 并更新 p 字段
@@ -5019,7 +5337,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 log_print(f"[{browser_id}] ⚠ 更新 p 字段异常: {str(e)}")
         
         # 检查是否需要换IP重试（仅type=5或type=1任务且重试次数小于2）
-        if not success and failure_reason == "NEED_IP_RETRY" and retry_count < 2:
+        if not success and failure_reason == "NEED_IP_RETRY" and retry_count < 1:
             mission_type = mission.get("type")
             if mission_type == 5 or mission_type == 1:
                 log_print(f"[{browser_id}] Type={mission_type} 任务需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
@@ -5732,7 +6050,7 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
         return False
 
 
-def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0, trending='', target_url=''):
+def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0, trending='', target_url='', current_ip=None, current_delay=None):
     """
     处理 Opinion Trade 交易流程
     
@@ -5791,7 +6109,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         # 6. 预打开OKX钱包并连接（仅在新启动的浏览器时执行）
         if is_new_browser:
             log_print(f"[{browser_id}] 步骤6: 预打开OKX钱包（浏览器新启动）...")
-            preopen_okx_wallet(driver, browser_id)
+            preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
         else:
             log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
         
@@ -5824,6 +6142,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             
             if region_restricted:
                 log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
+                # 调用 changeIpToErr 接口
+                call_change_ip_to_err(browser_id, current_ip)
                 return False, "NEED_IP_RETRY", None
             else:
                 log_print(f"[{browser_id}] ✓ 未检测到地区限制")
@@ -5837,7 +6157,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             mission = task_data.get('mission', {}) if task_data else {}
             mission_type = mission.get('type')
             
-            if mission_type == 5 and retry_count < 2:
+            if mission_type == 5 and retry_count < 1:
                 log_print(f"[{browser_id}] Type=5 任务Position按钮未出现，需要换IP重试（第{retry_count+1}次）...")
                 return False, "NEED_IP_RETRY", None
             else:
@@ -6262,12 +6582,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         return False, f"执行异常: {str(e)}", None
 
 
-def process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser):
+def process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, current_ip=None, current_delay=None):
     """
     处理 Polymarket 交易流程
     
     Args:
         is_new_browser: 是否是新启动的浏览器
+        current_ip: 当前使用的IP地址（可选）
+        current_delay: 当前IP的延迟（可选，单位：毫秒）
     
     Returns:
         tuple: (success, failure_reason)
@@ -6283,7 +6605,7 @@ def process_polymarket_trade(driver, browser_id, trade_type, price_type, option_
         # 6. 预打开OKX钱包（仅在新启动的浏览器时执行）
         if is_new_browser:
             log_print(f"[{browser_id}] 步骤6: 预打开OKX钱包（浏览器新启动）...")
-            preopen_okx_wallet(driver, browser_id)
+            preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
         else:
             log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
         
@@ -8939,8 +9261,8 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
                 portfolio = 0
             
             # 5.4. 判断：如果 positions 是空的（包括空列表[]），但是 portfolio_found 获取成功且大于0，则不上传数据
-            if (not positions or len(positions) == 0) and portfolio_found and portfolio > 0:
-                log_print(f"[{browser_id}] ⚠ positions 为空（空列表），但 portfolio 获取成功且大于0（portfolio={portfolio}），不上传数据")
+            if (not positions or len(positions) == 0) and portfolio_found and portfolio > 5:
+                log_print(f"[{browser_id}] ⚠ positions 为空（空列表），但 portfolio 获取成功且大于5（portfolio={portfolio}），不上传数据")
                 return False
             
             # 5.5. 判断 balance 和 portfolio 是否都为空或都是 0
@@ -10160,14 +10482,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                                 # 前往指定页面（随机选择一个）
                                 target_urls = [
                                     "https://app.opinion.trade/detail?topicId=213&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=79&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=210&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=80&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=211&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=175&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=78&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=115&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=193&type=multi"
+                                    # "https://app.opinion.trade/detail?topicId=79&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=210&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=80&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=211&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=175&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=78&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=115&type=multi",
+                                    # "https://app.opinion.trade/detail?topicId=193&type=multi"
                                 ]
                                 target_url = random.choice(target_urls)
                                 log_print(f"[{browser_id}] 前往页面获取可用余额: {target_url}")
@@ -10404,9 +10726,31 @@ def process_type2_mission(task_data, retry_count=0):
     collected_data = {}
     
     try:
-        # 1. 检查IP并更新代理
-        log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
-        try_update_ip_before_start(browser_id)
+        # 1. 检查IP并更新代理（仅在第一次进入时更新，重试时跳过因为已经在重试流程中更新过了）
+        current_ip = None
+        current_delay = None
+        if retry_count == 0:
+            log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
+            _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+        else:
+            log_print(f"[{browser_id}] 步骤1: 跳过IP更新（重试中，IP已在重试流程中更新）...")
+            # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
+                log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
+            else:
+                log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+        
+        # 确保 current_ip 和 current_delay 已初始化（用于后续代码使用）
+        if current_ip is None:
+            log_print(f"[{browser_id}] ⚠ current_ip 为 None，尝试从 LAST_PROXY_CONFIG 获取...")
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
         
         # 2. 打开浏览器
         log_print(f"[{browser_id}] 步骤2: 打开浏览器...")
@@ -10437,7 +10781,7 @@ def process_type2_mission(task_data, retry_count=0):
                 # 检查是否是代理连接错误
                     log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
                     # 如果是代理错误且重试次数小于2，执行换IP重试
-                    if retry_count < 2:
+                    if retry_count < 1:
                         log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                         
                         # 1. 关闭浏览器
@@ -10484,8 +10828,11 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] 步骤4.0.4: 检查是否存在 'I Understand and Agree' p标签...")
             if check_and_click_understand_agree(driver, browser_id, timeout=5):
                 # 如果存在并点击了，需要换IP重试（重试次数小于2）
-                if retry_count < 2:
+                if retry_count < 1:
                     log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
+                    
+                    # 调用 changeIpToErr 接口
+                    call_change_ip_to_err(browser_id, current_ip)
                     
                     # 1. 关闭浏览器
                     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -10526,9 +10873,11 @@ def process_type2_mission(task_data, retry_count=0):
                     log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
                     return False, "检测到 'I Understand and Agree' 且已重试2次", collected_data
             
+            
+          
             # 4.0.5 预打开OKX钱包
             log_print(f"[{browser_id}] 步骤4.0.5: 预打开OKX钱包...")
-            main_window = preopen_okx_wallet(driver, browser_id)
+            main_window = preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
             
             # 4.0.6 检查URL并验证Macro标签（仅当URL包含profile或macro时）
             log_print(f"[{browser_id}] 步骤4.0.6: 检查当前URL并验证Macro标签...")
@@ -10572,7 +10921,7 @@ def process_type2_mission(task_data, retry_count=0):
                         log_print(f"[{browser_id}] ✗ 未找到内容为 'Macro' 的 p 标签，需要换IP重试")
                         
                         # 如果是代理错误且重试次数小于2，执行换IP重试
-                        if retry_count < 2:
+                        if retry_count < 1:
                             log_print(f"[{browser_id}] Type=2 任务检测到Macro标签缺失，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                             
                             # 1. 关闭浏览器
@@ -10622,6 +10971,79 @@ def process_type2_mission(task_data, retry_count=0):
             # 4.1 检查并连接钱包
             log_print(f"[{browser_id}] 步骤4.1: 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
+            
+              # 6.1.2 检查地区限制
+            log_print(f"[{browser_id}] 步骤6.1.2: 检查地区限制...")
+            try:
+                start_time = time.time()
+                region_restricted = False
+                while time.time() - start_time < 3:
+                    try:
+                        # 查找所有div元素
+                        all_divs = driver.find_elements(By.TAG_NAME, "div")
+                        for div in all_divs:
+                            div_text = div.text
+                            if "API is not available to persons located in the" in div_text:
+                                region_restricted = True
+                                log_print(f"[{browser_id}] ✗ 检测到地区限制提示: {div_text[:100]}...")
+                                break
+                        if region_restricted:
+                            break
+                        time.sleep(0.2)  # 短暂等待后重试
+                    except Exception as e:
+                        # 查找过程中出现异常，继续尝试
+                        time.sleep(0.2)
+                        continue
+                
+                if region_restricted:
+                    log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
+                     # 调用 changeIpToErr 接口
+                    call_change_ip_to_err(browser_id, current_ip)
+                    # 如果存在并点击了，需要换IP重试（重试次数小于2）
+                    if retry_count < 1:
+                        log_print(f"[{browser_id}] Type=2 任务检测到 'API is not available to persons located in the'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
+                        
+                        # 1. 关闭浏览器
+                        log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                        try:
+                            if driver:
+                                driver.quit()
+                        except:
+                            pass
+                        close_adspower_browser(browser_id)
+                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
+                        call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
+                        log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
+                        time.sleep(120)  # Type=2任务等待2分钟
+                        
+                        # 2. 根据重试次数获取IP
+                        log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                        
+                        if not proxy_config:
+                            log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                            return False, "换IP失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                        
+                        # 3. 更新代理配置
+                        log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                        if not update_adspower_proxy(browser_id, proxy_config):
+                            log_print(f"[{browser_id}] ✗ 更新代理失败")
+                            return False, "更新代理失败", collected_data
+                        
+                        log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                        time.sleep(10)
+                        
+                        # 4. 递归重试任务（retry_count+1）
+                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                        return process_type2_mission(task_data, retry_count=retry_count+1)
+                else:
+                    log_print(f"[{browser_id}] ✓ 未检测到地区限制")
+            except Exception as e:
+                log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
+            
+            
             
             # 4.2 Type2任务特殊处理：检查OKX Wallet P标签
             log_print(f"[{browser_id}] 步骤4.2: 等待15秒后检查 OKX Wallet 状态...")
@@ -10902,14 +11324,14 @@ def process_type2_mission(task_data, retry_count=0):
                             # 前往指定页面（随机选择一个）
                             target_urls = [
                                 "https://app.opinion.trade/detail?topicId=213&type=multi",
-                                "https://app.opinion.trade/detail?topicId=79&type=multi",
-                                "https://app.opinion.trade/detail?topicId=210&type=multi",
-                                "https://app.opinion.trade/detail?topicId=80&type=multi",
-                                "https://app.opinion.trade/detail?topicId=211&type=multi",
-                                "https://app.opinion.trade/detail?topicId=175&type=multi",
-                                "https://app.opinion.trade/detail?topicId=78&type=multi",
-                                "https://app.opinion.trade/detail?topicId=115&type=multi",
-                                "https://app.opinion.trade/detail?topicId=193&type=multi"
+                                # "https://app.opinion.trade/detail?topicId=79&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=210&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=80&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=211&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=175&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=78&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=115&type=multi",
+                                # "https://app.opinion.trade/detail?topicId=193&type=multi"
                             ]
                             target_url = random.choice(target_urls)
                             log_print(f"[{browser_id}] 前往页面: {target_url}")
@@ -11090,7 +11512,7 @@ def process_type2_mission(task_data, retry_count=0):
                 # 检查是否是代理连接错误
                     log_print(f"[{browser_id}] ✗ 检测到代理连接错误: {error_msg}")
                     # 如果是代理错误且重试次数小于2，执行换IP重试
-                    if retry_count < 2:
+                    if retry_count < 1:
                         log_print(f"[{browser_id}] Type=2 任务检测到代理连接失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                         
                         # 1. 关闭浏览器
@@ -11136,7 +11558,7 @@ def process_type2_mission(task_data, retry_count=0):
             
             # 4.0.5 预打开OKX钱包
             log_print(f"[{browser_id}] 步骤4.0.5: 预打开OKX钱包...")
-            main_window = preopen_okx_wallet(driver, browser_id)
+            main_window = preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
             
             time.sleep(1)
             

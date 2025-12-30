@@ -34,15 +34,83 @@
             font-weight: 600;
             color: #333;
             letter-spacing: 2px;
+            margin-bottom: 40px;
+        }
+
+        .info-section {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 2px solid #eee;
+        }
+
+        .info-item {
+            margin: 15px 0;
+            font-size: 24px;
+            color: #555;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #667eea;
+            margin-right: 10px;
+        }
+
+        .info-value {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .loading {
+            font-size: 18px;
+            color: #999;
+            font-style: italic;
+        }
+
+        .error {
+            font-size: 18px;
+            color: #dc3545;
+        }
+
+        .delay-good {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .delay-medium {
+            color: #ffc107;
+            font-weight: bold;
+        }
+
+        .delay-bad {
+            color: #dc3545;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="time-display" id="timeDisplay"></div>
+        <div class="info-section" id="infoSection" style="display: none;">
+            <div class="info-item">
+                <span class="info-label">当前IP:</span>
+                <span class="info-value" id="ipDisplay">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">延迟:</span>
+                <span class="info-value" id="delayDisplay">-</span>
+            </div>
+        </div>
+        <div id="loadingInfo" class="loading" style="display: none;">正在获取IP和延迟信息...</div>
+        <div id="errorInfo" class="error" style="display: none;"></div>
     </div>
 
     <script>
+        // 获取URL参数
+        function getUrlParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
         // 获取北京时间（UTC+8）
         function getBeijingTime() {
             const now = new Date();
@@ -59,7 +127,7 @@
             const hours = String(date.getHours()).padStart(2, '0');
             const minutes = String(date.getMinutes()).padStart(2, '0');
             const seconds = String(date.getSeconds()).padStart(2, '0');
-            return `${day}日 ${hours}:${minutes}:${seconds}`;
+            return `${hours}:${minutes}:${seconds}`;
         }
 
         // 更新页面显示
@@ -67,15 +135,90 @@
             const beijingTime = getBeijingTime();
             const displayStr = formatDisplay(beijingTime);
             
+            // 获取IP和延迟
+            const ip = getUrlParam('ip');
+            const delay = getUrlParam('delay');
+            
+            // 构建标题：时：分：秒  ip  延迟
+            let titleStr = displayStr;
+            
+            if (delay !== null && delay !== undefined && delay !== '') {
+                const delayNum = parseInt(delay);
+                const delayText = !isNaN(delayNum) ? `${delayNum}` : delay;
+                titleStr += `||${delayText}`;
+            }
+            if (ip) {
+                titleStr += `||${ip}`;
+            }
             // 更新页面内容
             document.getElementById('timeDisplay').textContent = displayStr;
             
             // 更新页面标题
-            document.getElementById('pageTitle').textContent = displayStr;
+            document.getElementById('pageTitle').textContent = titleStr;
         }
 
-        // 页面加载时立即显示时间
-        updateDisplay();
+        // 获取延迟样式类
+        function getDelayClass(delay) {
+            if (delay === null || delay === undefined) {
+                return '';
+            }
+            if (delay < 1000) {
+                return 'delay-good';
+            } else if (delay > 2000) {
+                return 'delay-bad';
+            } else {
+                return 'delay-medium';
+            }
+        }
+
+        // 显示IP和延迟信息（从URL参数获取）
+        function displayIpAndDelay() {
+            const infoSection = document.getElementById('infoSection');
+            const loadingInfo = document.getElementById('loadingInfo');
+            const errorInfo = document.getElementById('errorInfo');
+            const ipDisplay = document.getElementById('ipDisplay');
+            const delayDisplay = document.getElementById('delayDisplay');
+
+            // 从URL参数获取IP和延迟
+            const ip = getUrlParam('ip');
+            const delay = getUrlParam('delay');
+
+            // 隐藏加载和错误信息
+            loadingInfo.style.display = 'none';
+            errorInfo.style.display = 'none';
+
+            if (ip) {
+                // 显示IP
+                ipDisplay.textContent = ip;
+                
+                // 显示延迟
+                if (delay !== null && delay !== undefined && delay !== '') {
+                    const delayNum = parseInt(delay);
+                    const delayText = !isNaN(delayNum) ? `${delayNum}ms` : delay;
+                    delayDisplay.textContent = delayText;
+                    delayDisplay.className = 'info-value ' + getDelayClass(delayNum);
+                } else {
+                    delayDisplay.textContent = '-';
+                    delayDisplay.className = 'info-value';
+                }
+                
+                // 显示信息区域
+                infoSection.style.display = 'block';
+            } else {
+                // 如果没有IP参数，显示提示
+                errorInfo.textContent = '未提供IP信息';
+                errorInfo.style.display = 'block';
+            }
+        }
+
+        // 页面加载时初始化
+        window.onload = function() {
+            // 立即显示时间
+            updateDisplay();
+
+            // 从URL参数直接显示IP和延迟信息
+            displayIpAndDelay();
+        };
     </script>
 </body>
 </html>

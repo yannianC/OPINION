@@ -7,13 +7,16 @@
         刷新数据
       </el-button>
       <el-button type="success" @click="exportAndCopy" :disabled="selectedCount === 0" style="margin-left: 10px;">
-        导出主题并复制 ({{ selectedCount }})
+        导出勾选主题并复制 ({{ selectedCount }})
       </el-button>
       <el-button type="warning" @click="exportAllBrowsers" :disabled="selectedCount === 0" style="margin-left: 10px;">
         导出勾选主题相关的所有浏览器编号 ({{ selectedCount }})
       </el-button>
       <el-button type="danger" @click="exportRedBrowsers" :disabled="selectedCount === 0" style="margin-left: 10px;">
         导出勾选主题相关的变红浏览器编号 ({{ selectedCount }})
+      </el-button>
+      <el-button type="warning" @click="saveAllBlacklistStatus" :loading="savingBlacklist" style="margin-left: 10px;">
+        保存勾选状态
       </el-button>
       <el-select 
         v-model="selectedGroup" 
@@ -25,6 +28,31 @@
         <el-option label="分组1" value="1" />
         <el-option label="分组2" value="2" />
       </el-select>
+    </div>
+
+    <!-- 显示复制的内容 -->
+    <div class="copied-content-display" v-if="copiedContent.eventNames || copiedContent.allBrowsers || copiedContent.redBrowsers">
+      <div v-if="copiedContent.eventNames" class="copied-item">
+        <div class="copied-label">
+          导出勾选主题并复制：
+          <span class="count-badge">({{ getEventNamesCount() }} 个主题)</span>
+        </div>
+        <div class="copied-text">{{ copiedContent.eventNames }}</div>
+      </div>
+      <div v-if="copiedContent.allBrowsers" class="copied-item">
+        <div class="copied-label">
+          导出勾选主题相关的所有浏览器编号：
+          <span class="count-badge">({{ getAllBrowsersCount() }} 个浏览器)</span>
+        </div>
+        <div class="copied-text">{{ copiedContent.allBrowsers }}</div>
+      </div>
+      <div v-if="copiedContent.redBrowsers" class="copied-item">
+        <div class="copied-label">
+          导出勾选主题相关的变红浏览器编号：
+          <span class="count-badge">({{ getRedBrowsersCount() }} 个浏览器)</span>
+        </div>
+        <div class="copied-text">{{ copiedContent.redBrowsers }}</div>
+      </div>
     </div>
 
     <!-- 事件统计表格 -->
@@ -48,6 +76,15 @@
           </div>
         </template>
       </el-table-column>
+
+      <!-- <el-table-column label="拉黑" width="100" align="center" fixed>
+        <template #default="scope">
+          <el-checkbox 
+            v-model="scope.row.isBlacklisted" 
+            :disabled="!scope.row.configId"
+          />
+        </template>
+      </el-table-column> -->
 
       <el-table-column label="yes持仓数量" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesPosition, b.yesPosition)">
         <template #default="scope">
@@ -136,6 +173,27 @@
           </span>
         </template>
       </el-table-column>
+
+      <el-table-column label="忽略的差额" width="130" align="center" sortable :sort-method="(a, b) => sortByNumber(a.ignoreDiff, b.ignoreDiff)">
+        <template #default="scope">
+          <el-input 
+            v-model.number="scope.row.ignoreDiff" 
+            type="number" 
+            size="small"
+            placeholder="0"
+            @blur="updateIgnoreDiff(scope.row)"
+            style="width: 100px;"
+          />
+        </template>
+      </el-table-column>
+
+      <el-table-column label="使用忽略后的差额" width="160" align="center" sortable :sort-method="(a, b) => sortByNumber(a.finalDiffAfterIgnore, b.finalDiffAfterIgnore)">
+        <template #default="scope">
+          <span :class="parseFloat(scope.row.finalDiffAfterIgnore) >= 0 ? 'positive' : 'negative'">
+            {{ formatNumber(scope.row.finalDiffAfterIgnore) }}
+          </span>
+        </template>
+      </el-table-column>
     </el-table>
   </div>
 </template>
@@ -153,6 +211,14 @@ const eventTableData = ref([])
 const selectedGroup = ref('all')
 const groupConfigList = ref([]) // 存储当前分组的事件名列表
 const accountDataCache = ref([]) // 存储原始账户数据，用于导出浏览器编号
+const exchangeConfigList = ref([]) // 存储 exchangeConfig 配置列表
+const configMap = ref(new Map()) // 存储 trending -> config 的映射
+const savingBlacklist = ref(false) // 是否正在保存拉黑状态
+const copiedContent = ref({
+  eventNames: '', // 导出勾选主题并复制的内容
+  allBrowsers: '', // 导出所有浏览器编号的内容
+  redBrowsers: '' // 导出变红浏览器编号的内容
+})
 
 /**
  * 计算选中的事件数量
@@ -187,31 +253,26 @@ const saveSelectionState = () => {
 /**
  * 从本地存储加载勾选状态
  */
+/**
+ * 从本地存储恢复勾选状态（已废弃，现在从服务器的字段 b 获取）
+ * 保留此函数以避免调用错误，但不执行任何操作
+ * 勾选状态在 loadAndCalculate 中已从服务器的 b 字段设置
+ */
 const loadSelectionState = () => {
-  try {
-    const saved = localStorage.getItem('eventAnomaly_selectedEvents')
-    if (saved) {
-      const selectedEvents = JSON.parse(saved)
-      const selectedSet = new Set(selectedEvents)
-      
-      // 恢复勾选状态
-      eventTableData.value.forEach(event => {
-        event.selected = selectedSet.has(event.eventName)
-      })
-      
-      console.log('[事件异常] 从本地存储恢复勾选状态，共', selectedEvents.length, '个')
-    }
-  } catch (error) {
-    console.error('[事件异常] 加载勾选状态失败:', error)
-  }
+  // 不再从本地存储恢复，而是从服务器的字段 b 获取
+  // 勾选状态在 loadAndCalculate 中已从服务器的 b 字段设置
+  console.log('[事件异常] 勾选状态已从服务器的字段 b 获取，不再使用本地存储')
 }
 
 /**
  * 处理选择变化
  */
 const handleSelectionChange = (row) => {
-  // 选择变化时保存到本地存储
-  saveSelectionState()
+  // 同步更新 isBlacklisted 状态，确保两者一致
+  // selected 勾选状态对应拉黑状态：勾选=拉黑，未勾选=未拉黑
+  row.isBlacklisted = row.selected
+  // 不再保存到本地存储，因为现在从服务器的字段 b 获取
+  // saveSelectionState()
 }
 
 /**
@@ -572,6 +633,39 @@ const loadGroupConfig = async (groupNo) => {
 }
 
 /**
+ * 加载 exchangeConfig 配置
+ */
+const loadExchangeConfig = async () => {
+  try {
+    console.log('[事件异常] 开始加载 exchangeConfig 配置...')
+    const response = await axios.get(`${API_BASE_URL}/mission/exchangeConfig`)
+    
+    if (response.data && response.data.code === 0 && response.data.data && response.data.data.configList) {
+      exchangeConfigList.value = response.data.data.configList
+      
+      // 创建 trending -> config 的映射（完全匹配）
+      const newConfigMap = new Map()
+      for (const config of exchangeConfigList.value) {
+        if (config.trending) {
+          const trending = config.trending.trim()
+          newConfigMap.set(trending, config)
+        }
+      }
+      configMap.value = newConfigMap
+      
+      console.log(`[事件异常] exchangeConfig 配置加载完成，共 ${exchangeConfigList.value.length} 个配置`)
+      return exchangeConfigList.value
+    } else {
+      console.warn('[事件异常] 未获取到 exchangeConfig 配置数据')
+      return []
+    }
+  } catch (error) {
+    console.error('[事件异常] 加载 exchangeConfig 配置失败:', error)
+    return []
+  }
+}
+
+/**
  * 加载链上数据
  */
 const loadChainStats = async () => {
@@ -635,11 +729,14 @@ const loadAndCalculate = async () => {
       groupConfigList.value = eventNames
     }
     
-    // 并行加载账户数据和链上数据
+    // 并行加载账户数据、链上数据和 exchangeConfig 配置
     const [accountResponse, chainDataMap] = await Promise.all([
       axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`),
       loadChainStats()
     ])
+    
+    // 加载 exchangeConfig 配置
+    await loadExchangeConfig()
     
     if (accountResponse.data && accountResponse.data.data) {
       const data = accountResponse.data.data
@@ -838,9 +935,34 @@ const loadAndCalculate = async () => {
         return Math.abs(b.finalDiff) - Math.abs(a.finalDiff)
       })
       
-      // 初始化选中状态（先设为false，后面会从本地存储恢复）
+      // 初始化选中状态，并匹配 exchangeConfig 配置
       allEvents.forEach(event => {
-        event.selected = false
+        // 匹配 exchangeConfig 配置（完全匹配）
+        const eventName = event.eventName.trim()
+        const matchedConfig = configMap.value.get(eventName)
+        
+        if (matchedConfig) {
+          // 从配置的 a 字段获取忽略的差额，如果为空则显示为 0
+          event.ignoreDiff = matchedConfig.a !== null && matchedConfig.a !== undefined 
+            ? parseFloat(matchedConfig.a) || 0 
+            : 0
+          event.configId = matchedConfig.id // 保存配置ID，用于更新
+          // 从配置的 b 字段获取拉黑状态：b=1 表示拉黑，b=0/null/undefined 表示未拉黑
+          event.isBlacklisted = matchedConfig.b === 1 || matchedConfig.b === '1'
+          // 保存原始 b 值，用于后续比较（处理 null、undefined、0、1 等情况）
+          event.originalB = matchedConfig.b !== null && matchedConfig.b !== undefined ? matchedConfig.b : 0
+          // 事件名前面的勾选状态从服务器的字段 b 获取：b=1 则勾选，b!=1 则不勾选
+          event.selected = matchedConfig.b === 1 || matchedConfig.b === '1'
+        } else {
+          event.ignoreDiff = 0
+          event.configId = null
+          event.isBlacklisted = false
+          event.originalB = 0  // 未匹配到配置，默认为未拉黑
+          event.selected = false  // 未匹配到配置，默认不勾选
+        }
+        
+        // 计算使用忽略后的差额：成交后差额 - 忽略的差额
+        event.finalDiffAfterIgnore = event.finalDiff - event.ignoreDiff
       })
       
       // 根据选择的分组进行过滤
@@ -934,6 +1056,33 @@ const handleGroupChange = async (value) => {
 }
 
 /**
+ * 计算导出的主题数量
+ */
+const getEventNamesCount = () => {
+  if (!copiedContent.value.eventNames) return 0
+  // 按分号分隔，计算数量
+  return copiedContent.value.eventNames.split(';').filter(item => item.trim()).length
+}
+
+/**
+ * 计算导出的所有浏览器编号数量
+ */
+const getAllBrowsersCount = () => {
+  if (!copiedContent.value.allBrowsers) return 0
+  // 按逗号分隔，计算数量
+  return copiedContent.value.allBrowsers.split(',').filter(item => item.trim()).length
+}
+
+/**
+ * 计算导出的变红浏览器编号数量
+ */
+const getRedBrowsersCount = () => {
+  if (!copiedContent.value.redBrowsers) return 0
+  // 按逗号分隔，计算数量
+  return copiedContent.value.redBrowsers.split(',').filter(item => item.trim()).length
+}
+
+/**
  * 导出并复制选中的事件名
  */
 const exportAndCopy = async () => {
@@ -952,6 +1101,8 @@ const exportAndCopy = async () => {
   try {
     // 复制到剪切板
     await navigator.clipboard.writeText(result)
+    // 保存复制的内容用于显示
+    copiedContent.value.eventNames = result
     ElMessage.success(`已复制 ${selectedEvents.length} 个事件名到剪切板`)
     console.log('[事件异常] 导出的内容:', result)
   } catch (error) {
@@ -964,6 +1115,8 @@ const exportAndCopy = async () => {
     textArea.select()
     try {
       document.execCommand('copy')
+      // 保存复制的内容用于显示
+      copiedContent.value.eventNames = result
       ElMessage.success(`已复制 ${selectedEvents.length} 个事件名到剪切板`)
       console.log('[事件异常] 导出的内容:', result)
     } catch (err) {
@@ -1042,6 +1195,8 @@ const exportAllBrowsers = async () => {
   try {
     // 复制到剪切板
     await navigator.clipboard.writeText(result)
+    // 保存复制的内容用于显示
+    copiedContent.value.allBrowsers = result
     ElMessage.success(`已复制 ${browserSet.size} 个浏览器编号到剪切板`)
     console.log('[事件异常] 导出的浏览器编号:', result)
   } catch (error) {
@@ -1054,6 +1209,8 @@ const exportAllBrowsers = async () => {
     textArea.select()
     try {
       document.execCommand('copy')
+      // 保存复制的内容用于显示
+      copiedContent.value.allBrowsers = result
       ElMessage.success(`已复制 ${browserSet.size} 个浏览器编号到剪切板`)
       console.log('[事件异常] 导出的浏览器编号:', result)
     } catch (err) {
@@ -1152,6 +1309,8 @@ const exportRedBrowsers = async () => {
   try {
     // 复制到剪切板
     await navigator.clipboard.writeText(result)
+    // 保存复制的内容用于显示
+    copiedContent.value.redBrowsers = result
     ElMessage.success(`已复制 ${browserSet.size} 个变红浏览器编号到剪切板`)
     console.log('[事件异常] 导出的变红浏览器编号:', result)
   } catch (error) {
@@ -1164,6 +1323,8 @@ const exportRedBrowsers = async () => {
     textArea.select()
     try {
       document.execCommand('copy')
+      // 保存复制的内容用于显示
+      copiedContent.value.redBrowsers = result
       ElMessage.success(`已复制 ${browserSet.size} 个变红浏览器编号到剪切板`)
       console.log('[事件异常] 导出的变红浏览器编号:', result)
     } catch (err) {
@@ -1171,6 +1332,175 @@ const exportRedBrowsers = async () => {
       console.error('[事件异常] 复制失败:', err)
     }
     document.body.removeChild(textArea)
+  }
+}
+
+/**
+ * 更新忽略的差额
+ */
+const updateIgnoreDiff = async (event) => {
+  if (!event.configId) {
+    ElMessage.warning('该事件未匹配到配置，无法更新')
+    return
+  }
+  
+  // 重新计算使用忽略后的差额
+  event.finalDiffAfterIgnore = event.finalDiff - (event.ignoreDiff || 0)
+  
+  // 找到对应的配置
+  const config = exchangeConfigList.value.find(c => c.id === event.configId)
+  if (!config) {
+    ElMessage.warning('未找到对应的配置')
+    return
+  }
+  
+  try {
+    // 构建更新数据
+    const submitData = {
+      list: [{
+        id: config.id,
+        trending: config.trending,
+        trendingPart1: config.trendingPart1 || null,
+        trendingPart2: config.trendingPart2 || null,
+        trendingPart3: config.trendingPart3 || null,
+        opUrl: config.opUrl || '',
+        polyUrl: config.polyUrl || '',
+        opTopicId: config.opTopicId || '',
+        weight: config.weight || 2,
+        isOpen: config.isOpen || 0,
+        groupNo: config.groupNo || null,
+        a: event.ignoreDiff || 0  // 更新忽略的差额
+      }]
+    }
+    
+    console.log('[事件异常] 更新忽略的差额:', submitData)
+    
+    const response = await axios.post(
+      `${API_BASE_URL}/mission/exchangeConfig`,
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.code === 0) {
+      // 更新本地配置缓存
+      config.a = event.ignoreDiff || 0
+      ElMessage.success('忽略的差额已更新')
+      console.log('[事件异常] 忽略的差额更新成功')
+    } else {
+      ElMessage.error('更新失败: ' + (response.data?.msg || '未知错误'))
+    }
+  } catch (error) {
+    console.error('[事件异常] 更新忽略的差额失败:', error)
+    const errorMsg = error.response?.data?.msg || error.message || '未知错误'
+    ElMessage.error('更新失败: ' + errorMsg)
+  }
+}
+
+/**
+ * 保存所有拉黑状态
+ */
+const saveAllBlacklistStatus = async () => {
+  savingBlacklist.value = true
+  
+  try {
+    // 收集需要更新的配置（只包含有更改的）
+    const modifiedConfigs = []
+    
+    for (const event of eventTableData.value) {
+      if (!event.configId) {
+        continue // 跳过未匹配到配置的事件
+      }
+      
+      // 找到对应的配置
+      const config = exchangeConfigList.value.find(c => c.id === event.configId)
+      if (!config) {
+        continue
+      }
+      
+      // 判断是否有更改：当前拉黑状态（从 selected 勾选状态获取）与配置中的 b 字段不一致
+      // selected 勾选状态对应拉黑状态：勾选=拉黑(b=1)，未勾选=未拉黑(b=0)
+      // 使用 selected 作为主要判断依据，因为用户操作的是事件名前面的勾选框
+      const currentBlacklistStatus = event.selected ? 1 : 0
+      // 处理 b 字段可能为 null、undefined、0、1 等情况
+      // 优先使用 event.originalB（初始化时保存的原始值），如果没有则使用 config.b
+      const originalB = event.originalB !== undefined && event.originalB !== null ? event.originalB : (config.b !== null && config.b !== undefined ? config.b : 0)
+      const originalBlacklistStatus = (originalB === 1 || originalB === '1') ? 1 : 0
+      
+      console.log(`[事件异常] 检查拉黑状态: ${event.eventName}, 当前=${currentBlacklistStatus}, 原始=${originalBlacklistStatus}, originalB=${originalB}, config.b=${config.b}, event.selected=${event.selected}, event.isBlacklisted=${event.isBlacklisted}`)
+      
+      if (currentBlacklistStatus !== originalBlacklistStatus) {
+        modifiedConfigs.push({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 2,
+          isOpen: config.isOpen || 0,
+          groupNo: config.groupNo || null,
+          a: config.a || null,
+          b: currentBlacklistStatus  // 更新拉黑状态：勾选的为1，未勾选的为0
+        })
+      }
+    }
+    
+    if (modifiedConfigs.length === 0) {
+      ElMessage.info('没有需要更新的拉黑状态')
+      return
+    }
+    
+    console.log(`[事件异常] 准备更新 ${modifiedConfigs.length} 个配置的拉黑状态`)
+    
+    // 构建提交数据
+    const submitData = {
+      list: modifiedConfigs
+    }
+    
+    const response = await axios.post(
+      `${API_BASE_URL}/mission/exchangeConfig`,
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.code === 0) {
+      // 更新本地配置缓存和事件数据
+      for (const modifiedConfig of modifiedConfigs) {
+        const config = exchangeConfigList.value.find(c => c.id === modifiedConfig.id)
+        if (config) {
+          config.b = modifiedConfig.b
+        }
+        // 更新事件数据中的原始值和拉黑状态，以便下次比较时使用
+        const event = eventTableData.value.find(e => e.configId === modifiedConfig.id)
+        if (event) {
+          event.originalB = modifiedConfig.b
+          // 同步更新 isBlacklisted 和 selected 状态，确保两者一致
+          event.isBlacklisted = modifiedConfig.b === 1 || modifiedConfig.b === '1'
+          event.selected = modifiedConfig.b === 1 || modifiedConfig.b === '1'
+        }
+      }
+      
+      ElMessage.success(`已成功更新 ${modifiedConfigs.length} 个配置的拉黑状态`)
+      console.log('[事件异常] 拉黑状态更新成功')
+    } else {
+      ElMessage.error('更新失败: ' + (response.data?.msg || '未知错误'))
+    }
+  } catch (error) {
+    console.error('[事件异常] 保存拉黑状态失败:', error)
+    const errorMsg = error.response?.data?.msg || error.message || '未知错误'
+    ElMessage.error('保存失败: ' + errorMsg)
+  } finally {
+    savingBlacklist.value = false
   }
 }
 
@@ -1214,6 +1544,48 @@ onMounted(() => {
 .negative {
   color: #f56c6c;
   font-weight: 600;
+}
+
+.copied-content-display {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+}
+
+.copied-item {
+  margin-bottom: 15px;
+}
+
+.copied-item:last-child {
+  margin-bottom: 0;
+}
+
+.copied-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.count-badge {
+  font-size: 13px;
+  font-weight: 500;
+  color: #409eff;
+  margin-left: 8px;
+}
+
+.copied-text {
+  font-size: 13px;
+  color: #303133;
+  background-color: #f5f7fa;
+  padding: 10px;
+  border-radius: 4px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>
 

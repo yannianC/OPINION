@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面10-本地网络监控</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .control-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label {
+            font-weight: bold;
+            color: #333;
+            white-space: nowrap;
+        }
+
+        .control-group input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 100px;
+        }
+
+        .control-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .status-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.stopped {
+            background: #dc3545;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        button {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.stop {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+
+        button.block {
+            background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        button.unblock {
+            background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #667eea;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+        }
+
+        tbody tr {
+            transition: background-color 0.3s;
+        }
+
+        tbody tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        tbody tr.alert {
+            background-color: #ffebee !important;
+            animation: alertPulse 1s infinite;
+        }
+
+        tbody tr.blocked {
+            background-color: #fff3cd !important;
+            opacity: 0.7;
+        }
+
+        @keyframes alertPulse {
+            0%, 100% { background-color: #ffebee; }
+            50% { background-color: #ffcdd2; }
+        }
+
+        .time-display {
+            font-family: 'Courier New', monospace;
+            color: #666;
+        }
+
+        .time-display.overdue {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .action-cell {
+            display: flex;
+            gap: 8px;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #f5c6cb;
+        }
+
+        .empty-message {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>电脑组请求时间监控</h1>
+        
+        <div class="control-panel">
+            <div class="control-group">
+                <label>报警阈值（秒）：</label>
+                <input type="number" id="thresholdInput" value="30" min="1" />
+            </div>
+            <div class="status-info">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span id="statusText">监控中...</span>
+                <span id="lastUpdateTime"></span>
+            </div>
+            <button id="toggleBtn">停止监控</button>
+        </div>
+
+        <div id="loadingIndicator" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <div>正在加载数据...</div>
+        </div>
+
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+        <table id="dataTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>电脑组</th>
+                    <th>最近一次请求时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+
+        <div id="emptyMessage" class="empty-message" style="display: none;">
+            暂无数据
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let intervalId = null;
+        let requestIntervalId = null;
+        let blockedGroups = new Set();
+        let audioContext = null;
+        let isMonitoring = true;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 加载拉黑列表
+            loadBlockedGroups();
+            
+            // 初始化音频上下文
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.warn('音频上下文初始化失败:', e);
+            }
+
+            // 绑定事件
+            document.getElementById('thresholdInput').addEventListener('change', function() {
+                // 阈值改变时，重新检查所有行
+                checkAlerts();
+            });
+
+            document.getElementById('toggleBtn').addEventListener('click', toggleMonitoring);
+
+            // 立即请求一次
+            fetchData();
+
+            // 开始定时请求（每5秒）
+            startAutoRequest();
+        });
+
+        // 加载拉黑列表
+        function loadBlockedGroups() {
+            const blocked = localStorage.getItem('blockedGroups');
+            if (blocked) {
+                try {
+                    const groups = JSON.parse(blocked);
+                    blockedGroups = new Set(groups);
+                } catch (e) {
+                    console.error('加载拉黑列表失败:', e);
+                }
+            }
+        }
+
+        // 保存拉黑列表
+        function saveBlockedGroups() {
+            localStorage.setItem('blockedGroups', JSON.stringify(Array.from(blockedGroups)));
+        }
+
+        // 开始自动请求
+        function startAutoRequest() {
+            if (requestIntervalId) {
+                clearInterval(requestIntervalId);
+            }
+            // 静默刷新，不显示加载指示器
+            requestIntervalId = setInterval(() => fetchData(true), 5000);
+        }
+
+        // 停止自动请求
+        function stopAutoRequest() {
+            if (requestIntervalId) {
+                clearInterval(requestIntervalId);
+                requestIntervalId = null;
+            }
+        }
+
+        // 切换监控状态
+        function toggleMonitoring() {
+            isMonitoring = !isMonitoring;
+            const btn = document.getElementById('toggleBtn');
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+
+            if (isMonitoring) {
+                btn.textContent = '停止监控';
+                btn.classList.remove('stop');
+                indicator.classList.remove('stopped');
+                statusText.textContent = '监控中...';
+                startAutoRequest();
+                fetchData();
+            } else {
+                btn.textContent = '开始监控';
+                btn.classList.add('stop');
+                indicator.classList.add('stopped');
+                statusText.textContent = '已停止';
+                stopAutoRequest();
+            }
+        }
+
+        // 获取数据
+        // silent: 是否静默刷新（不显示加载指示器）
+        async function fetchData(silent = false) {
+            if (!isMonitoring) return;
+
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const errorMessage = document.getElementById('errorMessage');
+            const dataTable = document.getElementById('dataTable');
+            const emptyMessage = document.getElementById('emptyMessage');
+
+            // 静默刷新时不显示加载指示器，也不隐藏表格
+            if (!silent) {
+                loadingIndicator.style.display = 'block';
+                dataTable.style.display = 'none';
+                emptyMessage.style.display = 'none';
+            }
+            errorMessage.style.display = 'none';
+
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/mission/groupNoReqTime');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP错误! 状态: ${response.status}`);
+                }
+
+                const responseData = await response.json();
+                
+                // 静默刷新时不隐藏加载指示器（因为本来就没显示）
+                if (!silent) {
+                    loadingIndicator.style.display = 'none';
+                }
+                
+                // 检查响应格式
+                if (!responseData || responseData.code !== 0) {
+                    errorMessage.textContent = `请求失败: ${responseData?.msg || '未知错误'}`;
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                // 提取 reqTime 数据
+                const reqTimeData = responseData.data?.reqTime;
+                if (!reqTimeData || Object.keys(reqTimeData).length === 0) {
+                    if (!silent) {
+                        emptyMessage.style.display = 'block';
+                    }
+                    return;
+                }
+
+                // 处理数据
+                displayData(reqTimeData);
+                updateLastUpdateTime();
+
+            } catch (error) {
+                console.error('请求失败:', error);
+                if (!silent) {
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.textContent = `请求失败: ${error.message}`;
+                    errorMessage.style.display = 'block';
+                }
+            }
+        }
+
+        // 显示数据
+        function displayData(reqTimeData) {
+            const tableBody = document.getElementById('tableBody');
+            const dataTable = document.getElementById('dataTable');
+            const emptyMessage = document.getElementById('emptyMessage');
+
+            tableBody.innerHTML = '';
+
+            // reqTimeData 是一个对象，key 是电脑组号，value 是时间戳（毫秒）
+            if (!reqTimeData || typeof reqTimeData !== 'object' || Object.keys(reqTimeData).length === 0) {
+                emptyMessage.style.display = 'block';
+                dataTable.style.display = 'none';
+                return;
+            }
+
+            dataTable.style.display = 'table';
+            emptyMessage.style.display = 'none';
+
+            // 将对象转换为数组并排序（按电脑组号）
+            const dataArray = Object.entries(reqTimeData)
+                .map(([groupNo, timestamp]) => ({
+                    groupNo: groupNo,
+                    reqTime: timestamp // 时间戳（毫秒）
+                }))
+                .sort((a, b) => {
+                    // 按数字排序，如果都是数字的话
+                    const numA = parseInt(a.groupNo);
+                    const numB = parseInt(b.groupNo);
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                        return numA - numB;
+                    }
+                    return a.groupNo.localeCompare(b.groupNo);
+                });
+
+            dataArray.forEach(item => {
+                const row = document.createElement('tr');
+                const groupNo = item.groupNo;
+                const reqTime = item.reqTime; // 这是时间戳（毫秒）
+
+                // 检查是否被拉黑
+                if (blockedGroups.has(groupNo)) {
+                    row.classList.add('blocked');
+                }
+
+                // 创建单元格
+                const groupCell = document.createElement('td');
+                groupCell.textContent = groupNo;
+                row.appendChild(groupCell);
+
+                const timeCell = document.createElement('td');
+                const timeDisplay = document.createElement('span');
+                timeDisplay.className = 'time-display';
+                
+                if (reqTime) {
+                    // reqTime 是时间戳（毫秒），需要转换为 Date 对象
+                    const time = new Date(reqTime);
+                    const now = new Date();
+                    const diffSeconds = Math.floor((now - time) / 1000);
+                    
+                    timeDisplay.textContent = formatTime(time) + ` (${diffSeconds}秒前)`;
+                    
+                    // 检查是否超过阈值
+                    const threshold = parseInt(document.getElementById('thresholdInput').value) || 30;
+                    if (diffSeconds > threshold && !blockedGroups.has(groupNo)) {
+                        timeDisplay.classList.add('overdue');
+                        row.classList.add('alert');
+                    }
+                } else {
+                    timeDisplay.textContent = '无数据';
+                    timeDisplay.classList.add('overdue');
+                    if (!blockedGroups.has(groupNo)) {
+                        row.classList.add('alert');
+                    }
+                }
+                
+                timeCell.appendChild(timeDisplay);
+                row.appendChild(timeCell);
+
+                // 操作列
+                const actionCell = document.createElement('td');
+                actionCell.className = 'action-cell';
+                
+                const blockBtn = document.createElement('button');
+                if (blockedGroups.has(groupNo)) {
+                    blockBtn.textContent = '取消拉黑';
+                    blockBtn.className = 'unblock';
+                    blockBtn.onclick = () => unblockGroup(groupNo);
+                } else {
+                    blockBtn.textContent = '拉黑';
+                    blockBtn.className = 'block';
+                    blockBtn.onclick = () => blockGroup(groupNo);
+                }
+                
+                actionCell.appendChild(blockBtn);
+                row.appendChild(actionCell);
+
+                tableBody.appendChild(row);
+            });
+
+            // 检查报警
+            checkAlerts();
+        }
+
+        // 格式化时间
+        function formatTime(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        }
+
+        // 检查报警
+        function checkAlerts() {
+            const rows = document.querySelectorAll('#tableBody tr');
+            const threshold = parseInt(document.getElementById('thresholdInput').value) || 30;
+            let hasAlert = false;
+
+            rows.forEach(row => {
+                const groupNo = row.cells[0].textContent;
+                const timeDisplay = row.querySelector('.time-display');
+                
+                // 如果被拉黑，不报警
+                if (blockedGroups.has(groupNo)) {
+                    row.classList.remove('alert');
+                    timeDisplay?.classList.remove('overdue');
+                    return;
+                }
+
+                // 检查时间差
+                const timeText = timeDisplay?.textContent || '';
+                const match = timeText.match(/\((\d+)秒前\)/);
+                if (match) {
+                    const diffSeconds = parseInt(match[1]);
+                    if (diffSeconds > threshold || timeText.includes('无数据')) {
+                        row.classList.add('alert');
+                        timeDisplay?.classList.add('overdue');
+                        hasAlert = true;
+                    } else {
+                        row.classList.remove('alert');
+                        timeDisplay?.classList.remove('overdue');
+                    }
+                } else if (timeText.includes('无数据')) {
+                    row.classList.add('alert');
+                    timeDisplay?.classList.add('overdue');
+                    hasAlert = true;
+                }
+            });
+
+            // 如果有报警，播放声音
+            if (hasAlert && isMonitoring) {
+                playAlertSound();
+            }
+        }
+
+        // 播放报警声音
+        function playAlertSound() {
+            if (!audioContext) {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.warn('无法创建音频上下文:', e);
+                    return;
+                }
+            }
+
+            try {
+                // 创建简单的报警音（440Hz，持续0.2秒）
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = 440;
+                oscillator.type = 'sine';
+
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.2);
+            } catch (e) {
+                console.warn('播放声音失败:', e);
+            }
+        }
+
+        // 拉黑电脑组
+        function blockGroup(groupNo) {
+            blockedGroups.add(groupNo);
+            saveBlockedGroups();
+            // 重新渲染表格
+            fetchData();
+        }
+
+        // 取消拉黑
+        function unblockGroup(groupNo) {
+            blockedGroups.delete(groupNo);
+            saveBlockedGroups();
+            // 重新渲染表格
+            fetchData();
+        }
+
+        // 更新最后更新时间
+        function updateLastUpdateTime() {
+            const now = new Date();
+            const timeStr = formatTime(now);
+            document.getElementById('lastUpdateTime').textContent = `最后更新: ${timeStr}`;
+        }
+    </script>
+</body>
+</html>

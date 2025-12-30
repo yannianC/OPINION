@@ -272,6 +272,11 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
+          <el-checkbox v-model="filters.showOpenTimeGreaterThanPositionTime" @change="applyFilters">
+            打开时间大于仓位抓取时间
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
           <label>打开时间:</label>
           <el-select 
             v-model="filters.openTimeOperator" 
@@ -1095,6 +1100,37 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 浏览器编号信息弹窗 -->
+    <el-dialog 
+      v-model="browserInfoDialogVisible" 
+      title="任务执行信息" 
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div class="browser-info-content">
+        <div class="info-item">
+          <span class="info-label">任务类型:</span>
+          <span class="info-value">{{ getTaskTypeName(browserInfoData.taskType) }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">总数量:</span>
+          <span class="info-value">{{ browserInfoData.totalCount }} 个</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">浏览器编号:</span>
+          <div class="info-value browser-ids">
+            {{ browserInfoData.browserIds.join(', ') }}
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="browserInfoDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="confirmBrowserInfoTask">确认执行</el-button>
+        </span>
+      </template>
+    </el-dialog>
     </div>
 
     <!-- 数据总计页面 -->
@@ -1460,6 +1496,16 @@ const transactionDialogVisible = ref(false)
 const currentTransactions = ref([])
 
 /**
+ * 浏览器编号信息弹窗相关
+ */
+const browserInfoDialogVisible = ref(false)
+const browserInfoData = ref({
+  browserIds: [],
+  totalCount: 0,
+  taskType: '' // 'refreshAll', 'refreshRed', 'cancelAndRefreshAll', 'cancelAndRefreshRed'
+})
+
+/**
  * 自动刷新相关
  */
 const autoRefresh = ref({
@@ -1513,6 +1559,7 @@ const filters = ref({
   showHasDifference: false,  // 显示与链上信息有差额
   showAvailableGreaterThanBalance: false,  // 显示可用大于余额
   showAvailableEqualBalance: false,  // 显示可用等于余额
+  showOpenTimeGreaterThanPositionTime: false,  // 显示打开时间大于仓位抓取时间
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
@@ -1535,6 +1582,7 @@ const activeFilters = ref({
   showAvailableGreaterThanBalance: false,  // 显示可用大于余额
   showAvailableEqualBalance: false,  // 显示可用等于余额
   showBalanceGreaterThanZeroButAvailableZero: false,  // 显示余额大于0但可用为0或空
+  showOpenTimeGreaterThanPositionTime: false,  // 显示打开时间大于仓位抓取时间
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
@@ -1623,6 +1671,7 @@ const applyFilters = () => {
     showAvailableGreaterThanBalance: filters.value.showAvailableGreaterThanBalance,
     showAvailableEqualBalance: filters.value.showAvailableEqualBalance,
     showBalanceGreaterThanZeroButAvailableZero: filters.value.showBalanceGreaterThanZeroButAvailableZero,
+    showOpenTimeGreaterThanPositionTime: filters.value.showOpenTimeGreaterThanPositionTime,
     openTimeOperator: openTimeOperator,
     openTimeValue: openTimeValue,
     positionTimeOperator: positionTimeOperator,
@@ -1651,6 +1700,7 @@ const clearFilters = () => {
     showAvailableGreaterThanBalance: false,
     showAvailableEqualBalance: false,
     showBalanceGreaterThanZeroButAvailableZero: false,
+    showOpenTimeGreaterThanPositionTime: false,
     openTimeOperator: '>',
     openTimeValue: null,
     positionTimeOperator: '>',
@@ -1672,6 +1722,7 @@ const clearFilters = () => {
     showAvailableGreaterThanBalance: false,
     showAvailableEqualBalance: false,
     showBalanceGreaterThanZeroButAvailableZero: false,
+    showOpenTimeGreaterThanPositionTime: false,
     openTimeOperator: '>',
     openTimeValue: null,
     positionTimeOperator: '>',
@@ -1714,6 +1765,7 @@ const filteredTableData = computed(() => {
                     filters.showAvailableGreaterThanBalance ||
                     filters.showAvailableEqualBalance ||
                     filters.showBalanceGreaterThanZeroButAvailableZero ||
+                    filters.showOpenTimeGreaterThanPositionTime ||
                     (filters.openTimeValue !== null && filters.openTimeValue !== undefined) ||
                     (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined)
   
@@ -1845,6 +1897,21 @@ const filteredTableData = computed(() => {
         // 可用必须为0或空（向下取整后）
         if (available !== null && available !== undefined && available > 0) {
           return false  // 可用不为0或空，不显示
+        }
+      }
+      
+      // 显示打开时间大于仓位抓取时间筛选
+      if (filters.showOpenTimeGreaterThanPositionTime) {
+        // 必须同时有打开时间和仓位抓取时间
+        if (!row.f || !row.d) {
+          return false  // 缺少时间数据，不显示
+        }
+        const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+        const positionTime = typeof row.d === 'string' ? parseInt(row.d) : row.d
+        
+        // 检查打开时间是否大于仓位抓取时间
+        if (openTime <= positionTime) {
+          return false  // 打开时间不大于仓位抓取时间，不显示
         }
       }
       
@@ -3823,9 +3890,24 @@ const submitRefreshTaskWithRetry = async (row, retryDelay = 2000) => {
 }
 
 /**
- * 显示延迟时间输入对话框（一键抓所有）
+ * 获取任务类型名称
  */
-const showDelayDialogForRefreshAll = async () => {
+const getTaskTypeName = (taskType) => {
+  const typeMap = {
+    'refreshAll': '一键抓所有',
+    'refreshRed': '一键抓异常',
+    'cancelAndRefreshAll': '一键撤单后抓所有',
+    'cancelAndRefreshRed': '异常撤单抓取'
+  }
+  return typeMap[taskType] || '未知任务'
+}
+
+/**
+ * 确认执行浏览器信息任务
+ */
+const confirmBrowserInfoTask = async () => {
+  browserInfoDialogVisible.value = false
+  
   try {
     const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
       confirmButtonText: '确认',
@@ -3852,130 +3934,137 @@ const showDelayDialogForRefreshAll = async () => {
       await new Promise(resolve => setTimeout(resolve, delayMs))
     }
     
-    await refreshAllPositions()
+    // 根据任务类型执行相应的任务
+    const taskType = browserInfoData.value.taskType
+    if (taskType === 'refreshAll') {
+      await refreshAllPositions()
+    } else if (taskType === 'refreshRed') {
+      await refreshRedPositions()
+    } else if (taskType === 'cancelAndRefreshAll') {
+      await cancelAndRefreshAll()
+    } else if (taskType === 'cancelAndRefreshRed') {
+      await cancelAndRefreshRed()
+    }
   } catch (error) {
     // 用户点击取消，不执行任何操作
     if (error !== 'cancel') {
       console.error('显示延迟对话框失败:', error)
     }
   }
+}
+
+/**
+ * 显示延迟时间输入对话框（一键抓所有）
+ */
+const showDelayDialogForRefreshAll = async () => {
+  // 获取所有有浏览器编号和电脑组的行
+  const validRows = tableData.value.filter(row => 
+    row.fingerprintNo && row.computeGroup && row.platform
+  )
+  
+  if (validRows.length === 0) {
+    ElMessage.warning('没有可刷新的账户')
+    return
+  }
+  
+  // 收集浏览器编号
+  const browserIds = validRows.map(row => String(row.fingerprintNo))
+  
+  // 显示浏览器编号信息对话框
+  browserInfoData.value = {
+    browserIds: browserIds,
+    totalCount: browserIds.length,
+    taskType: 'refreshAll'
+  }
+  browserInfoDialogVisible.value = true
 }
 
 /**
  * 显示延迟时间输入对话框（一键抓异常）
  */
 const showDelayDialogForRefreshRed = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: '0',
-      inputValue: '0',
-      inputValidator: (value) => {
-        if (value === null || value === '') {
-          return '请输入延迟时间'
-        }
-        const num = Number(value)
-        if (isNaN(num) || num < 0) {
-          return '请输入有效的数字（>= 0）'
-        }
-        return true
-      }
-    })
-    
-    const delayMinutes = Number(value) || 0
-    const delayMs = delayMinutes * 60 * 1000
-    
-    if (delayMs > 0) {
-      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
-    }
-    
-    await refreshRedPositions()
-  } catch (error) {
-    // 用户点击取消，不执行任何操作
-    if (error !== 'cancel') {
-      console.error('显示延迟对话框失败:', error)
-    }
+  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中）
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const redRows = tableData.value.filter(row => 
+    row.fingerprintNo && 
+    row.computeGroup && 
+    row.platform &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row)
+  )
+  
+  if (redRows.length === 0) {
+    ElMessage.warning('没有需要刷新的变红仓位')
+    return
   }
+  
+  // 收集浏览器编号
+  const browserIds = redRows.map(row => String(row.fingerprintNo))
+  
+  // 显示浏览器编号信息对话框
+  browserInfoData.value = {
+    browserIds: browserIds,
+    totalCount: browserIds.length,
+    taskType: 'refreshRed'
+  }
+  browserInfoDialogVisible.value = true
 }
 
 /**
  * 显示延迟时间输入对话框（一键撤单后抓所有）
  */
 const showDelayDialogForCancelAndRefreshAll = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: '0',
-      inputValue: '0',
-      inputValidator: (value) => {
-        if (value === null || value === '') {
-          return '请输入延迟时间'
-        }
-        const num = Number(value)
-        if (isNaN(num) || num < 0) {
-          return '请输入有效的数字（>= 0）'
-        }
-        return true
-      }
-    })
-    
-    const delayMinutes = Number(value) || 0
-    const delayMs = delayMinutes * 60 * 1000
-    
-    if (delayMs > 0) {
-      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
-    }
-    
-    await cancelAndRefreshAll()
-  } catch (error) {
-    // 用户点击取消，不执行任何操作
-    if (error !== 'cancel') {
-      console.error('显示延迟对话框失败:', error)
-    }
+  // 获取所有有浏览器编号和电脑组的行
+  const validRows = tableData.value.filter(row => 
+    row.fingerprintNo && row.computeGroup && row.platform
+  )
+  
+  if (validRows.length === 0) {
+    ElMessage.warning('没有可操作的账户')
+    return
   }
+  
+  // 收集浏览器编号
+  const browserIds = validRows.map(row => String(row.fingerprintNo))
+  
+  // 显示浏览器编号信息对话框
+  browserInfoData.value = {
+    browserIds: browserIds,
+    totalCount: browserIds.length,
+    taskType: 'cancelAndRefreshAll'
+  }
+  browserInfoDialogVisible.value = true
 }
 
 /**
  * 显示延迟时间输入对话框（异常撤单抓取）
  */
 const showDelayDialogForCancelAndRefreshRed = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: '0',
-      inputValue: '0',
-      inputValidator: (value) => {
-        if (value === null || value === '') {
-          return '请输入延迟时间'
-        }
-        const num = Number(value)
-        if (isNaN(num) || num < 0) {
-          return '请输入有效的数字（>= 0）'
-        }
-        return true
-      }
-    })
-    
-    const delayMinutes = Number(value) || 0
-    const delayMs = delayMinutes * 60 * 1000
-    
-    if (delayMs > 0) {
-      ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
-    }
-    
-    await cancelAndRefreshRed()
-  } catch (error) {
-    // 用户点击取消，不执行任何操作
-    if (error !== 'cancel') {
-      console.error('显示延迟对话框失败:', error)
-    }
+  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中）
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const redRows = tableData.value.filter(row => 
+    row.fingerprintNo && 
+    row.computeGroup && 
+    row.platform &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row)
+  )
+  
+  if (redRows.length === 0) {
+    ElMessage.warning('没有需要操作的变红仓位')
+    return
   }
+  
+  // 收集浏览器编号
+  const browserIds = redRows.map(row => String(row.fingerprintNo))
+  
+  // 显示浏览器编号信息对话框
+  browserInfoData.value = {
+    browserIds: browserIds,
+    totalCount: browserIds.length,
+    taskType: 'cancelAndRefreshRed'
+  }
+  browserInfoDialogVisible.value = true
 }
 
 /**
@@ -6005,6 +6094,52 @@ onUnmounted(() => {
   color: #333;
   font-weight: 500;
   word-break: break-all;
+}
+
+.browser-info-content {
+  padding: 20px;
+  min-height: 150px;
+}
+
+.info-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  border-left: 4px solid #409eff;
+}
+
+.info-item:last-child {
+  margin-bottom: 0;
+}
+
+.info-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #606266;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.info-value {
+  font-size: 15px;
+  color: #333;
+  font-weight: 500;
+  word-break: break-all;
+  flex: 1;
+}
+
+.browser-ids {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px;
+  background-color: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  line-height: 1.8;
 }
 </style>
 

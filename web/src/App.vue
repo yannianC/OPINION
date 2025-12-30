@@ -119,6 +119,26 @@
               />
             </div>
             <div class="trending-filter">
+              <label>
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.needJudgeDF"
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                />
+                不交易变红且抓取仓位时间距离现在超过xx小时的仓位(小时):
+              </label>
+              <input 
+                v-model.number="hedgeMode.maxDHour" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                placeholder="12"
+                :disabled="autoHedgeRunning || !hedgeMode.needJudgeDF"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
               <label>订单薄至少组数:</label>
               <input 
                 v-model.number="hedgeMode.minOrderbookDepth" 
@@ -1567,6 +1587,9 @@
           <button type="button" class="btn btn-secondary btn-sm" @click="hideAllConfigs">
             全部隐藏
           </button>
+          <button type="button" class="btn btn-warning btn-sm" @click="cancelAllBlacklist">
+            取消所有拉黑
+          </button>
           <button type="button" class="btn btn-success btn-sm" @click="showOnlyValidOrderbooks" :class="{ 'btn-active': showOnlyValid }">
             {{ showOnlyValid ? '显示全部' : '只显示符合对冲条件的' }}
           </button>
@@ -2252,7 +2275,9 @@ const hedgeMode = reactive({
   minTotalDepth: 2000,  // 买1-N和卖1-N累加的最小深度
   maxOpenHour: 4,  // 可加仓时间（小时）
   closeOpenHourArea: '12,36',  // 可平仓随机区间（小时）
-  maxIpDelay: ''  // ip最大延迟（毫秒）
+  maxIpDelay: '',  // ip最大延迟（毫秒）
+  needJudgeDF: false,  // 是否过滤超时仓位
+  maxDHour: 12  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
 })
 
 // 交易费查询
@@ -2328,6 +2353,7 @@ const LOCAL_STORAGE_KEY = 'hedge_logs'
 const HEDGE_SETTINGS_KEY = 'hedge_settings'
 const MONITOR_BROWSER_KEY = 'monitor_browser_ids'
 const CONFIG_VISIBLE_KEY = 'config_visible_status'  // 配置显示状态
+const CONFIG_BLACKLIST_KEY = 'config_blacklist'  // 配置拉黑状态
 
 // 对冲任务暂停状态（按 trendingId 记录）
 const pausedType3Tasks = ref(new Set())
@@ -4086,7 +4112,7 @@ const showEditConfigDialog = () => {
   // 加载评分数据
   loadConfigRatings()
   
-  // 加载拉黑状态
+  // 加载拉黑状态（从本地存储获取）
   loadConfigBlacklist()
   
   // 保存原始配置数据的副本，用于比较是否修改
@@ -4153,6 +4179,31 @@ const hideAllConfigs = () => {
 }
 
 /**
+ * 取消所有拉黑
+ */
+const cancelAllBlacklist = () => {
+  if (confirm('确定要取消所有配置的拉黑状态吗？')) {
+    try {
+      // 将所有配置的拉黑状态设置为 false
+      editConfigList.value.forEach(config => {
+        config.isBlacklisted = false
+      })
+      
+      // 清空本地存储中的拉黑列表
+      localStorage.removeItem(CONFIG_BLACKLIST_KEY)
+      
+      // 更新活动配置列表
+      updateActiveConfigs()
+      
+      // alert('已取消所有配置的拉黑状态')
+    } catch (error) {
+      console.error('取消所有拉黑失败:', error)
+      alert('取消所有拉黑失败: ' + error.message)
+    }
+  }
+}
+
+/**
  * 只显示符合对冲条件的配置
  */
 const showOnlyValidOrderbooks = () => {
@@ -4208,26 +4259,25 @@ const saveConfigRating = (config) => {
 }
 
 /**
- * 加载配置拉黑状态
+ * 加载配置拉黑状态（从本地存储获取）
  */
 const loadConfigBlacklist = () => {
   try {
-    const blacklistStr = localStorage.getItem('configBlacklist')
+    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
     if (blacklistStr) {
       const blacklist = JSON.parse(blacklistStr)
       editConfigList.value.forEach(config => {
-        // 根据trending字段判断是否在拉黑列表中
-        config.isBlacklisted = !!blacklist[config.trending]
+        // 从本地存储读取拉黑状态，使用 trending 作为 key
+        config.isBlacklisted = blacklist[config.trending] === true
       })
     } else {
-      // 如果没有拉黑列表，初始化所有配置为未拉黑
+      // 如果没有本地存储数据，默认未拉黑
       editConfigList.value.forEach(config => {
         config.isBlacklisted = false
       })
     }
   } catch (error) {
     console.error('加载拉黑状态失败:', error)
-    // 出错时初始化所有配置为未拉黑
     editConfigList.value.forEach(config => {
       config.isBlacklisted = false
     })
@@ -4235,22 +4285,38 @@ const loadConfigBlacklist = () => {
 }
 
 /**
- * 保存配置拉黑状态
+ * 保存配置拉黑状态（保存到本地存储）
  */
 const saveConfigBlacklist = (config) => {
   try {
-    const blacklistStr = localStorage.getItem('configBlacklist')
+    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
     const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
     
     if (config.isBlacklisted) {
-      // 添加到拉黑列表
       blacklist[config.trending] = true
     } else {
-      // 从拉黑列表中移除
       delete blacklist[config.trending]
     }
     
-    localStorage.setItem('configBlacklist', JSON.stringify(blacklist))
+    localStorage.setItem(CONFIG_BLACKLIST_KEY, JSON.stringify(blacklist))
+    
+    // 如果被拉黑，需要关闭该主题的所有运行中的对冲任务
+    if (config.isBlacklisted) {
+      // 在 activeConfigs 中查找对应的配置（可能还在列表中）
+      const activeConfig = activeConfigs.value.find(c => c.id === config.id)
+      if (activeConfig && activeConfig.currentHedges) {
+        const runningHedges = activeConfig.currentHedges.filter(h => h.finalStatus === 'running')
+        if (runningHedges.length > 0) {
+          console.log(`[拉黑] 配置 ${config.trending} 有 ${runningHedges.length} 个运行中的对冲任务，开始关闭...`)
+          // 关闭所有运行中的对冲任务
+          runningHedges.forEach(hedge => {
+            hedge.finalStatus = 'blacklisted'
+            finishHedge(activeConfig, hedge)
+          })
+          console.log(`[拉黑] 配置 ${config.trending} 的所有对冲任务已关闭`)
+        }
+      }
+    }
     
     // 更新活动配置列表，确保拉黑的主题立即从自动分配中移除
     updateActiveConfigs()
@@ -4258,12 +4324,13 @@ const saveConfigBlacklist = (config) => {
     console.log(`配置 ${config.trending} ${config.isBlacklisted ? '已拉黑' : '已解除拉黑'}`)
   } catch (error) {
     console.error('保存拉黑状态失败:', error)
+    alert('保存拉黑状态失败: ' + error.message)
   }
 }
 
 /**
  * 快速拉黑功能
- * 将输入框中的主题（按分号分隔）都设置为拉黑状态
+ * 将输入框中的主题（按分号分隔）都设置为拉黑状态，并保存到本地存储
  */
 const quickBlacklist = () => {
   if (!quickBlacklistInput.value || !quickBlacklistInput.value.trim()) {
@@ -4282,83 +4349,96 @@ const quickBlacklist = () => {
     return
   }
   
-  // 获取拉黑列表
-  let blacklist = {}
   try {
-    const blacklistStr = localStorage.getItem('configBlacklist')
-    if (blacklistStr) {
-      blacklist = JSON.parse(blacklistStr)
-    }
-  } catch (error) {
-    console.error('读取拉黑列表失败:', error)
-    blacklist = {}
-  }
-  
-  let matchedCount = 0
-  let notFoundTopics = []
-  
-  // 遍历所有配置，匹配主题并设置为拉黑（只进行完全匹配）
-  editConfigList.value.forEach(config => {
-    // 只进行完全匹配，包括###后面的部分
-    const configTrending = config.trending ? config.trending.trim() : ''
+    // 读取本地存储的拉黑列表
+    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
+    const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
     
-    for (const topic of topics) {
-      const topicTrimmed = topic.trim()
-      
-      // 完全匹配：去除首尾空格后完全相同
-      if (configTrending === topicTrimmed) {
-        config.isBlacklisted = true
-        blacklist[config.trending] = true
-        matchedCount++
-        break
-      }
-    }
-  })
-  
-  // 检查哪些主题没有匹配到
-  topics.forEach(topic => {
-    const topicTrimmed = topic.trim()
-    let found = false
+    let matchedCount = 0
+    let notFoundTopics = []
+    let newBlacklistedCount = 0
     
-    for (const config of editConfigList.value) {
+    // 遍历所有配置，匹配主题并设置为拉黑（只进行完全匹配）
+    editConfigList.value.forEach(config => {
+      // 只进行完全匹配，包括###后面的部分
       const configTrending = config.trending ? config.trending.trim() : ''
       
-      // 只进行完全匹配
-      if (configTrending === topicTrimmed) {
-        found = true
-        break
+      for (const topic of topics) {
+        const topicTrimmed = topic.trim()
+        
+        // 完全匹配：去除首尾空格后完全相同
+        if (configTrending === topicTrimmed) {
+          // 检查是否已经拉黑
+          if (blacklist[config.trending] !== true) {
+            // 设置为拉黑
+            blacklist[config.trending] = true
+            config.isBlacklisted = true
+            newBlacklistedCount++
+          } else {
+            // 已经拉黑了，只更新界面状态
+            config.isBlacklisted = true
+          }
+          matchedCount++
+          break
+        }
       }
-    }
+    })
     
-    if (!found) {
-      notFoundTopics.push(topicTrimmed)
+    // 检查哪些主题没有匹配到
+    topics.forEach(topic => {
+      const topicTrimmed = topic.trim()
+      let found = false
+      
+      for (const config of editConfigList.value) {
+        const configTrending = config.trending ? config.trending.trim() : ''
+        
+        // 只进行完全匹配
+        if (configTrending === topicTrimmed) {
+          found = true
+          break
+        }
+      }
+      
+      if (!found) {
+        notFoundTopics.push(topicTrimmed)
+      }
+    })
+    
+    // 保存到本地存储
+    if (newBlacklistedCount > 0) {
+      localStorage.setItem(CONFIG_BLACKLIST_KEY, JSON.stringify(blacklist))
+      
+      // 更新活动配置列表
+      updateActiveConfigs()
+      
+      // 显示结果
+      let message = `已成功拉黑 ${matchedCount} 个主题（其中 ${newBlacklistedCount} 个新拉黑）`
+      if (notFoundTopics.length > 0) {
+        message += `\n\n未找到以下主题（${notFoundTopics.length} 个）:\n${notFoundTopics.slice(0, 10).join('\n')}`
+        if (notFoundTopics.length > 10) {
+          message += `\n... 还有 ${notFoundTopics.length - 10} 个未显示`
+        }
+      }
+      alert(message)
+      
+      console.log('[快速拉黑] 匹配的主题数量:', matchedCount)
+      console.log('[快速拉黑] 新拉黑的配置数量:', newBlacklistedCount)
+      console.log('[快速拉黑] 未找到的主题:', notFoundTopics)
+    } else {
+      // 没有需要更新的配置，只显示结果
+      let message = `已找到 ${matchedCount} 个主题（均已拉黑，无需更新）`
+      if (notFoundTopics.length > 0) {
+        message += `\n\n未找到以下主题（${notFoundTopics.length} 个）:\n${notFoundTopics.slice(0, 10).join('\n')}`
+        if (notFoundTopics.length > 10) {
+          message += `\n... 还有 ${notFoundTopics.length - 10} 个未显示`
+        }
+      }
+      alert(message)
     }
-  })
-  
-  // 保存拉黑列表到 localStorage
-  try {
-    localStorage.setItem('configBlacklist', JSON.stringify(blacklist))
   } catch (error) {
-    console.error('保存拉黑列表失败:', error)
-    alert('保存拉黑列表失败，请重试')
-    return
+    console.error('快速拉黑失败:', error)
+    alert('快速拉黑失败: ' + error.message)
   }
-  
-  // 更新活动配置列表
-  updateActiveConfigs()
-  
-  // 显示结果
-  let message = `已成功拉黑 ${matchedCount} 个主题`
-  if (notFoundTopics.length > 0) {
-    message += `\n\n未找到以下主题（${notFoundTopics.length} 个）:\n${notFoundTopics.slice(0, 10).join('\n')}`
-    if (notFoundTopics.length > 10) {
-      message += `\n... 还有 ${notFoundTopics.length - 10} 个未显示`
-    }
-  }
-  alert(message)
-  
-  console.log('[快速拉黑] 匹配的主题数量:', matchedCount)
-  console.log('[快速拉黑] 未找到的主题:', notFoundTopics)
 }
 
 /**
@@ -4479,9 +4559,17 @@ const getConfigBatch = (config) => {
  * 获取配置状态
  */
 const getConfigStatus = (config) => {
-  // 已拉黑
-  if (config.isBlacklisted) {
-    return '已拉黑'
+  // 已拉黑：从本地存储判断
+  try {
+    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
+    if (blacklistStr) {
+      const blacklist = JSON.parse(blacklistStr)
+      if (blacklist[config.trending] === true) {
+        return '已拉黑'
+      }
+    }
+  } catch (error) {
+    console.error('读取拉黑状态失败:', error)
   }
   
   // 未添加：启用和显示有任意一个没有开启
@@ -4848,14 +4936,22 @@ const updateActiveConfigs = () => {
   // 先加载显示状态
   const configsWithVisible = loadConfigVisibleStatus(configList.value)
   
-  // 加载拉黑状态
-  const blacklistStr = localStorage.getItem('configBlacklist')
-  const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
+  // 从本地存储读取拉黑状态
+  let blacklist = {}
+  try {
+    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
+    if (blacklistStr) {
+      blacklist = JSON.parse(blacklistStr)
+    }
+  } catch (error) {
+    console.error('读取拉黑状态失败:', error)
+  }
   
+  // 过滤掉拉黑的配置（从本地存储判断）
   activeConfigs.value = configsWithVisible
     .filter(config => config.isOpen === 1 || config.enabled === true)  // 启用的配置
     .filter(config => config.visible !== false)  // 显示开关打开的配置
-    .filter(config => !blacklist[config.trending])  // 过滤掉拉黑的配置
+    .filter(config => blacklist[config.trending] !== true)  // 过滤掉拉黑的配置
     .map(config => {
       // 恢复保存的对冲信息
       const savedInfo = hedgeInfoMap.get(config.id)
@@ -6445,6 +6541,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
             requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
           }
+          // 添加 needJudgeDF 和 maxDHour 字段
+          requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+          requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
@@ -6463,6 +6562,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
             requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
           }
+          // 添加 needJudgeDF 和 maxDHour 字段
+          requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+          requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
         } else {
           // 模式1：使用原有接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4'
@@ -6483,6 +6585,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
             requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
           }
+          // 添加 needJudgeDF 和 maxDHour 字段
+          requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+          requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
         }
         
         const response = await axios.post(
@@ -7239,6 +7344,8 @@ const saveHedgeSettings = () => {
       priceRangeMax: hedgeMode.priceRangeMax,
       minTotalDepth: hedgeMode.minTotalDepth,
       maxIpDelay: hedgeMode.maxIpDelay,
+      needJudgeDF: hedgeMode.needJudgeDF,
+      maxDHour: hedgeMode.maxDHour,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
       hedgeTaskInterval: hedgeTaskInterval.value,
@@ -7328,6 +7435,12 @@ const loadHedgeSettings = () => {
     }
     if (settings.maxIpDelay !== undefined) {
       hedgeMode.maxIpDelay = settings.maxIpDelay
+    }
+    if (settings.needJudgeDF !== undefined) {
+      hedgeMode.needJudgeDF = settings.needJudgeDF
+    }
+    if (settings.maxDHour !== undefined) {
+      hedgeMode.maxDHour = settings.maxDHour
     }
     
     // 其他设置

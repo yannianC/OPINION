@@ -362,6 +362,92 @@
         .btn-clear-filter:hover {
             background: #5a6268;
         }
+
+        .query-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .query-section label {
+            color: #555;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .query-section input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 150px;
+            transition: border-color 0.3s;
+        }
+
+        .query-section input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-query {
+            padding: 8px 16px;
+            background: #28a745;
+            font-size: 14px;
+        }
+
+        .btn-query:hover {
+            background: #218838;
+        }
+
+        .stats-section {
+            background: #e7f3ff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+            border-left: 4px solid #667eea;
+        }
+
+        .stats-section.active {
+            display: block;
+        }
+
+        .stats-section h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .stat-item {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-item .stat-label {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-item .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -376,6 +462,30 @@
         <div id="loadingDiv" class="loading" style="display: none;">
             <div class="spinner"></div>
             <p>正在加载数据，请稍候...</p>
+        </div>
+
+        <div class="query-section">
+            <label for="queryDelayValue">延迟查询值（ms）：</label>
+            <input type="number" id="queryDelayValue" placeholder="请输入数字" min="0">
+            <button class="btn-query" onclick="queryDelayStats()">🔍 查询统计</button>
+        </div>
+
+        <div id="statsSection" class="stats-section">
+            <h3>延迟分布统计</h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-label">延迟 0 ~ <span id="statsQueryValue">-</span> ms</div>
+                    <div class="stat-value" id="statsCount0ToN">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">延迟 <span id="statsQueryValue2">-</span> ~ 19999 ms</div>
+                    <div class="stat-value" id="statsCountNTo19999">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">延迟 ≥ 20000 ms</div>
+                    <div class="stat-value" id="statsCount20000Plus">0</div>
+                </div>
+            </div>
         </div>
 
         <div id="filterSection" class="filter-section">
@@ -416,6 +526,7 @@
                         <th class="sortable" data-column="number" onclick="sortTable('number')">浏览器编号</th>
                         <th>最快的IP</th>
                         <th class="sortable" data-column="delay" onclick="sortTable('delay')">延迟</th>
+                        <th class="sortable" data-column="delayAvg" onclick="sortTable('delayAvg')">平均延迟</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -489,6 +600,16 @@
                     });
                 }
             });
+
+            // 设置查询输入框的回车键支持
+            const queryInput = document.getElementById('queryDelayValue');
+            if (queryInput) {
+                queryInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        queryDelayStats();
+                    }
+                });
+            }
 
             await loadAccountConfig();
             await loadData();
@@ -600,7 +721,7 @@
                 browserMap[number].push(item);
             });
 
-            // 对每个浏览器编号，找到延迟最小的IP
+            // 对每个浏览器编号，找到延迟最小的IP，并计算平均延迟
             const resultList = [];
             Object.keys(browserMap).forEach(number => {
                 const ips = browserMap[number];
@@ -610,29 +731,37 @@
                     const fastestIP = validIPs.reduce((min, current) => 
                         current.delay < min.delay ? current : min
                     );
+                    // 计算平均延迟
+                    const delaySum = validIPs.reduce((sum, ip) => sum + ip.delay, 0);
+                    const delayAvg = delaySum / validIPs.length;
                     resultList.push({
                         number: number,
-                        fastestIP: fastestIP
+                        fastestIP: fastestIP,
+                        delayAvg: delayAvg
                     });
                 } else if (ips.length > 0) {
                     // 如果没有有效的延迟值，使用第一个IP
                     resultList.push({
                         number: number,
-                        fastestIP: ips[0]
+                        fastestIP: ips[0],
+                        delayAvg: null
                     });
                 }
             });
 
-            // 保存数据到全局变量
-            originalDataList = resultList.map(item => {
-                const number = item.number;
-                const computeGroup = browserToGroupMap[number] || browserToGroupMap[String(number)] || '-';
-                return {
-                    number: number,
-                    computeGroup: computeGroup,
-                    fastestIP: item.fastestIP
-                };
-            });
+            // 保存数据到全局变量，并过滤掉没有电脑组的项
+            originalDataList = resultList
+                .map(item => {
+                    const number = item.number;
+                    const computeGroup = browserToGroupMap[number] || browserToGroupMap[String(number)] || '-';
+                    return {
+                        number: number,
+                        computeGroup: computeGroup,
+                        fastestIP: item.fastestIP,
+                        delayAvg: item.delayAvg
+                    };
+                })
+                .filter(item => item.computeGroup !== '-'); // 过滤掉没有电脑组的项
 
             // 重置筛选和排序状态
             currentDataList = [...originalDataList];
@@ -665,6 +794,7 @@
                 const number = item.number;
                 const fastestIP = item.fastestIP;
                 const computeGroup = item.computeGroup;
+                const delayAvg = item.delayAvg;
                 
                 // 延迟样式
                 let delayClass = 'delay-medium';
@@ -676,12 +806,25 @@
                     }
                 }
 
+                // 平均延迟样式
+                let delayAvgClass = 'delay-medium';
+                let delayAvgText = '-';
+                if (delayAvg !== null && delayAvg !== undefined && !isNaN(delayAvg)) {
+                    delayAvgText = Math.round(delayAvg) + 'ms';
+                    if (delayAvg < 1000) {
+                        delayAvgClass = 'delay-good';
+                    } else if (delayAvg > 2000) {
+                        delayAvgClass = 'delay-bad';
+                    }
+                }
+
                 row.innerHTML = `
                     <td>${index + 1}</td>
                     <td>${computeGroup}</td>
                     <td>${number}</td>
                     <td>${fastestIP.ip}</td>
                     <td class="${delayClass}">${fastestIP.delay !== null && fastestIP.delay !== undefined ? fastestIP.delay + 'ms' : '-'}</td>
+                    <td class="${delayAvgClass}">${delayAvgText}</td>
                     <td>
                         <button class="btn-view-more" onclick="viewMore('${number}')">查看更多</button>
                     </td>
@@ -715,6 +858,10 @@
                     case 'delay':
                         aValue = a.fastestIP.delay !== null && a.fastestIP.delay !== undefined ? a.fastestIP.delay : Infinity;
                         bValue = b.fastestIP.delay !== null && b.fastestIP.delay !== undefined ? b.fastestIP.delay : Infinity;
+                        break;
+                    case 'delayAvg':
+                        aValue = a.delayAvg !== null && a.delayAvg !== undefined && !isNaN(a.delayAvg) ? a.delayAvg : Infinity;
+                        bValue = b.delayAvg !== null && b.delayAvg !== undefined && !isNaN(b.delayAvg) ? b.delayAvg : Infinity;
                         break;
                     case 'number':
                         aValue = Number(a.number) || 0;
@@ -894,6 +1041,57 @@
 
             // 重新渲染表格
             renderTable();
+        }
+
+        /**
+         * 查询延迟统计
+         */
+        function queryDelayStats() {
+            const queryValue = document.getElementById('queryDelayValue').value.trim();
+            
+            if (!queryValue) {
+                alert('请输入查询值');
+                return;
+            }
+
+            const numValue = Number(queryValue);
+            if (isNaN(numValue) || numValue < 0) {
+                alert('请输入有效的数字（≥0）');
+                return;
+            }
+
+            // 使用原始数据列表进行统计（已过滤掉没有电脑组的项）
+            let count0ToN = 0;      // 0 到 numValue
+            let countNTo19999 = 0;  // numValue 到 19999
+            let count20000Plus = 0; // 20000 及以上
+
+            originalDataList.forEach(item => {
+                const delay = item.fastestIP.delay;
+                
+                // 只统计有延迟值的项
+                if (delay !== null && delay !== undefined && delay >= 0) {
+                    if (delay <= numValue) {
+                        // 0 到这个数的个数（包含这个数）
+                        count0ToN++;
+                    } else if (delay < 20000) {
+                        // 这个数到19999的个数（不包含这个数，从这个数+1开始）
+                        countNTo19999++;
+                    } else {
+                        // 20000及20000以上的个数
+                        count20000Plus++;
+                    }
+                }
+            });
+
+            // 更新统计显示
+            document.getElementById('statsQueryValue').textContent = numValue;
+            document.getElementById('statsQueryValue2').textContent = numValue;
+            document.getElementById('statsCount0ToN').textContent = count0ToN;
+            document.getElementById('statsCountNTo19999').textContent = countNTo19999;
+            document.getElementById('statsCount20000Plus').textContent = count20000Plus;
+
+            // 显示统计区域
+            document.getElementById('statsSection').classList.add('active');
         }
 
         /**

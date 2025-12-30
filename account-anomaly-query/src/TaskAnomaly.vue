@@ -175,23 +175,47 @@
                   <span class="sell-count">卖出: {{ taskStatistics.balanceOrPosition.sell }}</span>
                 </span>
               </div>
+              <div class="stat-item">
+                <span class="stat-label">挂单失败（普通）:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.orderFailed.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.orderFailed.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">限价距离市价差距过大:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.priceGapTooLarge.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.priceGapTooLarge.sell }}</span>
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">已有挂单:</span>
+                <span class="stat-value">
+                  <span class="buy-count">买入: {{ taskStatistics.alreadyHasOrder.buy }}</span>
+                  <span>/</span>
+                  <span class="sell-count">卖出: {{ taskStatistics.alreadyHasOrder.sell }}</span>
+                </span>
+              </div>
               <div class="stat-item stat-item-expandable">
                 <div class="stat-item-header">
-                  <span class="stat-label">挂单失败:</span>
+                  <span class="stat-label">挂单失败（全部）:</span>
                   <span class="stat-value">
-                    <span class="buy-count">买入: {{ taskStatistics.orderFailed.buy }}</span>
+                    <span class="buy-count">买入: {{ taskStatistics.orderFailed.buy + taskStatistics.priceGapTooLarge.buy + taskStatistics.alreadyHasOrder.buy }}</span>
                     <span>/</span>
-                    <span class="sell-count">卖出: {{ taskStatistics.orderFailed.sell }}</span>
+                    <span class="sell-count">卖出: {{ taskStatistics.orderFailed.sell + taskStatistics.priceGapTooLarge.sell + taskStatistics.alreadyHasOrder.sell }}</span>
                   </span>
                   <button 
-                    v-if="(taskStatistics.orderFailed.buy + taskStatistics.orderFailed.sell) > 0"
+                    v-if="(taskStatistics.orderFailed.buy + taskStatistics.orderFailed.sell + taskStatistics.priceGapTooLarge.buy + taskStatistics.priceGapTooLarge.sell + taskStatistics.alreadyHasOrder.buy + taskStatistics.alreadyHasOrder.sell) > 0"
                     class="expand-msg-btn"
                     @click="showOrderFailedMsgs = !showOrderFailedMsgs"
                   >
                     {{ showOrderFailedMsgs ? '收起' : '查看msg' }}
                   </button>
                 </div>
-                <div v-if="showOrderFailedMsgs && (taskStatistics.orderFailed.buy + taskStatistics.orderFailed.sell) > 0" class="msg-list">
+                <div v-if="showOrderFailedMsgs && (taskStatistics.orderFailed.buy + taskStatistics.orderFailed.sell + taskStatistics.priceGapTooLarge.buy + taskStatistics.priceGapTooLarge.sell + taskStatistics.alreadyHasOrder.buy + taskStatistics.alreadyHasOrder.sell) > 0" class="msg-list">
                   <div class="msg-list-title">挂单失败的不同msg（共 {{ uniqueOrderFailedMsgs.length }} 种）:</div>
                   <div class="msg-list-items">
                     <div 
@@ -215,9 +239,12 @@
                   开仓成功率{{ buyStatistics.successRate }}%，
                   其中部分成交{{ buyStatistics.partialFilled }}%，
                   单边成交{{ buyStatistics.singleSideFilled }}%，
-                  IP问题{{ buyStatistics.ipProblem }}%，
+                  未成交的{{ buyStatistics.notFilled }}%，
+                  失败原因：IP问题{{ buyStatistics.ipProblem }}%，
                   余额或仓位错误{{ buyStatistics.balanceOrPosition }}%，
-                  挂单失败{{ buyStatistics.orderFailed }}%
+                  挂单失败{{ buyStatistics.orderFailed }}%，
+                  限价距离市价差距过大{{ buyStatistics.priceGapTooLarge }}%，
+                  已有挂单{{ buyStatistics.alreadyHasOrder }}%
                 </div>
               </div>
               <div class="summary-item sell-summary">
@@ -226,9 +253,12 @@
                   平仓成功率{{ sellStatistics.successRate }}%，
                   其中部分成交{{ sellStatistics.partialFilled }}%，
                   单边成交{{ sellStatistics.singleSideFilled }}%，
-                  IP问题{{ sellStatistics.ipProblem }}%，
+                  未成交的{{ sellStatistics.notFilled }}%，
+                  失败原因：IP问题{{ sellStatistics.ipProblem }}%，
                   余额或仓位错误{{ sellStatistics.balanceOrPosition }}%，
-                  挂单失败{{ sellStatistics.orderFailed }}%
+                  挂单失败{{ sellStatistics.orderFailed }}%，
+                  限价距离市价差距过大{{ sellStatistics.priceGapTooLarge }}%，
+                  已有挂单{{ sellStatistics.alreadyHasOrder }}%
                 </div>
               </div>
             </div>
@@ -712,7 +742,9 @@ export default {
         singleSideFilled: { buy: 0, sell: 0 }, // Position未检测到变化超时，但对方已变化，保留挂单的（单边成交的）
         ipProblem: { buy: 0, sell: 0 },        // ip问题（包含执行异常）
         balanceOrPosition: { buy: 0, sell: 0 }, // 余额或仓位不对（包含开仓有对向仓位）
-        orderFailed: { buy: 0, sell: 0 }       // 挂单失败
+        orderFailed: { buy: 0, sell: 0 },      // 挂单失败（普通）
+        priceGapTooLarge: { buy: 0, sell: 0 }, // 限价距离市价差距过大
+        alreadyHasOrder: { buy: 0, sell: 0 }   // 已有挂单
       },
       orderFailedMsgs: [], // 存储"挂单失败"的所有不同msg（包含重复，用于统计）
       showOrderFailedMsgs: false, // 是否显示"挂单失败"的msg列表
@@ -902,19 +934,32 @@ export default {
           successRate: 0,
           partialFilled: 0,
           singleSideFilled: 0,
+          notFilled: 0,
           ipProblem: 0,
           balanceOrPosition: 0,
-          orderFailed: 0
+          orderFailed: 0,
+          priceGapTooLarge: 0,
+          alreadyHasOrder: 0
         }
       }
+      
+      const ipProblem = (this.taskStatistics.ipProblem.buy / total) * 100
+      const balanceOrPosition = (this.taskStatistics.balanceOrPosition.buy / total) * 100
+      const orderFailed = (this.taskStatistics.orderFailed.buy / total) * 100
+      const priceGapTooLarge = (this.taskStatistics.priceGapTooLarge.buy / total) * 100
+      const alreadyHasOrder = (this.taskStatistics.alreadyHasOrder.buy / total) * 100
+      const notFilled = ipProblem + balanceOrPosition + orderFailed + priceGapTooLarge + alreadyHasOrder
       
       return {
         successRate: ((this.taskStatistics.allFilled.buy / total) * 100).toFixed(2),
         partialFilled: ((this.taskStatistics.partialFilled.buy / total) * 100).toFixed(2),
         singleSideFilled: ((this.taskStatistics.singleSideFilled.buy / total) * 100).toFixed(2),
-        ipProblem: ((this.taskStatistics.ipProblem.buy / total) * 100).toFixed(2),
-        balanceOrPosition: ((this.taskStatistics.balanceOrPosition.buy / total) * 100).toFixed(2),
-        orderFailed: ((this.taskStatistics.orderFailed.buy / total) * 100).toFixed(2)
+        notFilled: notFilled.toFixed(2),
+        ipProblem: ipProblem.toFixed(2),
+        balanceOrPosition: balanceOrPosition.toFixed(2),
+        orderFailed: orderFailed.toFixed(2),
+        priceGapTooLarge: priceGapTooLarge.toFixed(2),
+        alreadyHasOrder: alreadyHasOrder.toFixed(2)
       }
     },
     
@@ -926,19 +971,32 @@ export default {
           successRate: 0,
           partialFilled: 0,
           singleSideFilled: 0,
+          notFilled: 0,
           ipProblem: 0,
           balanceOrPosition: 0,
-          orderFailed: 0
+          orderFailed: 0,
+          priceGapTooLarge: 0,
+          alreadyHasOrder: 0
         }
       }
+      
+      const ipProblem = (this.taskStatistics.ipProblem.sell / total) * 100
+      const balanceOrPosition = (this.taskStatistics.balanceOrPosition.sell / total) * 100
+      const orderFailed = (this.taskStatistics.orderFailed.sell / total) * 100
+      const priceGapTooLarge = (this.taskStatistics.priceGapTooLarge.sell / total) * 100
+      const alreadyHasOrder = (this.taskStatistics.alreadyHasOrder.sell / total) * 100
+      const notFilled = ipProblem + balanceOrPosition + orderFailed + priceGapTooLarge + alreadyHasOrder
       
       return {
         successRate: ((this.taskStatistics.allFilled.sell / total) * 100).toFixed(2),
         partialFilled: ((this.taskStatistics.partialFilled.sell / total) * 100).toFixed(2),
         singleSideFilled: ((this.taskStatistics.singleSideFilled.sell / total) * 100).toFixed(2),
-        ipProblem: ((this.taskStatistics.ipProblem.sell / total) * 100).toFixed(2),
-        balanceOrPosition: ((this.taskStatistics.balanceOrPosition.sell / total) * 100).toFixed(2),
-        orderFailed: ((this.taskStatistics.orderFailed.sell / total) * 100).toFixed(2)
+        notFilled: notFilled.toFixed(2),
+        ipProblem: ipProblem.toFixed(2),
+        balanceOrPosition: balanceOrPosition.toFixed(2),
+        orderFailed: orderFailed.toFixed(2),
+        priceGapTooLarge: priceGapTooLarge.toFixed(2),
+        alreadyHasOrder: alreadyHasOrder.toFixed(2)
       }
     }
   },
@@ -1276,7 +1334,17 @@ export default {
         return 'balanceOrPosition'
       }
       
-      // 其他错误都归为挂单失败
+      // 挂单失败细分：限价距离市价差距过大
+      if (msg.includes('限价距离市价差距过大')) {
+        return 'priceGapTooLarge'
+      }
+      
+      // 挂单失败细分：已有挂单
+      if (msg.includes('已有挂单')) {
+        return 'alreadyHasOrder'
+      }
+      
+      // 其他错误都归为挂单失败（普通）
       return 'orderFailed'
     },
     
@@ -1289,7 +1357,9 @@ export default {
         singleSideFilled: { buy: 0, sell: 0 },
         ipProblem: { buy: 0, sell: 0 },
         balanceOrPosition: { buy: 0, sell: 0 },
-        orderFailed: { buy: 0, sell: 0 }
+        orderFailed: { buy: 0, sell: 0 },
+        priceGapTooLarge: { buy: 0, sell: 0 },
+        alreadyHasOrder: { buy: 0, sell: 0 }
       }
       this.orderFailedMsgs = []
     },
