@@ -241,7 +241,7 @@
                   单边成交{{ buyStatistics.singleSideFilled }}%，
                   未成交的{{ buyStatistics.notFilled }}%，
                   失败原因：IP问题{{ buyStatistics.ipProblem }}%，
-                  余额或仓位错误{{ buyStatistics.balanceOrPosition }}%，
+                  资产更新不及时{{ buyStatistics.balanceOrPosition }}%，
                   挂单失败{{ buyStatistics.orderFailed }}%，
                   限价距离市价差距过大{{ buyStatistics.priceGapTooLarge }}%，
                   已有挂单{{ buyStatistics.alreadyHasOrder }}%
@@ -255,7 +255,7 @@
                   单边成交{{ sellStatistics.singleSideFilled }}%，
                   未成交的{{ sellStatistics.notFilled }}%，
                   失败原因：IP问题{{ sellStatistics.ipProblem }}%，
-                  余额或仓位错误{{ sellStatistics.balanceOrPosition }}%，
+                  资产更新不及时{{ sellStatistics.balanceOrPosition }}%，
                   挂单失败{{ sellStatistics.orderFailed }}%，
                   限价距离市价差距过大{{ sellStatistics.priceGapTooLarge }}%，
                   已有挂单{{ sellStatistics.alreadyHasOrder }}%
