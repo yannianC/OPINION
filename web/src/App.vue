@@ -275,9 +275,23 @@
             
             <!-- 时间过滤输入框 -->
             <div class="hedge-time-filter">
-              <span class="filter-label">最近</span>
+              <span class="filter-label">开仓使用：最近</span>
               <input 
                 v-model.number="hedgeMode.timePassMin" 
+                type="number" 
+                class="time-input" 
+                min="0"
+                placeholder="60"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+              <span class="filter-label">分钟内有过任意操作的，不参与</span>
+            </div>
+            
+            <div class="hedge-time-filter">
+              <span class="filter-label">平仓使用：最近</span>
+              <input 
+                v-model.number="hedgeMode.minCloseMin" 
                 type="number" 
                 class="time-input" 
                 min="0"
@@ -1901,6 +1915,13 @@
                           log.yesOnChainBalance === '获取失败' ? 'error' : 'success']">
                           {{ log.yesOnChainBalance === undefined || log.yesOnChainBalance === '' ? '加载中...' : log.yesOnChainBalance }}
                         </span>
+                        <button 
+                          class="btn-view-log" 
+                          @click="openBroLogDialog(log.yesNumber)"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          查看日志
+                        </button>
                       </span>
                     </span>
                   </div>
@@ -1919,6 +1940,13 @@
                           log.noOnChainBalance === '获取失败' ? 'error' : 'success']">
                           {{ log.noOnChainBalance === undefined || log.noOnChainBalance === '' ? '加载中...' : log.noOnChainBalance }}
                         </span>
+                        <button 
+                          class="btn-view-log" 
+                          @click="openBroLogDialog(log.noNumber)"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          查看日志
+                        </button>
                       </span>
                     </span>
                   </div>
@@ -2014,6 +2042,33 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-warning" @click="clearAllHedgeLogs">清空所有日志</button>
           <button type="button" class="btn btn-secondary" @click="closeAllHedgeLogsDialog">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 浏览器日志弹窗 -->
+    <div v-if="showBroLogDialog" class="modal-overlay" @click="closeBroLogDialog">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>浏览器日志 (浏览器ID: {{ currentBroNumber }})</h3>
+          <button class="modal-close" @click="closeBroLogDialog">×</button>
+        </div>
+        <div class="bro-log-content">
+          <div v-if="isLoadingBroLogs" class="loading">加载中...</div>
+          <div v-else-if="broLogs.length === 0" class="empty">暂无日志记录</div>
+          <div v-else class="bro-log-list">
+            <div 
+              v-for="(logItem, index) in broLogs" 
+              :key="index" 
+              class="bro-log-item"
+            >
+              <div class="bro-log-time">{{ formatBeijingTime(logItem.time) }}</div>
+              <div class="bro-log-text">{{ logItem.log }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="closeBroLogDialog">关闭</button>
         </div>
       </div>
     </div>
@@ -2258,6 +2313,7 @@ const hedgeStatus = reactive({
 const hedgeMode = reactive({
   isClose: false,  // false: 开仓, true: 平仓
   timePassMin: 60,  // 最近xx分钟内有过任意操作的，不参与
+  minCloseMin: 60,  // 平仓使用：最近xx分钟内有过任意操作的，不参与
   intervalType: 'success',  // 'success': 挂单成功再挂另一边, 'delay': 延时
   intervalDelay: 1000,  // 延时的毫秒数
   maxDepth: 100,  // 最大允许深度
@@ -2323,6 +2379,12 @@ const allHedgeLogsPageSize = ref(10)  // 总日志每页显示数量
 
 // 交易费详情弹窗
 const showFeeDetailDialog = ref(false)
+
+// 浏览器日志弹窗
+const showBroLogDialog = ref(false)  // 浏览器日志弹窗
+const broLogs = ref([])  // 浏览器日志列表
+const currentBroNumber = ref(null)  // 当前查看的浏览器ID
+const isLoadingBroLogs = ref(false)  // 是否正在加载日志
 
 // 排序后的地址列表（按手续费从高到低）
 const sortedFeeAddresses = computed(() => {
@@ -6544,6 +6606,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加 needJudgeDF 和 maxDHour 字段
           requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
           requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+          // 添加 minCloseMin 字段
+          requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
@@ -6565,6 +6629,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加 needJudgeDF 和 maxDHour 字段
           requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
           requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+          // 添加 minCloseMin 字段
+          requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
         } else {
           // 模式1：使用原有接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4'
@@ -6588,6 +6654,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加 needJudgeDF 和 maxDHour 字段
           requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
           requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+          // 添加 minCloseMin 字段
+          requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
         }
         
         const response = await axios.post(
@@ -7314,6 +7382,72 @@ const formatCompactTime = (timeStr) => {
   } catch (e) {
     return timeStr
   }
+}
+
+/**
+ * 格式化毫秒时间戳为北京时间
+ */
+const formatBeijingTime = (timestamp) => {
+  if (!timestamp) return '-'
+  try {
+    const date = new Date(Number(timestamp))
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch (e) {
+    return timestamp
+  }
+}
+
+/**
+ * 打开浏览器日志弹窗
+ */
+const openBroLogDialog = async (number) => {
+  if (!number) return
+  currentBroNumber.value = number
+  showBroLogDialog.value = true
+  broLogs.value = []
+  await fetchBroLogs(number)
+}
+
+/**
+ * 获取浏览器日志
+ */
+const fetchBroLogs = async (number) => {
+  if (!number) return
+  isLoadingBroLogs.value = true
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/bro/getBroLog', {
+      params: {
+        number: number,
+        size: 200
+      }
+    })
+    if (response.data?.code === 0 && response.data?.data?.list) {
+      broLogs.value = response.data.data.list
+    } else {
+      console.error('获取浏览器日志失败:', response.data)
+      broLogs.value = []
+    }
+  } catch (error) {
+    console.error('获取浏览器日志失败:', error)
+    broLogs.value = []
+  } finally {
+    isLoadingBroLogs.value = false
+  }
+}
+
+/**
+ * 关闭浏览器日志弹窗
+ */
+const closeBroLogDialog = () => {
+  showBroLogDialog.value = false
+  broLogs.value = []
+  currentBroNumber.value = null
 }
 
 /**
@@ -10571,6 +10705,60 @@ onUnmounted(() => {
 .balance-value.loading {
   color: #6c757d;
   font-style: italic;
+}
+
+.btn-view-log {
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-view-log:hover {
+  background: #5568d3;
+}
+
+/* 浏览器日志弹窗样式 */
+.bro-log-content {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.bro-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bro-log-item {
+  background: #f8f9fa;
+  border-radius: 6px;
+  padding: 0.75rem;
+  border-left: 4px solid #667eea;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.bro-log-item:hover {
+  background: #e9ecef;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.bro-log-time {
+  color: #6c757d;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.bro-log-text {
+  color: #212529;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  line-height: 1.5;
 }
 
 .task-success {

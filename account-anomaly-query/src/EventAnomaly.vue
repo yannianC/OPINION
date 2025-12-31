@@ -45,6 +45,37 @@
           <span class="count-badge">({{ getAllBrowsersCount() }} 个浏览器)</span>
         </div>
         <div class="copied-text">{{ copiedContent.allBrowsers }}</div>
+        
+        <!-- 上一次导出结果和最终结果 -->
+        <div v-if="browserExportState.type === 'all'" class="export-extra-section">
+          <div class="export-section">
+            <div class="export-label">
+              上一次导出结果：
+              <span class="count-badge">({{ browserExportState.previousResult ? browserExportState.previousResult.split(',').filter(item => item.trim()).length : 0 }} 个浏览器)</span>
+            </div>
+            <el-input
+              v-model="browserExportState.previousResult"
+              type="textarea"
+              :rows="3"
+              placeholder="上一次导出的结果（可编辑）"
+              class="export-input"
+            />
+          </div>
+          
+          <div class="export-section">
+            <div class="export-label">
+              最终结果（交集）：
+              <span class="count-badge">({{ finalResult ? finalResult.split(',').filter(item => item.trim()).length : 0 }} 个浏览器)</span>
+            </div>
+            <div class="copied-text final-result">{{ finalResult || '（上一次结果为空，直接使用本次结果）' }}</div>
+          </div>
+          
+          <div class="export-actions">
+            <el-button type="primary" @click="confirmAndCopy" :disabled="!finalResult || !finalResult.trim()">
+              确定并复制
+            </el-button>
+          </div>
+        </div>
       </div>
       <div v-if="copiedContent.redBrowsers" class="copied-item">
         <div class="copied-label">
@@ -52,6 +83,37 @@
           <span class="count-badge">({{ getRedBrowsersCount() }} 个浏览器)</span>
         </div>
         <div class="copied-text">{{ copiedContent.redBrowsers }}</div>
+        
+        <!-- 上一次导出结果和最终结果 -->
+        <div v-if="browserExportState.type === 'red'" class="export-extra-section">
+          <div class="export-section">
+            <div class="export-label">
+              上一次导出结果：
+              <span class="count-badge">({{ browserExportState.previousResult ? browserExportState.previousResult.split(',').filter(item => item.trim()).length : 0 }} 个浏览器)</span>
+            </div>
+            <el-input
+              v-model="browserExportState.previousResult"
+              type="textarea"
+              :rows="3"
+              placeholder="上一次导出的结果（可编辑）"
+              class="export-input"
+            />
+          </div>
+          
+          <div class="export-section">
+            <div class="export-label">
+              最终结果（交集）：
+              <span class="count-badge">({{ finalResult ? finalResult.split(',').filter(item => item.trim()).length : 0 }} 个浏览器)</span>
+            </div>
+            <div class="copied-text final-result">{{ finalResult || '（上一次结果为空，直接使用本次结果）' }}</div>
+          </div>
+          
+          <div class="export-actions">
+            <el-button type="primary" @click="confirmAndCopy" :disabled="!finalResult || !finalResult.trim()">
+              确定并复制
+            </el-button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -219,12 +281,45 @@ const copiedContent = ref({
   allBrowsers: '', // 导出所有浏览器编号的内容
   redBrowsers: '' // 导出变红浏览器编号的内容
 })
+// 浏览器编号导出相关状态
+const browserExportState = ref({
+  type: '', // 'all' 或 'red'，表示当前导出类型
+  currentResult: '', // 本次导出结果
+  previousResult: '' // 上一次导出结果（可编辑）
+})
 
 /**
  * 计算选中的事件数量
  */
 const selectedCount = computed(() => {
   return eventTableData.value.filter(item => item.selected).length
+})
+
+/**
+ * 计算最终结果（交集）
+ */
+const finalResult = computed(() => {
+  const current = browserExportState.value.currentResult
+  const previous = browserExportState.value.previousResult
+  
+  // 如果上一次结果为空，直接返回本次结果
+  if (!previous || !previous.trim()) {
+    return current || ''
+  }
+  
+  // 如果本次结果为空，返回空
+  if (!current || !current.trim()) {
+    return ''
+  }
+  
+  // 计算交集
+  const currentSet = new Set(current.split(',').map(item => item.trim()).filter(item => item))
+  const previousSet = new Set(previous.split(',').map(item => item.trim()).filter(item => item))
+  
+  const intersection = Array.from(currentSet).filter(item => previousSet.has(item))
+  
+  // 排序并返回
+  return intersection.sort((a, b) => parseInt(a) - parseInt(b)).join(',')
 })
 
 /**
@@ -1083,6 +1178,35 @@ const getRedBrowsersCount = () => {
 }
 
 /**
+ * 从本地存储加载上一次导出结果
+ */
+const loadPreviousBrowserResult = (type) => {
+  try {
+    const key = type === 'all' ? 'eventAnomaly_previousAllBrowsers' : 'eventAnomaly_previousRedBrowsers'
+    const saved = localStorage.getItem(key)
+    if (saved) {
+      return saved
+    }
+  } catch (error) {
+    console.error('[事件异常] 加载上一次导出结果失败:', error)
+  }
+  return ''
+}
+
+/**
+ * 保存最终结果到本地存储
+ */
+const saveFinalResultToLocal = (type, result) => {
+  try {
+    const key = type === 'all' ? 'eventAnomaly_previousAllBrowsers' : 'eventAnomaly_previousRedBrowsers'
+    localStorage.setItem(key, result)
+    console.log(`[事件异常] 已保存${type === 'all' ? '所有' : '变红'}浏览器编号到本地存储`)
+  } catch (error) {
+    console.error('[事件异常] 保存最终结果失败:', error)
+  }
+}
+
+/**
  * 导出并复制选中的事件名
  */
 const exportAndCopy = async () => {
@@ -1094,6 +1218,13 @@ const exportAndCopy = async () => {
     ElMessage.warning('请至少选择一个事件')
     return
   }
+  
+  // 清空其他导出内容，只显示当前导出的主题
+  copiedContent.value.allBrowsers = ''
+  copiedContent.value.redBrowsers = ''
+  browserExportState.value.type = ''
+  browserExportState.value.currentResult = ''
+  browserExportState.value.previousResult = ''
   
   // 按分号拼接
   const result = selectedEvents.join(';')
@@ -1192,33 +1323,21 @@ const exportAllBrowsers = async () => {
   // 按逗号拼接
   const result = Array.from(browserSet).sort((a, b) => parseInt(a) - parseInt(b)).join(',')
   
-  try {
-    // 复制到剪切板
-    await navigator.clipboard.writeText(result)
-    // 保存复制的内容用于显示
-    copiedContent.value.allBrowsers = result
-    ElMessage.success(`已复制 ${browserSet.size} 个浏览器编号到剪切板`)
-    console.log('[事件异常] 导出的浏览器编号:', result)
-  } catch (error) {
-    // 如果 clipboard API 不可用，使用备用方法
-    const textArea = document.createElement('textarea')
-    textArea.value = result
-    textArea.style.position = 'fixed'
-    textArea.style.opacity = '0'
-    document.body.appendChild(textArea)
-    textArea.select()
-    try {
-      document.execCommand('copy')
-      // 保存复制的内容用于显示
-      copiedContent.value.allBrowsers = result
-      ElMessage.success(`已复制 ${browserSet.size} 个浏览器编号到剪切板`)
-      console.log('[事件异常] 导出的浏览器编号:', result)
-    } catch (err) {
-      ElMessage.error('复制失败，请手动复制')
-      console.error('[事件异常] 复制失败:', err)
-    }
-    document.body.removeChild(textArea)
-  }
+  // 清空其他导出内容，只显示当前导出的所有浏览器编号
+  copiedContent.value.eventNames = ''
+  copiedContent.value.redBrowsers = ''
+  
+  // 设置导出状态
+  browserExportState.value.type = 'all'
+  browserExportState.value.currentResult = result
+  browserExportState.value.previousResult = loadPreviousBrowserResult('all')
+  // finalResult 会自动通过 computed 计算
+  
+  // 保存到显示区域（用于兼容原有显示）
+  copiedContent.value.allBrowsers = result
+  
+  ElMessage.success(`已导出 ${browserSet.size} 个浏览器编号`)
+  console.log('[事件异常] 导出的浏览器编号:', result)
 }
 
 /**
@@ -1306,27 +1425,55 @@ const exportRedBrowsers = async () => {
   // 按逗号拼接
   const result = Array.from(browserSet).sort((a, b) => parseInt(a) - parseInt(b)).join(',')
   
+  // 清空其他导出内容，只显示当前导出的变红浏览器编号
+  copiedContent.value.eventNames = ''
+  copiedContent.value.allBrowsers = ''
+  
+  // 设置导出状态
+  browserExportState.value.type = 'red'
+  browserExportState.value.currentResult = result
+  browserExportState.value.previousResult = loadPreviousBrowserResult('red')
+  // finalResult 会自动通过 computed 计算
+  
+  // 保存到显示区域（用于兼容原有显示）
+  copiedContent.value.redBrowsers = result
+  
+  ElMessage.success(`已导出 ${browserSet.size} 个变红浏览器编号`)
+  console.log('[事件异常] 导出的变红浏览器编号:', result)
+}
+
+/**
+ * 确定并复制最终结果
+ */
+const confirmAndCopy = async () => {
+  const final = finalResult.value
+  
+  if (!final || !final.trim()) {
+    ElMessage.warning('最终结果为空，无法复制')
+    return
+  }
+  
   try {
     // 复制到剪切板
-    await navigator.clipboard.writeText(result)
-    // 保存复制的内容用于显示
-    copiedContent.value.redBrowsers = result
-    ElMessage.success(`已复制 ${browserSet.size} 个变红浏览器编号到剪切板`)
-    console.log('[事件异常] 导出的变红浏览器编号:', result)
+    await navigator.clipboard.writeText(final)
+    // 保存最终结果到本地存储（不立即更新 previousResult，等下次点击导出按钮时再加载）
+    saveFinalResultToLocal(browserExportState.value.type, final)
+    ElMessage.success(`已复制 ${final.split(',').filter(item => item.trim()).length} 个浏览器编号到剪切板，并已保存到本地`)
+    console.log('[事件异常] 最终结果已复制:', final)
   } catch (error) {
     // 如果 clipboard API 不可用，使用备用方法
     const textArea = document.createElement('textarea')
-    textArea.value = result
+    textArea.value = final
     textArea.style.position = 'fixed'
     textArea.style.opacity = '0'
     document.body.appendChild(textArea)
     textArea.select()
     try {
       document.execCommand('copy')
-      // 保存复制的内容用于显示
-      copiedContent.value.redBrowsers = result
-      ElMessage.success(`已复制 ${browserSet.size} 个变红浏览器编号到剪切板`)
-      console.log('[事件异常] 导出的变红浏览器编号:', result)
+      // 保存最终结果到本地存储（不立即更新 previousResult，等下次点击导出按钮时再加载）
+      saveFinalResultToLocal(browserExportState.value.type, final)
+      ElMessage.success(`已复制 ${final.split(',').filter(item => item.trim()).length} 个浏览器编号到剪切板，并已保存到本地`)
+      console.log('[事件异常] 最终结果已复制:', final)
     } catch (err) {
       ElMessage.error('复制失败，请手动复制')
       console.error('[事件异常] 复制失败:', err)
@@ -1586,6 +1733,67 @@ onMounted(() => {
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;
+}
+
+.export-section {
+  margin-bottom: 15px;
+}
+
+.export-section:last-of-type {
+  margin-bottom: 10px;
+}
+
+.export-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.export-text {
+  font-size: 13px;
+  color: #303133;
+  background-color: #f5f7fa;
+  padding: 10px;
+  border-radius: 4px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.export-text.final-result {
+  background-color: #e8f4fd;
+  border: 1px solid #b3d8ff;
+}
+
+.export-input {
+  margin-top: 8px;
+}
+
+.export-input :deep(.el-textarea__inner) {
+  font-size: 13px;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.export-extra-section {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e4e7ed;
+}
+
+.export-extra-section .export-section {
+  margin-bottom: 15px;
+}
+
+.export-extra-section .export-section:last-of-type {
+  margin-bottom: 10px;
+}
+
+.export-actions {
+  margin-top: 10px;
+  text-align: left;
 }
 </style>
 

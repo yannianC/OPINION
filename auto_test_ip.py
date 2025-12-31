@@ -264,6 +264,14 @@ UPDATE_IP_INFO_URL = f"{API_BASE_URL}/bro/updateIpInfo"
 BROWSER_LOCKS = {}
 BROWSER_LOCKS_LOCK = threading.Lock()  # 保护BROWSER_LOCKS字典的锁
 
+# 浏览器ID队列字典，用于存储同一浏览器ID的待处理IP
+BROWSER_QUEUES = {}
+BROWSER_QUEUES_LOCK = threading.Lock()  # 保护BROWSER_QUEUES字典的锁
+
+# 浏览器ID处理状态字典，用于标记某个浏览器ID是否正在处理
+BROWSER_PROCESSING = {}
+BROWSER_PROCESSING_LOCK = threading.Lock()  # 保护BROWSER_PROCESSING字典的锁
+
 def initialize_fingerprint_mapping():
     """
     初始化浏览器编号到用户ID的映射数据
@@ -3388,41 +3396,231 @@ def initialize_fingerprint_mapping():
 
 
 # ============================================================================
+# 任务获取和结果提交
+# ============================================================================
+
+def get_mission_from_server():
+    """
+    从服务器获取任务（带typelist=[11]参数）
+    
+    Returns:
+        dict: 任务数据，如果没有任务或失败则返回None
+    """
+    try:
+        url = f"{SERVER_BASE_URL}/mission/getOneMission"
+        payload = {
+            "groupNo": COMPUTER_GROUP,
+            "typeList": [11]
+        }
+        
+        log_print(f"\n[系统] 请求任务: {url}")
+        log_print(f"[系统] 请求参数: {payload}")
+        
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            log_print(f"[系统] 服务器响应: {result}")
+            
+            if result and isinstance(result, dict):
+                code = result.get("code")
+                msg = result.get("msg")
+                data = result.get("data")
+                
+                if code == 0 and data:
+                    mission = data.get("mission", {})
+                    
+                    if mission and mission.get("id"):
+                        log_print(f"[系统] ✓ 获取到任务 ID: {mission.get('id')}, 类型: {mission.get('type')}")
+                        return mission
+                    else:
+                        log_print(f"[系统] ℹ 任务数据为空或缺少ID")
+                else:
+                    log_print(f"[系统] ℹ 暂无任务 (code: {code}, msg: {msg})")
+            else:
+                log_print(f"[系统] ℹ 服务器返回数据格式错误")
+        else:
+            log_print(f"[系统] ✗ 请求失败，状态码: {response.status_code}")
+        
+        return None
+        
+    except requests.exceptions.Timeout:
+        log_print(f"[系统] ✗ 请求超时")
+        return None
+    except requests.exceptions.ConnectionError:
+        log_print(f"[系统] ✗ 连接错误")
+        return None
+    except Exception as e:
+        log_print(f"[系统] ✗ 获取任务异常: {str(e)}")
+        import traceback
+        log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+        return None
+
+
+def submit_mission_result(mission_id, success_count, failed_count, failed_info, status=2, custom_msg=None):
+    """
+    提交任务结果到服务器（带重试机制）
+    
+    Args:
+        mission_id: 任务ID
+        success_count: 成功数量
+        failed_count: 失败数量
+        failed_info: 失败的浏览器信息字典 {browser_id: failure_reason}
+        status: 任务状态，2=成功，3=失败
+        custom_msg: 自定义消息（如果提供，将使用此消息而不是默认格式）
+        
+    Returns:
+        bool: 提交成功返回True，失败返回False
+    """
+    url = f"{SERVER_BASE_URL}/mission/saveResult"
+    
+    # 构建消息
+    if custom_msg:
+        # 如果提供了自定义消息，直接使用
+        msg = custom_msg
+    else:
+        # 否则使用默认格式
+        msg = f"成功: {success_count}个, 失败: {failed_count}个"
+        if failed_info:
+            msg += f", 失败的浏览器: {', '.join(failed_info.keys())}"
+            reasons = []
+            for bid, reason in failed_info.items():
+                if reason:
+                    reasons.append(f"{bid}{reason}")
+            if reasons:
+                msg += f"，其中{'，'.join(reasons)}"
+    
+    payload = {
+        "id": mission_id,
+        "status": status,  # 2=成功，3=失败
+        "msg": msg
+    }
+    
+    log_print(f"\n[系统] 提交结果: {url}")
+    log_print(f"[系统] 提交数据: {payload}")
+    
+    # 重试机制：最多重试3次
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                log_print(f"[系统] 第 {attempt + 1} 次尝试提交...")
+                time.sleep(2)
+            
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                result = response.json()
+                log_print(f"[系统] 服务器响应: {result}")
+                
+                if result == {}:
+                    log_print(f"[系统] ✓ 结果提交成功（服务器返回空字典）")
+                    return True
+                
+                if result and isinstance(result, dict):
+                    code = result.get("code")
+                    server_msg = result.get("msg")
+                    
+                    if code == 0:
+                        log_print(f"[系统] ✓ 结果提交成功")
+                        return True
+                    else:
+                        log_print(f"[系统] ✗ 结果提交失败 (code: {code}, msg: {server_msg})")
+                        if attempt < max_retries - 1:
+                            continue
+                        return False
+                else:
+                    log_print(f"[系统] ✗ 服务器返回数据格式错误")
+                    if attempt < max_retries - 1:
+                        continue
+                    return False
+            else:
+                log_print(f"[系统] ✗ 结果提交失败，状态码: {response.status_code}")
+                if attempt < max_retries - 1:
+                    continue
+                return False
+                
+        except requests.exceptions.Timeout:
+            log_print(f"[系统] ✗ 提交超时")
+            if attempt < max_retries - 1:
+                continue
+            return False
+        except requests.exceptions.ConnectionError:
+            log_print(f"[系统] ✗ 连接错误")
+            if attempt < max_retries - 1:
+                continue
+            return False
+        except Exception as e:
+            log_print(f"[系统] ✗ 提交异常: {str(e)}")
+            if attempt < max_retries - 1:
+                continue
+            import traceback
+            log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+            return False
+    
+    return False
+
+
+# ============================================================================
 # 获取IP列表
 # ============================================================================
 
 def get_all_ip_info():
     """
-    获取所有IP信息
+    获取所有IP信息（带重试机制，最多3次）
     
     Returns:
-        list: IP信息列表，失败返回空列表
+        tuple: (ip_list, success) - IP信息列表和是否成功，失败返回([], False)
     """
-    try:
-        group_no = read_computer_group()
-        url = GET_IP_INFO_URL
-        params = {"groupNo": group_no}
-        
-        log_print(f"[系统] 请求IP列表: {url}, 参数: {params}")
-        response = requests.get(url, params=params, timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 0:
-                ip_list = result.get("data", {}).get("list", [])
-                log_print(f"[系统] ✓ 成功获取 {len(ip_list)} 个IP信息")
-                return ip_list
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                log_print(f"[系统] 第 {attempt + 1} 次尝试获取IP列表...")
+                time.sleep(2)
+            
+            group_no = read_computer_group()
+            url = GET_IP_INFO_URL
+            params = {"groupNo": group_no}
+            
+            log_print(f"[系统] 请求IP列表: {url}, 参数: {params}")
+            response = requests.get(url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 0:
+                    ip_list = result.get("data", {}).get("list", [])
+                    log_print(f"[系统] ✓ 成功获取 {len(ip_list)} 个IP信息")
+                    return ip_list, True
+                else:
+                    log_print(f"[系统] ✗ 获取IP列表失败: {result.get('msg')}")
+                    if attempt < max_retries - 1:
+                        continue
+                    return [], False
             else:
-                log_print(f"[系统] ✗ 获取IP列表失败: {result.get('msg')}")
-                return []
-        else:
-            log_print(f"[系统] ✗ 获取IP列表失败: HTTP状态码 {response.status_code}")
-            return []
-    except Exception as e:
-        log_print(f"[系统] ✗ 获取IP列表异常: {str(e)}")
-        import traceback
-        log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
-        return []
+                log_print(f"[系统] ✗ 获取IP列表失败: HTTP状态码 {response.status_code}")
+                if attempt < max_retries - 1:
+                    continue
+                return [], False
+        except requests.exceptions.Timeout:
+            log_print(f"[系统] ✗ 获取IP列表超时")
+            if attempt < max_retries - 1:
+                continue
+            return [], False
+        except requests.exceptions.ConnectionError:
+            log_print(f"[系统] ✗ 连接错误")
+            if attempt < max_retries - 1:
+                continue
+            return [], False
+        except Exception as e:
+            log_print(f"[系统] ✗ 获取IP列表异常: {str(e)}")
+            if attempt < max_retries - 1:
+                continue
+            import traceback
+            log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+            return [], False
+    
+    return [], False
 
 
 # ============================================================================
@@ -3441,7 +3639,9 @@ def update_ip_info(ip_data):
     """
     try:
         url = UPDATE_IP_INFO_URL
+        # 调试：打印要上传的数据
         log_print(f"[{ip_data.get('ip', 'unknown')}] 上传IP信息: {url}")
+        log_print(f"[{ip_data.get('ip', 'unknown')}] [调试] 上传数据字段: a={ip_data.get('a')}, b={ip_data.get('b')}, c={ip_data.get('c')}, d={ip_data.get('d')}, h={ip_data.get('h')}, e={ip_data.get('e')}, f={ip_data.get('f')}, g={ip_data.get('g')}, i={ip_data.get('i')}")
         response = requests.post(url, json=ip_data, timeout=30)
         
         if response.status_code == 200:
@@ -3772,7 +3972,7 @@ def wait_for_opinion_trade_box(driver, serial_number, max_retries=3):
         log_print(f"[{serial_number}] [OP] 等待页面加载完成... (尝试 {attempt + 1}/{max_retries})")
         
         # 在120秒内，每3秒检查一次
-        timeout = 120
+        timeout = 30
         interval = 3
         start_time = time.time()
         
@@ -4941,25 +5141,27 @@ def submit_opinion_order_simple(driver, trade_box, browser_id, serial_number):
         # 1. 设置买卖方向为"Buy"
         if not click_opinion_trade_type_button(trade_box, "Buy", serial_number):
             log_print(f"[{serial_number}] [OP] ✗ 设置买卖方向失败")
-            return False, "2"
+            return False, "8"
         
         # 2. 设置价格类型为"Limit"
         if not select_opinion_price_type(trade_box, "Limit", serial_number):
             log_print(f"[{serial_number}] [OP] ✗ 设置价格类型失败")
-            return False, "2"
+            return False, "8"
         
         # 3. 设置买卖类型为"YES"
         if not select_opinion_option_type(trade_box, "YES", serial_number):
             log_print(f"[{serial_number}] [OP] ✗ 设置买卖类型失败")
-            return False, "2"
+            return False, "8"
         
         # 4. 点击Amount标签
         click_opinion_amount_tab(trade_box, serial_number)
         
         # 5. 填入价格和数量
-        if not fill_opinion_price_and_amount(trade_box, 10, 100, serial_number):
+        price = random.randint(10, 15)
+        amount = random.randint(100, 200)
+        if not fill_opinion_price_and_amount(trade_box, price, amount, serial_number):
             log_print(f"[{serial_number}] [OP] ✗ 填入价格/数量失败")
-            return False, "2"
+            return False, "8"
         
         # 6. 调用完整的submit_opinion_order方法
         success, result = submit_opinion_order(driver, trade_box, "Buy", "YES", serial_number, browser_id, task_data=None)
@@ -4969,22 +5171,22 @@ def submit_opinion_order_simple(driver, trade_box, browser_id, serial_number):
         else:
             # 转换失败原因
             if result == True:
-                return False, "2"  # 可重试的失败
+                return False, "8"  # 可重试的失败
             elif isinstance(result, str):
                 if "限价" in result or "Unusual" in result:
-                    return False, "2"
+                    return True, None
                 elif "okx" in result.lower():
-                    return False, "2"
+                    return True, None
                 else:
-                    return False, "2"
+                    return False, "8"
             else:
-                return False, "2"
+                return False, "8"
         
     except Exception as e:
         log_print(f"[{serial_number}] [OP] ✗ 提交订单失败: {str(e)}")
         import traceback
         log_print(f"[{serial_number}] [OP] 异常详情:\n{traceback.format_exc()}")
-        return False, "2"
+        return False, "8"
 
 
 def get_balance_spot_address(driver, browser_id, timeout=30):
@@ -5117,9 +5319,65 @@ def get_browser_lock(browser_id):
         return BROWSER_LOCKS[browser_id]
 
 
+def process_ip_queue(browser_id):
+    """
+    处理指定浏览器ID的IP队列（串行处理）
+    
+    Args:
+        browser_id: 浏览器ID
+    """
+    while True:
+        # 从队列中获取IP
+        ip_info = None
+        with BROWSER_QUEUES_LOCK:
+            if browser_id in BROWSER_QUEUES and BROWSER_QUEUES[browser_id]:
+                ip_info = BROWSER_QUEUES[browser_id].pop(0)
+            else:
+                # 队列为空，标记为不再处理
+                with BROWSER_PROCESSING_LOCK:
+                    BROWSER_PROCESSING[browser_id] = False
+                break
+        
+        if ip_info:
+            # 处理这个IP
+            process_ip_internal(ip_info)
+
+
 def process_ip(ip_info):
     """
-    处理单个IP的完整流程
+    处理单个IP的完整流程（会检查浏览器ID是否正在处理，如果是则加入队列）
+    
+    Args:
+        ip_info: IP信息字典
+    """
+    ip = ip_info.get("ip", "unknown")
+    browser_id = ip_info.get("number", "unknown")
+    log_prefix = f"[{browser_id}-{ip}]"
+    
+    # 检查这个浏览器ID是否正在处理
+    with BROWSER_PROCESSING_LOCK:
+        if browser_id in BROWSER_PROCESSING and BROWSER_PROCESSING[browser_id]:
+            # 正在处理，加入队列
+            with BROWSER_QUEUES_LOCK:
+                if browser_id not in BROWSER_QUEUES:
+                    BROWSER_QUEUES[browser_id] = []
+                BROWSER_QUEUES[browser_id].append(ip_info)
+            log_print(f"{log_prefix} 浏览器ID {browser_id} 正在处理其他IP，已加入队列（队列长度: {len(BROWSER_QUEUES[browser_id])}）")
+            return
+        else:
+            # 标记为正在处理
+            BROWSER_PROCESSING[browser_id] = True
+    
+    # 直接处理这个IP
+    process_ip_internal(ip_info)
+    
+    # 处理完成后，继续处理队列中的IP（串行）
+    process_ip_queue(browser_id)
+
+
+def process_ip_internal(ip_info):
+    """
+    实际处理单个IP的完整流程
     
     Args:
         ip_info: IP信息字典
@@ -5129,12 +5387,6 @@ def process_ip(ip_info):
     serial_number = browser_id
     log_prefix = f"[{browser_id}-{ip}]"
     
-    # 获取浏览器ID对应的锁
-    browser_lock = get_browser_lock(browser_id)
-    
-    # 等待获取锁（如果当前浏览器ID有任务在执行，会在这里等待）
-    log_print(f"{log_prefix} 等待浏览器ID {browser_id} 的锁...")
-    browser_lock.acquire()
     try:
         log_print(f"\n{'='*80}")
         log_print(f"{log_prefix} 开始处理IP: {ip}, 浏览器ID: {browser_id}")
@@ -5185,10 +5437,12 @@ def process_ip(ip_info):
             http_success += 1
             result_data["a"] = int(time.time())
             result_data["b"] = f"{http_success},{http_fail}"
-            result_data["c"] = "10"  # 成功记为10
-            result_data["d"] = http_result['delay1']  # HTTP页面1延迟
-            result_data["h"] = http_result['delay2']  # HTTP页面2延迟
+            result_data["c"] = "1"  # 成功记为10
+            result_data["d"] = http_result.get('delay1', -1)  # HTTP页面1延迟
+            result_data["h"] = http_result.get('delay2', -1)  # HTTP页面2延迟
             # 不上传e, f, g, i
+            log_print(f"{log_prefix} [调试] 准备上传数据 - d={result_data.get('d')}, h={result_data.get('h')}")
+            log_print(f"{log_prefix} [调试] http_result - delay1={http_result.get('delay1')}, delay2={http_result.get('delay2')}")
             update_ip_info(result_data)
             log_print(f"{log_prefix} ✓ HTTP模式成功完成，任务结束")
             return
@@ -5197,7 +5451,7 @@ def process_ip(ip_info):
         http_fail += 1
         http_failure_reason = http_result.get("failure_reason", "0")
         
-        log_print(f"{log_prefix} ✗ HTTP模式失败，切换到socks5模式...")
+        log_print(f"{log_prefix} ✗ HTTP模式失败，切换到socks5模式...{http_failure_reason}")
         
         # 关闭浏览器
         close_adspower_browser(serial_number)
@@ -5214,7 +5468,7 @@ def process_ip(ip_info):
             result_data["d"] = http_result.get('delay1', -1)  # HTTP页面1延迟
             result_data["h"] = http_result.get('delay2', -1)  # HTTP页面2延迟
             result_data["e"] = f"{socks5_success},{socks5_fail}"
-            result_data["f"] = "10"  # 成功记为10
+            result_data["f"] = "1"  # 成功记为10
             result_data["g"] = socks5_result['delay1']  # Socks5页面1延迟
             result_data["i"] = socks5_result['delay2']  # Socks5页面2延迟
         else:
@@ -5229,11 +5483,11 @@ def process_ip(ip_info):
                (not original_f or original_f == "") and (not original_g or original_g == "") and (not original_i or original_i == ""):
                 result_data["a"] = int(time.time())
                 result_data["b"] = "0,1"
-                result_data["c"] = "0"
+                result_data["c"] = http_failure_reason  # 使用实际的HTTP失败原因
                 result_data["d"] = -1  # HTTP页面1延迟
                 result_data["h"] = -1  # HTTP页面2延迟
                 result_data["e"] = "0,1"
-                result_data["f"] = "0"
+                result_data["f"] = socks5_failure_reason  # 使用实际的SOCKS5失败原因
                 result_data["g"] = -1  # Socks5页面1延迟
                 result_data["i"] = -1  # Socks5页面2延迟
             else:
@@ -5278,9 +5532,8 @@ def process_ip(ip_info):
         except Exception as upload_error:
             log_print(f"{log_prefix} ✗ 上传异常结果失败: {str(upload_error)}")
     finally:
-        # 释放锁
-        browser_lock.release()
-        log_print(f"{log_prefix} 释放浏览器ID {browser_id} 的锁")
+        # 处理完成后，继续处理队列中的下一个IP
+        pass
 
 
 def process_ip_with_mode(ip_info, proxy_type, proxy_port, browser_id, serial_number, log_prefix):
@@ -5316,8 +5569,7 @@ def process_ip_with_mode(ip_info, proxy_type, proxy_port, browser_id, serial_num
     driver = None
     
     try:
-        # 步骤1: 更新代理
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤1: 更新代理...")
+        # 步骤1: 更新代理（重试3次）
         proxy_config = {
             "ip": ip_info["ip"],
             "port": proxy_port,
@@ -5327,296 +5579,536 @@ def process_ip_with_mode(ip_info, proxy_type, proxy_port, browser_id, serial_num
             "isMain": ip_info.get("isMain", 0)
         }
         
-        if not update_adspower_proxy(browser_id, proxy_config):
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 更新代理失败")
-            result["failure_reason"] = "3"
-            return result
-        
-        # 步骤2: 启动浏览器
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤2: 启动浏览器...")
-        browser_data = start_adspower_browser(serial_number)
-        if not browser_data:
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 启动浏览器失败")
-            result["failure_reason"] = "3"
-            return result
-        
-        driver = create_selenium_driver(browser_data)
-        log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 浏览器启动成功")
-        
-        time.sleep(10)
-        
-        # 步骤3: 打开macro页面并记录延迟
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤3: 打开macro页面...")
-        macro_url = "https://app.opinion.trade/macro"
-        macro_delay = -1
-        macro_success = False
-        
-        for macro_retry in range(1, MAX_RETRIES + 1):
+        proxy_update_success = False
+        for proxy_retry in range(1, 4):  # 重试3次
             try:
-                if macro_retry > 1:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] 尝试刷新macro页面 (第 {macro_retry}/{MAX_RETRIES} 次)...")
-                    time.sleep(5)  # 刷新前等待5秒
+                if proxy_retry > 1:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤1: 更新代理 (重试第 {proxy_retry}/3 次)...")
+                    time.sleep(2)  # 重试前等待2秒
+                else:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤1: 更新代理...")
                 
-                macro_start_time = time.time()
-                driver.get(macro_url)
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ macro页面加载成功")
-                
-                # 等待页面加载完成：在60s内找到tbody元素，找到第一个tr，找到第一个td，等待td下出现p标签且内容不为空
-                log_print(f"{log_prefix} [{proxy_type.upper()}] 等待macro页面加载完成...")
-                macro_load_success = False
-                timeout = 60
-                start_wait_time = time.time()
-                
-                while time.time() - start_wait_time < timeout:
-                    try:
-                        # 查找tbody元素
-                        tbody_elements = driver.find_elements(By.TAG_NAME, "tbody")
-                        if tbody_elements:
-                            tbody = tbody_elements[0]
-                            # 查找第一个tr
-                            tr_elements = tbody.find_elements(By.TAG_NAME, "tr")
-                            if tr_elements:
-                                first_tr = tr_elements[0]
-                                # 查找第一个td
-                                td_elements = first_tr.find_elements(By.TAG_NAME, "td")
-                                if td_elements:
-                                    first_td = td_elements[0]
-                                    # 查找p标签
-                                    p_elements = first_td.find_elements(By.TAG_NAME, "p")
-                                    if p_elements:
-                                        p_text = p_elements[0].text.strip()
-                                        if p_text != "":
-                                            # 加载完成
-                                            macro_delay = int((time.time() - macro_start_time) * 1000)  # 转换为毫秒
-                                            log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ macro页面加载完成，延迟: {macro_delay}ms")
-                                            macro_success = True
-                                            macro_load_success = True
-                                            result["delay1"] = macro_delay
-                                            break
-                        time.sleep(0.5)  # 每0.5秒检查一次
-                    except Exception as e:
-                        time.sleep(0.5)
-                        continue
-                
-                if macro_load_success:
+                if update_adspower_proxy(browser_id, proxy_config):
+                    proxy_update_success = True
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 更新代理成功")
                     break
                 else:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ macro页面加载未完成")
-                    if macro_retry < MAX_RETRIES:
-                        driver.refresh()
-                        time.sleep(2)
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 更新代理失败 (第 {proxy_retry}/3 次)")
+                    if proxy_retry < 3:
                         continue
                     else:
-                        result["delay1"] = -1
-                        result["failure_reason"] = "1"
-                        close_adspower_browser(serial_number)
+                        result["failure_reason"] = "3"
                         return result
-                        
-            except (WebDriverException, TimeoutException) as e:
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 打开macro页面失败 (第 {macro_retry}/{MAX_RETRIES} 次): {str(e)}")
-                if macro_retry < MAX_RETRIES:
-                    time.sleep(5)
+            except Exception as e:
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤1异常 (第 {proxy_retry}/3 次): {str(e)}")
+                if proxy_retry < 3:
+                    import traceback
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+                    time.sleep(2)  # 重试前等待2秒
                     continue
                 else:
-                    result["delay1"] = -1
-                    result["failure_reason"] = "0"
+                    import traceback
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+                    result["failure_reason"] = "3"
+                    return result
+        
+        if not proxy_update_success:
+            result["failure_reason"] = "3"
+            return result
+        
+        # 步骤2: 启动浏览器（重试3次）
+        driver = None
+        browser_start_success = False
+        for browser_retry in range(1, 4):  # 重试3次
+            try:
+                if browser_retry > 1:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤2: 启动浏览器 (重试第 {browser_retry}/3 次)...")
+                    time.sleep(2)  # 重试前等待2秒
+                else:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤2: 启动浏览器...")
+                
+                browser_data = start_adspower_browser(serial_number)
+                if not browser_data:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 启动浏览器失败 (第 {browser_retry}/3 次)")
+                    if browser_retry < 3:
+                        continue
+                    else:
+                        result["failure_reason"] = "3"
+                        return result
+                
+                driver = create_selenium_driver(browser_data)
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 浏览器启动成功")
+                browser_start_success = True
+                time.sleep(10)
+                break
+            except Exception as e:
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤2异常 (第 {browser_retry}/3 次): {str(e)}")
+                if browser_retry < 3:
+                    import traceback
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+                    # 清理可能已创建的driver
+                    if driver:
+                        try:
+                            driver.quit()
+                        except:
+                            pass
+                        driver = None
+                    # 尝试关闭可能已启动的浏览器
+                    try:
+                        close_adspower_browser(serial_number)
+                    except:
+                        pass
+                    time.sleep(2)  # 重试前等待2秒
+                    continue
+                else:
+                    import traceback
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+                    result["failure_reason"] = "3"
+                    if driver:
+                        try:
+                            driver.quit()
+                        except:
+                            pass
                     close_adspower_browser(serial_number)
                     return result
         
-        if not macro_success:
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ macro页面打开失败")
-            result["delay1"] = -1
-            result["failure_reason"] = "1"
+        if not browser_start_success:
+            result["failure_reason"] = "3"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
             close_adspower_browser(serial_number)
             return result
         
-        # 步骤4: 打开目标页面1（不再记录延迟）
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤4: 打开目标页面1...")
-        target_url_1 = TARGET_URL_1
-        page1_success = False
         
-        for page_retry in range(1, MAX_RETRIES + 1):
-            try:
-                if page_retry > 1:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] 尝试刷新页面 (第 {page_retry}/{MAX_RETRIES} 次)...")
-                    time.sleep(5)  # 刷新前等待5秒
-                
-                driver.get(target_url_1)
-                page_load_success = True
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 页面加载成功")
-                
-                # 等待页面完全加载
-                time.sleep(2)
-                
-                # 步骤5: 检查"I Understand and Agree"
-                log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤5: 检查'I Understand and Agree'...")
-                if check_and_click_understand_agree(driver, browser_id, timeout=5):
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 检测到'I Understand and Agree'，失败")
-                    result["failure_reason"] = "9"
-                    close_adspower_browser(serial_number)
-                    return result
-                
-                # 步骤6: 等待页面真正完成加载
-                log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤6: 等待页面真正完成加载...")
-                trade_box = wait_for_opinion_trade_box(driver, serial_number, max_retries=3)
-                
-                if trade_box:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 页面1加载完成")
-                    page1_success = True
-                    break
-                else:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 页面1加载未真正完成")
-                    if page_retry < MAX_RETRIES:
-                        refresh_page_with_opinion_check(driver, serial_number)
-                        time.sleep(2)
+        time.sleep(10)
+        # 步骤3: 打开macro页面并记录延迟
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤3: 打开macro页面...")
+            macro_url = "https://app.opinion.trade/macro"
+            macro_delay = -1
+            macro_success = False
+            
+            for macro_retry in range(1, 2):
+                try:
+                    if macro_retry > 1:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] 尝试刷新macro页面 (第 {macro_retry}/{MAX_RETRIES} 次)...")
+                        time.sleep(5)  # 刷新前等待5秒
+                    
+                    macro_start_time = time.time()
+                    driver.get(macro_url)
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ macro页面加载成功")
+                    
+                    # 等待页面加载完成：在60s内找到tbody元素，找到第一个tr，找到第一个td，等待td下出现p标签且内容不为空
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 等待macro页面加载完成...")
+                    macro_load_success = False
+                    timeout = 60
+                    start_wait_time = time.time()
+                    
+                    while time.time() - start_wait_time < timeout:
+                        try:
+                            # 查找tbody元素
+                            tbody_elements = driver.find_elements(By.TAG_NAME, "tbody")
+                            if tbody_elements:
+                                tbody = tbody_elements[0]
+                                # 查找第一个tr
+                                tr_elements = tbody.find_elements(By.TAG_NAME, "tr")
+                                if tr_elements:
+                                    first_tr = tr_elements[0]
+                                    # 查找第一个td
+                                    td_elements = first_tr.find_elements(By.TAG_NAME, "td")
+                                    if td_elements:
+                                        first_td = td_elements[0]
+                                        # 查找p标签
+                                        p_elements = first_td.find_elements(By.TAG_NAME, "p")
+                                        if p_elements:
+                                            p_text = p_elements[0].text.strip()
+                                            if p_text != "":
+                                                # 加载完成
+                                                macro_delay = int((time.time() - macro_start_time) * 1000)  # 转换为毫秒
+                                                log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ macro页面加载完成，延迟: {macro_delay}ms")
+                                                macro_success = True
+                                                macro_load_success = True
+                                                result["delay1"] = macro_delay
+                                                break
+                            time.sleep(0.5)  # 每0.5秒检查一次
+                        except Exception as e:
+                            time.sleep(0.5)
+                            continue
+                    
+                    if macro_load_success:
+                        break
+                    else:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ macro页面加载未完成")
+                        if macro_retry < MAX_RETRIES:
+                            driver.refresh()
+                            time.sleep(2)
+                            continue
+                        else:
+                            result["delay1"] = -1
+                            result["failure_reason"] = "4"
+                            
+                except (WebDriverException, TimeoutException) as e:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 打开macro页面失败 (第 {macro_retry}/{MAX_RETRIES} 次): {str(e)}")
+                    if macro_retry < MAX_RETRIES:
+                        time.sleep(5)
                         continue
                     else:
-                        result["failure_reason"] = "1"
+                        result["delay1"] = -1
+                        result["failure_reason"] = "4"
+        
+            if not macro_success:
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ macro页面打开失败")
+                result["delay1"] = -1
+                result["failure_reason"] = "4"
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤3异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["delay1"] = -1
+            result["failure_reason"] = "4"
+         
+        
+        # 步骤4: 打开目标页面1（不再记录延迟）
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤4: 打开目标页面1...")
+            target_url_1 = TARGET_URL_1
+            page1_success = False
+            
+            for page_retry in range(1, MAX_RETRIES + 1):
+                try:
+                    if page_retry > 1:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] 尝试刷新页面 (第 {page_retry}/{MAX_RETRIES} 次)...")
+                        time.sleep(5)  # 刷新前等待5秒
+                    
+                    driver.get(target_url_1)
+                    page_load_success = True
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 页面加载成功")
+                    
+                    # 等待页面完全加载
+                    time.sleep(2)
+                    
+                    # 步骤5: 检查"I Understand and Agree"
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤5: 检查'I Understand and Agree'...")
+                    if check_and_click_understand_agree(driver, browser_id, timeout=5):
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 检测到'I Understand and Agree'，失败")
+                        result["failure_reason"] = "2"
                         close_adspower_browser(serial_number)
                         return result
-                        
-            except (WebDriverException, TimeoutException) as e:
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 打开页面失败 (第 {page_retry}/{MAX_RETRIES} 次): {str(e)}")
-                if page_retry < MAX_RETRIES:
-                    time.sleep(5)
-                    continue
-                else:
-                    result["failure_reason"] = "0"
-                    close_adspower_browser(serial_number)
-                    return result
+                    
+                    # 步骤6: 等待页面真正完成加载
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤6: 等待页面真正完成加载...")
+                    trade_box = wait_for_opinion_trade_box(driver, serial_number, max_retries=3)
+                    
+                    if trade_box:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 页面1加载完成")
+                        page1_success = True
+                        break
+                    else:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 页面1加载未真正完成")
+                        if page_retry < MAX_RETRIES:
+                            refresh_page_with_opinion_check(driver, serial_number)
+                            time.sleep(2)
+                            continue
+                        else:
+                            result["failure_reason"] = "5"
+                            close_adspower_browser(serial_number)
+                            return result
+                            
+                except (WebDriverException, TimeoutException) as e:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 打开页面失败 (第 {page_retry}/{MAX_RETRIES} 次): {str(e)}")
+                    if page_retry < MAX_RETRIES:
+                        time.sleep(5)
+                        continue
+                    else:
+                        result["failure_reason"] = "5"
+                        close_adspower_browser(serial_number)
+                        return result
         
-        if not page1_success:
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 页面1打开失败")
-            result["failure_reason"] = "1"
+            if not page1_success:
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 页面1打开失败")
+                result["failure_reason"] = "5"
+                close_adspower_browser(serial_number)
+                return result
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤4异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "5"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
             close_adspower_browser(serial_number)
             return result
         
         # 步骤7: 检查地区限制
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤7: 检查地区限制...")
-        if check_region_restriction(driver, browser_id, timeout=3):
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 检测到地区限制")
-            result["failure_reason"] = "9"
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤7: 检查地区限制...")
+            if check_region_restriction(driver, browser_id, timeout=3):
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 检测到地区限制")
+                result["failure_reason"] = "2"
+                close_adspower_browser(serial_number)
+                return result
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤7异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "2"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
             close_adspower_browser(serial_number)
             return result
         
         # 步骤8: 预打开OKX页面并连接钱包
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤8: 预打开OKX页面并连接钱包...")
-        preopen_okx_wallet(driver, serial_number)
-        
-        connect_wallet_if_needed(driver, browser_id)
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤8: 预打开OKX页面并连接钱包...")
+            preopen_okx_wallet(driver, serial_number)
+            connect_wallet_if_needed(driver, browser_id)
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤8异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "6"  # 钱包连接失败
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            close_adspower_browser(serial_number)
+            return result
         
         # 步骤9: 检测API限制
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤9: 检测API限制...")
-        if check_api_restriction(driver, browser_id, timeout=3):
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 检测到API限制")
-            result["failure_reason"] = "9"
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤9: 检测API限制...")
+            if check_api_restriction(driver, browser_id, timeout=3):
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 检测到API限制")
+                result["failure_reason"] = "2"
+                close_adspower_browser(serial_number)
+                return result
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤9异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "2"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            close_adspower_browser(serial_number)
+            return result
+        
+        # 步骤9.5: 检查钱包连接状态
+        try:
+            time.sleep(10)
+            connect_wallet_button = None
+            okx_wallet_p = None
+            start_time = time.time()
+            while time.time() - start_time < 10:
+                try:
+                    # 查找 Connect Wallet 按钮
+                    connect_buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for button in connect_buttons:
+                        if button.text.strip() == "Connect Wallet":
+                            connect_wallet_button = button
+                            log_print(f"[{browser_id}] ✓ 找到 Connect Wallet 按钮")
+                            break
+                    
+                    # 查找 OKX Wallet 的 p 标签
+                    if not connect_wallet_button:
+                        p_tags = driver.find_elements(By.TAG_NAME, "p")
+                        for p in p_tags:
+                            if p.text.strip() == "OKX Wallet":
+                                okx_wallet_p = p
+                                log_print(f"[{browser_id}] ✓ 找到 OKX Wallet 选项")
+                                break
+                    
+                    # 如果找到了其中一个，停止查找
+                    if connect_wallet_button or okx_wallet_p:
+                        break
+                    
+                    # 如果3秒后两个都没找到，认为已连接
+                    if time.time() - start_time > 3:
+                        log_print(f"[{browser_id}] ✓ 未找到 Connect Wallet 按钮和 OKX Wallet 选项，钱包已连接")
+                        break
+                    
+                    time.sleep(0.5)
+                except:
+                    time.sleep(0.5)
+            
+            # 10秒后，检查结果
+            if connect_wallet_button or okx_wallet_p:
+                result["failure_reason"] = "6"
+                close_adspower_browser(serial_number)
+                return result
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤9.5异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "6"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
             close_adspower_browser(serial_number)
             return result
         
         # 步骤10: 等待Position按钮
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤10: 等待Position按钮...")
-        if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ Position按钮未出现")
-            result["failure_reason"] = "1"
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤10: 等待Position按钮...")
+            if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ Position按钮未出现")
+                result["failure_reason"] = "7"
+                close_adspower_browser(serial_number)
+                return result
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤10异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "7"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
             close_adspower_browser(serial_number)
             return result
         
         # 步骤11: 提交订单
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤11: 提交订单...")
-        trade_box = driver.find_element(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
-        order_success, failure_reason = submit_opinion_order_simple(driver, trade_box, browser_id, serial_number)
-        
-        if not order_success:
-            if failure_reason == "2":
-                # 重试一次（重新获取trade_box，因为页面可能已变化）
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 提交订单失败，重试一次...")
-                time.sleep(2)
-                # 重新获取trade_box
-                try:
-                    trade_box = driver.find_element(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
-                except:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 重试时无法找到trade-box")
-                    result["failure_reason"] = "2"
-                    close_adspower_browser(serial_number)
-                    return result
-                order_success, failure_reason = submit_opinion_order_simple(driver, trade_box, browser_id, serial_number)
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤11: 提交订单...")
+            trade_box = driver.find_element(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+            order_success, failure_reason = submit_opinion_order_simple(driver, trade_box, browser_id, serial_number)
             
             if not order_success:
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 提交订单失败")
-                result["failure_reason"] = failure_reason or "2"
-                close_adspower_browser(serial_number)
-                return result
+                if failure_reason == "8":
+                    # 重试一次（重新获取trade_box，因为页面可能已变化）
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 提交订单失败，重试一次...")
+                    time.sleep(2)
+                    # 重新获取trade_box
+                    try:
+                        trade_box = driver.find_element(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                    except:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 重试时无法找到trade-box")
+                        result["failure_reason"] = "8"
+                        close_adspower_browser(serial_number)
+                        return result
+                    order_success, failure_reason = submit_opinion_order_simple(driver, trade_box, browser_id, serial_number)
+                
+                if not order_success:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 提交订单失败")
+                    result["failure_reason"] = failure_reason or "8"
+                    close_adspower_browser(serial_number)
+                    return result
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤11异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["failure_reason"] = "8"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            close_adspower_browser(serial_number)
+            return result
         
         # 步骤12: 打开目标页面2并获取Balance Spot地址
-        log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤12: 打开目标页面2...")
-        target_url_2 = TARGET_URL_2
-        page2_success = False
-        page2_delay = -1
-        
-        for page2_retry in range(1, MAX_RETRIES + 1):
-            try:
-                if page2_retry > 1:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] 刷新页面2 (第 {page2_retry}/{MAX_RETRIES} 次)...")
+        try:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 步骤12: 打开目标页面2...")
+            target_url_2 = TARGET_URL_2
+            page2_success = False
+            page2_delay = -1
+            
+            for page2_retry in range(1, MAX_RETRIES + 1):
+                try:
+                    if page2_retry > 1:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] 刷新页面2 (第 {page2_retry}/{MAX_RETRIES} 次)...")
+                        time.sleep(2)
+                    
+                    # 重新记录开始时间（每次重试都要重新记录）
+                    start_time2 = time.time()
+                    driver.get(target_url_2)
                     time.sleep(2)
-                
-                # 重新记录开始时间（每次重试都要重新记录）
-                start_time2 = time.time()
-                driver.get(target_url_2)
-                time.sleep(2)
-                
-                # 等待页面加载完成
-                address, address_success = get_balance_spot_address(driver, browser_id, timeout=30)
-                
-                if address_success:
-                    page2_delay = int((time.time() - start_time2) * 1000)  # 转换为毫秒
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 页面2加载完成，延迟: {page2_delay}ms")
-                    page2_success = True
-                    result["delay2"] = page2_delay
-                    break
-                else:
-                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 获取Balance Spot地址失败")
+                    
+                    # 等待页面加载完成
+                    address, address_success = get_balance_spot_address(driver, browser_id, timeout=30)
+                    
+                    if address_success:
+                        page2_delay = int((time.time() - start_time2) * 1000)  # 转换为毫秒
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✓ 页面2加载完成，延迟: {page2_delay}ms")
+                        page2_success = True
+                        result["delay2"] = page2_delay
+                        break
+                    else:
+                        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 获取Balance Spot地址失败")
+                        if page2_retry < MAX_RETRIES:
+                            refresh_page_with_opinion_check(driver, serial_number)
+                            time.sleep(2)
+                            continue
+                        else:
+                            result["delay2"] = -1
+                            result["failure_reason"] = "11"
+                            # 页面2失败，关闭浏览器并返回
+                            close_adspower_browser(serial_number)
+                            return result
+                            
+                except Exception as e:
+                    log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 打开页面2失败 (第 {page2_retry}/{MAX_RETRIES} 次): {str(e)}")
                     if page2_retry < MAX_RETRIES:
-                        refresh_page_with_opinion_check(driver, serial_number)
                         time.sleep(2)
                         continue
                     else:
                         result["delay2"] = -1
-                        result["failure_reason"] = "1"
+                        result["failure_reason"] = "11"
                         # 页面2失败，关闭浏览器并返回
                         close_adspower_browser(serial_number)
                         return result
-                        
-            except Exception as e:
-                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 打开页面2失败 (第 {page2_retry}/{MAX_RETRIES} 次): {str(e)}")
-                if page2_retry < MAX_RETRIES:
-                    time.sleep(2)
-                    continue
-                else:
-                    result["delay2"] = -1
-                    result["failure_reason"] = "1"
-                    # 页面2失败，关闭浏览器并返回
-                    close_adspower_browser(serial_number)
-                    return result
         
-        # 所有步骤成功
-        if page1_success and page2_success:
-            result["success"] = True
-            result["failure_reason"] = "10"  # 成功记为10
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✓✓✓ 所有步骤成功完成")
-        else:
-            # 理论上不应该到达这里，因为页面2失败时已经return了
-            if not page2_success:
-                result["failure_reason"] = "1"
-            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 部分步骤失败")
-        
-        # 关闭浏览器
-        close_adspower_browser(serial_number)
+            # 所有步骤成功
+            if page1_success and page2_success:
+                result["success"] = True
+                result["failure_reason"] = "1"  # 成功记为1
+                # 确保 delay2 被正确设置（如果页面2成功但 delay2 未设置，使用 page2_delay）
+                if result.get("delay2") == -1 and page2_delay != -1:
+                    result["delay2"] = page2_delay
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✓✓✓ 所有步骤成功完成")
+                log_print(f"{log_prefix} [{proxy_type.upper()}] [调试] 最终结果 - delay1={result.get('delay1')}, delay2={result.get('delay2')}, success={result.get('success')}")
+            else:
+                # 理论上不应该到达这里，因为页面2失败时已经return了
+                if not page2_success:
+                    result["failure_reason"] = "11"
+                log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 部分步骤失败")
+            
+            # 关闭浏览器
+            close_adspower_browser(serial_number)
+        except Exception as e:
+            log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 步骤12异常: {str(e)}")
+            import traceback
+            log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
+            result["delay2"] = -1
+            result["failure_reason"] = "11"
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            close_adspower_browser(serial_number)
+            return result
         
     except Exception as e:
-        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 处理过程中发生异常: {str(e)}")
+        # 这是最后的兜底异常处理，理论上不应该到达这里
+        log_print(f"{log_prefix} [{proxy_type.upper()}] ✗ 处理过程中发生未捕获的异常: {str(e)}")
         import traceback
         log_print(f"{log_prefix} [{proxy_type.upper()}] 异常详情:\n{traceback.format_exc()}")
-        result["failure_reason"] = "0"
         if driver:
             try:
                 driver.quit()
@@ -5633,36 +6125,210 @@ def process_ip_with_mode(ip_info, proxy_type, proxy_port, browser_id, serial_num
 
 def main():
     """
-    主函数 - 多线程任务循环
+    主函数 - 循环获取任务并处理
     """
     log_print("="*80)
     log_print("IP测试脚本启动")
     log_print("="*80)
     
-    # 获取IP列表
-    ip_list = get_all_ip_info()
-    if not ip_list:
-        log_print("[系统] ✗ 未获取到IP列表，程序退出")
-        return
-    
-    log_print(f"[系统] ✓ 获取到 {len(ip_list)} 个IP，开始使用 {THREAD_COUNT} 个线程处理...")
-    
-    # 使用线程池处理IP列表
-    with ThreadPoolExecutor(max_workers=THREAD_COUNT) as executor:
-        futures = [executor.submit(process_ip, ip_info) for ip_info in ip_list]
-        
-        # 等待所有任务完成
-        for future in futures:
-            try:
-                future.result()
-            except Exception as e:
-                log_print(f"[系统] ✗ 处理IP时发生异常: {str(e)}")
-                import traceback
-                log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
-    
-    log_print("="*80)
-    log_print("所有IP处理完成")
-    log_print("="*80)
+    # 主循环：每隔5秒请求一次任务
+    while True:
+        try:
+            # 获取任务
+            mission = get_mission_from_server()
+            
+            if mission and mission.get("id"):
+                mission_id = mission.get("id")
+                log_print(f"[系统] 获取到任务 ID: {mission_id}，开始处理...")
+                
+                # 获取IP列表（带重试机制）
+                ip_list, success = get_all_ip_info()
+                
+                if not success:
+                    # 3次都失败了，保存任务为失败
+                    log_print(f"[系统] ✗ 获取IP列表失败，保存任务 {mission_id} 为失败")
+                    submit_mission_result(
+                        mission_id=mission_id,
+                        success_count=0,
+                        failed_count=0,
+                        failed_info={},
+                        status=3,  # 失败
+                        custom_msg="服务器数据列表获取失败"
+                    )
+                    log_print(f"[系统] 等待5秒后继续获取下一个任务...")
+                    time.sleep(5)
+                    continue
+                
+                if not ip_list:
+                    log_print(f"[系统] ✗ 获取到空的IP列表，保存任务 {mission_id} 为失败")
+                    submit_mission_result(
+                        mission_id=mission_id,
+                        success_count=0,
+                        failed_count=0,
+                        failed_info={},
+                        status=3,  # 失败
+                        custom_msg="服务器数据列表获取失败"
+                    )
+                    log_print(f"[系统] 等待5秒后继续获取下一个任务...")
+                    time.sleep(5)
+                    continue
+                
+                log_print(f"[系统] ✓ 获取到 {len(ip_list)} 个IP，开始使用 {THREAD_COUNT} 个线程处理...")
+                log_print(f"[系统] 调度策略: 第一批任务间隔5秒启动，之后任务完成时立即调度新任务")
+                
+                # 待处理任务队列
+                pending_tasks = ip_list.copy()
+                pending_tasks_lock = threading.Lock()
+                
+                # 正在运行的浏览器ID集合
+                running_browser_ids = set()
+                running_browser_ids_lock = threading.Lock()
+                
+                # 已完成任务计数
+                completed_count = 0
+                completed_count_lock = threading.Lock()
+                
+                # 成功和失败计数
+                success_count = 0
+                failed_count = 0
+                failed_info = {}
+                
+                def get_next_available_task():
+                    """获取下一个可执行的任务（跳过浏览器ID正在运行的任务）"""
+                    with pending_tasks_lock:
+                        if not pending_tasks:
+                            return None
+                        
+                        # 查找第一个浏览器ID不在运行中的任务
+                        # 同时检查BROWSER_PROCESSING，因为process_ip内部也会管理队列
+                        for i, ip_info in enumerate(pending_tasks):
+                            browser_id = ip_info.get("number", "unknown")
+                            with running_browser_ids_lock:
+                                # 检查是否在主调度器的运行列表中
+                                if browser_id in running_browser_ids:
+                                    continue
+                            # 检查是否在process_ip的内部处理列表中
+                            with BROWSER_PROCESSING_LOCK:
+                                if browser_id in BROWSER_PROCESSING and BROWSER_PROCESSING[browser_id]:
+                                    continue
+                            
+                            # 找到可用任务，移除并标记浏览器ID为运行中
+                            task = pending_tasks.pop(i)
+                            with running_browser_ids_lock:
+                                running_browser_ids.add(browser_id)
+                            return task
+                        
+                        # 所有待处理任务的浏览器ID都在运行中，返回None
+                        return None
+                
+                def task_completed(browser_id, task_success=True, failure_reason=None):
+                    """任务完成回调"""
+                    with running_browser_ids_lock:
+                        running_browser_ids.discard(browser_id)
+                    with completed_count_lock:
+                        nonlocal completed_count, success_count, failed_count
+                        completed_count += 1
+                        if task_success:
+                            success_count += 1
+                        else:
+                            failed_count += 1
+                            if browser_id:
+                                failed_info[browser_id] = failure_reason or ""
+                
+                def worker():
+                    """工作线程函数 - 持续获取并处理任务"""
+                    while True:
+                        # 获取下一个可用任务
+                        task = get_next_available_task()
+                        
+                        if task is None:
+                            # 没有可用任务
+                            with pending_tasks_lock:
+                                if not pending_tasks:
+                                    # 没有待处理任务了，退出
+                                    break
+                                else:
+                                    # 还有待处理任务，但浏览器ID都在运行，等待一下再重试
+                                    time.sleep(0.5)
+                                    continue
+                        
+                        browser_id = task.get("number", "unknown")
+                        ip = task.get("ip", "unknown")
+                        log_print(f"[系统] 开始处理任务: IP={ip}, 浏览器ID={browser_id}")
+                        
+                        task_success = True
+                        failure_reason = None
+                        try:
+                            # 处理任务（process_ip不返回值，成功或失败由内部逻辑处理并上传）
+                            process_ip(task)
+                            # 如果没有抛出异常，认为任务已处理完成
+                        except Exception as e:
+                            log_print(f"[系统] ✗ 处理任务异常: {str(e)}")
+                            import traceback
+                            log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+                            task_success = False
+                            failure_reason = f"异常: {str(e)}"
+                        finally:
+                            # 任务完成，释放浏览器ID
+                            task_completed(browser_id, task_success, failure_reason)
+                            with completed_count_lock:
+                                log_print(f"[系统] 任务完成: IP={ip}, 浏览器ID={browser_id} (已完成: {completed_count}/{len(ip_list)})")
+                
+                # 使用线程池
+                with ThreadPoolExecutor(max_workers=THREAD_COUNT) as executor:
+                    # 第一批任务：间隔5秒启动worker线程
+                    worker_futures = []
+                    initial_count = min(THREAD_COUNT, len(ip_list))
+                    
+                    log_print(f"[系统] 第一批启动 {initial_count} 个worker线程，间隔5秒...")
+                    for i in range(initial_count):
+                        if i > 0:
+                            log_print(f"[系统] 等待5秒后启动第 {i + 1} 个worker线程...")
+                            time.sleep(5)
+                        
+                        log_print(f"[系统] 启动worker线程 {i + 1}/{initial_count}")
+                        future = executor.submit(worker)
+                        worker_futures.append(future)
+                    
+                    log_print(f"[系统] 所有worker线程已启动，开始动态调度任务...")
+                    
+                    # 等待所有worker线程完成
+                    for i, future in enumerate(worker_futures):
+                        try:
+                            future.result()
+                            log_print(f"[系统] Worker线程 {i + 1} 已完成")
+                        except Exception as e:
+                            log_print(f"[系统] ✗ Worker线程 {i + 1} 异常: {str(e)}")
+                            import traceback
+                            log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+                
+                log_print("="*80)
+                log_print(f"任务 {mission_id} 处理完成 (总计: {completed_count}/{len(ip_list)}, 成功: {success_count}, 失败: {failed_count})")
+                log_print("="*80)
+                
+                # 保存任务结果
+                submit_mission_result(
+                    mission_id=mission_id,
+                    success_count=success_count,
+                    failed_count=failed_count,
+                    failed_info=failed_info,
+                    status=2  # 成功
+                )
+                
+            else:
+                # 没有获取到任务，等待5秒后继续
+                log_print(f"[系统] 未获取到任务，等待5秒后继续...")
+                time.sleep(5)
+                
+        except KeyboardInterrupt:
+            log_print("\n[系统] 收到中断信号，程序退出")
+            break
+        except Exception as e:
+            log_print(f"[系统] ✗ 主循环异常: {str(e)}")
+            import traceback
+            log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+            log_print(f"[系统] 等待5秒后继续...")
+            time.sleep(5)
 
 
 if __name__ == "__main__":

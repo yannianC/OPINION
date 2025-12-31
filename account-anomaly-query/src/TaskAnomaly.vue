@@ -362,6 +362,14 @@
                       >
                         {{ task.balanceLoading ? '加载中...' : '获取' }}
                       </button>
+                      <button 
+                        v-if="task.browserId"
+                        class="btn-view-log" 
+                        @click="openBroLogDialog(task.browserId)"
+                        style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                      >
+                        查看日志
+                      </button>
                     </span>
                     <span class="task-separator">|</span>
                     <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -370,14 +378,6 @@
                       :href="task.opUrl" 
                       target="_blank" 
                       class="link-btn"
-                    >
-                      查看
-                    </a>
-                    <a 
-                      :href="task.opUrl" 
-                      target="_blank" 
-                      class="link-btn"
-                      style="margin-left: 8px;"
                     >
                       查看
                     </a>
@@ -468,6 +468,14 @@
                         >
                           {{ task.balanceLoading ? '加载中...' : '获取' }}
                         </button>
+                        <button 
+                          v-if="task.browserId"
+                          class="btn-view-log" 
+                          @click="openBroLogDialog(task.browserId)"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          查看日志
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -540,6 +548,14 @@
                         >
                           {{ task.balanceLoading ? '加载中...' : '获取' }}
                         </button>
+                        <button 
+                          v-if="task.browserId"
+                          class="btn-view-log" 
+                          @click="openBroLogDialog(task.browserId)"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          查看日志
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -608,6 +624,14 @@
                           :disabled="task.balanceLoading"
                         >
                           {{ task.balanceLoading ? '加载中...' : '获取' }}
+                        </button>
+                        <button 
+                          v-if="task.browserId"
+                          class="btn-view-log" 
+                          @click="openBroLogDialog(task.browserId)"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          查看日志
                         </button>
                       </span>
                       <span class="task-separator">|</span>
@@ -678,6 +702,14 @@
                         >
                           {{ task.balanceLoading ? '加载中...' : '获取' }}
                         </button>
+                        <button 
+                          v-if="task.browserId"
+                          class="btn-view-log" 
+                          @click="openBroLogDialog(task.browserId)"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          查看日志
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -702,6 +734,33 @@
       <section class="empty-section" v-if="!loading && Object.keys(results).length === 0 && hasQueried">
         <p>未找到异常账号</p>
       </section>
+    </div>
+
+    <!-- 浏览器日志弹窗 -->
+    <div v-if="showBroLogDialog" class="modal-overlay" @click="closeBroLogDialog">
+      <div class="modal-content large" @click.stop>
+        <div class="modal-header">
+          <h3>浏览器日志 (浏览器ID: {{ currentBroNumber }})</h3>
+          <button class="modal-close" @click="closeBroLogDialog">×</button>
+        </div>
+        <div class="bro-log-content">
+          <div v-if="isLoadingBroLogs" class="loading">加载中...</div>
+          <div v-else-if="broLogs.length === 0" class="empty">暂无日志记录</div>
+          <div v-else class="bro-log-list">
+            <div 
+              v-for="(logItem, index) in broLogs" 
+              :key="index" 
+              class="bro-log-item"
+            >
+              <div class="bro-log-time">{{ formatBeijingTime(logItem.time) }}</div>
+              <div class="bro-log-text">{{ logItem.log }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="closeBroLogDialog">关闭</button>
+        </div>
+      </div>
     </div>
 
     <!-- Toast 提示 -->
@@ -752,7 +811,12 @@ export default {
         show: false,
         message: '',
         type: 'info'
-      }
+      },
+      // 浏览器日志弹窗
+      showBroLogDialog: false,  // 浏览器日志弹窗
+      broLogs: [],  // 浏览器日志列表
+      currentBroNumber: null,  // 当前查看的浏览器ID
+      isLoadingBroLogs: false  // 是否正在加载日志
     }
   },
   mounted() {
@@ -2076,6 +2140,72 @@ export default {
           task.onChainBalance = balance
         }))
       }
+    },
+    
+    /**
+     * 格式化毫秒时间戳为北京时间
+     */
+    formatBeijingTime(timestamp) {
+      if (!timestamp) return '-'
+      try {
+        const date = new Date(Number(timestamp))
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const hours = String(date.getHours()).padStart(2, '0')
+        const minutes = String(date.getMinutes()).padStart(2, '0')
+        const seconds = String(date.getSeconds()).padStart(2, '0')
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+      } catch (e) {
+        return timestamp
+      }
+    },
+    
+    /**
+     * 打开浏览器日志弹窗
+     */
+    async openBroLogDialog(number) {
+      if (!number) return
+      this.currentBroNumber = number
+      this.showBroLogDialog = true
+      this.broLogs = []
+      await this.fetchBroLogs(number)
+    },
+    
+    /**
+     * 获取浏览器日志
+     */
+    async fetchBroLogs(number) {
+      if (!number) return
+      this.isLoadingBroLogs = true
+      try {
+        const response = await axios.get('https://sg.bicoin.com.cn/99l/bro/getBroLog', {
+          params: {
+            number: number,
+            size: 200
+          }
+        })
+        if (response.data?.code === 0 && response.data?.data?.list) {
+          this.broLogs = response.data.data.list
+        } else {
+          console.error('获取浏览器日志失败:', response.data)
+          this.broLogs = []
+        }
+      } catch (error) {
+        console.error('获取浏览器日志失败:', error)
+        this.broLogs = []
+      } finally {
+        this.isLoadingBroLogs = false
+      }
+    },
+    
+    /**
+     * 关闭浏览器日志弹窗
+     */
+    closeBroLogDialog() {
+      this.showBroLogDialog = false
+      this.broLogs = []
+      this.currentBroNumber = null
     }
   }
 }
@@ -2844,6 +2974,164 @@ export default {
 .balance-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.btn-view-log {
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-view-log:hover {
+  background: #5568d3;
+}
+
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 90%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-content.large {
+  width: 800px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #e0e0e0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: white;
+  cursor: pointer;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.modal-actions {
+  padding: 15px 20px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary {
+  background: #95a5a6;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #7f8c8d;
+}
+
+/* 浏览器日志弹窗样式 */
+.bro-log-content {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.bro-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bro-log-item {
+  background: #f8f9fa;
+  border-radius: 6px;
+  padding: 0.75rem;
+  border-left: 4px solid #667eea;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.bro-log-item:hover {
+  background: #e9ecef;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.bro-log-time {
+  color: #6c757d;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.bro-log-text {
+  color: #212529;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.loading {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+}
+
+.empty {
+  text-align: center;
+  padding: 20px;
+  color: #999;
 }
 
 /* 模式2样式 */

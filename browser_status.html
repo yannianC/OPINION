@@ -66,6 +66,28 @@
             font-size: 18px;
         }
 
+        .refresh-time {
+            font-size: 14px;
+            color: #6c757d;
+            margin-left: 20px;
+        }
+
+        .refresh-time-label {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .refresh-time-value {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .browser-time {
+            color: #6c757d;
+            font-size: 12px;
+            margin-left: 4px;
+        }
+
         .refresh-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -546,6 +568,10 @@
             <button class="refresh-btn" id="refreshBtn" onclick="loadData()">
                 🔄 刷新数据
             </button>
+            <span class="refresh-time" id="refreshTime" style="display: none;">
+                <span class="refresh-time-label">数据刷新时间：</span>
+                <span class="refresh-time-value" id="refreshTimeValue">-</span>
+            </span>
             <div class="total-summary">
                 <span class="total-summary-label">总计个数：</span>
                 <span class="total-summary-value" id="totalSum">-</span>
@@ -743,7 +769,9 @@
                 const result = await response.json();
 
                 if (result.code === 0 && result.data) {
-                    displayData(result.data, result.data2 || {});
+                    // 记录刷新时间（当前时间戳）
+                    const refreshTime = Date.now();
+                    displayData(result.data, result.data2 || {}, result.data3 || {}, refreshTime);
                 } else {
                     throw new Error(result.msg || '获取数据失败');
                 }
@@ -761,9 +789,26 @@
             }
         }
 
-        function displayData(data, data2) {
+        function displayData(data, data2, data3, refreshTime) {
             const tableContainer = document.getElementById('tableContainer');
             const totalSumElement = document.getElementById('totalSum');
+            const refreshTimeElement = document.getElementById('refreshTime');
+            const refreshTimeValueElement = document.getElementById('refreshTimeValue');
+
+            // 显示刷新时间
+            if (refreshTime) {
+                const refreshDate = new Date(refreshTime);
+                const refreshTimeStr = refreshDate.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+                refreshTimeValueElement.textContent = refreshTimeStr;
+                refreshTimeElement.style.display = 'inline';
+            }
 
             // 如果没有数据
             if (!data || Object.keys(data).length === 0) {
@@ -803,7 +848,41 @@
             groupIds.forEach((groupId, index) => {
                 const browserIds = data[groupId] || [];
                 const totalCount = data2[groupId] || browserIds.length;
-                const browserIdsStr = browserIds.join(',');
+                
+                // 构建浏览器ID字符串，每个ID后面加上时间差
+                const browserIdsWithTime = browserIds.map(browserId => {
+                    // 尝试多种key格式：groupId_browserId（字符串和数字）、browserId（字符串和数字）
+                    const groupIdStr = String(groupId);
+                    const browserIdStr = String(browserId);
+                    const groupIdNum = Number(groupId);
+                    const browserIdNum = Number(browserId);
+                    
+                    // 尝试匹配的key格式
+                    const keys = [
+                        `${groupIdStr}_${browserIdStr}`,  // "2436_26"
+                        `${groupIdNum}_${browserIdNum}`,  // 数字格式
+                        `${groupIdStr}_${browserIdNum}`,  // 混合格式1
+                        `${groupIdNum}_${browserIdStr}`,  // 混合格式2
+                        browserIdStr,                     // "1338"
+                        browserIdNum                      // 1338
+                    ];
+                    
+                    let openTime = null;
+                    for (const key of keys) {
+                        if (data3[key] !== undefined) {
+                            openTime = data3[key];
+                            break;
+                        }
+                    }
+                    
+                    if (openTime && refreshTime) {
+                        // 计算时间差（分钟）
+                        const timeDiff = Math.floor((refreshTime - openTime) / (1000 * 60));
+                        return `${browserId}<span class="browser-time">（${timeDiff}分钟）</span>`;
+                    } else {
+                        return browserId;
+                    }
+                }).join(', ');
                 
                 // 累加总计个数
                 totalSum += totalCount;
@@ -812,7 +891,7 @@
                     <tr>
                         <td>${index + 1}</td>
                         <td><span class="group-id">${groupId}</span></td>
-                        <td class="browser-ids">${browserIdsStr || '-'}</td>
+                        <td class="browser-ids">${browserIdsWithTime || '-'}</td>
                         <td><span class="total-count">${totalCount}</span></td>
                     </tr>
                 `;

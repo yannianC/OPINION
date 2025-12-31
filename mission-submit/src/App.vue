@@ -237,12 +237,97 @@
           </div>
         </form>
       </section>
+
+      <!-- IP检测任务表单 -->
+      <section class="section">
+        <h2>检测IP任务</h2>
+        <div class="task-form">
+          <!-- 电脑批次选择 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ipBatchSelect">电脑批次 *</label>
+              <select
+                id="ipBatchSelect"
+                v-model="ipBatchType"
+              >
+                <option value="first">第一批电脑</option>
+                <option value="second">第二批电脑</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 电脑组输入框 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ipGroupNos">电脑组 *</label>
+              <input
+                id="ipGroupNos"
+                v-model="ipGroupNosInput"
+                type="text"
+                placeholder="支持格式: 1 或 1,2,3 或 1-3"
+              />
+              <div v-if="parsedIpGroupNos.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
+                已解析: {{ parsedIpGroupNos.join(', ') }}
+              </div>
+              <div v-if="validIpGroupNos.length > 0" style="margin-top: 8px; color: #28a745; font-size: 12px;">
+                有效电脑组: {{ validIpGroupNos.join(', ') }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 提交按钮 -->
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" @click="handleIpDetection" :disabled="isSubmittingIp || validIpGroupNos.length === 0">
+              <span v-if="isSubmittingIp">运行中...</span>
+              <span v-else>运行IP检测任务</span>
+            </button>
+            <button type="button" class="btn btn-secondary" @click="ipGroupNosInput = ''">
+              清空
+            </button>
+          </div>
+        </div>
+
+        <!-- IP检测任务状态列表 -->
+        <div v-if="ipTaskStatusList.length > 0" class="task-status-list" style="margin-top: 20px;">
+          <h3 style="font-size: 16px; margin-bottom: 12px; color: #333;">IP检测任务状态</h3>
+          <div class="task-status-item" v-for="(item, index) in ipTaskStatusList" :key="index">
+            <div class="task-status-header">
+              <span class="task-group-no">电脑组: {{ item.groupNo }}</span>
+              <span class="task-id">任务ID: {{ item.taskId || '获取中...' }}</span>
+            </div>
+            <div class="task-status-body">
+              <span class="task-status" :class="getStatusClass(item.status)">
+                状态: {{ getStatusText(item.status) }}
+              </span>
+              <span class="task-message" v-if="item.msg">消息: {{ item.msg }}</span>
+            </div>
+          </div>
+          <div class="task-status-actions" style="margin-top: 12px;">
+            <button class="btn btn-secondary btn-sm" @click="clearTaskStatusList">清除状态列表</button>
+          </div>
+        </div>
+
+        <!-- IP检测失败列表 -->
+        <div v-if="failedIpGroups.length > 0" class="failed-list" style="margin-top: 20px;">
+          <h3 style="font-size: 16px; margin-bottom: 12px; color: #333;">IP检测失败的电脑组</h3>
+          <div class="failed-item" v-for="(item, index) in failedIpGroups" :key="index">
+            <span class="failed-id">电脑组: {{ item.groupNo }}</span>
+            <span class="failed-error" v-if="item.error">错误: {{ item.error }}</span>
+          </div>
+          <div class="failed-actions">
+            <button class="btn btn-primary" @click="retryFailedIp" :disabled="isRetryingIp">
+              {{ isRetryingIp ? '重试中...' : '重试失败的电脑组' }}
+            </button>
+            <button class="btn btn-secondary" @click="clearFailedIpList">清除列表</button>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import axios from 'axios'
 
 // 响应式数据
@@ -271,9 +356,24 @@ const cleanGroupNosInput = ref('')
 const isCleaning = ref(false)
 const showConfirmDialog = ref(false)
 
+// IP检测任务相关
+const ipBatchType = ref('second') // 默认第二批电脑
+const ipGroupNosInput = ref('')
+const isSubmittingIp = ref(false)
+const failedIpGroups = ref([]) // 存储失败的电脑组 [{groupNo, error}]
+const isRetryingIp = ref(false)
+const ipTaskStatusList = ref([]) // 存储任务状态 [{groupNo, taskId, status, msg}]
+const statusPollingInterval = ref(null) // 状态轮询定时器
+
 // 映射关系
 const browserToGroupMap = ref({}) // 浏览器ID -> 电脑组
 const groupToBrowserMap = ref({}) // 电脑组 -> 浏览器ID数组
+
+// 第一批电脑组列表
+const firstBatchGroups = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26, 27]
+
+// 第二批电脑组列表（第一批+900）
+const secondBatchGroups = firstBatchGroups.map(g => g + 900)
 
 /**
  * 解析输入字符串（支持单个、逗号分隔、区间）
@@ -338,6 +438,24 @@ const validCleanGroupNos = computed(() => {
   
   // 过滤出存在的电脑组
   return parsedCleanGroupNos.value.filter(groupNo => existingGroups.includes(groupNo)).sort((a, b) => a - b)
+})
+
+// 解析后的IP检测电脑组列表
+const parsedIpGroupNos = computed(() => {
+  return parseInput(ipGroupNosInput.value)
+})
+
+// 验证IP检测的电脑组是否在对应批次中
+const validIpGroupNos = computed(() => {
+  if (parsedIpGroupNos.value.length === 0) {
+    return []
+  }
+  
+  // 根据批次类型获取允许的电脑组列表
+  const allowedGroups = ipBatchType.value === 'first' ? firstBatchGroups : secondBatchGroups
+  
+  // 过滤出在允许列表中的电脑组
+  return parsedIpGroupNos.value.filter(groupNo => allowedGroups.includes(groupNo)).sort((a, b) => a - b)
 })
 
 /**
@@ -959,9 +1077,352 @@ watch(trendingSearchText, (newVal) => {
   }
 })
 
+// 监听IP批次类型变化，自动填充对应的电脑组
+watch(ipBatchType, (newVal) => {
+  if (newVal === 'first') {
+    ipGroupNosInput.value = firstBatchGroups.join(',')
+  } else if (newVal === 'second') {
+    ipGroupNosInput.value = secondBatchGroups.join(',')
+  }
+}, { immediate: true })
+
+/**
+ * 获取任务状态
+ * @param {number|string} taskId - 任务ID
+ * @returns {Promise<object|null>} 返回mission对象或null
+ */
+const fetchMissionStatus = async (taskId) => {
+  // 验证taskId是否有效
+  if (taskId === undefined || taskId === null || taskId === '' || typeof taskId === 'object') {
+    console.error(`获取任务状态失败: 无效的任务ID`, { taskId, type: typeof taskId })
+    return null
+  }
+  
+  // 确保taskId是数字或字符串
+  const validTaskId = Number(taskId)
+  if (isNaN(validTaskId)) {
+    console.error(`获取任务状态失败: 任务ID不是有效数字`, { taskId, type: typeof taskId })
+    return null
+  }
+  
+  try {
+    const url = `https://sg.bicoin.com.cn/99l/mission/status?id=${validTaskId}`
+    console.log(`正在获取任务状态: ${url}`)
+    const response = await axios.get(url)
+    if (response.data && response.data.code === 0 && response.data.data) {
+      // 返回 mission 对象，而不是整个 data
+      return response.data.data.mission
+    }
+    return null
+  } catch (error) {
+    console.error(`获取任务 ${validTaskId} 状态失败:`, error)
+    return null
+  }
+}
+
+/**
+ * 获取状态文本
+ * @param {number} status - 状态码
+ * @returns {string} 状态文本
+ */
+const getStatusText = (status) => {
+  const statusMap = {
+    0: '未启动',
+    9: '进行中',
+    2: '已成功发布任务',
+    3: '失败'
+  }
+  return statusMap[status] || `未知状态(${status})`
+}
+
+/**
+ * 获取状态样式类
+ * @param {number} status - 状态码
+ * @returns {string} 样式类名
+ */
+const getStatusClass = (status) => {
+  const classMap = {
+    0: 'status-pending',
+    9: 'status-running',
+    2: 'status-success',
+    3: 'status-failed'
+  }
+  return classMap[status] || 'status-unknown'
+}
+
+/**
+ * 提交单个IP检测任务（带重试）
+ * @param {number} groupNo - 电脑组
+ * @param {number} maxRetries - 最大重试次数
+ * @returns {Promise<{success: boolean, taskId?: number, error?: string}>}
+ */
+const submitSingleIpDetection = async (groupNo, maxRetries = 3) => {
+  const payload = {
+    groupNo: String(groupNo),
+    type: 11,
+    exchangeName: 'OP'
+  }
+  
+  let lastError = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // 重试前等待5秒
+        console.log(`电脑组 ${groupNo} IP检测第 ${attempt} 次重试，等待5秒...`)
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+      
+      const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/add', payload)
+      
+      if (response.data && response.data.code === 0) {
+        console.log(`电脑组 ${groupNo} IP检测成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+        // 获取任务ID
+        const taskId = response.data.data?.id || response.data.data?.taskId || null
+        return { success: true, taskId: taskId }
+      } else {
+        lastError = response.data?.msg || '未知错误'
+        console.error(`电脑组 ${groupNo} IP检测失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      }
+    } catch (error) {
+      lastError = error.message || '未知错误'
+      console.error(`电脑组 ${groupNo} IP检测失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+    }
+  }
+  
+  // 所有重试都失败
+  return { success: false, error: lastError }
+}
+
+/**
+ * 处理IP检测任务
+ */
+const handleIpDetection = async () => {
+  if (isSubmittingIp.value || validIpGroupNos.value.length === 0) return
+  
+  // 验证输入
+  if (parsedIpGroupNos.value.length === 0) {
+    showMessage('请正确输入电脑组', 'error')
+    return
+  }
+  
+  if (validIpGroupNos.value.length === 0) {
+    showMessage('输入的电脑组不在当前批次中', 'error')
+    return
+  }
+  
+  isSubmittingIp.value = true
+  failedIpGroups.value = [] // 清空之前的失败列表
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    
+    // 清空之前的状态列表
+    ipTaskStatusList.value = []
+    
+    // 为每个电脑组提交一个请求（带重试）
+    for (const groupNo of validIpGroupNos.value) {
+      const result = await submitSingleIpDetection(groupNo, 3)
+      
+      if (result.success) {
+        successCount++
+        // 存储任务信息到状态列表
+        if (result.taskId) {
+          ipTaskStatusList.value.push({
+            groupNo: groupNo,
+            taskId: result.taskId,
+            status: 0, // 初始状态为未启动
+            msg: ''
+          })
+        } else {
+          // 如果没有任务ID，也添加到列表但标记为未知
+          ipTaskStatusList.value.push({
+            groupNo: groupNo,
+            taskId: null,
+            status: null,
+            msg: '未获取到任务ID'
+          })
+        }
+      } else {
+        failCount++
+        failedIpGroups.value.push({
+          groupNo: groupNo,
+          error: result.error || 'IP检测失败'
+        })
+      }
+    }
+    
+    if (successCount > 0) {
+      showMessage(`IP检测完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+      // 开始轮询任务状态
+      startStatusPolling()
+    } else {
+      showMessage(`IP检测失败：所有请求都失败了`, 'error')
+    }
+    
+    // 清空输入框
+    ipGroupNosInput.value = ''
+  } catch (error) {
+    console.error('IP检测失败:', error)
+    showMessage('IP检测失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isSubmittingIp.value = false
+  }
+}
+
+/**
+ * 重试失败的IP检测任务
+ */
+const retryFailedIp = async () => {
+  if (isRetryingIp.value || failedIpGroups.value.length === 0) return
+  
+  isRetryingIp.value = true
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    const newFailedList = []
+    let hasNewTasks = false
+    
+    for (const item of failedIpGroups.value) {
+      const result = await submitSingleIpDetection(item.groupNo, 3)
+      
+      if (result.success) {
+        successCount++
+        // 添加到状态列表
+        if (result.taskId) {
+          ipTaskStatusList.value.push({
+            groupNo: item.groupNo,
+            taskId: result.taskId,
+            status: 0, // 初始状态为未启动
+            msg: ''
+          })
+          hasNewTasks = true
+        } else {
+          ipTaskStatusList.value.push({
+            groupNo: item.groupNo,
+            taskId: null,
+            status: null,
+            msg: '未获取到任务ID'
+          })
+        }
+      } else {
+        failCount++
+        newFailedList.push({
+          ...item,
+          error: result.error || 'IP检测失败'
+        })
+      }
+    }
+    
+    failedIpGroups.value = newFailedList
+    
+    if (successCount > 0) {
+      showMessage(`重试完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+      // 如果有新任务，开始轮询
+      if (hasNewTasks) {
+        startStatusPolling()
+      }
+    } else {
+      showMessage(`重试失败：所有请求都失败了`, 'error')
+    }
+  } catch (error) {
+    console.error('重试IP检测失败:', error)
+    showMessage('重试IP检测失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isRetryingIp.value = false
+  }
+}
+
+/**
+ * 清除IP检测失败列表
+ */
+const clearFailedIpList = () => {
+  failedIpGroups.value = []
+  showMessage('失败列表已清除', 'info')
+}
+
+/**
+ * 轮询任务状态
+ */
+const pollTaskStatus = async () => {
+  // 检查是否有需要轮询的任务（状态不是2或3）
+  const tasksToPoll = ipTaskStatusList.value.filter(task => {
+    return task.taskId && task.status !== 2 && task.status !== 3
+  })
+  
+  if (tasksToPoll.length === 0) {
+    // 没有需要轮询的任务，停止轮询
+    stopStatusPolling()
+    return
+  }
+  
+  // 并行获取所有任务的状态
+  const statusPromises = tasksToPoll.map(async (task) => {
+    try {
+      const mission = await fetchMissionStatus(task.taskId)
+      if (mission) {
+        // 更新任务状态
+        const taskIndex = ipTaskStatusList.value.findIndex(t => t.taskId === task.taskId)
+        if (taskIndex !== -1) {
+          ipTaskStatusList.value[taskIndex].status = mission.status || task.status
+          ipTaskStatusList.value[taskIndex].msg = mission.msg || ''
+        }
+      }
+    } catch (error) {
+      console.error(`获取任务 ${task.taskId} 状态失败:`, error)
+    }
+  })
+  
+  await Promise.all(statusPromises)
+}
+
+/**
+ * 开始轮询任务状态
+ */
+const startStatusPolling = () => {
+  // 先立即执行一次
+  pollTaskStatus()
+  
+  // 清除之前的定时器
+  if (statusPollingInterval.value) {
+    clearInterval(statusPollingInterval.value)
+  }
+  
+  // 每隔10秒轮询一次
+  statusPollingInterval.value = setInterval(() => {
+    pollTaskStatus()
+  }, 10000)
+}
+
+/**
+ * 停止轮询任务状态
+ */
+const stopStatusPolling = () => {
+  if (statusPollingInterval.value) {
+    clearInterval(statusPollingInterval.value)
+    statusPollingInterval.value = null
+  }
+}
+
+/**
+ * 清除任务状态列表
+ */
+const clearTaskStatusList = () => {
+  stopStatusPolling()
+  ipTaskStatusList.value = []
+  showMessage('任务状态列表已清除', 'info')
+}
+
 // 页面加载时自动加载映射
 onMounted(() => {
   loadMappings()
+})
+
+// 组件卸载时清除轮询定时器
+onUnmounted(() => {
+  stopStatusPolling()
 })
 </script>
 
@@ -1046,6 +1507,80 @@ onMounted(() => {
   gap: 12px;
   justify-content: flex-end;
   margin-top: 24px;
+}
+
+/* 任务状态列表样式 */
+.task-status-list {
+  margin-top: 20px;
+}
+
+.task-status-item {
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+}
+
+.task-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.task-group-no {
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.task-id {
+  font-size: 12px;
+  color: #666;
+}
+
+.task-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-status {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.task-status.status-pending {
+  color: #6c757d;
+}
+
+.task-status.status-running {
+  color: #ffc107;
+}
+
+.task-status.status-success {
+  color: #28a745;
+}
+
+.task-status.status-failed {
+  color: #dc3545;
+}
+
+.task-status.status-unknown {
+  color: #6c757d;
+}
+
+.task-message {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.task-status-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
 }
 </style>
 
