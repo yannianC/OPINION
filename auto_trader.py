@@ -2686,7 +2686,7 @@ def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=Fa
         return -1
 
 
-def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_number, browser_id, task_data=None, bro_log_list=None):
+def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_number, browser_id, task_data=None, bro_log_list=None, trendingId=''):
     """
     提交 Opinion Trade 订单
     
@@ -2699,6 +2699,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         browser_id: 浏览器ID
         task_data: 任务数据（用于type=5的同步机制）
         bro_log_list: 日志列表（用于记录日志）
+        trendingId: 交易主题ID（用于更新时间戳）
         
     Returns:
         tuple: (success, should_retry_or_msg)
@@ -3015,7 +3016,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     log_msg = f"[OP] ✓ 任务一已点击 OKX 确认按钮"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    update_browser_timestamp_q(browser_id)
+                                    update_browser_timestamp_q(browser_id, trendingId)
                                     # 更改状态为7（任务一已确认）
                                     log_msg = f"[OP] 任务一: 设置状态为7（已确认）..."
                                     log_print(f"[{serial_number}] {log_msg}")
@@ -3125,7 +3126,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     buttons[1].click()
                                     log_msg = f"[OP] ✓ 任务二已点击 OKX 确认按钮"
-                                    update_browser_timestamp_q(browser_id)
+                                    update_browser_timestamp_q(browser_id, trendingId)
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     log_msg = f"[OP] ✓ 任务二提交订单成功"
@@ -5524,6 +5525,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
     # 从 trending 中提取主标题和子标题
     trending = exchange_config.get("trending", "")
     trending_part1 = ""
+    trendingId = mission.get("trendingId", "")
     
     if "###" in trending:
         # 如果包含 ###，说明有子标题
@@ -5834,7 +5836,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         # 根据交易所类型选择不同的处理流程
         add_bro_log_entry(bro_log_list, browser_id, f"步骤6: 开始处理{exchange_type}交易流程")
         if exchange_type == "OP":
-            success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url, current_ip, current_delay, bro_log_list)
+            success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url, current_ip, current_delay, bro_log_list, trendingId)
         else:
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, current_ip, current_delay)
             available_balance = None  # Polymarket 暂不支持
@@ -6705,7 +6707,7 @@ def click_trending_part1_if_needed(driver, browser_id, trending_part1):
         return False, "EXCEPTION"
 
 
-def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0, trending='', target_url='', current_ip=None, current_delay=None, bro_log_list=None):
+def process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1='', task_data=None, retry_count=0, trending='', target_url='', current_ip=None, current_delay=None, bro_log_list=None, trendingId=''):
     """
     处理 Opinion Trade 交易流程
     
@@ -6716,6 +6718,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         retry_count: 当前重试次数
         trending: 完整的交易主题（用于API调用）
         bro_log_list: 日志列表（用于记录日志）
+        trendingId: 交易主题ID（用于更新时间戳）
     
     Returns:
         tuple: (success, failure_reason, available_balance)
@@ -7185,7 +7188,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 # 12. 提交订单
                 add_bro_log_entry(bro_log_list, browser_id, "步骤12: 提交订单")
                 log_print(f"[{browser_id}] 步骤12: 提交订单...")
-                submit_success, should_retry = submit_opinion_order(driver, tabs_content, trade_type, option_type, browser_id, browser_id, task_data, bro_log_list)
+                submit_success, should_retry = submit_opinion_order(driver, tabs_content, trade_type, option_type, browser_id, browser_id, task_data, bro_log_list, trendingId)
                 if not submit_success:
                     add_bro_log_entry(bro_log_list, browser_id, "提交订单失败")
                     log_print(f"[{browser_id}] ✗ 提交订单失败")
@@ -9972,62 +9975,56 @@ def update_browser_timestamp(browser_id):
         log_print(f"[{browser_id}] ⚠ 更新时间戳异常: {str(e)}")
         return False
 
-def update_browser_timestamp_q(browser_id):
+def update_browser_timestamp_q(browser_id, trendingId=''):
     """
-    更新浏览器配置的 f 字段为当前时间戳
+    通过API更新浏览器时间戳
     
     Args:
         browser_id: 浏览器编号
+        trendingId: 交易主题ID
         
     Returns:
         bool: 更新成功返回True，失败返回False
     """
-    try:
-        log_print(f"[{browser_id}] 更新浏览器时间戳...")
-        
-        # 1. 获取现有配置
-        get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
-        params = {"no": browser_id,"computeGroup":COMPUTER_GROUP}
-        
-        response = requests.get(get_url, params=params, timeout=10)
-        
-        if response.status_code != 200:
-            time.sleep(2)
-            response = requests.get(get_url, params=params, timeout=10)
-            if response.status_code != 200:
-                log_print(f"[{browser_id}] ✗ 获取账户配置失败: HTTP {response.status_code}")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            log_print(f"[{browser_id}] 更新浏览器时间戳... (尝试 {attempt + 1}/{max_retries})")
+            
+            # 构建请求URL和参数
+            url = f"{SERVER_BASE_URL}/hedge/updateSingleOpenTime"
+            timestamp = int(time.time() * 1000)
+            
+            payload = {
+                "number": browser_id,
+                "trendingId": trendingId,
+                "time": timestamp
+            }
+            
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                log_print(f"[{browser_id}] ✓ 时间戳更新成功: {timestamp}")
+                return True
+            else:
+                if attempt < max_retries - 1:
+                    log_print(f"[{browser_id}] ⚠ 更新时间戳失败: HTTP {response.status_code}，将重试...")
+                    time.sleep(2)
+                    continue
+                else:
+                    log_print(f"[{browser_id}] ✗ 更新时间戳失败: HTTP {response.status_code}")
+                    return False
+                    
+        except Exception as e:
+            if attempt < max_retries - 1:
+                log_print(f"[{browser_id}] ⚠ 更新时间戳异常: {str(e)}，将重试...")
+                time.sleep(2)
+                continue
+            else:
+                log_print(f"[{browser_id}] ✗ 更新时间戳异常: {str(e)}")
                 return False
-        
-        result = response.json()
-        if not result or not result.get('data'):
-            log_print(f"[{browser_id}] ⚠ 账户配置不存在，跳过更新")
-            return False
-        
-        account_config = result['data']
-        
-        # 2. 更新 q 字段为当前时间戳（毫秒）
-        timestamp = int(time.time() * 1000)
-        account_config['q'] = str(timestamp)
-        
-        log_print(f"[{browser_id}] 更新 q 字段: {timestamp}")
-        
-        # 3. 上传更新（带重试机制）
-        success, result, error_msg = upload_account_config_with_retry(
-            account_config, 
-            browser_id=browser_id, 
-            timeout=10
-        )
-        
-        if not success:
-            log_print(f"[{browser_id}] ✗ 上传时间戳失败: {error_msg}")
-            return False
-        
-        log_print(f"[{browser_id}] ✓ 时间戳更新成功")
-        return True
-        
-    except Exception as e:
-        log_print(f"[{browser_id}] ⚠ 更新时间戳异常: {str(e)}")
-        return False
+    
+    return False
 
 
 

@@ -7790,9 +7790,9 @@ const executeHedgeTask = async (config, hedgeData) => {
   const firstPsSide = firstSide === 'YES' ? 1 : 2
   const secondPsSide = firstSide === 'YES' ? 2 : 1
   
-  // 获取电脑组ID
-  const yesGroupNo = browserToGroupMap.value[hedgeData.yesNumber] || '1'
-  const noGroupNo = browserToGroupMap.value[hedgeData.noNumber] || '1'
+  // 获取电脑组ID（直接使用API返回的组号）
+  const yesGroupNo = hedgeData.yesGroup || browserToGroupMap.value[hedgeData.yesNumber] || '1'
+  const noGroupNo = hedgeData.noGroup || browserToGroupMap.value[hedgeData.noNumber] || '1'
   
   // 计算价格（一方是 currentPrice，另一方是 100 - currentPrice）
   const yesPrice = firstSide === 'YES' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
@@ -7844,7 +7844,8 @@ const executeHedgeTask = async (config, hedgeData) => {
   console.log(`开始对冲 ${config.id}:`, hedgeRecord)
   
   try {
-    const groupNo = browserToGroupMap.value[firstBrowser] || '1'
+    // 使用已获取的组号（直接使用API返回的组号）
+    const groupNo = firstSide === 'YES' ? yesGroupNo : noGroupNo
     
     const taskData = {
       groupNo: groupNo,
@@ -8083,7 +8084,8 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
   const secondPsSide = secondSide === 'YES' ? 1 : 2
   
   try {
-    const groupNo = browserToGroupMap.value[secondBrowser] || '1'
+    // 使用已存储的组号（来自API返回的组号）
+    const groupNo = secondSide === 'YES' ? hedgeRecord.yesGroupNo : hedgeRecord.noGroupNo
     
     // 任务二的价格 = 100 - 任务一的价格
     const secondPrice = (100 - parseFloat(hedgeRecord.price)).toFixed(1)
@@ -8223,11 +8225,13 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     console.log(`模式2 - 开始提交先挂方（${firstSide}）任务，共 ${firstSideList.length} 个`)
     
     let firstSideSuccessCount = 0
+    // 获取组号（优先使用API返回的group字段，如果item中有group则使用item.group，否则使用browserToGroupMap）
+    const defaultGroup = hedgeData.group || '1'
     for (const item of firstSideList) {
       try {
         const browserNo = item.number
         const share = floorToTwoDecimals(item.share)
-        const groupNo = browserToGroupMap.value[browserNo] || '1'
+        const groupNo = item.group || defaultGroup || browserToGroupMap.value[browserNo] || '1'
         
         // 计算价格：先挂方使用 currentPrice（与模式1一致）
         const taskPrice = parseFloat(hedgeData.currentPrice)
@@ -8323,7 +8327,7 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         try {
           const browserNo = item.number
           const share = floorToTwoDecimals(item.share)
-          const groupNo = browserToGroupMap.value[browserNo] || '1'
+          const groupNo = item.group || defaultGroup || browserToGroupMap.value[browserNo] || '1'
           
           // 计算价格：后挂方使用 100 - currentPrice（与模式1一致）
           const taskPrice = 100 - parseFloat(hedgeData.currentPrice)
@@ -9417,7 +9421,7 @@ onMounted(() => {
   loadHedgeSettings()
   
   // 加载账户配置（浏览器编号和组号映射）
-  fetchAccountConfig()
+  // fetchAccountConfig()
   
   // 加载配置
   fetchExchangeConfig()
