@@ -810,22 +810,19 @@
                 refreshTimeElement.style.display = 'inline';
             }
 
-            // 如果没有数据
-            if (!data || Object.keys(data).length === 0) {
-                tableContainer.innerHTML = '<div class="empty">暂无数据</div>';
-                totalSumElement.textContent = '0';
-                return;
+            // 固定的电脑组列表
+            const fixedGroupIds = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,901,902,903,904,905,906,907,908,909,910,911,912,913,914,915,916,921,922,923,924,925,926,927];
+            
+            // 确保data不为null或undefined
+            if (!data) {
+                data = {};
             }
-
-            // 按电脑组ID排序
-            const groupIds = Object.keys(data).sort((a, b) => {
-                const numA = parseInt(a);
-                const numB = parseInt(b);
-                if (!isNaN(numA) && !isNaN(numB)) {
-                    return numA - numB;
-                }
-                return a.localeCompare(b);
-            });
+            if (!data2) {
+                data2 = {};
+            }
+            if (!data3) {
+                data3 = {};
+            }
 
             // 计算总计个数之和
             let totalSum = 0;
@@ -844,45 +841,54 @@
                     <tbody>
             `;
 
-            // 遍历每个电脑组
-            groupIds.forEach((groupId, index) => {
-                const browserIds = data[groupId] || [];
-                const totalCount = data2[groupId] || browserIds.length;
+            // 遍历每个固定的电脑组
+            fixedGroupIds.forEach((groupId, index) => {
+                // 将组号转换为字符串和数字，以便匹配数据
+                const groupIdStr = String(groupId);
+                const groupIdNum = Number(groupId);
+                
+                // 尝试从data中获取浏览器ID列表（支持字符串和数字key）
+                const browserIds = data[groupIdStr] || data[groupIdNum] || [];
+                
+                // 尝试从data2中获取总计个数（支持字符串和数字key）
+                const totalCount = data2[groupIdStr] !== undefined ? data2[groupIdStr] : 
+                                   (data2[groupIdNum] !== undefined ? data2[groupIdNum] : 0);
                 
                 // 构建浏览器ID字符串，每个ID后面加上时间差
-                const browserIdsWithTime = browserIds.map(browserId => {
-                    // 尝试多种key格式：groupId_browserId（字符串和数字）、browserId（字符串和数字）
-                    const groupIdStr = String(groupId);
-                    const browserIdStr = String(browserId);
-                    const groupIdNum = Number(groupId);
-                    const browserIdNum = Number(browserId);
-                    
-                    // 尝试匹配的key格式
-                    const keys = [
-                        `${groupIdStr}_${browserIdStr}`,  // "2436_26"
-                        `${groupIdNum}_${browserIdNum}`,  // 数字格式
-                        `${groupIdStr}_${browserIdNum}`,  // 混合格式1
-                        `${groupIdNum}_${browserIdStr}`,  // 混合格式2
-                        browserIdStr,                     // "1338"
-                        browserIdNum                      // 1338
-                    ];
-                    
-                    let openTime = null;
-                    for (const key of keys) {
-                        if (data3[key] !== undefined) {
-                            openTime = data3[key];
-                            break;
+                let browserIdsWithTime = '';
+                if (browserIds && browserIds.length > 0) {
+                    browserIdsWithTime = browserIds.map(browserId => {
+                        // 尝试多种key格式：groupId_browserId（字符串和数字）、browserId（字符串和数字）
+                        const browserIdStr = String(browserId);
+                        const browserIdNum = Number(browserId);
+                        
+                        // 尝试匹配的key格式
+                        const keys = [
+                            `${groupIdStr}_${browserIdStr}`,  // "2436_26"
+                            `${groupIdNum}_${browserIdNum}`,  // 数字格式
+                            `${groupIdStr}_${browserIdNum}`,  // 混合格式1
+                            `${groupIdNum}_${browserIdStr}`,  // 混合格式2
+                            browserIdStr,                     // "1338"
+                            browserIdNum                      // 1338
+                        ];
+                        
+                        let openTime = null;
+                        for (const key of keys) {
+                            if (data3[key] !== undefined) {
+                                openTime = data3[key];
+                                break;
+                            }
                         }
-                    }
-                    
-                    if (openTime && refreshTime) {
-                        // 计算时间差（分钟）
-                        const timeDiff = Math.floor((refreshTime - openTime) / (1000 * 60));
-                        return `${browserId}<span class="browser-time">（${timeDiff}分钟）</span>`;
-                    } else {
-                        return browserId;
-                    }
-                }).join(', ');
+                        
+                        if (openTime && refreshTime) {
+                            // 计算时间差（分钟）
+                            const timeDiff = Math.floor((refreshTime - openTime) / (1000 * 60));
+                            return `${browserId}<span class="browser-time">（${timeDiff}分钟）</span>`;
+                        } else {
+                            return browserId;
+                        }
+                    }).join(', ');
+                }
                 
                 // 累加总计个数
                 totalSum += totalCount;

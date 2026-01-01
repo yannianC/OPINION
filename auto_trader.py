@@ -3007,6 +3007,64 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                                 
+                                    # 轮询检查任务1状态，确保状态保持为7
+                                    log_msg = f"[OP] 任务一: 等待20秒后开始轮询检查状态..."
+                                    log_print(f"[{serial_number}] {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                    time.sleep(20)  # 先等待20秒
+                                    
+                                    max_poll_time = 60  # 1分钟内
+                                    poll_interval = 20  # 每20秒执行一次
+                                    start_poll_time = time.time()
+                                    poll_count = 0
+                                    
+                                    while time.time() - start_poll_time < max_poll_time:
+                                        poll_count += 1
+                                        status = get_mission_status(mission_id)
+                                        log_msg = f"[OP] 任务一: 第{poll_count}次轮询，当前状态: {status}"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        
+                                        if status == 7:
+                                            log_msg = f"[OP] ✓ 任务一状态为7，退出轮询"
+                                            log_print(f"[{serial_number}] {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                            break
+                                        elif status == 6:
+                                            log_msg = f"[OP] 任务一状态变为6，重新设置为7..."
+                                            log_print(f"[{serial_number}] {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                            save_result_success = save_mission_result(mission_id, 7)
+                                            if not save_result_success:
+                                                time.sleep(2)
+                                                save_result_success = save_mission_result(mission_id, 7)
+                                            if save_result_success:
+                                                log_msg = f"[OP] ✓ 任务一状态已重新设置为7"
+                                                log_print(f"[{serial_number}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                            
+                                            # 等待下一次20秒轮询
+                                            time.sleep(poll_interval)
+                                            
+                                            # 再次检查状态
+                                            status = get_mission_status(mission_id)
+                                            log_msg = f"[OP] 任务一: 重新设置后检查状态: {status}"
+                                            log_print(f"[{serial_number}] {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                            
+                                            if status == 7:
+                                                log_msg = f"[OP] ✓ 任务一状态为7，退出轮询"
+                                                log_print(f"[{serial_number}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                break
+                                        else:
+                                            # 其他状态，继续等待
+                                            time.sleep(poll_interval)
+                                    
+                                    if time.time() - start_poll_time >= max_poll_time:
+                                        log_msg = f"[OP] 任务一: 轮询超时（1分钟），退出轮询"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     
                                     log_msg = f"[OP] ✓ 任务一提交订单成功"
                                     log_print(f"[{serial_number}] {log_msg}")
@@ -3078,7 +3136,8 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             return False, "本任务正常，等待任务一确认超时"
                                         
                                         tp1_status = get_mission_status(tp1)
-                                        if tp1_status == 7 or tp1_status == 2:
+                                        #### CCCCCCC
+                                        if tp1_status == 7 or tp1_status == 2 or tp1_status == 8 or tp1_status == 12:
                                             time.sleep(5)
                                             log_msg = f"[OP] ✓ 任务一已点击确认（状态7）"
                                             log_print(f"[{serial_number}] {log_msg}")
@@ -3993,8 +4052,6 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             while time.time() - phase2_start_time < phase2_timeout:
                 try:
                     elapsed = int(time.time() - phase2_start_time)
-                    log_print(f"[{serial_number}] [{task_label}] 检测任务一状态（已用时 {elapsed}秒）...")
-                    
                     # 获取任务一的状态
                     current_status = get_mission_status(target_mission_id)
                     if is_task1:
@@ -4046,12 +4103,12 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             # 获取Open Orders数据
             log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
             
-            # 查找 Open Orders div
+            # 查找 Open Orders div  CCCCCCC
             tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
             open_orders_div = None
             for div in tabs_divs:
                 div_id = div.get_attribute('id')
-                if div_id and 'open orders' in div_id.lower():
+                if div_id and 'openorders' in div_id.lower():
                     open_orders_div = div
                     break
             
@@ -4131,7 +4188,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             open_orders_div = None
             for div in tabs_divs:
                 div_id = div.get_attribute('id')
-                if div_id and 'open orders' in div_id.lower():
+                if div_id and 'openorders' in div_id.lower():
                     open_orders_div = div
                     break
             
@@ -4403,7 +4460,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         open_orders_div = None
         for div in tabs_divs:
             div_id = div.get_attribute('id')
-            if div_id and 'open orders' in div_id.lower():
+            if div_id and 'openorders' in div_id.lower():
                 open_orders_div = div
                 break
         
@@ -4981,7 +5038,7 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
         open_orders_div = None
         for div in tabs_divs:
             div_id = div.get_attribute('id')
-            if div_id and 'open orders' in div_id.lower():
+            if div_id and 'openorders' in div_id.lower():
                 open_orders_div = div
                 break
         
