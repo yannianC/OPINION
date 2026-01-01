@@ -11416,7 +11416,7 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
             driver.get(profile_url)
             log_print(f"[{browser_id}] ✓ 已打开页面: {profile_url}")
             
-            time.sleep(15)
+            time.sleep(30)
             
             # 检查并连接钱包
             log_print(f"[{browser_id}] 检查并连接钱包...")
