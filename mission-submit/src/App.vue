@@ -143,7 +143,19 @@
             </div>
           </div>
 
-          <!-- 浏览器ID输入框 -->
+          <!-- 浏览器ID批次选择和输入框 -->
+          <div class="form-row" v-if="inputType === 'browser'">
+            <div class="form-group">
+              <label for="browserBatchType">电脑批次 *</label>
+              <select
+                id="browserBatchType"
+                v-model="browserBatchType"
+              >
+                <option value="first">第一批电脑（1-27）</option>
+                <option value="second">第二批电脑（901-927）</option>
+              </select>
+            </div>
+          </div>
           <div class="form-row" v-if="inputType === 'browser'">
             <div class="form-group">
               <label for="browserIds">浏览器ID *</label>
@@ -342,6 +354,7 @@ const message = ref({ text: '', type: '' })
 // 表单数据
 const inputType = ref('browser') // 'browser' 或 'group'
 const browserIdsInput = ref('')
+const browserBatchType = ref('second') // 浏览器ID批次选择：'first' 或 'second'，默认第二批
 const groupNosInput = ref('')
 const selectedTrending = ref('all') // 默认全部
 const trendingSearchText = ref('全部') // 默认显示"全部"
@@ -374,6 +387,53 @@ const firstBatchGroups = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 
 // 第二批电脑组列表（第一批+900）
 const secondBatchGroups = firstBatchGroups.map(g => g + 900)
+
+/**
+ * 根据浏览器ID和批次获取对应的电脑组
+ * @param {number|string} browserId - 浏览器ID
+ * @param {string} batchType - 批次类型 'first' 或 'second'
+ * @returns {number|null} 电脑组编号，如果找不到则返回null
+ */
+const getGroupNoByBrowserIdAndBatch = (browserId, batchType) => {
+  // 从映射中获取浏览器ID对应的原始电脑组
+  const originalGroupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+  
+  if (!originalGroupNo) {
+    return null
+  }
+  
+  const groupNum = Number(originalGroupNo)
+  if (isNaN(groupNum)) {
+    return null
+  }
+  
+  // 判断原始电脑组属于哪个批次
+  const isFirstBatch = firstBatchGroups.includes(groupNum)
+  const isSecondBatch = secondBatchGroups.includes(groupNum)
+  
+  if (batchType === 'first') {
+    // 如果选择批次1
+    if (isFirstBatch) {
+      // 原始电脑组就是批次1的，直接返回
+      return groupNum
+    } else if (isSecondBatch) {
+      // 原始电脑组是批次2的，减去900得到批次1的
+      return groupNum - 900
+    }
+  } else if (batchType === 'second') {
+    // 如果选择批次2
+    if (isSecondBatch) {
+      // 原始电脑组就是批次2的，直接返回
+      return groupNum
+    } else if (isFirstBatch) {
+      // 原始电脑组是批次1的，加上900得到批次2的
+      return groupNum + 900
+    }
+  }
+  
+  // 如果都不匹配，返回原始电脑组（兜底）
+  return groupNum
+}
 
 /**
  * 解析输入字符串（支持单个、逗号分隔、区间）
@@ -661,6 +721,7 @@ const loadMappings = async () => {
  */
 const resetForm = () => {
   browserIdsInput.value = ''
+  browserBatchType.value = 'second' // 重置为默认批次
   groupNosInput.value = ''
   selectedTrending.value = 'all'
   trendingSearchText.value = ''
@@ -808,8 +869,15 @@ const handleSubmit = async () => {
     
     // 为每个浏览器ID提交一个请求（带重试）
     for (const browserId of browserIdsToSubmit) {
-      // 获取对应的电脑组
-      const groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+      // 获取对应的电脑组（根据输入类型和批次）
+      let groupNo = null
+      if (inputType.value === 'browser') {
+        // 浏览器ID类型：根据批次获取电脑组
+        groupNo = getGroupNoByBrowserIdAndBatch(browserId, browserBatchType.value)
+      } else {
+        // 电脑组类型：直接从映射中获取
+        groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+      }
       
       if (!groupNo) {
         console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过`)
@@ -1010,8 +1078,15 @@ const handlePositionUpdate = async () => {
     
     // 为每个浏览器ID提交一个请求（带重试）
     for (const browserId of browserIdsToSubmit) {
-      // 获取对应的电脑组
-      const groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+      // 获取对应的电脑组（根据输入类型和批次）
+      let groupNo = null
+      if (inputType.value === 'browser') {
+        // 浏览器ID类型：根据批次获取电脑组
+        groupNo = getGroupNoByBrowserIdAndBatch(browserId, browserBatchType.value)
+      } else {
+        // 电脑组类型：直接从映射中获取
+        groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+      }
       
       if (!groupNo) {
         console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过`)

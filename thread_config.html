@@ -432,6 +432,128 @@
             color: #6c757d;
             font-weight: 500;
         }
+
+        .checkbox-cell {
+            text-align: center;
+            width: 50px;
+        }
+
+        .checkbox-cell input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .batch-controls {
+            padding: 15px 20px;
+            background: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .batch-controls label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        .batch-input {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 150px;
+            transition: border-color 0.3s ease;
+        }
+
+        .batch-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .batch-modify-btn {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(23, 162, 184, 0.4);
+        }
+
+        .batch-modify-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(23, 162, 184, 0.6);
+        }
+
+        .batch-modify-btn:active {
+            transform: translateY(0);
+        }
+
+        .batch-modify-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .batch-blacklist-btn {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+            margin-left: 10px;
+        }
+
+        .batch-blacklist-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.6);
+        }
+
+        .batch-blacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .batch-blacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .batch-unblacklist-btn {
+            background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 193, 7, 0.4);
+            margin-left: 10px;
+        }
+
+        .batch-unblacklist-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 193, 7, 0.6);
+        }
+
+        .batch-unblacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .batch-unblacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -440,6 +562,15 @@
         <h1>
             页面7-配置线程
         </h1>
+        <div class="batch-controls">
+            <label>电脑组:</label>
+            <input type="text" class="batch-input" id="batchGroupInput" placeholder="例如: 1-7 或 1,2,3">
+            <label>线程数:</label>
+            <input type="number" class="batch-input" id="batchThreadInput" placeholder="输入线程数" min="1" step="1">
+            <button class="batch-modify-btn" id="batchModifyBtn" onclick="batchModify()">
+                🔧 批量修改
+            </button>
+        </div>
         <div class="controls">
             <div class="button-group">
                 <button class="refresh-btn" id="refreshBtn" onclick="loadData()">
@@ -453,6 +584,12 @@
                 </button>
                 <button class="clean-mission-btn" id="cleanMissionBtn" onclick="cleanAllMission()">
                     🗑️ 清空任务
+                </button>
+                <button class="batch-blacklist-btn" id="batchBlacklistBtn" onclick="batchBlacklist()">
+                    🚫 拉黑勾选的
+                </button>
+                <button class="batch-unblacklist-btn" id="batchUnblacklistBtn" onclick="batchUnblacklist()">
+                    ✅ 取消拉黑勾选的
                 </button>
             </div>
         </div>
@@ -520,6 +657,57 @@
             } catch (error) {
                 console.error('更新拉黑按钮失败:', error);
             }
+        }
+
+        // 保存当前勾选状态（基于电脑组号）
+        function saveSelectionState() {
+            const selectedGroups = new Set();
+            const rowCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+            rowCheckboxes.forEach(checkbox => {
+                const row = checkbox.closest('tr');
+                if (row) {
+                    const rowId = row.id;
+                    const groupInput = document.getElementById(`group_${rowId}`);
+                    if (groupInput && groupInput.value) {
+                        const group = parseInt(groupInput.value);
+                        if (!isNaN(group)) {
+                            selectedGroups.add(group);
+                        }
+                    }
+                }
+            });
+            return selectedGroups;
+        }
+
+        // 恢复勾选状态（基于电脑组号）
+        function restoreSelectionState(selectedGroups) {
+            if (!selectedGroups || selectedGroups.size === 0) return;
+            
+            // 使用requestAnimationFrame确保DOM已更新
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    const allRows = document.querySelectorAll('tbody tr');
+                    let restoredCount = 0;
+                    
+                    allRows.forEach(row => {
+                        const rowId = row.id;
+                        const groupInput = document.getElementById(`group_${rowId}`);
+                        if (groupInput && groupInput.value) {
+                            const group = parseInt(groupInput.value);
+                            if (!isNaN(group) && selectedGroups.has(group)) {
+                                const checkbox = row.querySelector('.row-checkbox');
+                                if (checkbox) {
+                                    checkbox.checked = true;
+                                    restoredCount++;
+                                }
+                            }
+                        }
+                    });
+                    
+                    // 更新全选状态和输入框
+                    updateSelectAllState();
+                }, 150);
+            });
         }
 
         // 静默刷新数据（不显示加载状态）
@@ -599,6 +787,9 @@
                 <table>
                     <thead>
                         <tr>
+                            <th class="checkbox-cell">
+                                <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
+                            </th>
                             <th class="index-cell">序号</th>
                             <th>电脑组</th>
                             <th>线程数</th>
@@ -620,6 +811,9 @@
                     
                     tableHTML += `
                         <tr id="${rowId}">
+                            <td class="checkbox-cell">
+                                <input type="checkbox" class="row-checkbox" onchange="updateSelectAllState()">
+                            </td>
                             <td class="index-cell">${index + 1}</td>
                             <td>
                                 <input type="number" 
@@ -658,6 +852,21 @@
             `;
 
             tableContainer.innerHTML = tableHTML;
+            
+            // 绑定电脑组输入框的change事件
+            const allGroupInputs = document.querySelectorAll('.group-input');
+            allGroupInputs.forEach(input => {
+                input.addEventListener('change', () => {
+                    // 当电脑组输入改变时，如果该行被勾选，更新批量输入框
+                    const row = input.closest('tr');
+                    if (row) {
+                        const checkbox = row.querySelector('.row-checkbox');
+                        if (checkbox && checkbox.checked) {
+                            updateGroupInputFromSelection();
+                        }
+                    }
+                });
+            });
         }
 
         // 新增十行
@@ -671,6 +880,9 @@
                     <table>
                         <thead>
                             <tr>
+                                <th class="checkbox-cell">
+                                    <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
+                                </th>
                                 <th class="index-cell">序号</th>
                                 <th>电脑组</th>
                                 <th>线程数</th>
@@ -696,6 +908,9 @@
                 row.id = rowId;
                 row.className = 'new-row';
                 row.innerHTML = `
+                    <td class="checkbox-cell">
+                        <input type="checkbox" class="row-checkbox" onchange="updateSelectAllState()">
+                    </td>
                     <td class="index-cell">${startIndex + i + 1}</td>
                     <td>
                         <input type="number" 
@@ -732,6 +947,20 @@
             if (newRows.length > 0) {
                 newRows[newRows.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
+            
+            // 为新添加的行绑定电脑组输入框事件
+            newRows.forEach(row => {
+                const groupInput = row.querySelector('.group-input');
+                if (groupInput) {
+                    groupInput.addEventListener('change', () => {
+                        // 当电脑组输入改变时，如果该行被勾选，更新批量输入框
+                        const checkbox = row.querySelector('.row-checkbox');
+                        if (checkbox && checkbox.checked) {
+                            updateGroupInputFromSelection();
+                        }
+                    });
+                }
+            });
         }
 
         // 保存单行数据
@@ -1027,9 +1256,402 @@
             }, 3000);
         }
 
+        // 根据选中的行更新电脑组输入框
+        function updateGroupInputFromSelection() {
+            const rowCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+            const selectedGroups = [];
+            
+            rowCheckboxes.forEach(checkbox => {
+                const row = checkbox.closest('tr');
+                if (row) {
+                    const rowId = row.id;
+                    const groupInput = document.getElementById(`group_${rowId}`);
+                    if (groupInput && groupInput.value) {
+                        const group = parseInt(groupInput.value);
+                        if (!isNaN(group)) {
+                            selectedGroups.push(group);
+                        }
+                    }
+                }
+            });
+            
+            // 排序并格式化显示
+            selectedGroups.sort((a, b) => a - b);
+            const batchGroupInput = document.getElementById('batchGroupInput');
+            if (batchGroupInput) {
+                if (selectedGroups.length === 0) {
+                    batchGroupInput.value = '';
+                } else {
+                    // 尝试合并为区间格式，如果连续的话
+                    let formatted = '';
+                    let start = selectedGroups[0];
+                    let end = selectedGroups[0];
+                    
+                    for (let i = 1; i < selectedGroups.length; i++) {
+                        if (selectedGroups[i] === end + 1) {
+                            end = selectedGroups[i];
+                        } else {
+                            if (start === end) {
+                                formatted += (formatted ? ',' : '') + start;
+                            } else {
+                                formatted += (formatted ? ',' : '') + start + '-' + end;
+                            }
+                            start = selectedGroups[i];
+                            end = selectedGroups[i];
+                        }
+                    }
+                    
+                    // 添加最后一个区间
+                    if (start === end) {
+                        formatted += (formatted ? ',' : '') + start;
+                    } else {
+                        formatted += (formatted ? ',' : '') + start + '-' + end;
+                    }
+                    
+                    batchGroupInput.value = formatted;
+                }
+            }
+        }
+
+        // 根据输入框内容勾选对应的行
+        function updateSelectionFromGroupInput() {
+            const batchGroupInput = document.getElementById('batchGroupInput');
+            if (!batchGroupInput) return;
+            
+            const inputValue = batchGroupInput.value.trim();
+            if (!inputValue) {
+                // 如果输入框为空，取消所有勾选
+                const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+                rowCheckboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+                updateSelectAllState();
+                return;
+            }
+            
+            // 解析输入框内容
+            const groups = parseGroupRange(inputValue);
+            if (groups.length === 0) return;
+            
+            // 遍历所有行，勾选匹配的电脑组
+            const allRows = document.querySelectorAll('tbody tr');
+            allRows.forEach(row => {
+                const rowId = row.id;
+                const groupInput = document.getElementById(`group_${rowId}`);
+                if (groupInput && groupInput.value) {
+                    const group = parseInt(groupInput.value);
+                    if (!isNaN(group) && groups.includes(group)) {
+                        const checkbox = row.querySelector('.row-checkbox');
+                        if (checkbox) {
+                            checkbox.checked = true;
+                        }
+                    } else {
+                        const checkbox = row.querySelector('.row-checkbox');
+                        if (checkbox) {
+                            checkbox.checked = false;
+                        }
+                    }
+                } else {
+                    // 如果电脑组为空，取消勾选
+                    const checkbox = row.querySelector('.row-checkbox');
+                    if (checkbox) {
+                        checkbox.checked = false;
+                    }
+                }
+            });
+            
+            updateSelectAllState();
+        }
+
+        // 全选/全不选
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+            rowCheckboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+            });
+            // 更新电脑组输入框
+            updateGroupInputFromSelection();
+        }
+
+        // 更新全选状态
+        function updateSelectAllState() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+            const checkedCount = Array.from(rowCheckboxes).filter(cb => cb.checked).length;
+            selectAllCheckbox.checked = rowCheckboxes.length > 0 && checkedCount === rowCheckboxes.length;
+            selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < rowCheckboxes.length;
+            // 更新电脑组输入框
+            updateGroupInputFromSelection();
+        }
+
+        // 获取选中的行
+        function getSelectedRows() {
+            const rowCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+            const selectedRows = [];
+            rowCheckboxes.forEach(checkbox => {
+                const row = checkbox.closest('tr');
+                if (row) {
+                    selectedRows.push(row.id);
+                }
+            });
+            return selectedRows;
+        }
+
+        // 批量拉黑
+        async function batchBlacklist() {
+            const selectedRows = getSelectedRows();
+            if (selectedRows.length === 0) {
+                showToast('请先勾选要拉黑的电脑组', 'error');
+                return;
+            }
+
+            // 保存当前勾选状态
+            const selectedGroups = saveSelectionState();
+
+            const batchBtn = document.getElementById('batchBlacklistBtn');
+            batchBtn.disabled = true;
+            batchBtn.textContent = '⏳ 处理中...';
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const rowId of selectedRows) {
+                const groupInput = document.getElementById(`group_${rowId}`);
+                if (!groupInput) continue;
+                
+                const computerGroup = parseInt(groupInput.value);
+                if (isNaN(computerGroup) || computerGroup < 1) {
+                    failCount++;
+                    continue;
+                }
+
+                try {
+                    const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/addTempGroupBlack', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            group: computerGroup
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (result.code === 0) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    failCount++;
+                }
+            }
+
+            // 静默刷新数据
+            await silentRefresh();
+
+            // 等待DOM更新完成后恢复勾选状态
+            restoreSelectionState(selectedGroups);
+
+            if (successCount > 0) {
+                showToast(`成功拉黑 ${successCount} 个电脑组${failCount > 0 ? `，失败 ${failCount} 个` : ''}`, successCount === selectedRows.length ? 'success' : 'error');
+            } else {
+                showToast('拉黑失败', 'error');
+            }
+
+            batchBtn.disabled = false;
+            batchBtn.textContent = '🚫 拉黑勾选的';
+        }
+
+        // 批量取消拉黑
+        async function batchUnblacklist() {
+            const selectedRows = getSelectedRows();
+            if (selectedRows.length === 0) {
+                showToast('请先勾选要取消拉黑的电脑组', 'error');
+                return;
+            }
+
+            // 保存当前勾选状态
+            const selectedGroups = saveSelectionState();
+
+            const batchBtn = document.getElementById('batchUnblacklistBtn');
+            batchBtn.disabled = true;
+            batchBtn.textContent = '⏳ 处理中...';
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const rowId of selectedRows) {
+                const groupInput = document.getElementById(`group_${rowId}`);
+                if (!groupInput) continue;
+                
+                const computerGroup = parseInt(groupInput.value);
+                if (isNaN(computerGroup) || computerGroup < 1) {
+                    failCount++;
+                    continue;
+                }
+
+                try {
+                    const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/removeTempGroupBlack', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            group: computerGroup
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (result.code === 0) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    failCount++;
+                }
+            }
+
+            // 静默刷新数据
+            await silentRefresh();
+
+            // 等待DOM更新完成后恢复勾选状态
+            restoreSelectionState(selectedGroups);
+
+            if (successCount > 0) {
+                showToast(`成功取消拉黑 ${successCount} 个电脑组${failCount > 0 ? `，失败 ${failCount} 个` : ''}`, successCount === selectedRows.length ? 'success' : 'error');
+            } else {
+                showToast('取消拉黑失败', 'error');
+            }
+
+            batchBtn.disabled = false;
+            batchBtn.textContent = '✅ 取消拉黑勾选的';
+        }
+
+        // 解析电脑组范围（支持 1-7 或 1,2,3 格式）
+        function parseGroupRange(rangeStr) {
+            const groups = new Set();
+            const parts = rangeStr.split(',');
+            
+            for (const part of parts) {
+                const trimmed = part.trim();
+                if (trimmed.includes('-')) {
+                    // 范围格式：1-7
+                    const [start, end] = trimmed.split('-').map(s => parseInt(s.trim()));
+                    if (!isNaN(start) && !isNaN(end) && start <= end) {
+                        for (let i = start; i <= end; i++) {
+                            groups.add(i);
+                        }
+                    }
+                } else {
+                    // 单个数字
+                    const num = parseInt(trimmed);
+                    if (!isNaN(num)) {
+                        groups.add(num);
+                    }
+                }
+            }
+            
+            return Array.from(groups).sort((a, b) => a - b);
+        }
+
+        // 批量修改
+        async function batchModify() {
+            const groupInput = document.getElementById('batchGroupInput');
+            const threadInput = document.getElementById('batchThreadInput');
+            const batchBtn = document.getElementById('batchModifyBtn');
+
+            const groupRange = groupInput.value.trim();
+            const threadCount = parseInt(threadInput.value);
+
+            if (!groupRange) {
+                showToast('请输入电脑组范围', 'error');
+                return;
+            }
+
+            if (isNaN(threadCount) || threadCount < 1) {
+                showToast('请输入有效的线程数（大于等于1的整数）', 'error');
+                return;
+            }
+
+            // 解析电脑组范围
+            const groups = parseGroupRange(groupRange);
+            if (groups.length === 0) {
+                showToast('无法解析电脑组范围，请使用格式：1-7 或 1,2,3', 'error');
+                return;
+            }
+
+            // 确认操作
+            if (!confirm(`确定要将电脑组 ${groups.join(', ')} 的线程数都修改为 ${threadCount} 吗？`)) {
+                return;
+            }
+
+            // 保存当前勾选状态
+            const selectedGroups = saveSelectionState();
+
+            batchBtn.disabled = true;
+            batchBtn.textContent = '⏳ 修改中...';
+
+            try {
+                // 构建更新列表
+                const updateList = groups.map(group => ({
+                    computerGroup: group,
+                    threadCount: threadCount
+                }));
+
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        list: updateList
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast(`成功修改 ${groups.length} 个电脑组的线程数为 ${threadCount}`, 'success');
+                    // 静默刷新数据
+                    await silentRefresh();
+                    // 等待DOM更新完成后恢复勾选状态
+                    restoreSelectionState(selectedGroups);
+                } else {
+                    throw new Error(result.msg || '批量修改失败');
+                }
+            } catch (error) {
+                showToast('批量修改失败: ' + error.message, 'error');
+            } finally {
+                batchBtn.disabled = false;
+                batchBtn.textContent = '🔧 批量修改';
+            }
+        }
+
         // 页面加载时自动获取数据
         window.addEventListener('DOMContentLoaded', () => {
             loadData();
+            
+            // 绑定批量电脑组输入框的事件监听
+            const batchGroupInput = document.getElementById('batchGroupInput');
+            if (batchGroupInput) {
+                // 使用input事件，实时响应输入变化
+                batchGroupInput.addEventListener('input', () => {
+                    // 延迟执行，避免输入过程中频繁触发
+                    clearTimeout(batchGroupInput.updateTimeout);
+                    batchGroupInput.updateTimeout = setTimeout(() => {
+                        updateSelectionFromGroupInput();
+                    }, 300);
+                });
+                
+                // 也监听blur事件，失去焦点时立即更新
+                batchGroupInput.addEventListener('blur', () => {
+                    clearTimeout(batchGroupInput.updateTimeout);
+                    updateSelectionFromGroupInput();
+                });
+            }
         });
     </script>
 </body>

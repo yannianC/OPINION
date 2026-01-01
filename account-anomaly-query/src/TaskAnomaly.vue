@@ -2182,7 +2182,7 @@ export default {
         const response = await axios.get('https://sg.bicoin.com.cn/99l/bro/getBroLog', {
           params: {
             number: number,
-            size: 200
+            size: 1000
           }
         })
         if (response.data?.code === 0 && response.data?.data?.list) {

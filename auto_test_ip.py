@@ -272,6 +272,10 @@ BROWSER_QUEUES_LOCK = threading.Lock()  # 保护BROWSER_QUEUES字典的锁
 BROWSER_PROCESSING = {}
 BROWSER_PROCESSING_LOCK = threading.Lock()  # 保护BROWSER_PROCESSING字典的锁
 
+# 全局线程池，用于控制所有任务的并发数
+GLOBAL_THREAD_POOL = None
+GLOBAL_THREAD_POOL_LOCK = threading.Lock()  # 保护全局线程池的锁
+
 def initialize_fingerprint_mapping():
     """
     初始化浏览器编号到用户ID的映射数据
@@ -5432,78 +5436,50 @@ def process_ip_internal(ip_info):
         # HTTP模式处理
         http_result = process_ip_with_mode(ip_info, "http", 50100, browser_id, serial_number, log_prefix)
         
+        # 记录HTTP模式结果
         if http_result["success"]:
-            # HTTP成功，不需要再试socks5
             http_success += 1
-            result_data["a"] = int(time.time())
-            result_data["b"] = f"{http_success},{http_fail}"
-            result_data["c"] = "1"  # 成功记为10
-            result_data["d"] = http_result.get('delay1', -1)  # HTTP页面1延迟
-            result_data["h"] = http_result.get('delay2', -1)  # HTTP页面2延迟
-            # 不上传e, f, g, i
-            log_print(f"{log_prefix} [调试] 准备上传数据 - d={result_data.get('d')}, h={result_data.get('h')}")
-            log_print(f"{log_prefix} [调试] http_result - delay1={http_result.get('delay1')}, delay2={http_result.get('delay2')}")
-            update_ip_info(result_data)
-            log_print(f"{log_prefix} ✓ HTTP模式成功完成，任务结束")
-            return
+            http_failure_reason = "1"  # HTTP成功记为1
+            log_print(f"{log_prefix} ✓ HTTP模式成功")
+        else:
+            http_fail += 1
+            http_failure_reason = http_result.get("failure_reason", "0")
+            log_print(f"{log_prefix} ✗ HTTP模式失败: {http_failure_reason}")
         
-        # HTTP失败，切换到socks5
-        http_fail += 1
-        http_failure_reason = http_result.get("failure_reason", "0")
-        
-        log_print(f"{log_prefix} ✗ HTTP模式失败，切换到socks5模式...{http_failure_reason}")
-        
-        # 关闭浏览器
+        # 关闭浏览器，准备切换到socks5模式
+        log_print(f"{log_prefix} 关闭浏览器，准备切换到socks5模式...")
         close_adspower_browser(serial_number)
         
-        # Socks5模式处理
+        # Socks5模式处理（无论HTTP是否成功，都要执行）
         socks5_result = process_ip_with_mode(ip_info, "socks5", 50101, browser_id, serial_number, log_prefix)
         
+        # 记录Socks5模式结果
         if socks5_result["success"]:
-            # Socks5成功
             socks5_success += 1
-            result_data["a"] = int(time.time())
-            result_data["b"] = f"{http_success},{http_fail}"
-            result_data["c"] = http_failure_reason
-            result_data["d"] = http_result.get('delay1', -1)  # HTTP页面1延迟
-            result_data["h"] = http_result.get('delay2', -1)  # HTTP页面2延迟
-            result_data["e"] = f"{socks5_success},{socks5_fail}"
-            result_data["f"] = "1"  # 成功记为10
-            result_data["g"] = socks5_result['delay1']  # Socks5页面1延迟
-            result_data["i"] = socks5_result['delay2']  # Socks5页面2延迟
+            socks5_failure_reason = "1"  # Socks5成功记为1
+            log_print(f"{log_prefix} ✓ Socks5模式成功")
         else:
-            # Socks5也失败
             socks5_fail += 1
             socks5_failure_reason = socks5_result.get("failure_reason", "0")
-            
-            # 如果原有数据为空，且HTTP和socks5都失败
-            # 检查所有字段是否都为空（a, b, c, d, h, e, f, g, i）
-            if (not original_a or original_a == "") and (not original_b or original_b == "") and (not original_c or original_c == "") and \
-               (not original_d or original_d == "") and (not original_h or original_h == "") and (not original_e or original_e == "") and \
-               (not original_f or original_f == "") and (not original_g or original_g == "") and (not original_i or original_i == ""):
-                result_data["a"] = int(time.time())
-                result_data["b"] = "0,1"
-                result_data["c"] = http_failure_reason  # 使用实际的HTTP失败原因
-                result_data["d"] = -1  # HTTP页面1延迟
-                result_data["h"] = -1  # HTTP页面2延迟
-                result_data["e"] = "0,1"
-                result_data["f"] = socks5_failure_reason  # 使用实际的SOCKS5失败原因
-                result_data["g"] = -1  # Socks5页面1延迟
-                result_data["i"] = -1  # Socks5页面2延迟
-            else:
-                result_data["a"] = int(time.time())
-                result_data["b"] = f"{http_success},{http_fail}"
-                result_data["c"] = http_failure_reason
-                result_data["d"] = http_result.get('delay1', -1)  # HTTP页面1延迟
-                result_data["h"] = http_result.get('delay2', -1)  # HTTP页面2延迟
-                result_data["e"] = f"{socks5_success},{socks5_fail}"
-                result_data["f"] = socks5_failure_reason
-                result_data["g"] = socks5_result.get('delay1', -1)  # Socks5页面1延迟
-                result_data["i"] = socks5_result.get('delay2', -1)  # Socks5页面2延迟
+            log_print(f"{log_prefix} ✗ Socks5模式失败: {socks5_failure_reason}")
+        
+        # 统一处理两种模式的结果并上传
+        result_data["a"] = int(time.time())
+        result_data["b"] = f"{http_success},{http_fail}"
+        result_data["c"] = http_failure_reason
+        result_data["d"] = http_result.get('delay1', -1)  # HTTP页面1延迟
+        result_data["h"] = http_result.get('delay2', -1)  # HTTP页面2延迟
+        result_data["e"] = f"{socks5_success},{socks5_fail}"
+        result_data["f"] = socks5_failure_reason
+        result_data["g"] = socks5_result.get('delay1', -1)  # Socks5页面1延迟
+        result_data["i"] = socks5_result.get('delay2', -1)  # Socks5页面2延迟
+        
+        log_print(f"{log_prefix} [调试] 准备上传数据 - HTTP: delay1={result_data.get('d')}, delay2={result_data.get('h')}, success={http_result['success']}")
+        log_print(f"{log_prefix} [调试] 准备上传数据 - Socks5: delay1={result_data.get('g')}, delay2={result_data.get('i')}, success={socks5_result['success']}")
         
         # 上传结果
         update_ip_info(result_data)
-        log_print(f"{log_prefix} ✓ 任务完成，结果已上传")
+        log_print(f"{log_prefix} ✓ 任务完成，HTTP和Socks5两种模式结果已上传")
     except Exception as e:
         # 发生异常时，也要上传失败结果
         log_print(f"{log_prefix} ✗ 处理IP时发生异常: {str(e)}")
@@ -6141,6 +6117,109 @@ def main():
                 mission_id = mission.get("id")
                 log_print(f"[系统] 获取到任务 ID: {mission_id}，开始处理...")
                 
+                # 判断 numberList 是否为空或 null
+                number_list = mission.get("numberList")
+                if number_list and number_list.strip():
+                    # numberList 有值，处理单个任务
+                    log_print(f"[系统] 检测到 numberList 有值: {number_list}，执行单个任务模式")
+                    
+                    browser_id = number_list.strip()
+                    tp1 = mission.get("tp1")
+                    if not tp1 or not tp1.strip():
+                        log_print(f"[系统] ✗ tp1 字段为空，无法执行任务")
+                        submit_mission_result(
+                            mission_id=mission_id,
+                            success_count=0,
+                            failed_count=0,
+                            failed_info={},
+                            status=3,  # 失败
+                            custom_msg="tp1字段为空"
+                        )
+                        log_print(f"[系统] 等待5秒后继续获取下一个任务...")
+                        time.sleep(5)
+                        continue
+                    
+                    ip = tp1.strip()
+                    log_print(f"[系统] 单个任务 - 浏览器ID: {browser_id}, IP: {ip}")
+                    
+                    # 尝试从 get_all_ip_info 中查找对应的 IP 信息，以获取完整的配置
+                    ip_list, success = get_all_ip_info()
+                    ip_info = None
+                    
+                    if success and ip_list:
+                        # 查找对应的 IP 信息（将number转换为字符串进行比较）
+                        for item in ip_list:
+                            item_number = str(item.get("number", "")).strip()
+                            item_ip = str(item.get("ip", "")).strip()
+                            if item_number == browser_id and item_ip == ip:
+                                ip_info = item.copy()
+                                log_print(f"[系统] ✓ 找到对应的IP配置信息")
+                                break
+                    
+                    # 如果没有找到，使用默认配置构造 ip_info
+                    if not ip_info:
+                        log_print(f"[系统] ⚠ 未找到对应的IP配置，使用默认配置")
+                        ip_info = {
+                            "ip": ip,
+                            "number": browser_id,
+                            "username": "nolanwang",  # 默认用户名
+                            "password": "HFVsyegfeyigrfkjb",  # 默认密码
+                            "isMain": 0
+                        }
+                    
+                    # 启动处理任务（异步，不等待完成）
+                    try:
+                        log_print(f"[系统] 开始处理单个任务: 浏览器ID={browser_id}, IP={ip}")
+                        
+                        # 确保全局线程池已初始化
+                        init_global_thread_pool()
+                        
+                        # 使用线程池异步处理，不阻塞主循环
+                        def process_single_task():
+                            try:
+                                process_ip(ip_info)
+                            except Exception as e:
+                                log_print(f"[系统] ✗ 处理单个任务异常: {str(e)}")
+                                import traceback
+                                log_print(f"[系统] 异常详情:\n{traceback.format_exc()}")
+                        
+                        # 使用全局线程池提交任务，确保不超过最大线程数
+                        with GLOBAL_THREAD_POOL_LOCK:
+                            if GLOBAL_THREAD_POOL is not None:
+                                GLOBAL_THREAD_POOL.submit(process_single_task)
+                                log_print(f"[系统] ✓ 单个任务已提交到线程池（当前线程池大小: {THREAD_COUNT}）")
+                            else:
+                                # 如果线程池未初始化，回退到直接创建线程（不应该发生）
+                                log_print(f"[系统] ⚠ 全局线程池未初始化，使用直接线程创建")
+                                task_thread = threading.Thread(target=process_single_task, daemon=True)
+                                task_thread.start()
+                        
+                        # 只要开始运行了，就返回任务成功
+                        log_print(f"[系统] ✓ 单个任务已开始处理，保存任务为成功")
+                        submit_mission_result(
+                            mission_id=mission_id,
+                            success_count=1,
+                            failed_count=0,
+                            failed_info={},
+                            status=2  # 成功
+                        )
+                    except Exception as e:
+                        log_print(f"[系统] ✗ 启动单个任务处理失败: {str(e)}")
+                        submit_mission_result(
+                            mission_id=mission_id,
+                            success_count=0,
+                            failed_count=1,
+                            failed_info={browser_id: f"启动失败: {str(e)}"},
+                            status=3  # 失败
+                        )
+                    
+                    log_print(f"[系统] 等待5秒后继续获取下一个任务...")
+                    time.sleep(5)
+                    continue
+                
+                # numberList 为空或 null，执行原有逻辑：获取所有IP列表
+                log_print(f"[系统] numberList 为空或 null，执行批量任务模式")
+                
                 # 获取IP列表（带重试机制）
                 ip_list, success = get_all_ip_info()
                 
@@ -6331,7 +6410,31 @@ def main():
             time.sleep(5)
 
 
+def init_global_thread_pool():
+    """初始化全局线程池"""
+    global GLOBAL_THREAD_POOL
+    with GLOBAL_THREAD_POOL_LOCK:
+        if GLOBAL_THREAD_POOL is None:
+            GLOBAL_THREAD_POOL = ThreadPoolExecutor(max_workers=THREAD_COUNT)
+            log_print(f"[系统] 全局线程池已初始化，最大线程数: {THREAD_COUNT}")
+
+
+def shutdown_global_thread_pool():
+    """关闭全局线程池"""
+    global GLOBAL_THREAD_POOL
+    with GLOBAL_THREAD_POOL_LOCK:
+        if GLOBAL_THREAD_POOL is not None:
+            log_print("[系统] 正在关闭全局线程池...")
+            GLOBAL_THREAD_POOL.shutdown(wait=True)
+            GLOBAL_THREAD_POOL = None
+            log_print("[系统] 全局线程池已关闭")
+
+
 if __name__ == "__main__":
     # 初始化并启动主循环
     initialize_fingerprint_mapping()
-    main()
+    init_global_thread_pool()
+    try:
+        main()
+    finally:
+        shutdown_global_thread_pool()

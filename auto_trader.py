@@ -469,12 +469,12 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
         browser_id: 浏览器编号
         timeout: 请求超时时间（秒），默认15秒
         ip_index: IP选择索引
-            - 0: 获取延迟最小的IP，根据isMain判断使用http或socks5
-            - 1: 从延迟最小的IP开始，根据isMain和f/c字段判断是否切换代理类型
-            - 2: 从延迟第二小的IP开始，重复ip_index=0的逻辑
+            - 0: 获取延迟最低的IP及代理方式
+            - 1: 获取延迟第二低的IP及代理方式
+            - 依次类推
         
     Returns:
-        dict: 代理配置信息，包含 ip, port, username, password, type, isMain，失败返回None
+        dict: 代理配置信息，包含 ip, port, username, password, type, delay，失败返回None
     """
     try:
         log_print(f"[{browser_id}] 调用获取IP状态列表接口（超时: {timeout}秒，ip_index={ip_index}）...")
@@ -497,111 +497,131 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                     log_print(f"[{browser_id}] ⚠ 返回数据中没有IP列表")
                     return None
                 
-                # 按delay排序
-                sorted_ip_list = sorted(ip_list, key=lambda x: x.get("delay", 999999))
-                log_print(f"[{browser_id}] IP列表已按延迟排序，共{len(sorted_ip_list)}个IP")
+                # 筛选出每个IP能用的模式以及延迟（每个IP最多只选一个，如果http和socks5都通，选延迟低的）
+                available_options = []
                 
-                # 处理不同的ip_index逻辑
-                if ip_index == 0:
-                    # ip_index=0: 获取延迟最小的IP，根据isMain判断
-                    if len(sorted_ip_list) == 0:
-                        log_print(f"[{browser_id}] ⚠ IP列表为空")
-                        return None
+                for ip_item in ip_list:
+                    ip = ip_item.get("ip")
+                    username = ip_item.get("username")
+                    password = ip_item.get("password")
                     
-                    selected_ip = sorted_ip_list[0]
-                    return _build_proxy_config_from_ip(browser_id, selected_ip, 0)
-                
-                elif ip_index == 1:
-                    # ip_index=1: 从延迟最小的IP开始，根据isMain和f/c字段判断
-                    if len(sorted_ip_list) == 0:
-                        log_print(f"[{browser_id}] ⚠ IP列表为空")
-                        return None
+                    if not ip or not username or not password:
+                        continue
                     
-                    # 先尝试延迟最小的IP
-                    selected_ip = sorted_ip_list[0]
-                    ip = selected_ip.get("ip")
-                    delay = selected_ip.get("delay", 999999)
-                    is_main = selected_ip.get("isMain", 0)
+                    # 检查http代理（c字段=1表示可用，h字段表示延迟）
+                    c_value = ip_item.get("c")
+                    # 兼容字符串"1"和整数1
+                    http_available = (str(c_value) == "1")
+                    http_delay_str = ip_item.get("h") if http_available else None
+                    # 将延迟转换为整数，如果转换失败则设为None
+                    try:
+                        http_delay = int(http_delay_str) if http_delay_str is not None and str(http_delay_str).strip() and str(http_delay_str) != "-1" else None
+                    except (ValueError, TypeError):
+                        http_delay = None
                     
-                    log_print(f"[{browser_id}] 选择延迟最小的IP: IP={ip}, Delay={delay}, isMain={is_main}")
+                    # 检查socks5代理（f字段=1表示可用，i字段表示延迟）
+                    f_value = ip_item.get("f")
+                    # 兼容字符串"1"和整数1
+                    socks5_available = (str(f_value) == "1")
+                    socks5_delay_str = ip_item.get("i") if socks5_available else None
+                    # 将延迟转换为整数，如果转换失败则设为None
+                    try:
+                        socks5_delay = int(socks5_delay_str) if socks5_delay_str is not None and str(socks5_delay_str).strip() and str(socks5_delay_str) != "-1" else None
+                    except (ValueError, TypeError):
+                        socks5_delay = None
                     
-                    if is_main == 1:
-                        # 初始是Http，检查f字段
-                        f_value = selected_ip.get("f", 0)
-                        log_print(f"[{browser_id}] isMain=1 (初始Http)，检查f字段: f={f_value}")
-                        
-                        if f_value == 1:
-                            # 继续使用这个IP，但改为socks5
-                            port = selected_ip.get("port")
-                            username = selected_ip.get("username")
-                            password = selected_ip.get("password")
-                            
-                            if ip and username and password:
-                                proxy_config = {
-                                    "ip": ip,
-                                    "port": "50101",
-                                    "username": username,
-                                    "password": password,
-                                    "type": "socks5",
-                                    "isMain": is_main,
-                                    "delay": delay
-                                }
-                                log_print(f"[{browser_id}] ✓ f=1，切换为socks5: IP={ip}, Port=50101, Delay={delay}")
-                                return proxy_config
-                            else:
-                                log_print(f"[{browser_id}] ⚠ f=1 但数据中缺少必要字段")
-                                return None
-                        else:
-                            log_print(f"[{browser_id}] f!=1，使用延迟最小的IP，保持Http配置")
-                            return _build_proxy_config_from_ip(browser_id, selected_ip, 0)
-                    else:
-                        # 初始是socks5，检查c字段
-                        c_value = selected_ip.get("c", 0)
-                        log_print(f"[{browser_id}] isMain!=1 (初始socks5)，检查c字段: c={c_value}")
-                        
-                        if c_value == 1:
-                            # 继续使用这个IP，改为http
-                            username = selected_ip.get("username")
-                            password = selected_ip.get("password")
-                            
-                            if ip and username and password:
-                                proxy_config = {
+                    # 如果http和socks5都通，选择延迟较低的那个
+                    if http_available and socks5_available:
+                        if http_delay is not None and socks5_delay is not None:
+                            if http_delay <= socks5_delay:
+                                # http延迟更低或相等，选择http
+                                available_options.append({
                                     "ip": ip,
                                     "port": "50100",
                                     "username": username,
                                     "password": password,
                                     "type": "http",
-                                    "isMain": is_main,
-                                    "delay": delay
-                                }
-                                log_print(f"[{browser_id}] ✓ c=1，切换为http: IP={ip}, Port=50100, Delay={delay}")
-                                return proxy_config
+                                    "delay": http_delay
+                                })
                             else:
-                                log_print(f"[{browser_id}] ⚠ c=1 但数据中缺少必要字段")
-                                return None
-                        else:
-                            # c!=1，使用延迟第二小的IP，重复这个逻辑
-                            if len(sorted_ip_list) < 2:
-                                log_print(f"[{browser_id}] ⚠ c!=1 但只有{len(sorted_ip_list)}个IP，无法使用第二小的IP")
-                                return None
-                            
-                            log_print(f"[{browser_id}] c!=1，切换到延迟第二小的IP")
-                            selected_ip = sorted_ip_list[1]
-                            return _process_ip_index_1_logic(browser_id, selected_ip)
+                                # socks5延迟更低，选择socks5
+                                available_options.append({
+                                    "ip": ip,
+                                    "port": "50101",
+                                    "username": username,
+                                    "password": password,
+                                    "type": "socks5",
+                                    "delay": socks5_delay
+                                })
+                        elif http_delay is not None:
+                            # 只有http有延迟数据，选择http
+                            available_options.append({
+                                "ip": ip,
+                                "port": "50100",
+                                "username": username,
+                                "password": password,
+                                "type": "http",
+                                "delay": http_delay
+                            })
+                        elif socks5_delay is not None:
+                            # 只有socks5有延迟数据，选择socks5
+                            available_options.append({
+                                "ip": ip,
+                                "port": "50101",
+                                "username": username,
+                                "password": password,
+                                "type": "socks5",
+                                "delay": socks5_delay
+                            })
+                    elif http_available and http_delay is not None:
+                        # 只有http通，选择http
+                        available_options.append({
+                            "ip": ip,
+                            "port": "50100",
+                            "username": username,
+                            "password": password,
+                            "type": "http",
+                            "delay": http_delay
+                        })
+                    elif socks5_available and socks5_delay is not None:
+                        # 只有socks5通，选择socks5
+                        available_options.append({
+                            "ip": ip,
+                            "port": "50101",
+                            "username": username,
+                            "password": password,
+                            "type": "socks5",
+                            "delay": socks5_delay
+                        })
+                    else:
+                        # 如果都不通，也添加到列表，延迟设为最大值，排序时会排在最后
+                        # 优先选择http类型
+                        available_options.append({
+                            "ip": ip,
+                            "port": "50100",
+                            "username": username,
+                            "password": password,
+                            "type": "http",
+                            "delay": 999999
+                        })
                 
-                elif ip_index == 2:
-                    # ip_index=2: 从延迟第二小的IP开始，重复ip_index=0的逻辑
-                    if len(sorted_ip_list) < 2:
-                        log_print(f"[{browser_id}] ⚠ IP列表不足2个，无法使用第二小的IP")
-                        return None
-                    
-                    selected_ip = sorted_ip_list[1]
-                    log_print(f"[{browser_id}] 从延迟第二小的IP开始，重复ip_index=0的逻辑")
-                    return _build_proxy_config_from_ip(browser_id, selected_ip, 1)
-                
-                else:
-                    log_print(f"[{browser_id}] ⚠ 不支持的ip_index值: {ip_index}")
+                if not available_options:
+                    log_print(f"[{browser_id}] ⚠ 没有可用的IP代理配置")
                     return None
+                
+                # 按延迟从低到高排序
+                available_options.sort(key=lambda x: x.get("delay", 999999))
+                log_print(f"[{browser_id}] 筛选出{len(available_options)}个可用代理配置，已按延迟排序")
+                
+                # 根据ip_index选择
+                if ip_index >= len(available_options):
+                    log_print(f"[{browser_id}] ⚠ ip_index={ip_index} 超出可用配置数量({len(available_options)})")
+                    return None
+                
+                selected_option = available_options[ip_index]
+                log_print(f"[{browser_id}] ✓ 选择第{ip_index+1}个配置: IP={selected_option['ip']}, Port={selected_option['port']}, Type={selected_option['type']}, Delay={selected_option['delay']}")
+                
+                return selected_option
                     
             else:
                 log_print(f"[{browser_id}] ⚠ 获取IP状态列表失败: code={code}, msg={result.get('msg')}")
@@ -623,136 +643,6 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
         return None
 
 
-def _build_proxy_config_from_ip(browser_id, selected_ip, ip_rank):
-    """
-    根据IP信息构建代理配置（ip_index=0和ip_index=2的基础逻辑）
-    
-    Args:
-        browser_id: 浏览器编号
-        selected_ip: 选中的IP字典
-        ip_rank: IP在排序列表中的排名（0=最小延迟，1=第二小延迟）
-    
-    Returns:
-        dict: 代理配置信息，失败返回None
-    """
-    ip = selected_ip.get("ip")
-    delay = selected_ip.get("delay", 999999)
-    is_main = selected_ip.get("isMain", 0)
-    
-    rank_text = "最小" if ip_rank == 0 else "第二小"
-    log_print(f"[{browser_id}] 选择延迟{rank_text}的IP: IP={ip}, Delay={delay}, isMain={is_main}")
-    
-    if is_main == 1:
-        port = selected_ip.get("port")
-        username = selected_ip.get("username")
-        password = selected_ip.get("password")
-        isNew = selected_ip.get("isNew", False)
-        
-        if ip and port and username and password:
-            proxy_config = {
-                "ip": ip,
-                "port": "50100",
-                "username": username,
-                "password": password,
-                "type": "http",
-                "isMain": is_main,
-                "isNew": isNew,
-                "delay": delay
-            }
-            log_print(f"[{browser_id}] ✓ 成功获取代理配置 (isMain=1): IP={ip}, Port=50100, Delay={delay}, Type=http")
-            return proxy_config
-        else:
-            log_print(f"[{browser_id}] ⚠ isMain=1 但数据中缺少必要字段")
-            return None
-    else:
-        proxy_config = {
-            "ip": ip,
-            "port": "50101",
-            "username": selected_ip.get("username", "nolanwang"),
-            "password": selected_ip.get("password", "HFVsyegfeyigrfkjb"),
-            "type": "socks5",
-            "isMain": is_main,
-            "delay": delay
-        }
-        log_print(f"[{browser_id}] ✓ 成功获取代理配置 (isMain={is_main}): IP={ip}, Delay={delay}, Type=socks5")
-        return proxy_config
-
-
-def _process_ip_index_1_logic(browser_id, selected_ip):
-    """
-    处理ip_index=1时，当c!=1需要切换到第二小IP时的逻辑
-    
-    Args:
-        browser_id: 浏览器编号
-        selected_ip: 选中的IP字典（延迟第二小的IP）
-    
-    Returns:
-        dict: 代理配置信息，失败返回None
-    """
-    ip = selected_ip.get("ip")
-    delay = selected_ip.get("delay", 999999)
-    is_main = selected_ip.get("isMain", 0)
-    
-    log_print(f"[{browser_id}] 处理延迟第二小的IP: IP={ip}, Delay={delay}, isMain={is_main}")
-    
-    if is_main == 1:
-        # 初始是Http，检查f字段
-        f_value = selected_ip.get("f", 0)
-        log_print(f"[{browser_id}] isMain=1 (初始Http)，检查f字段: f={f_value}")
-        
-        if f_value == 1:
-            # 继续使用这个IP，但改为socks5
-            port = selected_ip.get("port")
-            username = selected_ip.get("username")
-            password = selected_ip.get("password")
-            
-            if ip and username and password:
-                proxy_config = {
-                    "ip": ip,
-                    "port": "50101",
-                    "username": username,
-                    "password": password,
-                    "type": "socks5",
-                    "isMain": is_main,
-                    "delay": delay
-                }
-                log_print(f"[{browser_id}] ✓ f=1，切换为socks5: IP={ip}, Port=50101, Delay={delay}")
-                return proxy_config
-            else:
-                log_print(f"[{browser_id}] ⚠ f=1 但数据中缺少必要字段")
-                return None
-        else:
-            log_print(f"[{browser_id}] f!=1，使用延迟第二小的IP，保持Http配置")
-            return _build_proxy_config_from_ip(browser_id, selected_ip, 1)
-    else:
-        # 初始是socks5，检查c字段
-        c_value = selected_ip.get("c", 0)
-        log_print(f"[{browser_id}] isMain!=1 (初始socks5)，检查c字段: c={c_value}")
-        
-        if c_value == 1:
-            # 继续使用这个IP，改为http
-            username = selected_ip.get("username")
-            password = selected_ip.get("password")
-            
-            if ip and username and password:
-                proxy_config = {
-                    "ip": ip,
-                    "port": "50100",
-                    "username": username,
-                    "password": password,
-                    "type": "http",
-                    "isMain": is_main,
-                    "delay": delay
-                }
-                log_print(f"[{browser_id}] ✓ c=1，切换为http: IP={ip}, Port=50100, Delay={delay}")
-                return proxy_config
-            else:
-                log_print(f"[{browser_id}] ⚠ c=1 但数据中缺少必要字段")
-                return None
-        else:
-            # c!=1，但已经是第二小的IP了，返回None或使用默认配置
-            log_print(f"[{browser_id}] ⚠ c!=1 且已是延迟第二小的IP，无法继续")
-            return None
 
 
 def update_adspower_proxy(browser_id, proxy_config):
@@ -987,66 +877,37 @@ def get_ip_list_by_number(browser_id, timeout=15):
 
 def get_ip_for_retry(browser_id, retry_count, timeout=15):
     """
-    根据重试次数获取代理配置（支持两次IP更换）
+    根据重试次数获取代理配置（支持多次IP更换）
     
     Args:
         browser_id: 浏览器编号
-        retry_count: 当前重试次数（0=第一次更换，1=第二次更换）
+        retry_count: 当前重试次数（0=第一次更换，1=第二次更换，以此类推）
         timeout: 请求超时时间（秒），默认15秒
         
     Returns:
-        dict: 代理配置信息，包含 ip, port, username, password, type，失败返回None
+        dict: 代理配置信息，包含 ip, port, username, password, type, delay，失败返回None
     """
-    if retry_count == 0:
-        # 第一次更换：使用 get_new_ip_for_browser（选择delay最小的IP），但端口改为50100，类型改为http
-        log_print(f"[{browser_id}] 第一次IP更换：使用 delay最小的IP，端口改为50100，类型改为http...")
-        proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=0)
-        
-        if proxy_config:
-            # 修改端口和类型
-            proxy_config["port"] = "50100"
-            proxy_config["type"] = "http"
-            log_print(f"[{browser_id}] ✓ 第一次IP更换成功: IP={proxy_config['ip']}, Port=50100, Type=http")
-            return proxy_config
-        else:
-            log_print(f"[{browser_id}] ✗ 第一次IP更换失败")
-            return None
-    elif retry_count == 1:
-    # if retry_count == 0:
-        # 第二次更换：获取IP列表，判断个数是否大于2，使用第二小的IP
-        log_print(f"[{browser_id}] 第二次IP更换：获取IP列表，使用 delay第二小的IP...")
-        
-        # 获取IP列表
-        ip_list = get_ip_list_by_number(browser_id, timeout=timeout)
-        if not ip_list:
-            log_print(f"[{browser_id}] ✗ 第二次IP更换失败：无法获取IP列表")
-            return None
-        
-        # 判断IP个数是否大于2
-        if len(ip_list) <= 2:
-            return None
-        #     log_print(f"[{browser_id}] ⚠ IP列表个数({len(ip_list)})<=2，请求添加更多IP...")
-        #     return add_more_ip_for_browser(browser_id, timeout=timeout)
-        
-        # 使用第二小的IP（ip_index=1）
-        proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=1)
-        if proxy_config:
-            log_print(f"[{browser_id}] ✓ 第二次IP更换成功: IP={proxy_config['ip']}")
-            return proxy_config
-        else:
-            log_print(f"[{browser_id}] ✗ 第二次IP更换失败")
-            return None
+    # 使用 ip_index=retry_count+1 来选择IP
+    ip_index = retry_count + 1
+    log_print(f"[{browser_id}] 第{retry_count+1}次IP更换：使用 ip_index={ip_index}...")
+    
+    proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=ip_index)
+    
+    if proxy_config:
+        log_print(f"[{browser_id}] ✓ 第{retry_count+1}次IP更换成功: IP={proxy_config['ip']}, Port={proxy_config['port']}, Type={proxy_config['type']}, Delay={proxy_config.get('delay')}")
+        return proxy_config
     else:
-        log_print(f"[{browser_id}] ⚠ 重试次数超出范围: {retry_count}，最多支持2次IP更换")
+        log_print(f"[{browser_id}] ✗ 第{retry_count+1}次IP更换失败")
         return None
 
 
-def try_update_ip_before_start(browser_id):
+def try_update_ip_before_start(browser_id, bro_log_list=None):
     """
     在打开浏览器前尝试获取并更新代理配置（8秒超时）
     
     Args:
         browser_id: 浏览器编号
+        bro_log_list: 浏览器日志列表（可选），如果提供则记录日志
         
     Returns:
         tuple: (bool, str, int) - (是否成功更新了代理配置, 当前使用的IP, 延迟)
@@ -1054,8 +915,10 @@ def try_update_ip_before_start(browser_id):
     """
     try:
         log_print(f"[{browser_id}] 尝试在打开浏览器前获取新代理配置...")
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, "尝试在打开浏览器前获取新代理配置...")
         
-        proxy_config = get_new_ip_for_browser(browser_id, timeout=8)
+        proxy_config = get_new_ip_for_browser(browser_id, timeout=8, ip_index=0)
         
         if proxy_config:
             current_ip = proxy_config.get("ip")
@@ -1065,9 +928,13 @@ def try_update_ip_before_start(browser_id):
             
             if update_success:
                 log_print(f"[{browser_id}] ✓ 代理配置更新成功")
+                if bro_log_list is not None:
+                    add_bro_log_entry(bro_log_list, browser_id, f"初始IP更新成功: IP={current_ip}, Delay={current_delay}")
                 return True, current_ip, current_delay
             else:
                 log_print(f"[{browser_id}] ⚠ 代理配置更新失败")
+                if bro_log_list is not None:
+                    add_bro_log_entry(bro_log_list, browser_id, "代理配置更新失败")
                 return False, None, None
         else:
             log_print(f"[{browser_id}] 8秒内未获取到新代理配置")
@@ -1077,7 +944,11 @@ def try_update_ip_before_start(browser_id):
                 current_ip = last_config.get("ip")
                 current_delay = last_config.get("delay")
                 log_print(f"[{browser_id}] 使用上次的代理配置: IP={current_ip}, Delay={current_delay}")
+                if bro_log_list is not None:
+                    add_bro_log_entry(bro_log_list, browser_id, f"初始IP（使用上次配置）: IP={current_ip}, Delay={current_delay}")
                 return False, current_ip, current_delay
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, "未获取到代理配置，IP信息未知")
             return False, None, None
             
     except Exception as e:
@@ -1089,9 +960,13 @@ def try_update_ip_before_start(browser_id):
                 current_ip = last_config.get("ip")
                 current_delay = last_config.get("delay")
                 log_print(f"[{browser_id}] 异常时使用上次的代理配置: IP={current_ip}, Delay={current_delay}")
+                if bro_log_list is not None:
+                    add_bro_log_entry(bro_log_list, browser_id, f"初始IP（异常时使用上次配置）: IP={current_ip}, Delay={current_delay}")
                 return False, current_ip, current_delay
         except:
             pass
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, f"获取初始IP时发生异常: {str(e)}")
         return False, None, None
 
 
@@ -2618,6 +2493,98 @@ def click_opinion_open_orders_tab(driver, serial_number):
         return False
 
 
+def get_closed_orders_latest_time(driver, serial_number):
+    """
+    获取 Closed Orders 的最新时间
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        
+    Returns:
+        str: 最新时间字符串，失败返回空字符串
+    """
+    try:
+        log_print(f"[{serial_number}] [OP] 查找并点击 'Closed Orders' 按钮...")
+        
+        # 查找并点击 Closed Orders 按钮
+        closed_orders_clicked = False
+        start_time = time.time()
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                for button in buttons:
+                    if button.text.strip() == "Closed Orders":
+                        button.click()
+                        log_print(f"[{serial_number}] [OP] ✓ 已点击 'Closed Orders' 按钮")
+                        closed_orders_clicked = True
+                        break
+                if closed_orders_clicked:
+                    break
+                time.sleep(0.5)
+            except:
+                time.sleep(0.5)
+        
+        if not closed_orders_clicked:
+            log_print(f"[{serial_number}] [OP] ⚠ 10秒内未找到 'Closed Orders' 按钮")
+            return ""
+        
+        time.sleep(3)  # 等待页面加载
+        
+        # 查找 id 包含 "closedOrders" 的 div
+        log_print(f"[{serial_number}] [OP] 查找 id 包含 'closedOrders' 的 div...")
+        tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+        
+        target_div = None
+        for div in tabs_divs:
+            div_id = div.get_attribute('id')
+            if div_id and 'closedorders' in div_id.lower():
+                target_div = div
+                log_print(f"[{serial_number}] [OP] 找到目标 div，id: {div_id}")
+                break
+        
+        if not target_div:
+            log_print(f"[{serial_number}] [OP] ⚠ 未找到包含 'closedOrders' 的 div")
+            return ""
+        
+        # 找到这个div下的第一个tr元素
+        try:
+            table = target_div.find_element(By.TAG_NAME, 'table')
+            tbody = table.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            
+            if not tr_list or len(tr_list) == 0:
+                log_print(f"[{serial_number}] [OP] ⚠ 未找到 tr 元素")
+                return ""
+            
+            first_tr = tr_list[0]
+            
+            # 找到这个tr元素下的最后一个td下的p标签内容
+            tds = first_tr.find_elements(By.TAG_NAME, "td")
+            if len(tds) == 0:
+                log_print(f"[{serial_number}] [OP] ⚠ 未找到 td 元素")
+                return ""
+            
+            last_td = tds[-1]  # 最后一个td
+            p_tags = last_td.find_elements(By.TAG_NAME, "p")
+            
+            if not p_tags or len(p_tags) == 0:
+                log_print(f"[{serial_number}] [OP] ⚠ 未找到 p 标签")
+                return ""
+            
+            latest_time = p_tags[0].text.strip()
+            log_print(f"[{serial_number}] [OP] ✓ 获取到 Closed Orders 最新时间: {latest_time}")
+            return latest_time
+            
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 获取 Closed Orders 时间失败: {str(e)}")
+            return ""
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [OP] ⚠ 获取 Closed Orders 最新时间失败: {str(e)}")
+        return ""
+
+
 def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=False, trending_part1=''):
     """
     获取 Opinion Trade 的table中tr的数量
@@ -3600,7 +3567,7 @@ def get_position_from_api(serial_number, trending, option_type):
     return None
 
 
-def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None):
+def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None, initial_open_orders_count=0, initial_closed_orders_time=""):
     """
     Type 5 任务专用：等待订单成功并收集数据
     
@@ -3614,6 +3581,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         option_type: YES 或 NO
         trending: 完整的交易主题（用于API调用，可选）
         amount: 下单数量（可选，用于计算差额）
+        initial_open_orders_count: 初始 Open Orders 数量（可选，用于检测挂单变化）
+        initial_closed_orders_time: 初始 Closed Orders 最新时间（可选，用于检测挂单变化）
         
     Returns:
         tuple: (success, msg)
@@ -3630,6 +3599,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     log_print(f"[{serial_number}] [{task_label}] Type 5 专用等待流程开始...")
     log_print(f"[{serial_number}] [{task_label}] 交易类型: {trade_type}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Position 数量: {initial_position_count}")
+    log_print(f"[{serial_number}] [{task_label}] 初始 Open Orders 数量: {initial_open_orders_count}")
+    log_print(f"[{serial_number}] [{task_label}] 初始 Closed Orders 最新时间: {initial_closed_orders_time}")
     
     # 切换回主页面
     try:
@@ -3650,8 +3621,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     else:
         log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
     
-    phase1_timeout = 600  # 10分钟
-    check_interval = 20 if trade_type == "Sell" else 60  # Sell每20秒检查，Buy每60秒检查
+    phase1_timeout = 900  # 15分钟
+    check_interval = 20  # Sell每20秒检查，Buy每60秒检查
     refresh_interval = 120  # 每2分钟刷新一次
     
     phase1_start_time = time.time()
@@ -3659,6 +3630,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     position_changed = False
     use_api_data = False  # 标记是否使用链上数据（如果链上数据先检测到变化，则后续使用链上数据）
     api_detected_first = False  # 标记链上数据是否先检测到变化
+    hava_order = False
     
     # 对于Buy类型，如果使用链上数据，需要记录初始链上仓位数量
     initial_position_count_api = None
@@ -3672,9 +3644,9 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             elapsed = int(time.time() - phase1_start_time)
             log_print(f"[{serial_number}] [{task_label}] 检查Position（已用时 {elapsed}秒）...")
             
-            # 对于Buy和Sell类型，每3分钟刷新
+            # 对于Buy和Sell类型，每2分钟刷新
             if time.time() - last_refresh_time >= refresh_interval:
-                log_print(f"[{serial_number}] [{task_label}] 3分钟无变化，刷新页面...")
+                log_print(f"[{serial_number}] [{task_label}] 2分钟无变化，刷新页面...")
                 refresh_page_with_opinion_check(driver, serial_number)
                 time.sleep(5)
                 last_refresh_time = time.time()
@@ -3760,6 +3732,82 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             save_mission_result(target_mission_id, 11)
                     
                     break
+                
+                # Buy类型：Position未变化，检查Open Orders数量是否有变化
+                if not position_changed_detected:
+                    log_print(f"[{serial_number}] [{task_label}] Position未变化，检查Open Orders数量是否有变化...")
+                    current_open_orders_count = get_opinion_table_row_count(driver, serial_number, need_click_open_orders=True, trending_part1=trending_part1)
+                    
+                    if current_open_orders_count < 0:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Open Orders 数量，设为 0")
+                        current_open_orders_count = 0
+                    
+                    log_print(f"[{serial_number}] [{task_label}] 当前 Open Orders 数量: {current_open_orders_count} (初始: {initial_open_orders_count})")
+                    
+                    # 检查Open Orders数量是否有变化
+                    if current_open_orders_count > initial_open_orders_count:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
+                        
+                        # 更新任务一的状态
+                        current_status = get_mission_status(target_mission_id)
+                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                        if is_task1:
+                            if current_status == 13:
+                                    save_mission_result(target_mission_id, 14)
+                            else:
+                                    # 任务1检测到closed orders时间变化，将任务1的状态改为12
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到Closed Orders时间变化，更改状态为12（为任务1，已出现挂单）...")
+                                    save_mission_result(target_mission_id, 12)
+                        else:
+                            if current_status == 12:
+                                    save_mission_result(target_mission_id, 14)
+                            else:
+                                    # 任务2检测到closed orders时间变化，将任务1的状态改为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到Closed Orders时间变化，更改任务一状态为13（为任务2，已出现挂单）...")
+                                    save_mission_result(target_mission_id, 13)
+                        hava_order = True
+                        break;
+                        
+
+                    else:
+                        # Open Orders数量也未变化，检查Closed Orders时间
+                        log_print(f"[{serial_number}] [{task_label}] Open Orders数量未变化，检查Closed Orders时间是否有变化...")
+                        current_closed_orders_time = get_closed_orders_latest_time(driver, serial_number)
+                        
+                        if not current_closed_orders_time:
+                            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Closed Orders 时间")
+                            current_closed_orders_time = ""
+                        
+                        log_print(f"[{serial_number}] [{task_label}] 当前 Closed Orders 最新时间: {current_closed_orders_time} (初始: {initial_closed_orders_time})")
+                        
+                        # 检查Closed Orders时间是否有变化
+                        if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
+                            log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
+                            
+                            # 更新任务一的状态
+                            current_status = get_mission_status(target_mission_id)
+                            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                            
+                            if is_task1:
+                                if current_status == 13:
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务1检测到closed orders时间变化，将任务1的状态改为12
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到Closed Orders时间变化，更改状态为12（为任务1，已出现挂单）...")
+                                    save_mission_result(target_mission_id, 12)
+                            else:
+                                if current_status == 12:
+                                    save_mission_result(target_mission_id, 14)
+                                   
+                                else:
+                                    # 任务2检测到closed orders时间变化，将任务1的状态改为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到Closed Orders时间变化，更改任务一状态为13（为任务2，已出现挂单）...")
+                                    save_mission_result(target_mission_id, 13)
+                            hava_order = True
+                      # 继续等待，不退出循环
+                    time.sleep(check_interval)
+                    continue
+                    
             else:
                 # Sell类型：检查已成交数量是否变化
                 # 方式1：本地抓取
@@ -3853,6 +3901,69 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             save_mission_result(target_mission_id, 11)
                     
                     break
+                
+                # Sell类型：Position未变化，检查Open Orders数量是否有变化
+                if not position_changed_detected:
+                    log_print(f"[{serial_number}] [{task_label}] Position未变化，检查Open Orders数量是否有变化...")
+                    current_open_orders_count = get_opinion_table_row_count(driver, serial_number, need_click_open_orders=True, trending_part1=trending_part1)
+                    
+                    if current_open_orders_count < 0:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Open Orders 数量，设为 0")
+                        current_open_orders_count = 0
+                    
+                    log_print(f"[{serial_number}] [{task_label}] 当前 Open Orders 数量: {current_open_orders_count} (初始: {initial_open_orders_count})")
+                    
+                    # 检查Open Orders数量是否有变化
+                    if current_open_orders_count > initial_open_orders_count:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
+                        
+                        # 更新任务一的状态
+                        current_status = get_mission_status(target_mission_id)
+                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                        
+                        if is_task1:
+                            # 任务1检测到open order数量变化，将任务1的状态改为12
+                            log_print(f"[{serial_number}] [{task_label}] 任务一检测到Open Orders数量变化，更改状态为12（为任务1，已出现挂单）...")
+                            save_mission_result(target_mission_id, 12)
+                        else:
+                            # 任务2检测到open order数量变化，将任务1的状态改为13
+                            log_print(f"[{serial_number}] [{task_label}] 任务二检测到Open Orders数量变化，更改任务一状态为13（为任务2，已出现挂单）...")
+                            save_mission_result(target_mission_id, 13)
+                        
+                        # 继续等待，不退出循环
+                        time.sleep(check_interval)
+                        continue
+                    else:
+                        # Open Orders数量也未变化，检查Closed Orders时间
+                        log_print(f"[{serial_number}] [{task_label}] Open Orders数量未变化，检查Closed Orders时间是否有变化...")
+                        current_closed_orders_time = get_closed_orders_latest_time(driver, serial_number)
+                        
+                        if not current_closed_orders_time:
+                            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Closed Orders 时间")
+                            current_closed_orders_time = ""
+                        
+                        log_print(f"[{serial_number}] [{task_label}] 当前 Closed Orders 最新时间: {current_closed_orders_time} (初始: {initial_closed_orders_time})")
+                        
+                        # 检查Closed Orders时间是否有变化
+                        if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
+                            log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
+                            
+                            # 更新任务一的状态
+                            current_status = get_mission_status(target_mission_id)
+                            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                            
+                            if is_task1:
+                                # 任务1检测到closed orders时间变化，将任务1的状态改为12
+                                log_print(f"[{serial_number}] [{task_label}] 任务一检测到Closed Orders时间变化，更改状态为12（为任务1，已出现挂单）...")
+                                save_mission_result(target_mission_id, 12)
+                            else:
+                                # 任务2检测到closed orders时间变化，将任务1的状态改为13
+                                log_print(f"[{serial_number}] [{task_label}] 任务二检测到Closed Orders时间变化，更改任务一状态为13（为任务2，已出现挂单）...")
+                                save_mission_result(target_mission_id, 13)
+                            
+                            # 继续等待，不退出循环
+                            time.sleep(check_interval)
+                            continue
             
             time.sleep(check_interval)
             
@@ -3861,13 +3972,61 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             time.sleep(check_interval)
     
     
-    
+    both_hava_order = False
+     
     if not position_changed:
         log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
         
-        # 先检查Open Orders，看是否有挂单
-        log_print(f"[{serial_number}] [{task_label}] 开始检查Open Orders是否有挂单...")
+        if hava_order:
+            # 在10分钟内，每隔30秒检测一次任务一的状态
+            log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务一状态）...")
+            phase2_timeout = 600  # 10分钟
+            phase2_check_interval = 30  # 30秒
+            phase2_start_time = time.time()
+            
+            while time.time() - phase2_start_time < phase2_timeout:
+                try:
+                    elapsed = int(time.time() - phase2_start_time)
+                    log_print(f"[{serial_number}] [{task_label}] 检测任务一状态（已用时 {elapsed}秒）...")
+                    
+                    # 获取任务一的状态
+                    current_status = get_mission_status(target_mission_id)
+                    if is_task1:
+                        if current_status == 14:
+                            both_hava_order = True
+                            break;
+                        elif current_status == 12:
+                            continue;
+                        elif current_status == 13:
+                            both_hava_order = True
+                            break;
+                        elif current_status == 11:
+                            both_hava_order = True
+                            break;
+                    else:
+                        if current_status == 14:
+                            both_hava_order = True
+                            break;
+                        elif current_status == 13:
+                            continue;
+                        elif current_status == 12:
+                            both_hava_order = True
+                            break;
+                        elif current_status == 8:
+                            both_hava_order = True
+                            break;
+                    
+                    # 等待30秒后继续下一次检测
+                    time.sleep(phase2_check_interval)
+                    
+                except Exception as e:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 检测任务一状态时出错: {str(e)}")
+                    time.sleep(phase2_check_interval)
         
+        log_print(f"[{serial_number}] [{task_label}] 10分钟定期检测结束")
+    
+    if not position_changed and not both_hava_order: 
+  
         try:
             # 点击Open Orders按钮
             log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
@@ -3910,23 +4069,6 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，检查任务一状态，判断另一个任务是否已变化...")
             current_status = get_mission_status(target_mission_id)
             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
-            
-            # 判断另一个任务是否已经变化
-            other_task_changed = False
-            if is_task1:
-                # 当前是任务一，检查任务一状态是否为11（表示任务二已经变化）
-                if current_status == 11:
-                    other_task_changed = True
-                    log_print(f"[{serial_number}] [{task_label}] 检测到任务二已变化（任务一状态为11），保留挂单")
-            else:
-                # 当前是任务二，检查任务一状态是否为8（表示任务一已经变化）
-                if current_status == 8:
-                    other_task_changed = True
-                    log_print(f"[{serial_number}] [{task_label}] 检测到任务一已变化（任务一状态为8），保留挂单")
-            
-            if other_task_changed:
-                log_print(f"[{serial_number}] [{task_label}] Position未检测到变化超时，但对方已变化，保留挂单")
-                return False, "Position未检测到变化超时，但对方已变化，保留挂单"
             
             # 找到第一个tr的最后一个td下的svg并点击
             first_tr = tr_list[0]
@@ -4193,8 +4335,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 log_print(f"[{serial_number}] [{task_label}]   差额: {difference} (绝对值: {difference_abs})")
                 
                 # 计算下单数量的10%作为阈值
-                amount_threshold = float(amount) * 0.1
-                log_print(f"[{serial_number}] [{task_label}]   下单数量的10%: {amount_threshold}")
+                amount_threshold = float(amount) * 0.4
+                log_print(f"[{serial_number}] [{task_label}]   下单数量的40%: {amount_threshold}")
                 
                 # 如果差额绝对值小于下单数量的10%，跳过获取Open Orders数据
                 if difference_abs < amount_threshold:
@@ -5030,6 +5172,30 @@ def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_po
 # Polymarket 特定函数
 # ============================================================================
 
+def check_driver_session_valid(driver, serial_number):
+    """
+    检查driver会话是否有效
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        
+    Returns:
+        bool: 会话有效返回True，否则返回False
+    """
+    try:
+        # 尝试获取当前窗口句柄，如果会话失效会抛出异常
+        _ = driver.current_window_handle
+        return True
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "invalid session id" in error_msg or "session not created" in error_msg or "no such window" in error_msg:
+            log_print(f"[{serial_number}] ⚠ Driver会话已失效: {str(e)}")
+            return False
+        # 其他异常可能是正常的，返回True
+        return True
+
+
 def wait_for_polymarket_trade_box(driver, serial_number, max_retries=3):
     """
     等待 Polymarket 页面加载完成
@@ -5584,13 +5750,14 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     log_print(f"[{browser_id}] 使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                 else:
                     log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                    _, current_ip, current_delay = try_update_ip_before_start(browser_id)
-                    add_bro_log_entry(bro_log_list, browser_id, f"更新IP完成: IP={current_ip}, Delay={current_delay}")
+                    _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
+                    if current_ip:
+                        add_bro_log_entry(bro_log_list, browser_id, f"更新IP完成: IP={current_ip}, Delay={current_delay}")
             else:
                 # 浏览器未运行，需要更新IP并启动浏览器
                 add_bro_log_entry(bro_log_list, browser_id, "步骤2: 检查IP并更新代理")
                 log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
     
                 
                 # 3. 启动浏览器
@@ -5620,8 +5787,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id)
-                add_bro_log_entry(bro_log_list, browser_id, f"更新IP完成: IP={current_ip}, Delay={current_delay}")
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
+                if current_ip:
+                    add_bro_log_entry(bro_log_list, browser_id, f"更新IP完成: IP={current_ip}, Delay={current_delay}")
             
             # 检查浏览器状态（重试时浏览器应该已关闭，需要重新启动）
             add_bro_log_entry(bro_log_list, browser_id, "步骤2: 检查浏览器状态")
@@ -6328,7 +6496,7 @@ def wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
         start_time = time.time()
         position_button_found = False
         
-        while time.time() - start_time < 30:
+        while time.time() - start_time < 45:
             try:
                 buttons = driver.find_elements(By.TAG_NAME, "button")
                 for button in buttons:
@@ -6878,14 +7046,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 add_bro_log_entry(bro_log_list, browser_id, "Position按钮未出现，页面加载可能失败")
                 log_print(f"[{browser_id}] ✗ Position按钮未出现，页面加载可能失败")
                 
-                time.sleep(60)
+                time.sleep(30)
                 # 发送飞书消息
                 message_text = f"电脑组{COMPUTER_GROUP}浏览器编号{browser_id} Position按钮未出现。请人工复核"
                 log_print(f"[{browser_id}] 发送飞书消息: {message_text}")
                 send_feishu_custom_message(browser_id, message_text)
                 return False, "Position按钮未出现，页面加载可能失败", None
         
-        time.sleep(20)
+        time.sleep(10)
         # 6.1.3 再次检查钱包是否已连接
         add_bro_log_entry(bro_log_list, browser_id, "步骤6.1.5.1: 再次检查钱包是否已连接")
         log_print(f"[{browser_id}] 步骤6.1.3: 再次检查钱包是否已连接...")
@@ -6980,6 +7148,18 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
         log_print(f"[{browser_id}] 初始 Open Orders 数量: {initial_open_orders_count}")
         add_bro_log_entry(bro_log_list, browser_id, f"初始 Open Orders 数量: {initial_open_orders_count}")
+        
+        # 获取 Closed Orders 的最新时间
+        add_bro_log_entry(bro_log_list, browser_id, "步骤6.4: 检查 Closed Orders")
+        log_print(f"[{browser_id}] 步骤6.4: 检查 Closed Orders...")
+        initial_closed_orders_time = get_closed_orders_latest_time(driver, browser_id)
+        
+        if not initial_closed_orders_time:
+            log_print(f"[{browser_id}] ⚠ 无法获取 Closed Orders 最新时间，设为空字符串")
+            initial_closed_orders_time = ""
+        
+        log_print(f"[{browser_id}] 初始 Closed Orders 最新时间: {initial_closed_orders_time}")
+        add_bro_log_entry(bro_log_list, browser_id, f"初始 Closed Orders 最新时间: {initial_closed_orders_time}")
         
         # Buy 和 Sell 类型：如果已有挂单则不能下单
         if initial_open_orders_count > 0:
@@ -7264,7 +7444,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 trade_type,
                 option_type,
                 trending,
-                amount
+                amount,
+                initial_open_orders_count,
+                initial_closed_orders_time
                 )
 
 
@@ -7440,6 +7622,45 @@ def process_polymarket_trade(driver, browser_id, trade_type, price_type, option_
             preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
         else:
             log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
+        
+        # 6.5 检查driver会话是否有效，如果失效则重新获取trade_box
+        log_print(f"[{browser_id}] 步骤6.5: 检查浏览器会话有效性...")
+        if not check_driver_session_valid(driver, browser_id):
+            log_print(f"[{browser_id}] ⚠ 浏览器会话已失效，尝试重新获取trade_box...")
+            # 切换到主窗口
+            try:
+                all_windows = driver.window_handles
+                for window in all_windows:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "polymarket.com" in current_url or "app.polymarket.com" in current_url:
+                        log_print(f"[{browser_id}] ✓ 已切换到主页面窗口")
+                        break
+            except:
+                pass
+            
+            # 重新获取trade_box
+            trade_box = wait_for_polymarket_trade_box(driver, browser_id, max_retries=3)
+            if not trade_box:
+                return False, "浏览器会话失效，重新获取trade_box失败"
+            log_print(f"[{browser_id}] ✓ 已重新获取trade_box")
+        else:
+            # 会话有效，但需要确保在主窗口并重新获取trade_box（因为步骤6可能切换了窗口）
+            try:
+                all_windows = driver.window_handles
+                for window in all_windows:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "polymarket.com" in current_url or "app.polymarket.com" in current_url:
+                        log_print(f"[{browser_id}] ✓ 已切换到主页面窗口")
+                        break
+            except:
+                pass
+            
+            # 重新获取trade_box以确保元素引用有效
+            trade_box = wait_for_polymarket_trade_box(driver, browser_id, max_retries=1)
+            if not trade_box:
+                log_print(f"[{browser_id}] ⚠ 重新获取trade_box失败，使用原有引用继续...")
         
         # 7. 点击买卖类型按钮
         log_print(f"[{browser_id}] 步骤7: 选择买卖类型 {trade_type}...")
@@ -11680,8 +11901,6 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
-                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                        call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         time.sleep(15)
                         
                         # 2. 根据重试次数获取IP
@@ -11730,8 +11949,6 @@ def process_type2_mission(task_data, retry_count=0):
                     except:
                         pass
                     close_adspower_browser(browser_id)
-                    # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                    call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                     log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
                     time.sleep(120)  # Type=2任务等待2分钟
                     
@@ -11820,8 +12037,6 @@ def process_type2_mission(task_data, retry_count=0):
                             except:
                                 pass
                             close_adspower_browser(browser_id)
-                            # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                            call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                             time.sleep(15)
                             
                             # 2. 根据重试次数获取IP
@@ -11899,8 +12114,6 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
-                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                        call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
                         time.sleep(120)  # Type=2任务等待2分钟
                         
@@ -11962,8 +12175,6 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
-                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                        call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         time.sleep(2)
                         
                         # 2. 根据重试次数获取IP
@@ -12411,8 +12622,6 @@ def process_type2_mission(task_data, retry_count=0):
                         except:
                             pass
                         close_adspower_browser(browser_id)
-                        # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                        call_remove_number_in_use(browser_id, "Type 2 任务换IP重试，")
                         time.sleep(15)
                         
                         # 2. 根据重试次数获取IP
@@ -12937,9 +13146,6 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             log_print(f"[{browser_id}] Type {mission_type} 任务异常，尝试关闭浏览器（兜底）...")
             try:
                 close_adspower_browser(browser_id)
-                # Type 2 任务关闭浏览器后调用 removeNumberInUse 接口
-                if mission_type == 2:
-                    call_remove_number_in_use(browser_id, "Type 2 任务异常关闭浏览器，")
             except Exception as close_error:
                 log_print(f"[{browser_id}] 关闭浏览器时出错: {str(close_error)}")
         

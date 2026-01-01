@@ -496,6 +496,58 @@
             cursor: not-allowed;
         }
 
+        .set-default-btn {
+            background: linear-gradient(135deg, #20c997 0%, #17a2b8 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(32, 201, 151, 0.4);
+        }
+
+        .set-default-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(32, 201, 151, 0.6);
+        }
+
+        .set-default-btn:active {
+            transform: translateY(0);
+        }
+
+        .set-default-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .auto-submit-btn {
+            background: linear-gradient(135deg, #e83e8c 0%, #d63384 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(232, 62, 140, 0.4);
+        }
+
+        .auto-submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(232, 62, 140, 0.6);
+        }
+
+        .auto-submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .auto-submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .browser-id-input {
             padding: 8px 12px;
             border: 2px solid #dee2e6;
@@ -532,6 +584,32 @@
         }
 
         .statistics-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .submit-task-btn {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 123, 255, 0.4);
+        }
+
+        .submit-task-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 123, 255, 0.6);
+        }
+
+        .submit-task-btn:active {
+            transform: translateY(0);
+        }
+
+        .submit-task-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
         }
@@ -618,7 +696,17 @@
             <button class="fetch-btn" id="fetchBtn" onclick="fetchData(true)">获取数据</button>
             <button class="snapshot-btn" id="snapshotBtn" onclick="snapshotData()">快照</button>
             <button class="blacklist-btn" id="blacklistBtn" onclick="blacklistSelected()">拉黑选中</button>
+            <div class="filter-group">
+                <label>电脑批次：</label>
+                <select id="batchSelect" style="padding: 8px 12px; border: 2px solid #dee2e6; border-radius: 6px; font-size: 14px; transition: border-color 0.3s ease;">
+                    <option value="batch1">第一批电脑1-27</option>
+                    <option value="batch2" selected>第二批电脑901-927</option>
+                </select>
+            </div>
+            <button class="submit-task-btn" id="submitTaskBtn" onclick="submitSelectedTasks()">抓取勾选ip信息</button>
             <button class="assign-ip-btn" id="assignIpBtn" onclick="assignIpToNoIpBrowsers()">给无ip的浏览器分配一个ip</button>
+            <button class="set-default-btn" id="setDefaultBtn" onclick="setDefaultForNoDetection()">为未检测ip设置默认值</button>
+            <button class="auto-submit-btn" id="autoSubmitBtn" onclick="autoSubmitNoDetectionTasks()">一键为未测试的ip提交抓取任务</button>
             <button class="statistics-btn" id="statisticsBtn" onclick="showStatistics()">IP段统计</button>
             <div class="filter-group">
                 <label>要分配ip的浏览器id：</label>
@@ -632,7 +720,17 @@
             </div>
             <div class="filter-group">
                 <label>
+                    <input type="checkbox" id="showFailedCheckbox" onchange="onShowFailedChange()"> 只显示失败的
+                </label>
+            </div>
+            <div class="filter-group">
+                <label>
                     <input type="checkbox" id="showNoDetectionCheckbox" onchange="onShowNoDetectionChange()"> 显示未检测的
+                </label>
+            </div>
+            <div class="filter-group">
+                <label>
+                    <input type="checkbox" id="hideNoGroupCheckbox" checked onchange="onHideNoGroupChange()"> 隐藏没有电脑组的
                 </label>
             </div>
             <div class="filter-group">
@@ -757,15 +855,21 @@
 
         let currentData = [];
         let filteredData = [];
-        let browserToGroupMap = {};
+        let browserToGroupMap = {}; // 完整的浏览器编号到电脑组的映射（可能一个浏览器编号对应多个电脑组）
+        let batch1Mapping = {}; // 第一批电脑（1-27）的映射
+        let batch2Mapping = {}; // 第二批电脑（901-927）的映射
+        let currentBatch = 'batch2'; // 当前选择的批次，默认第二批
         let sortState = {
             column: null,
             direction: null
         };
         let batchSelectState = 0; // 0: 未选择, 1: 选择都失败的, 2: 选择任一成功的
-        let selectedRows = new Set(); // 存储选中的行索引
+        let selectedRows = new Set(); // 存储选中的行索引（基于filteredData）
+        let selectedItems = new Set(); // 存储选中的项的唯一标识符（number-ip），用于跨排序/过滤保持选中状态
         let showSuccessOnly = false; // 是否只显示成功的记录
+        let showFailedOnly = false; // 是否只显示失败的记录（只要不是成功的）
         let showNoDetection = false; // 是否显示未检测的记录（前端检测时间为空）
+        let hideNoGroup = true; // 是否隐藏没有电脑组的记录，默认隐藏
 
         /**
          * 获取账户配置（浏览器编号和组号的映射关系）
@@ -783,23 +887,55 @@
                 
                 if (result && result.data) {
                     // 建立浏览器编号到组号的映射（同时支持字符串和数字作为key）
+                    // 一个浏览器编号可能对应多个电脑组，所以使用数组存储
                     const mapping = {};
+                    batch1Mapping = {};
+                    batch2Mapping = {};
+                    
                     result.data.forEach(item => {
                         if (item.fingerprintNo && item.computeGroup) {
                             const fingerprintNo = item.fingerprintNo;
                             const fingerprintNoStr = String(fingerprintNo);
                             const fingerprintNoNum = Number(fingerprintNo);
-                            // 同时用字符串和数字作为key，确保无论API返回什么类型都能匹配
-                            mapping[fingerprintNoStr] = item.computeGroup;
-                            if (!isNaN(fingerprintNoNum)) {
-                                mapping[fingerprintNoNum] = item.computeGroup;
+                            const computeGroup = Number(item.computeGroup);
+                            
+                            // 初始化映射数组
+                            if (!mapping[fingerprintNoStr]) {
+                                mapping[fingerprintNoStr] = [];
+                            }
+                            if (!isNaN(fingerprintNoNum) && !mapping[fingerprintNoNum]) {
+                                mapping[fingerprintNoNum] = [];
+                            }
+                            
+                            // 添加到映射数组（如果不存在）
+                            if (!mapping[fingerprintNoStr].includes(computeGroup)) {
+                                mapping[fingerprintNoStr].push(computeGroup);
+                            }
+                            if (!isNaN(fingerprintNoNum) && !mapping[fingerprintNoNum].includes(computeGroup)) {
+                                mapping[fingerprintNoNum].push(computeGroup);
+                            }
+                            
+                            // 根据电脑组范围分类到不同批次
+                            if (computeGroup >= 1 && computeGroup <= 27) {
+                                // 第一批电脑1-27
+                                batch1Mapping[fingerprintNoStr] = computeGroup;
+                                if (!isNaN(fingerprintNoNum)) {
+                                    batch1Mapping[fingerprintNoNum] = computeGroup;
+                                }
+                            } else if (computeGroup >= 901 && computeGroup <= 927) {
+                                // 第二批电脑901-927
+                                batch2Mapping[fingerprintNoStr] = computeGroup;
+                                if (!isNaN(fingerprintNoNum)) {
+                                    batch2Mapping[fingerprintNoNum] = computeGroup;
+                                }
                             }
                         }
                     });
                     browserToGroupMap = mapping;
                     
                     console.log(`账户配置加载成功，共 ${result.data.length} 条记录`);
-                    console.log('浏览器编号到组号映射:', mapping);
+                    console.log('第一批电脑映射（1-27）:', batch1Mapping);
+                    console.log('第二批电脑映射（901-927）:', batch2Mapping);
                 } else {
                     console.warn('获取账户配置失败: 无数据');
                 }
@@ -809,13 +945,30 @@
         }
 
         /**
-         * 根据浏览器编号获取电脑组
+         * 根据浏览器编号获取电脑组（根据当前选择的批次）
          */
         function getGroupByBrowserNumber(number) {
             if (!number) return null;
+            
+            // 获取当前选择的批次
+            const batchSelect = document.getElementById('batchSelect');
+            const selectedBatch = batchSelect ? batchSelect.value : currentBatch;
+            currentBatch = selectedBatch;
+            
             const numStr = String(number);
             const numNum = Number(number);
-            return browserToGroupMap[numStr] || browserToGroupMap[numNum] || null;
+            
+            // 根据选择的批次返回对应的电脑组
+            if (selectedBatch === 'batch1') {
+                // 第一批电脑1-27
+                return batch1Mapping[numStr] || batch1Mapping[numNum] || null;
+            } else if (selectedBatch === 'batch2') {
+                // 第二批电脑901-927
+                return batch2Mapping[numStr] || batch2Mapping[numNum] || null;
+            }
+            
+            // 默认返回第二批
+            return batch2Mapping[numStr] || batch2Mapping[numNum] || null;
         }
 
         async function fetchData(silent = false) {
@@ -850,9 +1003,14 @@
                     // 如果启用了只显示成功，应用筛选
                     if (showSuccessOnly) {
                         filteredData = filteredData.filter(item => {
-                            const httpStatus = item.c !== null && item.c !== undefined ? parseInt(item.c) : null;
-                            const socks5Status = item.f !== null && item.f !== undefined ? parseInt(item.f) : null;
-                            return (httpStatus === 1) || (socks5Status === 1);
+                            return isSuccess(item);
+                        });
+                    }
+                    
+                    // 如果启用了只显示失败，应用筛选
+                    if (showFailedOnly) {
+                        filteredData = filteredData.filter(item => {
+                            return !isSuccess(item);
                         });
                     }
                     
@@ -860,6 +1018,14 @@
                     if (showNoDetection) {
                         filteredData = filteredData.filter(item => {
                             return !item.a || item.a === null || item.a === 'null' || item.a === '';
+                        });
+                    }
+                    
+                    // 如果启用了隐藏没有电脑组的，应用筛选
+                    if (hideNoGroup) {
+                        filteredData = filteredData.filter(item => {
+                            const groupNo = getGroupByBrowserNumber(item.number);
+                            return groupNo !== null;
                         });
                     }
                     
@@ -1077,9 +1243,14 @@
             // 成功筛选
             if (showSuccessOnly) {
                 filteredData = filteredData.filter(item => {
-                    const httpStatus = item.c !== null && item.c !== undefined ? parseInt(item.c) : null;
-                    const socks5Status = item.f !== null && item.f !== undefined ? parseInt(item.f) : null;
-                    return (httpStatus === 1) || (socks5Status === 1);
+                    return isSuccess(item);
+                });
+            }
+            
+            // 失败筛选（只显示失败的）
+            if (showFailedOnly) {
+                filteredData = filteredData.filter(item => {
+                    return !isSuccess(item);
                 });
             }
             
@@ -1087,6 +1258,14 @@
             if (showNoDetection) {
                 filteredData = filteredData.filter(item => {
                     return !item.a || item.a === null || item.a === 'null' || item.a === '';
+                });
+            }
+            
+            // 如果启用了隐藏没有电脑组的，应用筛选
+            if (hideNoGroup) {
+                filteredData = filteredData.filter(item => {
+                    const groupNo = getGroupByBrowserNumber(item.number);
+                    return groupNo !== null;
                 });
             }
             
@@ -1100,6 +1279,12 @@
         function onShowSuccessChange() {
             showSuccessOnly = document.getElementById('showSuccessCheckbox').checked;
             
+            // 如果选中"显示成功的"，则取消"只显示失败的"
+            if (showSuccessOnly) {
+                showFailedOnly = false;
+                document.getElementById('showFailedCheckbox').checked = false;
+            }
+            
             // 检查是否有IP搜索
             const ipPrefix = document.getElementById('ipSearchValue').value.trim();
             if (ipPrefix) {
@@ -1111,8 +1296,42 @@
             }
         }
         
+        function onShowFailedChange() {
+            showFailedOnly = document.getElementById('showFailedCheckbox').checked;
+            
+            // 如果选中"只显示失败的"，则取消"显示成功的"
+            if (showFailedOnly) {
+                showSuccessOnly = false;
+                document.getElementById('showSuccessCheckbox').checked = false;
+            }
+            
+            // 检查是否有IP搜索
+            const ipPrefix = document.getElementById('ipSearchValue').value.trim();
+            if (ipPrefix) {
+                // 如果有IP搜索，重新应用IP搜索
+                applyIpSearch();
+            } else {
+                // 如果没有IP搜索，重新应用筛选
+                applyFilter();
+            }
+        }
+        
         function onShowNoDetectionChange() {
             showNoDetection = document.getElementById('showNoDetectionCheckbox').checked;
+            
+            // 检查是否有IP搜索
+            const ipPrefix = document.getElementById('ipSearchValue').value.trim();
+            if (ipPrefix) {
+                // 如果有IP搜索，重新应用IP搜索
+                applyIpSearch();
+            } else {
+                // 如果没有IP搜索，重新应用筛选
+                applyFilter();
+            }
+        }
+        
+        function onHideNoGroupChange() {
+            hideNoGroup = document.getElementById('hideNoGroupCheckbox').checked;
             
             // 检查是否有IP搜索
             const ipPrefix = document.getElementById('ipSearchValue').value.trim();
@@ -1141,6 +1360,7 @@
         function toggleBatchSelect() {
             batchSelectState = (batchSelectState + 1) % 3;
             selectedRows.clear();
+            selectedItems.clear();
             
             if (batchSelectState === 0) {
                 // 全部取消
@@ -1152,15 +1372,18 @@
             filteredData.forEach((item, index) => {
                 const httpStatus = item.c !== null && item.c !== undefined ? parseInt(item.c) : null;
                 const socks5Status = item.f !== null && item.f !== undefined ? parseInt(item.f) : null;
+                const key = `${item.number}-${item.ip}`;
                 
                 if (batchSelectState === 1) {
                     // 选择都失败的（HTTP和SOCKS5都不为1）
                     const bothFailed = (httpStatus !== 1 && socks5Status !== 1);
                     if (bothFailed) {
+                        selectedItems.add(key);
                         selectedRows.add(index);
                     }
                 } else if (batchSelectState === 2) {
                     // 全选所有记录
+                    selectedItems.add(key);
                     selectedRows.add(index);
                 }
             });
@@ -1169,19 +1392,90 @@
             updateBatchSelectButton();
         }
 
-        function toggleRowCheckbox(index) {
-            if (selectedRows.has(index)) {
-                selectedRows.delete(index);
-            } else {
-                selectedRows.add(index);
+        function toggleRowCheckboxByKey(encodedKey) {
+            // 解码Base64编码的key
+            let actualKey;
+            try {
+                actualKey = decodeURIComponent(escape(atob(encodedKey)));
+            } catch (e) {
+                console.error('解码key失败:', e, 'encodedKey:', encodedKey);
+                return;
             }
+            
+            const wasSelected = selectedItems.has(actualKey);
+            
+            if (wasSelected) {
+                selectedItems.delete(actualKey);
+            } else {
+                selectedItems.add(actualKey);
+            }
+            
+            // 重新计算selectedRows（基于filteredData）
+            selectedRows.clear();
+            if (filteredData) {
+                filteredData.forEach((item, idx) => {
+                    const itemKey = `${item.number}-${item.ip}`;
+                    if (selectedItems.has(itemKey)) {
+                        selectedRows.add(idx);
+                    }
+                });
+            }
+            
+            // 立即更新对应的checkbox状态（不等待updateCheckboxes遍历所有）
+            const tableContainer = document.getElementById('tableContainer');
+            const tbody = tableContainer.querySelector('tbody');
+            if (tbody) {
+                const rows = tbody.querySelectorAll('tr');
+                rows.forEach((row) => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 5) {
+                        const number = cells[2].textContent.trim();
+                        const ip = cells[4].textContent.trim();
+                        if (number && ip && number !== '-' && ip !== '-') {
+                            const key = `${number}-${ip}`;
+                            if (key === actualKey) {
+                                const checkbox = row.querySelector('input[type="checkbox"]');
+                                if (checkbox) {
+                                    checkbox.checked = !wasSelected;
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 同时更新所有checkbox状态（以防万一）
             updateCheckboxes();
+        }
+        
+        // 保留旧的函数名以兼容性（如果需要）
+        function toggleRowCheckbox(index) {
+            // 兼容旧代码，但建议使用toggleRowCheckboxByKey
+            // 尝试从checkbox的data属性或周围元素获取key
+            const checkbox = document.getElementById(`checkbox-${index}`);
+            if (checkbox) {
+                const row = checkbox.closest('tr');
+                if (row) {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 5) {
+                        const number = cells[2].textContent.trim();
+                        const ip = cells[4].textContent.trim();
+                        if (number && ip && number !== '-' && ip !== '-') {
+                            toggleRowCheckboxByKey(`${number}-${ip}`);
+                            return;
+                        }
+                    }
+                }
+            }
         }
 
         /**
          * 显示loading遮罩层
          */
         function showLoadingOverlay(text = '处理中...') {
+            // 先隐藏可能存在的遮罩
+            hideLoadingOverlay();
+            
             const overlay = document.createElement('div');
             overlay.id = 'loadingOverlay';
             overlay.className = 'loading-overlay';
@@ -1196,10 +1490,13 @@
          * 隐藏loading遮罩层
          */
         function hideLoadingOverlay() {
-            const overlay = document.getElementById('loadingOverlay');
-            if (overlay) {
-                overlay.remove();
-            }
+            // 移除所有可能的遮罩层
+            const overlays = document.querySelectorAll('.loading-overlay, #loadingOverlay');
+            overlays.forEach(overlay => {
+                if (overlay && overlay.parentNode) {
+                    overlay.remove();
+                }
+            });
         }
 
         /**
@@ -1227,6 +1524,234 @@
         }
 
         /**
+         * 提交单个IP检测任务（只提交一次，返回成功即认为成功）
+         */
+        async function submitSingleIpDetection(groupNo, numberList, tp1) {
+            const payload = {
+                groupNo: String(groupNo),
+                type: 11,
+                exchangeName: 'OP',
+                numberList: String(numberList),
+                tp1: String(tp1)
+            };
+            
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/mission/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result && result.code === 0) {
+                    console.log(`浏览器编号 ${numberList} IP ${tp1} 任务提交成功`);
+                    const taskId = result.data?.id || result.data?.taskId || null;
+                    return { success: true, taskId: taskId };
+                } else {
+                    const errorMsg = result?.msg || '未知错误';
+                    console.error(`浏览器编号 ${numberList} IP ${tp1} 任务提交失败:`, errorMsg);
+                    return { success: false, error: errorMsg };
+                }
+            } catch (error) {
+                const errorMsg = error.message || '未知错误';
+                console.error(`浏览器编号 ${numberList} IP ${tp1} 任务提交失败:`, errorMsg);
+                return { success: false, error: errorMsg };
+            }
+        }
+
+        /**
+         * 一键为未测试的IP提交抓取任务
+         */
+        async function autoSubmitNoDetectionTasks() {
+            // 获取当前选择的批次
+            const batchSelect = document.getElementById('batchSelect');
+            const selectedBatch = batchSelect ? batchSelect.value : 'batch2';
+            const batchName = selectedBatch === 'batch1' ? '第一批电脑1-27' : '第二批电脑901-927';
+            
+            // 找到所有符合条件的IP（a字段为空/null，且有对应电脑组的）
+            const noDetectionItems = currentData.filter(item => {
+                // a字段为空或null或none
+                const aIsEmpty = !item.a || item.a === null || item.a === 'null' || item.a === '' || item.a === 'None';
+                if (!aIsEmpty) return false;
+                
+                // 检查是否有对应电脑组
+                const groupNo = getGroupByBrowserNumber(item.number);
+                return groupNo !== null;
+            });
+            
+            if (noDetectionItems.length === 0) {
+                showToast('没有符合条件的未测试IP');
+                return;
+            }
+            
+            // 弹出确认对话框，告诉选择的电脑批次
+            const confirmMsg = `当前选择的电脑批次：${batchName}\n\n找到 ${noDetectionItems.length} 个未测试的IP（a字段为空，且有对应电脑组）。\n\n确定要为这些IP提交抓取任务吗？`;
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+            
+            const autoSubmitBtn = document.getElementById('autoSubmitBtn');
+            autoSubmitBtn.disabled = true;
+            autoSubmitBtn.textContent = '提交中...';
+            
+            // 显示loading遮罩层
+            showLoadingOverlay(`正在提交任务，请稍候... (0/${noDetectionItems.length})`);
+            
+            let successCount = 0;
+            let failCount = 0;
+            const failItems = [];
+            
+            try {
+                // 逐个提交任务
+                for (let i = 0; i < noDetectionItems.length; i++) {
+                    const item = noDetectionItems[i];
+                    // 更新loading文本
+                    showLoadingOverlay(`正在提交任务，请稍候... (${i + 1}/${noDetectionItems.length})\n当前: 浏览器编号 ${item.number}, IP ${item.ip}`);
+                    
+                    // 获取电脑组
+                    const groupNo = getGroupByBrowserNumber(item.number);
+                    if (!groupNo) {
+                        failCount++;
+                        failItems.push({
+                            number: item.number,
+                            ip: item.ip,
+                            error: '无法获取电脑组'
+                        });
+                        continue;
+                    }
+                    
+                    const result = await submitSingleIpDetection(groupNo, item.number, item.ip);
+                    
+                    if (result.success) {
+                        successCount++;
+                        console.log(`✓ [${i + 1}/${noDetectionItems.length}] 浏览器编号 ${item.number} IP ${item.ip} 任务提交成功`);
+                    } else {
+                        failCount++;
+                        failItems.push({
+                            number: item.number,
+                            ip: item.ip,
+                            error: result.error || '未知错误'
+                        });
+                        console.error(`✗ [${i + 1}/${noDetectionItems.length}] 浏览器编号 ${item.number} IP ${item.ip} 任务提交失败`);
+                    }
+                }
+                
+                // 隐藏loading遮罩层
+                hideLoadingOverlay();
+                
+                // 显示结果
+                if (failCount === 0) {
+                    showToast(`所有任务提交成功！共 ${successCount} 条`, true);
+                } else {
+                    const failMsg = failItems.map(item => `浏览器编号 ${item.number} IP ${item.ip}: ${item.error}`).join('\n');
+                    alert(`提交完成！\n成功: ${successCount} 条\n失败: ${failCount} 条\n\n失败详情：\n${failMsg}`);
+                }
+            } catch (error) {
+                // 隐藏loading遮罩层
+                hideLoadingOverlay();
+                alert(`提交任务过程中发生错误: ${error.message}`);
+            } finally {
+                autoSubmitBtn.disabled = false;
+                autoSubmitBtn.textContent = '一键为未测试的ip提交抓取任务';
+            }
+        }
+
+        /**
+         * 提交勾选IP信息的任务
+         */
+        async function submitSelectedTasks() {
+            if (selectedRows.size === 0) {
+                alert('请先选择要提交任务的记录');
+                return;
+            }
+            
+            // 收集选中的记录（基于selectedItems中的唯一标识符）
+            const itemsToSubmit = [];
+            selectedItems.forEach(key => {
+                // key格式为 "number-ip"，直接从filteredData中查找匹配的项
+                // 使用完整的key来匹配，因为IP可能包含多个"-"
+                const item = filteredData.find(d => `${d.number}-${d.ip}` === key);
+                if (item && item.number && item.ip) {
+                    const groupNo = getGroupByBrowserNumber(item.number);
+                    if (groupNo !== null) {
+                        itemsToSubmit.push({
+                            number: item.number,
+                            ip: item.ip,
+                            groupNo: groupNo
+                        });
+                    } else {
+                        console.warn(`浏览器编号 ${item.number} 无法获取电脑组，跳过`);
+                    }
+                }
+            });
+            
+            if (itemsToSubmit.length === 0) {
+                alert('选中的记录中没有有效的浏览器编号、IP或电脑组信息');
+                return;
+            }
+            
+            const submitTaskBtn = document.getElementById('submitTaskBtn');
+            submitTaskBtn.disabled = true;
+            submitTaskBtn.textContent = '提交中...';
+            
+            // 显示loading遮罩层
+            showLoadingOverlay(`正在提交任务，请稍候... (0/${itemsToSubmit.length})`);
+            
+            let successCount = 0;
+            let failCount = 0;
+            const failItems = [];
+            
+            try {
+                // 逐条提交任务
+                for (let i = 0; i < itemsToSubmit.length; i++) {
+                    const item = itemsToSubmit[i];
+                    // 更新loading文本
+                    showLoadingOverlay(`正在提交任务，请稍候... (${i + 1}/${itemsToSubmit.length})\n当前: 浏览器编号 ${item.number}, IP ${item.ip}`);
+                    
+                    const result = await submitSingleIpDetection(item.groupNo, item.number, item.ip);
+                    
+                    if (result.success) {
+                        successCount++;
+                        console.log(`✓ [${i + 1}/${itemsToSubmit.length}] 浏览器编号 ${item.number} IP ${item.ip} 任务提交成功`);
+                    } else {
+                        failCount++;
+                        failItems.push({
+                            number: item.number,
+                            ip: item.ip,
+                            error: result.error || '未知错误'
+                        });
+                        console.error(`✗ [${i + 1}/${itemsToSubmit.length}] 浏览器编号 ${item.number} IP ${item.ip} 任务提交失败`);
+                    }
+                }
+                
+                // 隐藏loading遮罩层（在所有操作之前先隐藏）
+                hideLoadingOverlay();
+                
+                // 显示结果
+                if (failCount === 0) {
+                    showToast(`所有任务提交成功！共 ${successCount} 条`, true);
+                    // 不清空选择，不刷新数据，保持当前状态（排序、勾选等）
+                } else {
+                    const failMsg = failItems.map(item => `浏览器编号 ${item.number} IP ${item.ip}: ${item.error}`).join('\n');
+                    alert(`提交完成！\n成功: ${successCount} 条\n失败: ${failCount} 条\n\n失败详情：\n${failMsg}`);
+                    // 不刷新数据，保持当前状态（排序、勾选等）
+                }
+            } catch (error) {
+                // 隐藏loading遮罩层
+                hideLoadingOverlay();
+                alert(`提交任务过程中发生错误: ${error.message}`);
+            } finally {
+                // 确保遮罩被隐藏
+                hideLoadingOverlay();
+                submitTaskBtn.disabled = false;
+                submitTaskBtn.textContent = '抓取勾选ip信息';
+            }
+        }
+
+        /**
          * 拉黑选中的记录
          */
         async function blacklistSelected() {
@@ -1235,17 +1760,16 @@
                 return;
             }
             
-            // 收集选中的number和ip，一一对应
+            // 收集选中的number和ip，一一对应（基于selectedItems）
             const numberList = [];
             const ipList = [];
             
-            selectedRows.forEach(index => {
-                if (filteredData[index]) {
-                    const item = filteredData[index];
-                    if (item.number && item.ip) {
-                        numberList.push(item.number);
-                        ipList.push(item.ip);
-                    }
+            selectedItems.forEach(key => {
+                // 从filteredData中找到对应的项
+                const item = filteredData.find(d => `${d.number}-${d.ip}` === key);
+                if (item && item.number && item.ip) {
+                    numberList.push(item.number);
+                    ipList.push(item.ip);
                 }
             });
             
@@ -1303,6 +1827,124 @@
             } finally {
                 blacklistBtn.disabled = false;
                 blacklistBtn.textContent = '拉黑选中';
+            }
+        }
+
+        /**
+         * 为未检测ip设置默认值
+         */
+        async function setDefaultForNoDetection() {
+            // 找到所有未检测的IP（a, b, c, d, e, f, g, h, i 都为空或null的）
+            const noDetectionItems = currentData.filter(item => {
+                const fields = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+                // 检查所有字段是否都为空、null或空字符串
+                return fields.every(field => {
+                    const value = item[field];
+                    return !value || value === null || value === 'null' || value === '';
+                });
+            });
+            
+            if (noDetectionItems.length === 0) {
+                showToast('没有未检测的IP');
+                return;
+            }
+            
+            // 确认操作
+            const confirmMsg = `确定要为 ${noDetectionItems.length} 个未检测的IP设置默认值吗？`;
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+            
+            const setDefaultBtn = document.getElementById('setDefaultBtn');
+            setDefaultBtn.disabled = true;
+            setDefaultBtn.textContent = '设置中...';
+            
+            // 显示loading遮罩层
+            showLoadingOverlay(`正在设置默认值，请稍候... (0/${noDetectionItems.length})`);
+            
+            let successCount = 0;
+            let failCount = 0;
+            const failItems = [];
+            
+            try {
+                // 逐个设置默认值
+                for (let i = 0; i < noDetectionItems.length; i++) {
+                    const item = noDetectionItems[i];
+                    // 更新loading文本
+                    showLoadingOverlay(`正在设置默认值，请稍候... (${i + 1}/${noDetectionItems.length})\n当前: 浏览器编号 ${item.number}, IP ${item.ip}`);
+                    
+                    // 构建请求数据（a不传值）
+                    const ipData = {
+                        number: item.number,
+                        ip: item.ip,
+                        b: "0,0",
+                        c: "1",
+                        d: "99999",
+                        h: "99999",
+                        e: "0,0",
+                        f: "1",
+                        g: "99999",
+                        i: "99999"
+                        // a 不传值
+                    };
+                    
+                    try {
+                        const response = await fetch('https://sg.bicoin.com.cn/99l/bro/updateIpInfo', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(ipData)
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result && result.code === 0) {
+                            successCount++;
+                            console.log(`✓ [${i + 1}/${noDetectionItems.length}] 浏览器编号 ${item.number} IP ${item.ip} 设置默认值成功`);
+                        } else {
+                            failCount++;
+                            const errorMsg = result?.msg || '未知错误';
+                            failItems.push({
+                                number: item.number,
+                                ip: item.ip,
+                                error: errorMsg
+                            });
+                            console.error(`✗ [${i + 1}/${noDetectionItems.length}] 浏览器编号 ${item.number} IP ${item.ip} 设置默认值失败:`, errorMsg);
+                        }
+                    } catch (error) {
+                        failCount++;
+                        const errorMsg = error.message || '未知错误';
+                        failItems.push({
+                            number: item.number,
+                            ip: item.ip,
+                            error: errorMsg
+                        });
+                        console.error(`✗ [${i + 1}/${noDetectionItems.length}] 浏览器编号 ${item.number} IP ${item.ip} 设置默认值失败:`, errorMsg);
+                    }
+                }
+                
+                // 隐藏loading遮罩层
+                hideLoadingOverlay();
+                
+                // 显示结果
+                if (failCount === 0) {
+                    showToast(`所有默认值设置成功！共 ${successCount} 条`, true);
+                    // 刷新数据
+                    await fetchData(true);
+                } else {
+                    const failMsg = failItems.map(item => `浏览器编号 ${item.number} IP ${item.ip}: ${item.error}`).join('\n');
+                    alert(`设置完成！\n成功: ${successCount} 条\n失败: ${failCount} 条\n\n失败详情：\n${failMsg}`);
+                    // 刷新数据
+                    await fetchData(true);
+                }
+            } catch (error) {
+                // 隐藏loading遮罩层
+                hideLoadingOverlay();
+                alert(`设置默认值过程中发生错误: ${error.message}`);
+            } finally {
+                setDefaultBtn.disabled = false;
+                setDefaultBtn.textContent = '为未检测ip设置默认值';
             }
         }
 
@@ -1416,11 +2058,39 @@
         }
 
         function updateCheckboxes() {
-            filteredData.forEach((item, index) => {
-                const checkbox = document.getElementById(`checkbox-${index}`);
-                if (checkbox) {
-                    checkbox.checked = selectedRows.has(index);
+            // 基于selectedItems来更新checkbox状态
+            // 遍历所有checkbox，从所在行获取数据来判断是否选中
+            const tableContainer = document.getElementById('tableContainer');
+            const tbody = tableContainer.querySelector('tbody');
+            if (!tbody) return;
+            
+            const checkboxes = tbody.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach((checkbox) => {
+                // 找到checkbox所在的行
+                const row = checkbox.closest('tr');
+                if (!row) return;
+                
+                // 从行中获取浏览器编号和IP
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 5) return; // 至少需要5个单元格
+                
+                // 浏览器编号在第3个td（索引2）
+                const numberCell = cells[2];
+                // IP在第5个td（索引4）
+                const ipCell = cells[4];
+                
+                if (!numberCell || !ipCell) return;
+                
+                const number = numberCell.textContent.trim();
+                const ip = ipCell.textContent.trim();
+                
+                if (!number || !ip || number === '-' || ip === '-') {
+                    checkbox.checked = false;
+                    return;
                 }
+                
+                const key = `${number}-${ip}`;
+                checkbox.checked = selectedItems.has(key);
             });
         }
 
@@ -1504,9 +2174,14 @@
             // 如果启用了"显示成功的"筛选，再应用成功筛选
             if (showSuccessOnly) {
                 filteredData = filteredData.filter(item => {
-                    const httpStatus = item.c !== null && item.c !== undefined ? parseInt(item.c) : null;
-                    const socks5Status = item.f !== null && item.f !== undefined ? parseInt(item.f) : null;
-                    return (httpStatus === 1) || (socks5Status === 1);
+                    return isSuccess(item);
+                });
+            }
+            
+            // 如果启用了"只显示失败的"筛选，再应用失败筛选
+            if (showFailedOnly) {
+                filteredData = filteredData.filter(item => {
+                    return !isSuccess(item);
                 });
             }
             
@@ -1517,10 +2192,28 @@
                 });
             }
             
-            // 统计信息：基于当前筛选后的数据进行统计
-            const matchingIps = baseFilteredData.filter(item => {
+            // 如果启用了隐藏没有电脑组的，应用筛选
+            if (hideNoGroup) {
+                filteredData = filteredData.filter(item => {
+                    const groupNo = getGroupByBrowserNumber(item.number);
+                    return groupNo !== null;
+                });
+            }
+            
+            // 统计信息：基于当前筛选后的数据进行统计（也要应用隐藏没有电脑组的筛选）
+            let statsBaseData = baseFilteredData.filter(item => {
                 return matchIpPrefix(item.ip, ipPrefix);
             });
+            
+            // 统计时也应用隐藏没有电脑组的筛选
+            if (hideNoGroup) {
+                statsBaseData = statsBaseData.filter(item => {
+                    const groupNo = getGroupByBrowserNumber(item.number);
+                    return groupNo !== null;
+                });
+            }
+            
+            const matchingIps = statsBaseData;
             
             const successIps = matchingIps.filter(item => {
                 const httpStatus = item.c !== null && item.c !== undefined ? parseInt(item.c) : null;
@@ -1539,7 +2232,7 @@
             // 重置排序状态
             sortState.column = null;
             sortState.direction = null;
-            selectedRows.clear();
+            // 注意：不清空selectedRows和selectedItems，保持选中状态
             batchSelectState = 0;
             updateBatchSelectButton();
             
@@ -1610,12 +2303,13 @@
         }
 
         /**
-         * 判断是否成功（HTTP最近一次状态或SOCKS5最近一次状态是成功的）
+         * 判断是否成功（HTTP最近一次状态或SOCKS5最近一次状态是成功的，且a字段必须有值）
          */
         function isSuccess(item) {
             const httpStatus = item.c !== null && item.c !== undefined ? parseInt(item.c) : null;
             const socks5Status = item.f !== null && item.f !== undefined ? parseInt(item.f) : null;
-            return (httpStatus === 1) || (socks5Status === 1);
+            const hasA = item.a && item.a !== null && item.a !== 'null' && item.a !== '';
+            return ((httpStatus === 1) || (socks5Status === 1)) && hasA;
         }
 
         /**
@@ -1633,7 +2327,16 @@
             // 按IP前两段分组统计
             const groupMap = {};
             
-            currentData.forEach(item => {
+            // 先过滤数据（如果启用了隐藏没有电脑组的）
+            let statsData = currentData;
+            if (hideNoGroup) {
+                statsData = currentData.filter(item => {
+                    const groupNo = getGroupByBrowserNumber(item.number);
+                    return groupNo !== null;
+                });
+            }
+            
+            statsData.forEach(item => {
                 const ipPrefix = getIpPrefix(item.ip);
                 if (!ipPrefix) return;
                 
@@ -1746,23 +2449,21 @@
                 return;
             }
             
-            // 保存当前选中状态（基于数据内容，而不是索引）
-            const oldSelectedData = new Set();
-            selectedRows.forEach(index => {
-                if (filteredData[index]) {
-                    const item = filteredData[index];
-                    oldSelectedData.add(`${item.number}-${item.ip}`);
-                }
-            });
-            
-            // 重新计算选中状态
+            // 基于唯一标识符重新计算选中状态（确保不受排序影响）
+            // selectedItems 存储的是 number-ip 的唯一标识符
+            // selectedRows 需要基于 filteredData 来更新，而不是传入的 list（因为list可能是排序后的）
             selectedRows.clear();
-            list.forEach((item, index) => {
-                const key = `${item.number}-${item.ip}`;
-                if (oldSelectedData.has(key)) {
-                    selectedRows.add(index);
-                }
-            });
+            if (filteredData) {
+                filteredData.forEach((item, index) => {
+                    const key = `${item.number}-${item.ip}`;
+                    if (selectedItems.has(key)) {
+                        selectedRows.add(index);
+                    }
+                });
+            }
+            
+            // 为了在显示时正确显示checkbox状态，我们需要基于传入的list来计算
+            // 但selectedRows保持基于filteredData的索引
             
             let html = `
                 <table>
@@ -1800,18 +2501,24 @@
                 const numberDisplay = item.number || '-';
                 const groupDisplay = groupNo !== null ? groupNo : '-';
                 
-                // 判断是否成功（HTTP状态为1或SOCKS5状态为1）
-                const isSuccess = (httpStatus === 1) || (socks5Status === 1);
+                // 判断是否成功（HTTP状态为1或SOCKS5状态为1，且a字段必须有值）
+                const hasA = item.a && item.a !== null && item.a !== 'null' && item.a !== '';
+                const isSuccess = ((httpStatus === 1) || (socks5Status === 1)) && hasA;
                 if (isSuccess) {
                     successCount++;
                 }
                 
-                const isChecked = selectedRows.has(index);
+                // 基于唯一标识符判断是否选中（不受排序影响）
+                const key = `${item.number}-${item.ip}`;
+                const isChecked = selectedItems.has(key);
+                
+                // 将key进行Base64编码，避免HTML属性中的特殊字符问题
+                const encodedKey = btoa(unescape(encodeURIComponent(key)));
                 
                 html += `
                     <tr class="${isSuccess ? 'row-success' : ''}">
                         <td class="checkbox-cell">
-                            <input type="checkbox" id="checkbox-${index}" ${isChecked ? 'checked' : ''} onchange="toggleRowCheckbox(${index})">
+                            <input type="checkbox" id="checkbox-${index}" ${isChecked ? 'checked' : ''} onchange="toggleRowCheckboxByKey('${encodedKey}')">
                         </td>
                         <td>${index + 1}</td>
                         <td>${numberDisplay}</td>
@@ -1854,6 +2561,18 @@
             await fetchAccountConfig();
             // 然后获取数据
             fetchData();
+            
+            // 监听批次选择改变事件
+            const batchSelect = document.getElementById('batchSelect');
+            if (batchSelect) {
+                batchSelect.addEventListener('change', function() {
+                    currentBatch = this.value;
+                    // 如果已有数据，重新显示以更新电脑组显示
+                    if (filteredData && filteredData.length > 0) {
+                        displayData(filteredData);
+                    }
+                });
+            }
         });
     </script>
 </body>

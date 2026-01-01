@@ -61,7 +61,7 @@
       <el-button type="danger" @click="showDelayDialogForCancelAndRefreshRed" :loading="cancelingAndRefreshingRed">
         异常撤单抓取
       </el-button>
-      <el-button type="danger" @click="refreshRedPositionsOld" :loading="refreshingRedOld">
+      <el-button type="danger" @click="showDelayDialogForRefreshRedOld" :loading="refreshingRedOld">
         刷新变红且超过30分钟仓位
       </el-button>
       <el-button type="success" @click="deduplicateAddresses" :loading="deduplicating">
@@ -1123,6 +1123,23 @@
             {{ browserInfoData.browserIds.join(', ') }}
           </div>
         </div>
+        <div class="info-item">
+          <span class="info-label">电脑批次:</span>
+          <el-select v-model="browserInfoData.computeBatch" style="width: 200px">
+            <el-option label="第一批电脑1-27" value="batch1"></el-option>
+            <el-option label="第二批电脑901-927" value="batch2"></el-option>
+          </el-select>
+        </div>
+        <div class="info-item">
+          <span class="info-label">延迟时间（分钟）:</span>
+          <el-input-number 
+            v-model="browserInfoData.delayMinutes" 
+            :min="0" 
+            :precision="0"
+            style="width: 200px"
+            placeholder="0"
+          ></el-input-number>
+        </div>
       </div>
       <template #footer>
         <span class="dialog-footer">
@@ -1502,7 +1519,9 @@ const browserInfoDialogVisible = ref(false)
 const browserInfoData = ref({
   browserIds: [],
   totalCount: 0,
-  taskType: '' // 'refreshAll', 'refreshRed', 'cancelAndRefreshAll', 'cancelAndRefreshRed'
+  taskType: '', // 'refreshAll', 'refreshRed', 'cancelAndRefreshAll', 'cancelAndRefreshRed', 'refreshRedOld'
+  computeBatch: 'batch2', // 'batch1' 第一批电脑1-27, 'batch2' 第二批电脑901-927
+  delayMinutes: 0
 })
 
 /**
@@ -3897,59 +3916,62 @@ const getTaskTypeName = (taskType) => {
     'refreshAll': '一键抓所有',
     'refreshRed': '一键抓异常',
     'cancelAndRefreshAll': '一键撤单后抓所有',
-    'cancelAndRefreshRed': '异常撤单抓取'
+    'cancelAndRefreshRed': '异常撤单抓取',
+    'refreshRedOld': '刷新变红且超过30分钟仓位'
   }
   return typeMap[taskType] || '未知任务'
+}
+
+/**
+ * 判断电脑组是否属于指定的批次
+ * @param {number|string} computeGroup - 电脑组编号
+ * @param {string} batch - 批次 'batch1' 或 'batch2'
+ * @returns {boolean}
+ */
+const isComputeGroupInBatch = (computeGroup, batch) => {
+  const groupNum = Number(computeGroup)
+  if (isNaN(groupNum)) return false
+  
+  if (batch === 'batch1') {
+    return groupNum >= 1 && groupNum <= 27
+  } else if (batch === 'batch2') {
+    return groupNum >= 901 && groupNum <= 927
+  }
+  return false
 }
 
 /**
  * 确认执行浏览器信息任务
  */
 const confirmBrowserInfoTask = async () => {
+  const delayMinutes = Number(browserInfoData.value.delayMinutes) || 0
+  const delayMs = delayMinutes * 60 * 1000
+  const computeBatch = browserInfoData.value.computeBatch || 'batch2'
+  
   browserInfoDialogVisible.value = false
   
   try {
-    const { value } = await ElMessageBox.prompt('请输入延迟时间（分钟）', '延迟执行', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: '0',
-      inputValue: '0',
-      inputValidator: (value) => {
-        if (value === null || value === '') {
-          return '请输入延迟时间'
-        }
-        const num = Number(value)
-        if (isNaN(num) || num < 0) {
-          return '请输入有效的数字（>= 0）'
-        }
-        return true
-      }
-    })
-    
-    const delayMinutes = Number(value) || 0
-    const delayMs = delayMinutes * 60 * 1000
-    
     if (delayMs > 0) {
       ElMessage.info(`将在 ${delayMinutes} 分钟后执行任务...`)
       await new Promise(resolve => setTimeout(resolve, delayMs))
     }
     
-    // 根据任务类型执行相应的任务
+    // 根据任务类型执行相应的任务，传入电脑批次参数
     const taskType = browserInfoData.value.taskType
     if (taskType === 'refreshAll') {
-      await refreshAllPositions()
+      await refreshAllPositions(computeBatch)
     } else if (taskType === 'refreshRed') {
-      await refreshRedPositions()
+      await refreshRedPositions(computeBatch)
     } else if (taskType === 'cancelAndRefreshAll') {
-      await cancelAndRefreshAll()
+      await cancelAndRefreshAll(computeBatch)
     } else if (taskType === 'cancelAndRefreshRed') {
-      await cancelAndRefreshRed()
+      await cancelAndRefreshRed(computeBatch)
+    } else if (taskType === 'refreshRedOld') {
+      await refreshRedPositionsOld(computeBatch)
     }
   } catch (error) {
-    // 用户点击取消，不执行任何操作
-    if (error !== 'cancel') {
-      console.error('显示延迟对话框失败:', error)
-    }
+    console.error('执行任务失败:', error)
+    ElMessage.error('执行任务失败: ' + (error.message || '未知错误'))
   }
 }
 
@@ -3974,7 +3996,9 @@ const showDelayDialogForRefreshAll = async () => {
   browserInfoData.value = {
     browserIds: browserIds,
     totalCount: browserIds.length,
-    taskType: 'refreshAll'
+    taskType: 'refreshAll',
+    computeBatch: 'batch2',
+    delayMinutes: 0
   }
   browserInfoDialogVisible.value = true
 }
@@ -4005,7 +4029,9 @@ const showDelayDialogForRefreshRed = async () => {
   browserInfoData.value = {
     browserIds: browserIds,
     totalCount: browserIds.length,
-    taskType: 'refreshRed'
+    taskType: 'refreshRed',
+    computeBatch: 'batch2',
+    delayMinutes: 0
   }
   browserInfoDialogVisible.value = true
 }
@@ -4031,7 +4057,9 @@ const showDelayDialogForCancelAndRefreshAll = async () => {
   browserInfoData.value = {
     browserIds: browserIds,
     totalCount: browserIds.length,
-    taskType: 'cancelAndRefreshAll'
+    taskType: 'cancelAndRefreshAll',
+    computeBatch: 'batch2',
+    delayMinutes: 0
   }
   browserInfoDialogVisible.value = true
 }
@@ -4062,7 +4090,50 @@ const showDelayDialogForCancelAndRefreshRed = async () => {
   browserInfoData.value = {
     browserIds: browserIds,
     totalCount: browserIds.length,
-    taskType: 'cancelAndRefreshRed'
+    taskType: 'cancelAndRefreshRed',
+    computeBatch: 'batch2',
+    delayMinutes: 0
+  }
+  browserInfoDialogVisible.value = true
+}
+
+/**
+ * 显示延迟时间输入对话框（刷新变红且超过30分钟仓位）
+ */
+const showDelayDialogForRefreshRedOld = async () => {
+  // 获取所有背景标红且打开时间超过30分钟的行
+  const ignoredBrowsersSet = getIgnoredBrowsersSet()
+  const now = Date.now()
+  const thirtyMinutesAgo = now - (30 * 60 * 1000)  // 30分钟前的毫秒时间戳
+
+  const redOldRows = tableData.value.filter(row =>
+    row.fingerprintNo &&
+    row.computeGroup &&
+    row.platform &&
+    !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
+    shouldHighlightRow(row) &&
+    row.f // 确保有打开时间
+  ).filter(row => {
+    // 检查打开时间距离现在是否超过30分钟
+    const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
+    return openTime <= thirtyMinutesAgo
+  })
+  
+  if (redOldRows.length === 0) {
+    ElMessage.warning('没有需要刷新的变红且超过30分钟的仓位')
+    return
+  }
+  
+  // 收集浏览器编号
+  const browserIds = redOldRows.map(row => String(row.fingerprintNo))
+  
+  // 显示浏览器编号信息对话框
+  browserInfoData.value = {
+    browserIds: browserIds,
+    totalCount: browserIds.length,
+    taskType: 'refreshRedOld',
+    computeBatch: 'batch2',
+    delayMinutes: 0
   }
   browserInfoDialogVisible.value = true
 }
@@ -4070,10 +4141,11 @@ const showDelayDialogForCancelAndRefreshRed = async () => {
 /**
  * 刷新全部仓位
  */
-const refreshAllPositions = async () => {
-  // 获取所有有浏览器编号和电脑组的行
+const refreshAllPositions = async (computeBatch = 'batch2') => {
+  // 获取所有有浏览器编号和电脑组的行，并根据批次过滤
   const validRows = tableData.value.filter(row => 
-    row.fingerprintNo && row.computeGroup && row.platform
+    row.fingerprintNo && row.computeGroup && row.platform &&
+    isComputeGroupInBatch(row.computeGroup, computeBatch)
   )
   
   if (validRows.length === 0) {
@@ -4120,15 +4192,16 @@ const refreshAllPositions = async () => {
 /**
  * 刷新变红仓位（打开时间>仓位时间的）
  */
-const refreshRedPositions = async () => {
-  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中）
+const refreshRedPositions = async (computeBatch = 'batch2') => {
+  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中），并根据批次过滤
   const ignoredBrowsersSet = getIgnoredBrowsersSet()
   const redRows = tableData.value.filter(row => 
     row.fingerprintNo && 
     row.computeGroup && 
     row.platform &&
     !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
-    shouldHighlightRow(row)
+    shouldHighlightRow(row) &&
+    isComputeGroupInBatch(row.computeGroup, computeBatch)
   )
   
   if (redRows.length === 0) {
@@ -4175,7 +4248,7 @@ const refreshRedPositions = async () => {
 /**
  * 一键撤单后抓所有
  */
-const cancelAndRefreshAll = async () => {
+const cancelAndRefreshAll = async (computeBatch = 'batch2') => {
   // 先获取账户配置映射
   const configLoaded = await fetchAccountConfig()
   if (!configLoaded) {
@@ -4183,9 +4256,10 @@ const cancelAndRefreshAll = async () => {
     return
   }
   
-  // 获取所有有浏览器编号和电脑组的行
+  // 获取所有有浏览器编号和电脑组的行，并根据批次过滤
   const validRows = tableData.value.filter(row => 
-    row.fingerprintNo && row.computeGroup && row.platform
+    row.fingerprintNo && row.computeGroup && row.platform &&
+    isComputeGroupInBatch(row.computeGroup, computeBatch)
   )
   
   if (validRows.length === 0) {
@@ -4241,7 +4315,7 @@ const cancelAndRefreshAll = async () => {
 /**
  * 异常撤单抓取
  */
-const cancelAndRefreshRed = async () => {
+const cancelAndRefreshRed = async (computeBatch = 'batch2') => {
   // 先获取账户配置映射
   const configLoaded = await fetchAccountConfig()
   if (!configLoaded) {
@@ -4249,14 +4323,15 @@ const cancelAndRefreshRed = async () => {
     return
   }
   
-  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中）
+  // 获取所有背景标红的行（打开时间>仓位时间，且不在忽略列表中），并根据批次过滤
   const ignoredBrowsersSet = getIgnoredBrowsersSet()
   const redRows = tableData.value.filter(row => 
     row.fingerprintNo && 
     row.computeGroup && 
     row.platform &&
     !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
-    shouldHighlightRow(row)
+    shouldHighlightRow(row) &&
+    isComputeGroupInBatch(row.computeGroup, computeBatch)
   )
   
   if (redRows.length === 0) {
@@ -4362,8 +4437,8 @@ const refreshFilteredPositions = async () => {
 /**
  * 刷新变红且超过30分钟仓位（打开时间>仓位时间，且打开时间距离现在超过30分钟）
  */
-const refreshRedPositionsOld = async () => {
-  // 获取所有背景标红且打开时间超过30分钟的行
+const refreshRedPositionsOld = async (computeBatch = 'batch2') => {
+  // 获取所有背景标红且打开时间超过30分钟的行，并根据批次过滤
   const ignoredBrowsersSet = getIgnoredBrowsersSet()
   const now = Date.now()
   const thirtyMinutesAgo = now - (30 * 60 * 1000)  // 30分钟前的毫秒时间戳
@@ -4374,7 +4449,8 @@ const refreshRedPositionsOld = async () => {
     row.platform &&
     !ignoredBrowsersSet.has(String(row.fingerprintNo)) &&
     shouldHighlightRow(row) &&
-    row.f // 确保有打开时间
+    row.f && // 确保有打开时间
+    isComputeGroupInBatch(row.computeGroup, computeBatch)
   ).filter(row => {
     // 检查打开时间距离现在是否超过30分钟
     const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
