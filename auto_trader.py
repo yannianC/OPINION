@@ -5526,7 +5526,6 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
     trending = exchange_config.get("trending", "")
     trending_part1 = ""
     trendingId = mission.get("trendingId", "")
-    
     if "###" in trending:
         # 如果包含 ###，说明有子标题
         parts = trending.split("###")

@@ -7790,9 +7790,16 @@ const executeHedgeTask = async (config, hedgeData) => {
   const firstPsSide = firstSide === 'YES' ? 1 : 2
   const secondPsSide = firstSide === 'YES' ? 2 : 1
   
-  // 获取电脑组ID（直接使用API返回的组号）
-  const yesGroupNo = hedgeData.yesGroup || browserToGroupMap.value[hedgeData.yesNumber] || '1'
-  const noGroupNo = hedgeData.noGroup || browserToGroupMap.value[hedgeData.noNumber] || '1'
+  // 获取电脑组ID（直接使用API返回的组号，如果API返回了组号则优先使用，否则使用映射）
+  const yesGroupNo = (hedgeData.yesGroup !== undefined && hedgeData.yesGroup !== null && hedgeData.yesGroup !== '') 
+    ? String(hedgeData.yesGroup) 
+    : (browserToGroupMap.value[hedgeData.yesNumber] || '1')
+  const noGroupNo = (hedgeData.noGroup !== undefined && hedgeData.noGroup !== null && hedgeData.noGroup !== '') 
+    ? String(hedgeData.noGroup) 
+    : (browserToGroupMap.value[hedgeData.noNumber] || '1')
+  
+  console.log(`[executeHedgeTask] API返回的组号 - yesGroup: ${hedgeData.yesGroup}, noGroup: ${hedgeData.noGroup}`)
+  console.log(`[executeHedgeTask] 使用的组号 - yesGroupNo: ${yesGroupNo}, noGroupNo: ${noGroupNo}`)
   
   // 计算价格（一方是 currentPrice，另一方是 100 - currentPrice）
   const yesPrice = firstSide === 'YES' ? parseFloat(hedgeData.currentPrice) : (100 - parseFloat(hedgeData.currentPrice))
@@ -7846,6 +7853,7 @@ const executeHedgeTask = async (config, hedgeData) => {
   try {
     // 使用已获取的组号（直接使用API返回的组号）
     const groupNo = firstSide === 'YES' ? yesGroupNo : noGroupNo
+    console.log(`[executeHedgeTask] 提交第一个任务，使用组号: ${groupNo} (firstSide: ${firstSide}, yesGroupNo: ${yesGroupNo}, noGroupNo: ${noGroupNo})`)
     
     const taskData = {
       groupNo: groupNo,
@@ -8225,13 +8233,26 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     console.log(`模式2 - 开始提交先挂方（${firstSide}）任务，共 ${firstSideList.length} 个`)
     
     let firstSideSuccessCount = 0
-    // 获取组号（优先使用API返回的group字段，如果item中有group则使用item.group，否则使用browserToGroupMap）
-    const defaultGroup = hedgeData.group || '1'
+    // 获取组号（优先使用API返回的group字段，如果API返回了group则优先使用，否则使用browserToGroupMap）
+    const defaultGroup = (hedgeData.group !== undefined && hedgeData.group !== null && hedgeData.group !== '') 
+      ? String(hedgeData.group) 
+      : null
+    console.log(`[executeHedgeTaskV2] API返回的组号 - group: ${hedgeData.group}, defaultGroup: ${defaultGroup}`)
+    
     for (const item of firstSideList) {
       try {
         const browserNo = item.number
         const share = floorToTwoDecimals(item.share)
-        const groupNo = item.group || defaultGroup || browserToGroupMap.value[browserNo] || '1'
+        // 优先使用item.group（如果API在每个item中都返回了group），其次使用hedgeData.group，最后使用browserToGroupMap
+        let groupNo = '1'
+        if (item.group !== undefined && item.group !== null && item.group !== '') {
+          groupNo = String(item.group)
+        } else if (defaultGroup !== null) {
+          groupNo = defaultGroup
+        } else {
+          groupNo = browserToGroupMap.value[browserNo] || '1'
+        }
+        console.log(`[executeHedgeTaskV2] 浏览器 ${browserNo} 使用组号: ${groupNo} (item.group: ${item.group}, defaultGroup: ${defaultGroup})`)
         
         // 计算价格：先挂方使用 currentPrice（与模式1一致）
         const taskPrice = parseFloat(hedgeData.currentPrice)
@@ -8327,7 +8348,16 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         try {
           const browserNo = item.number
           const share = floorToTwoDecimals(item.share)
-          const groupNo = item.group || defaultGroup || browserToGroupMap.value[browserNo] || '1'
+          // 优先使用item.group（如果API在每个item中都返回了group），其次使用hedgeData.group，最后使用browserToGroupMap
+          let groupNo = '1'
+          if (item.group !== undefined && item.group !== null && item.group !== '') {
+            groupNo = String(item.group)
+          } else if (defaultGroup !== null) {
+            groupNo = defaultGroup
+          } else {
+            groupNo = browserToGroupMap.value[browserNo] || '1'
+          }
+          console.log(`[executeHedgeTaskV2] 浏览器 ${browserNo} 使用组号: ${groupNo} (item.group: ${item.group}, defaultGroup: ${defaultGroup})`)
           
           // 计算价格：后挂方使用 100 - currentPrice（与模式1一致）
           const taskPrice = 100 - parseFloat(hedgeData.currentPrice)

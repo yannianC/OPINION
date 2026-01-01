@@ -525,20 +525,19 @@
         // 静默刷新数据（不显示加载状态）
         async function silentRefresh() {
             try {
-                // 并行加载配置数据和拉黑名单
-                await Promise.all([
-                    loadBlackList(),
-                    (async () => {
-                        const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting');
-                        const result = await response.json();
+                // 先加载拉黑名单，确保拉黑信息已更新
+                await loadBlackList();
+                
+                // 然后加载配置数据
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/computerGroupSetting');
+                const result = await response.json();
 
-                        if (result.code === 0 && result.data && result.data.list) {
-                            configData = result.data.list;
-                        }
-                    })()
-                ]);
+                if (result.code === 0 && result.data && result.data.list) {
+                    configData = result.data.list;
+                }
 
-                // 静默更新显示
+                // 确保拉黑名单已加载后再显示数据
+                // 静默更新显示（此时blackList已经是最新的）
                 displayData(configData);
             } catch (error) {
                 console.error('静默刷新失败:', error);
