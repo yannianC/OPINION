@@ -695,9 +695,9 @@
         <div class="controls">
             <button class="fetch-btn" id="fetchBtn" onclick="fetchData(true)">获取数据</button>
             <button class="snapshot-btn" id="snapshotBtn" onclick="snapshotData()">快照</button>
-            <button class="blacklist-btn" id="blacklistBtn" onclick="blacklistSelected()">拉黑选中</button>
+            
             <div class="filter-group">
-                <label>电脑批次：</label>
+                <label style="font-size: 18px; color: #dc3545; font-weight: 700;">注意！电脑批次：</label>
                 <select id="batchSelect" style="padding: 8px 12px; border: 2px solid #dee2e6; border-radius: 6px; font-size: 14px; transition: border-color 0.3s ease;">
                     <option value="batch1">第一批电脑1-27</option>
                     <option value="batch2" selected>第二批电脑901-927</option>
@@ -708,6 +708,7 @@
             <button class="set-default-btn" id="setDefaultBtn" onclick="setDefaultForNoDetection()">为未检测ip设置默认值</button>
             <button class="auto-submit-btn" id="autoSubmitBtn" onclick="autoSubmitNoDetectionTasks()">一键为未测试的ip提交抓取任务</button>
             <button class="statistics-btn" id="statisticsBtn" onclick="showStatistics()">IP段统计</button>
+            <button class="blacklist-btn" id="blacklistBtn" onclick="blacklistSelected()">拉黑选中</button>
             <div class="filter-group">
                 <label>要分配ip的浏览器id：</label>
                 <input type="text" id="browserIdInput" class="browser-id-input" placeholder="例如: 1023,4352">

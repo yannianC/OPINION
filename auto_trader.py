@@ -314,6 +314,12 @@ def save_mission_result(mission_id, status, msg=""):
                 "status": status,
                 "msg": msg
             }
+            if msg == "":
+                payload = {
+                    "id": mission_id,
+                    "status": status
+                }
+           
             response = requests.post(url, json=payload, timeout=10)
             
             if response.status_code == 200:
@@ -2609,7 +2615,7 @@ def get_opinion_table_row_count(driver, serial_number, need_click_open_orders=Fa
         target_div = None
         for div in tabs_divs:
             div_id = div.get_attribute('id')
-            if div_id and 'open orders' in div_id.lower():
+            if div_id and 'openorders' in div_id.lower():
                 target_div = div
                 log_print(f"[{serial_number}] [OP] 找到目标 div，id: {div_id}")
                 break
@@ -7458,23 +7464,28 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     add_bro_log_entry(bro_log_list, browser_id, f"Type 5 任务成功: {msg}")
                     log_print(f"[{browser_id}] ========== Type 5 任务成功: {msg} ==========\n")
                     
-                    # 监控可用余额变化
+                    # 监控可用余额变化（即使失败也不影响任务成功状态）
                     final_available_balance = None
                     if initial_available_balance is not None:
-                        add_bro_log_entry(bro_log_list, browser_id, "开始监控可用余额变化")
-                        log_print(f"[{browser_id}] 开始监控可用余额变化...")
-                        # 重新获取 trade_box
-                        trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
-                        if trade_box_divs:
-                            current_trade_box = trade_box_divs[0]
-                            final_available_balance = monitor_available_balance_change(
-                                driver, browser_id, initial_available_balance, current_trade_box, max_wait_time=180
-                            )
-                            add_bro_log_entry(bro_log_list, browser_id, f"余额监控完成，最终可用余额: {final_available_balance}")
-                            log_print(f"[{browser_id}] ✓ 余额监控完成，最终可用余额: {final_available_balance}")
-                        else:
-                            add_bro_log_entry(bro_log_list, browser_id, "未找到 trade-box，无法监控余额变化")
-                            log_print(f"[{browser_id}] ⚠ 未找到 trade-box，无法监控余额变化")
+                        try:
+                            add_bro_log_entry(bro_log_list, browser_id, "开始监控可用余额变化")
+                            log_print(f"[{browser_id}] 开始监控可用余额变化...")
+                            # 重新获取 trade_box
+                            trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+                            if trade_box_divs:
+                                current_trade_box = trade_box_divs[0]
+                                final_available_balance = monitor_available_balance_change(
+                                    driver, browser_id, initial_available_balance, current_trade_box, max_wait_time=180
+                                )
+                                add_bro_log_entry(bro_log_list, browser_id, f"余额监控完成，最终可用余额: {final_available_balance}")
+                                log_print(f"[{browser_id}] ✓ 余额监控完成，最终可用余额: {final_available_balance}")
+                            else:
+                                add_bro_log_entry(bro_log_list, browser_id, "未找到 trade-box，无法监控余额变化")
+                                log_print(f"[{browser_id}] ⚠ 未找到 trade-box，无法监控余额变化")
+                        except Exception as balance_error:
+                            # 余额监控失败不影响任务成功状态
+                            log_print(f"[{browser_id}] ⚠ 余额监控过程中发生异常: {str(balance_error)}，但不影响任务成功状态")
+                            add_bro_log_entry(bro_log_list, browser_id, f"余额监控异常: {str(balance_error)}，但不影响任务成功")
                     else:
                         add_bro_log_entry(bro_log_list, browser_id, "初始可用余额为 None，跳过余额监控")
                         log_print(f"[{browser_id}] ⚠ 初始可用余额为 None，跳过余额监控")
@@ -12938,28 +12949,10 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             if mission_type == 5 and not success:
                 tp1 = mission.get('tp1')
                 if tp1:
-                    # 这是任务二，失败了
-                    # Type 5 任务状态说明
-                    type5_status_map = {
-                        0: "未启动",
-                        2: "成功",
-                        3: "失败",
-                        5: "任务一订单已准备",
-                        6: "任务1任务2订单已准备",
-                        7: "任务1已点击下单",
-                        8: "任务一仓位已变化",
-                        11: "任务二仓位已变化",
-                        10: "双方仓位都已变化"
-                    }
-                    log_print(f"[{browser_id}] Type 5 任务二失败，检查任务一状态...")
-                    task1_status = get_mission_status(tp1)
-                    if task1_status is not None and task1_status not in [2, 3]:
-                        # 任务一状态不是2或3，将其改为3
-                        status_desc = type5_status_map.get(task1_status, "未知状态")
-                        log_print(f"[{browser_id}] 任务一当前状态: {task1_status}（{status_desc}），将其改为状态3（任务二失败）")
-                        save_mission_result(tp1, 3, f"任务二失败，任务一原状态: {task1_status}（{status_desc}）")
-                    else:
-                        log_print(f"[{browser_id}] 任务一状态已是2或3或无法获取，无需修改")
+                    # 这是任务二，失败了，直接设置任务一状态为3（失败）
+                    log_print(f"[{browser_id}] Type 5 任务二失败，将任务一状态设置为3（失败）...")
+                    save_mission_result(tp1, 3, "")
+                    log_print(f"[{browser_id}] ✓ 任务一状态已更新为3（失败）")
             
             # # Type 5任务完成后发送 fingerprint 监控请求
             # if mission_type == 5 and task_browser_id:
