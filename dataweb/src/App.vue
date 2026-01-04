@@ -67,6 +67,9 @@
       <el-button type="success" @click="deduplicateAddresses" :loading="deduplicating">
         地址去重
       </el-button>
+      <el-button type="warning" @click="checkDuplicatePositions" :loading="checkingDuplicatePositions">
+        检查重复仓位
+      </el-button>
       <el-button type="primary" @click="getWalletAddresses" :loading="gettingWalletAddresses">
         获取钱包地址
       </el-button>
@@ -1247,6 +1250,7 @@ const isLoadingAccountConfig = ref(false)
 const browserToGroupMap = ref({})  // 浏览器ID -> 电脑组
 const parsingAll = ref(false)  // 是否正在全部解析
 const deduplicating = ref(false)  // 地址去重的加载状态
+const checkingDuplicatePositions = ref(false)  // 检查重复仓位的加载状态
 const gettingWalletAddresses = ref(false)  // 获取钱包地址的加载状态
 const snappingAccount = ref(false)  // 手动快照的加载状态
 const chainDataMap = ref(new Map())  // 链上信息数据映射，key为wallet_address（小写），value为链上信息字符串
@@ -4750,6 +4754,134 @@ const deduplicateAddresses = async () => {
     ElMessage.error('地址去重失败: ' + (error.message || '网络错误'))
   } finally {
     deduplicating.value = false
+  }
+}
+
+/**
+ * 检查重复仓位
+ * 检查每个字段"a"中是否有重复的仓位（只要主题名和YES/NO一致即为重复）
+ * 如果有重复，打印出这些浏览器ID和具体的重复仓位信息
+ */
+const checkDuplicatePositions = async () => {
+  checkingDuplicatePositions.value = true
+  
+  try {
+    const data = tableData.value
+    const duplicateResults = []  // 存储有重复仓位的结果，包含浏览器ID和重复仓位信息
+    
+    // 遍历所有数据行
+    for (const row of data) {
+      if (!row.a || !row.a.trim()) {
+        // 如果没有字段"a"，跳过
+        continue
+      }
+      
+      // 解析字段"a"中的仓位
+      const positions = parsePositions(row.a)
+      
+      if (positions.length === 0) {
+        // 如果没有解析到仓位，跳过
+        continue
+      }
+      
+      // 检查是否有重复的仓位（使用title+option作为唯一键）
+      const positionMap = new Map()  // key: title|||option, value: {count: 出现次数, positions: 所有该主题名和选项的仓位列表}
+      
+      for (const pos of positions) {
+        // 使用主题名和YES/NO（option）作为唯一键
+        const key = `${pos.title || ''}|||${pos.option || ''}`
+        
+        if (positionMap.has(key)) {
+          // 发现重复的仓位，增加计数并记录仓位信息
+          const info = positionMap.get(key)
+          info.count = info.count + 1
+          info.positions.push({
+            title: pos.title || '',
+            option: pos.option || '',
+            amount: pos.amount || '',
+            avgPrice: pos.avgPrice || ''
+          })
+        } else {
+          // 首次出现，记录仓位信息
+          positionMap.set(key, {
+            count: 1,
+            positions: [{
+              title: pos.title || '',
+              option: pos.option || '',
+              amount: pos.amount || '',
+              avgPrice: pos.avgPrice || ''
+            }]
+          })
+        }
+      }
+      
+      // 找出所有重复的仓位（出现次数>1）
+      const duplicatePositions = []
+      for (const [key, info] of positionMap.entries()) {
+        if (info.count > 1) {
+          duplicatePositions.push({
+            title: info.positions[0].title,
+            option: info.positions[0].option,
+            count: info.count,  // 重复次数
+            positions: info.positions  // 所有重复的仓位详情（可能数量、价格不同）
+          })
+        }
+      }
+      
+      // 如果有重复的仓位，记录浏览器ID和重复仓位信息
+      if (duplicatePositions.length > 0 && row.fingerprintNo) {
+        duplicateResults.push({
+          browserId: row.fingerprintNo,
+          duplicates: duplicatePositions
+        })
+      }
+    }
+    
+    // 打印结果
+    if (duplicateResults.length > 0) {
+      console.log('='.repeat(80))
+      console.log('发现重复仓位的浏览器ID及具体重复仓位信息：')
+      console.log('='.repeat(80))
+      
+      for (const result of duplicateResults) {
+        console.log(`\n浏览器ID: ${result.browserId}`)
+        console.log('重复的仓位：')
+        
+        for (const dup of result.duplicates) {
+          console.log(`  - 主题名: ${dup.title}`)
+          console.log(`    选项(YES/NO): ${dup.option || '(空)'}`)
+          console.log(`    重复次数: ${dup.count}次`)
+          console.log(`    重复的仓位详情:`)
+          
+          // 打印所有重复的仓位详情（可能数量、价格不同）
+          for (let i = 0; i < dup.positions.length; i++) {
+            const pos = dup.positions[i]
+            console.log(`      [${i + 1}] 数量: ${pos.amount}, 价格: ${pos.avgPrice || '(空)'}`)
+          }
+          console.log('')
+        }
+      }
+      
+      const browserIds = duplicateResults.map(r => r.browserId).join(', ')
+      console.log('='.repeat(80))
+      console.log(`共有 ${duplicateResults.length} 个浏览器存在重复仓位`)
+      console.log(`浏览器ID列表: ${browserIds}`)
+      console.log('='.repeat(80))
+      
+      ElMessage.warning(`发现 ${duplicateResults.length} 个浏览器存在重复仓位，详情请查看控制台`)
+    } else {
+      console.log('='.repeat(80))
+      console.log('检查完成：未发现重复仓位')
+      console.log('='.repeat(80))
+      
+      ElMessage.success('检查完成：未发现重复仓位')
+    }
+    
+  } catch (error) {
+    console.error('检查重复仓位失败:', error)
+    ElMessage.error('检查重复仓位失败: ' + (error.message || '未知错误'))
+  } finally {
+    checkingDuplicatePositions.value = false
   }
 }
 

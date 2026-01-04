@@ -1373,8 +1373,8 @@ def create_selenium_driver(browser_data):
     driver = webdriver.Chrome(service=service, options=options)
     
     # 设置页面加载超时时间为60秒，防止页面加载卡死导致线程无法释放
-    driver.set_page_load_timeout(60)
-    driver.set_script_timeout(60)
+    driver.set_page_load_timeout(75)
+    driver.set_script_timeout(75)
     
     return driver
 
@@ -9290,11 +9290,99 @@ def click_opinion_position_and_get_data(driver, serial_number):
                             log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面数据获取完成")
                             break
                         else:
-                            log_print(f"[{serial_number}] [OP] 发现下一页，点击下一页按钮...")
-                            next_page_button.click()
-                            time.sleep(3)  # 等待页面加载
-                            page_num += 1
-                            retry_start_time = time.time()  # 重置超时时间，因为开始新的一页
+                            log_print(f"[{serial_number}] [OP] 发现下一页，开始处理下一页数据...")
+                            
+                            # 点击下一页并检查数据是否重复（最多重试3次）
+                            next_page_retry_count = 0
+                            max_next_page_retries = 3
+                            next_page_success = False
+                            
+                            while next_page_retry_count < max_next_page_retries:
+                                # 点击下一页按钮
+                                next_page_button.click()
+                                log_print(f"[{serial_number}] [OP] 已点击下一页按钮（重试次数: {next_page_retry_count}/{max_next_page_retries}）")
+                                time.sleep(3)  # 等待页面加载
+                                
+                                # 重新获取position_div并解析下一页数据
+                                try:
+                                    position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                                    next_page_result_parts, next_page_is_no_data, next_page_need_retry = parse_tbody_data(position_div, driver, serial_number)
+                                    
+                                    if next_page_is_no_data or len(next_page_result_parts) == 0:
+                                        # 下一页没有数据，说明已经是最后一页，退出循环
+                                        log_print(f"[{serial_number}] [OP] ✓ 下一页无数据，所有页面数据获取完成")
+                                        next_page_success = True
+                                        break
+                                    
+                                    # 检查下一页数据是否与已获取的数据重复
+                                    # 如果下一页的所有数据都已经在已获取的数据中，则认为重复
+                                    is_duplicate = False
+                                    if len(next_page_result_parts) > 0:
+                                        duplicate_count = 0
+                                        for next_item in next_page_result_parts:
+                                            if next_item in all_result_parts:
+                                                duplicate_count += 1
+                                                log_print(f"[{serial_number}] [OP] ⚠ 检测到重复数据: {next_item}")
+                                        
+                                        # 如果所有数据都重复，则认为整页重复
+                                        if duplicate_count == len(next_page_result_parts):
+                                            is_duplicate = True
+                                            log_print(f"[{serial_number}] [OP] ⚠ 下一页所有 {len(next_page_result_parts)} 条数据都是重复的")
+                                    
+                                    if is_duplicate:
+                                        # 数据重复，等待3秒后重试点击下一页
+                                        next_page_retry_count += 1
+                                        if next_page_retry_count < max_next_page_retries:
+                                            log_print(f"[{serial_number}] [OP] ⚠ 下一页数据重复，等待3秒后重试点击下一页（{next_page_retry_count}/{max_next_page_retries}）")
+                                            time.sleep(3)
+                                            # 重新获取下一页按钮（因为页面可能已更新）
+                                            try:
+                                                position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                                                next_page_button = position_div.find_element(By.CSS_SELECTOR, 'button[aria-label="next page"]')
+                                                is_disabled = next_page_button.get_attribute("disabled") is not None
+                                                if is_disabled:
+                                                    log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面数据获取完成")
+                                                    next_page_success = True
+                                                    break
+                                            except Exception as e:
+                                                log_print(f"[{serial_number}] [OP] ⚠ 重新获取下一页按钮失败: {str(e)}")
+                                                break
+                                        else:
+                                            # 已重试3次，都是重复数据，返回任务失败
+                                            log_print(f"[{serial_number}] [OP] ✗ 连续3次点击下一页都是重复数据，任务失败")
+                                            return "", False, True
+                                    else:
+                                        # 数据不重复，添加到结果中
+                                        all_result_parts.extend(next_page_result_parts)
+                                        page_num += 1
+                                        log_print(f"[{serial_number}] [OP] ✓ 第 {page_num} 页解析完成，共 {len(next_page_result_parts)} 个仓位，累计 {len(all_result_parts)} 个仓位")
+                                        next_page_success = True
+                                        retry_start_time = time.time()  # 重置超时时间，因为开始新的一页
+                                        break
+                                    
+                                except Exception as e:
+                                    log_print(f"[{serial_number}] [OP] ⚠ 解析下一页数据异常: {str(e)}")
+                                    next_page_retry_count += 1
+                                    if next_page_retry_count < max_next_page_retries:
+                                        time.sleep(3)
+                                        try:
+                                            position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                                            next_page_button = position_div.find_element(By.CSS_SELECTOR, 'button[aria-label="next page"]')
+                                            is_disabled = next_page_button.get_attribute("disabled") is not None
+                                            if is_disabled:
+                                                log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面数据获取完成")
+                                                next_page_success = True
+                                                break
+                                        except:
+                                            break
+                                    else:
+                                        log_print(f"[{serial_number}] [OP] ✗ 连续3次解析下一页数据失败，任务失败")
+                                        return "", False, True
+                            
+                            if not next_page_success:
+                                # 如果没有成功处理下一页，退出循环
+                                break
+                            
                             continue
                     except Exception as e:
                         # 找不到下一页按钮，说明没有分页或已经是最后一页
@@ -9308,8 +9396,21 @@ def click_opinion_position_and_get_data(driver, serial_number):
             
             # 返回所有页面的结果
             if len(all_result_parts) > 0:
-                result_str = ";".join(all_result_parts)
-                log_print(f"[{serial_number}] [OP] ✓ Position 所有页面解析完成，共 {len(all_result_parts)} 个仓位")
+                # 最终去重：移除重复的数据
+                original_count = len(all_result_parts)
+                unique_result_parts = []
+                seen_items = set()
+                for item in all_result_parts:
+                    if item not in seen_items:
+                        unique_result_parts.append(item)
+                        seen_items.add(item)
+                
+                if len(unique_result_parts) < original_count:
+                    removed_count = original_count - len(unique_result_parts)
+                    log_print(f"[{serial_number}] [OP] ✓ 最终去重完成：原始 {original_count} 个仓位，去重后 {len(unique_result_parts)} 个仓位，移除 {removed_count} 个重复项")
+                
+                result_str = ";".join(unique_result_parts)
+                log_print(f"[{serial_number}] [OP] ✓ Position 所有页面解析完成，共 {len(unique_result_parts)} 个仓位")
                 return result_str, False, False
             else:
                 log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Position 数据且无'No data yet'，返回任务失败")
