@@ -4493,24 +4493,64 @@ const hideAllConfigs = () => {
 /**
  * 取消所有拉黑
  */
-const cancelAllBlacklist = () => {
+const cancelAllBlacklist = async () => {
   if (confirm('确定要取消所有配置的拉黑状态吗？')) {
     try {
-      // 将所有配置的拉黑状态设置为 false
-      editConfigList.value.forEach(config => {
-        config.isBlacklisted = false
-      })
+      // 找出所有已拉黑的配置
+      const blacklistedConfigs = editConfigList.value.filter(config => 
+        config.isBlacklisted || config.a === "1" || config.a === 1
+      )
       
-      // 清空本地存储中的拉黑列表
-      localStorage.removeItem(CONFIG_BLACKLIST_KEY)
+      if (blacklistedConfigs.length === 0) {
+        alert('没有已拉黑的配置')
+        return
+      }
       
-      // 更新活动配置列表
-      updateActiveConfigs()
+      // 构建提交数据，将所有拉黑的配置的a字段设置为"0"
+      const submitData = {
+        list: blacklistedConfigs.map(config => ({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 0,
+          isOpen: config.isOpen || (config.enabled ? 1 : 0),
+          a: "0"  // 取消拉黑
+        }))
+      }
       
-      // alert('已取消所有配置的拉黑状态')
+      // 调用保存接口
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+        submitData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (response.data && response.data.code === 0) {
+        // 更新本地状态
+        blacklistedConfigs.forEach(config => {
+          config.isBlacklisted = false
+          config.a = "0"
+        })
+        
+        // 更新活动配置列表
+        updateActiveConfigs()
+        
+        alert(`已成功取消 ${blacklistedConfigs.length} 个配置的拉黑状态`)
+      } else {
+        throw new Error(response.data?.msg || '取消拉黑失败')
+      }
     } catch (error) {
       console.error('取消所有拉黑失败:', error)
-      alert('取消所有拉黑失败: ' + error.message)
+      alert('取消所有拉黑失败: ' + (error.response?.data?.msg || error.message))
     }
   }
 }
@@ -4571,23 +4611,14 @@ const saveConfigRating = (config) => {
 }
 
 /**
- * 加载配置拉黑状态（从本地存储获取）
+ * 加载配置拉黑状态（从服务器数据读取字段a）
  */
 const loadConfigBlacklist = () => {
   try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    if (blacklistStr) {
-      const blacklist = JSON.parse(blacklistStr)
-      editConfigList.value.forEach(config => {
-        // 从本地存储读取拉黑状态，使用 trending 作为 key
-        config.isBlacklisted = blacklist[config.trending] === true
-      })
-    } else {
-      // 如果没有本地存储数据，默认未拉黑
-      editConfigList.value.forEach(config => {
-        config.isBlacklisted = false
-      })
-    }
+    editConfigList.value.forEach(config => {
+      // 从服务器返回的数据中读取字段a，a === "1" 表示拉黑
+      config.isBlacklisted = config.a === "1" || config.a === 1
+    })
   } catch (error) {
     console.error('加载拉黑状态失败:', error)
     editConfigList.value.forEach(config => {
@@ -4597,54 +4628,81 @@ const loadConfigBlacklist = () => {
 }
 
 /**
- * 保存配置拉黑状态（保存到本地存储）
+ * 保存配置拉黑状态（保存到服务器）
  */
-const saveConfigBlacklist = (config) => {
+const saveConfigBlacklist = async (config) => {
   try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
+    // 更新本地状态
+    config.a = config.isBlacklisted ? "1" : "0"
     
-    if (config.isBlacklisted) {
-      blacklist[config.trending] = true
-    } else {
-      delete blacklist[config.trending]
+    // 构建提交数据
+    const submitData = {
+      list: [{
+        id: config.id,
+        trending: config.trending,
+        trendingPart1: config.trendingPart1 || null,
+        trendingPart2: config.trendingPart2 || null,
+        trendingPart3: config.trendingPart3 || null,
+        opUrl: config.opUrl || '',
+        polyUrl: config.polyUrl || '',
+        opTopicId: config.opTopicId || '',
+        weight: config.weight || 0,
+        isOpen: config.isOpen || (config.enabled ? 1 : 0),
+        a: config.a  // 拉黑状态：1=拉黑，0=未拉黑
+      }]
     }
     
-    localStorage.setItem(CONFIG_BLACKLIST_KEY, JSON.stringify(blacklist))
-    
-    // 如果被拉黑，需要关闭该主题的所有运行中的对冲任务
-    if (config.isBlacklisted) {
-      // 在 activeConfigs 中查找对应的配置（可能还在列表中）
-      const activeConfig = activeConfigs.value.find(c => c.id === config.id)
-      if (activeConfig && activeConfig.currentHedges) {
-        const runningHedges = activeConfig.currentHedges.filter(h => h.finalStatus === 'running')
-        if (runningHedges.length > 0) {
-          console.log(`[拉黑] 配置 ${config.trending} 有 ${runningHedges.length} 个运行中的对冲任务，开始关闭...`)
-          // 关闭所有运行中的对冲任务
-          runningHedges.forEach(hedge => {
-            hedge.finalStatus = 'blacklisted'
-            finishHedge(activeConfig, hedge)
-          })
-          console.log(`[拉黑] 配置 ${config.trending} 的所有对冲任务已关闭`)
+    // 调用保存接口
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
         }
       }
+    )
+    
+    if (response.data && response.data.code === 0) {
+      // 如果被拉黑，需要关闭该主题的所有运行中的对冲任务
+      if (config.isBlacklisted) {
+        // 在 activeConfigs 中查找对应的配置（可能还在列表中）
+        const activeConfig = activeConfigs.value.find(c => c.id === config.id)
+        if (activeConfig && activeConfig.currentHedges) {
+          const runningHedges = activeConfig.currentHedges.filter(h => h.finalStatus === 'running')
+          if (runningHedges.length > 0) {
+            console.log(`[拉黑] 配置 ${config.trending} 有 ${runningHedges.length} 个运行中的对冲任务，开始关闭...`)
+            // 关闭所有运行中的对冲任务
+            runningHedges.forEach(hedge => {
+              hedge.finalStatus = 'blacklisted'
+              finishHedge(activeConfig, hedge)
+            })
+            console.log(`[拉黑] 配置 ${config.trending} 的所有对冲任务已关闭`)
+          }
+        }
+      }
+      
+      // 更新活动配置列表，确保拉黑的主题立即从自动分配中移除
+      updateActiveConfigs()
+      
+      console.log(`配置 ${config.trending} ${config.isBlacklisted ? '已拉黑' : '已解除拉黑'}`)
+    } else {
+      // 保存失败，恢复状态
+      config.isBlacklisted = !config.isBlacklisted
+      config.a = config.isBlacklisted ? "1" : "0"
+      throw new Error(response.data?.msg || '保存拉黑状态失败')
     }
-    
-    // 更新活动配置列表，确保拉黑的主题立即从自动分配中移除
-    updateActiveConfigs()
-    
-    console.log(`配置 ${config.trending} ${config.isBlacklisted ? '已拉黑' : '已解除拉黑'}`)
   } catch (error) {
     console.error('保存拉黑状态失败:', error)
-    alert('保存拉黑状态失败: ' + error.message)
+    alert('保存拉黑状态失败: ' + (error.response?.data?.msg || error.message))
   }
 }
 
 /**
  * 快速拉黑功能
- * 将输入框中的主题（按分号分隔）都设置为拉黑状态，并保存到本地存储
+ * 将输入框中的主题（按分号分隔）都设置为拉黑状态，并保存到服务器
  */
-const quickBlacklist = () => {
+const quickBlacklist = async () => {
   if (!quickBlacklistInput.value || !quickBlacklistInput.value.trim()) {
     alert('请输入要拉黑的主题，用分号(;)分隔')
     return
@@ -4662,13 +4720,9 @@ const quickBlacklist = () => {
   }
   
   try {
-    // 读取本地存储的拉黑列表
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
-    
     let matchedCount = 0
     let notFoundTopics = []
-    let newBlacklistedCount = 0
+    let newBlacklistedConfigs = []
     
     // 遍历所有配置，匹配主题并设置为拉黑（只进行完全匹配）
     editConfigList.value.forEach(config => {
@@ -4681,11 +4735,12 @@ const quickBlacklist = () => {
         // 完全匹配：去除首尾空格后完全相同
         if (configTrending === topicTrimmed) {
           // 检查是否已经拉黑
-          if (blacklist[config.trending] !== true) {
+          const isAlreadyBlacklisted = config.a === "1" || config.a === 1
+          if (!isAlreadyBlacklisted) {
             // 设置为拉黑
-            blacklist[config.trending] = true
             config.isBlacklisted = true
-            newBlacklistedCount++
+            config.a = "1"
+            newBlacklistedConfigs.push(config)
           } else {
             // 已经拉黑了，只更新界面状态
             config.isBlacklisted = true
@@ -4716,15 +4771,43 @@ const quickBlacklist = () => {
       }
     })
     
-    // 保存到本地存储
-    if (newBlacklistedCount > 0) {
-      localStorage.setItem(CONFIG_BLACKLIST_KEY, JSON.stringify(blacklist))
+    // 如果有新拉黑的配置，调用保存接口
+    if (newBlacklistedConfigs.length > 0) {
+      const submitData = {
+        list: newBlacklistedConfigs.map(config => ({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 0,
+          isOpen: config.isOpen || (config.enabled ? 1 : 0),
+          a: "1"  // 拉黑状态
+        }))
+      }
+      
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+        submitData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (response.data && response.data.code !== 0) {
+        throw new Error(response.data?.msg || '保存拉黑状态失败')
+      }
       
       // 更新活动配置列表
       updateActiveConfigs()
       
       // 显示结果
-      let message = `已成功拉黑 ${matchedCount} 个主题（其中 ${newBlacklistedCount} 个新拉黑）`
+      let message = `已成功拉黑 ${matchedCount} 个主题（其中 ${newBlacklistedConfigs.length} 个新拉黑）`
       if (notFoundTopics.length > 0) {
         message += `\n\n未找到以下主题（${notFoundTopics.length} 个）:\n${notFoundTopics.slice(0, 10).join('\n')}`
         if (notFoundTopics.length > 10) {
@@ -4734,7 +4817,7 @@ const quickBlacklist = () => {
       alert(message)
       
       console.log('[快速拉黑] 匹配的主题数量:', matchedCount)
-      console.log('[快速拉黑] 新拉黑的配置数量:', newBlacklistedCount)
+      console.log('[快速拉黑] 新拉黑的配置数量:', newBlacklistedConfigs.length)
       console.log('[快速拉黑] 未找到的主题:', notFoundTopics)
     } else {
       // 没有需要更新的配置，只显示结果
@@ -4749,7 +4832,7 @@ const quickBlacklist = () => {
     }
   } catch (error) {
     console.error('快速拉黑失败:', error)
-    alert('快速拉黑失败: ' + error.message)
+    alert('快速拉黑失败: ' + (error.response?.data?.msg || error.message))
   }
 }
 
@@ -4871,17 +4954,9 @@ const getConfigBatch = (config) => {
  * 获取配置状态
  */
 const getConfigStatus = (config) => {
-  // 已拉黑：从本地存储判断
-  try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    if (blacklistStr) {
-      const blacklist = JSON.parse(blacklistStr)
-      if (blacklist[config.trending] === true) {
-        return '已拉黑'
-      }
-    }
-  } catch (error) {
-    console.error('读取拉黑状态失败:', error)
+  // 已拉黑：从服务器数据字段a判断
+  if (config.a === "1" || config.a === 1) {
+    return '已拉黑'
   }
   
   // 未添加：启用和显示有任意一个没有开启
@@ -5055,7 +5130,9 @@ const submitEditConfig = async () => {
         hasAnyChange = true
       }
       
-      // 比较需要提交到服务器的字段是否发生变化
+      // 比较需要提交到服务器的字段是否发生变化（包括拉黑状态a字段）
+      const currentA = currentConfig.a === "1" || currentConfig.a === 1 ? "1" : (currentConfig.a || "0")
+      const originalA = originalConfig.a === "1" || originalConfig.a === 1 ? "1" : (originalConfig.a || "0")
       const isServerFieldModified = 
         currentConfig.trending !== originalConfig.trending ||
         currentConfig.opUrl !== originalConfig.opUrl ||
@@ -5063,7 +5140,8 @@ const submitEditConfig = async () => {
         currentConfig.opTopicId !== originalConfig.opTopicId ||
         currentConfig.weight !== originalConfig.weight ||
         currentConfig.enabled !== originalConfig.enabled ||
-        currentConfig.group !== originalConfig.group
+        currentConfig.group !== originalConfig.group ||
+        currentA !== originalA
       
       if (isServerFieldModified) {
         hasAnyChange = true
@@ -5104,7 +5182,8 @@ const submitEditConfig = async () => {
         opTopicId: config.opTopicId,
         weight: config.weight || 0,
         isOpen: config.enabled ? 1 : 0,  // enabled 映射为 isOpen (true->1, false->0)
-        group: config.group || null  // 添加group字段
+        group: config.group || null,  // 添加group字段
+        a: config.a === "1" || config.a === 1 ? "1" : (config.a || "0")  // 拉黑状态：1=拉黑，0=未拉黑
         // 注意：visible 字段不提交到服务器
       }))
     }
@@ -5248,22 +5327,11 @@ const updateActiveConfigs = () => {
   // 先加载显示状态
   const configsWithVisible = loadConfigVisibleStatus(configList.value)
   
-  // 从本地存储读取拉黑状态
-  let blacklist = {}
-  try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    if (blacklistStr) {
-      blacklist = JSON.parse(blacklistStr)
-    }
-  } catch (error) {
-    console.error('读取拉黑状态失败:', error)
-  }
-  
-  // 过滤掉拉黑的配置（从本地存储判断）
+  // 过滤配置：启用状态(isOpen=1)、未拉黑(a !== "1")、且本地显示是打开的
   activeConfigs.value = configsWithVisible
     .filter(config => config.isOpen === 1 || config.enabled === true)  // 启用的配置
     .filter(config => config.visible !== false)  // 显示开关打开的配置
-    .filter(config => blacklist[config.trending] !== true)  // 过滤掉拉黑的配置
+    .filter(config => config.a !== "1" && config.a !== 1)  // 过滤掉拉黑的配置（a !== "1" 表示未拉黑）
     .map(config => {
       // 恢复保存的对冲信息
       const savedInfo = hedgeInfoMap.get(config.id)

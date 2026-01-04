@@ -88,6 +88,58 @@
 
     <main class="main">
       <div class="container">
+        <!-- 查询功能 -->
+        <section class="section query-section">
+          <div class="section-header-with-filter">
+            <div class="query-wrapper">
+              <div class="query-controls">
+                <div class="form-group">
+                  <label for="queryTrendingId">Trending *</label>
+                  <div class="trending-autocomplete-wrapper">
+                    <input
+                      id="queryTrendingId"
+                      v-model="queryTrendingSearchText"
+                      type="text"
+                      placeholder="输入文字筛选或选择Trending"
+                      :disabled="isLoadingConfig || isQuerying"
+                      @input="onQueryTrendingSearchInput"
+                      @focus="showQueryTrendingDropdown = true"
+                      @blur="handleQueryTrendingBlur"
+                      autocomplete="off"
+                    />
+                    <div 
+                      v-if="showQueryTrendingDropdown && filteredQueryTrendingList.length > 0" 
+                      class="trending-dropdown"
+                    >
+                      <div
+                        v-for="config in filteredQueryTrendingList"
+                        :key="config.id"
+                        class="trending-dropdown-item"
+                        @mousedown.prevent="selectQueryTrending(config)"
+                      >
+                        {{ config.trending }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button 
+                  class="btn btn-primary" 
+                  @click="handleQuery"
+                  :disabled="!querySelectedConfig || isQuerying"
+                >
+                  {{ isQuerying ? '插入中...' : '插入' }}
+                </button>
+              </div>
+              <div v-if="queryResult && !queryResult.meetsCondition" class="query-result">
+                <div class="query-result-error">
+                  ❌ 不符合订单薄条件
+                  <div class="query-result-reason">{{ queryResult.reason }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        
         <!-- 自动对冲功能 -->
         <section class="section auto-hedge-section">
           <div class="section-header-with-filter">
@@ -2359,6 +2411,13 @@ const isLoadingHedgeHistory = ref(false)
 const isQuickSelecting = ref(false)  // 是否正在自动获取
 const trendingSearchText = ref('')  // Trending搜索文本
 const showTrendingDropdown = ref(false)  // 是否显示Trending下拉列表
+
+// 查询功能相关
+const queryTrendingSearchText = ref('')  // 查询Trending搜索文本
+const showQueryTrendingDropdown = ref(false)  // 是否显示查询Trending下拉列表
+const querySelectedConfig = ref(null)  // 查询选中的配置
+const isQuerying = ref(false)  // 是否正在查询
+const queryResult = ref(null)  // 查询结果
 const blackListText = ref('')  // 拉黑的浏览器列表
 const missionList = ref([])
 const hedgeHistoryList = ref([])
@@ -2760,6 +2819,169 @@ const handleTrendingBlur = () => {
   setTimeout(() => {
     showTrendingDropdown.value = false
   }, 200)
+}
+
+/**
+ * 过滤后的查询Trending列表
+ */
+const filteredQueryTrendingList = computed(() => {
+  if (!queryTrendingSearchText.value || queryTrendingSearchText.value.trim() === '') {
+    return configList.value
+  }
+  const searchLower = queryTrendingSearchText.value.toLowerCase().trim()
+  return configList.value.filter(config => {
+    return config.trending.toLowerCase().includes(searchLower)
+  })
+})
+
+/**
+ * 查询Trending搜索输入处理
+ */
+const onQueryTrendingSearchInput = () => {
+  showQueryTrendingDropdown.value = true
+  // 如果输入的内容完全匹配某个选项，自动选择
+  const exactMatch = configList.value.find(config => {
+    return config.trending === queryTrendingSearchText.value
+  })
+  if (exactMatch) {
+    querySelectedConfig.value = exactMatch
+  }
+}
+
+/**
+ * 选择查询Trending
+ */
+const selectQueryTrending = (config) => {
+  querySelectedConfig.value = config
+  queryTrendingSearchText.value = config.trending
+  showQueryTrendingDropdown.value = false
+}
+
+/**
+ * 查询Trending输入框失焦处理
+ */
+const handleQueryTrendingBlur = () => {
+  // 延迟隐藏，以便点击下拉项时能触发
+  setTimeout(() => {
+    showQueryTrendingDropdown.value = false
+  }, 200)
+}
+
+/**
+ * 处理插入（查询并添加到对冲列表）
+ */
+const handleQuery = async () => {
+  if (!querySelectedConfig.value) {
+    showToast('请先选择Trending配置', 'warning')
+    return
+  }
+  
+  isQuerying.value = true
+  queryResult.value = null
+  
+  try {
+    // 获取订单薄信息
+    const priceInfo = await parseOrderbookData(querySelectedConfig.value, hedgeMode.isClose)
+    
+    // 判断是否符合条件
+    const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+    
+    if (meetsCondition) {
+      // 符合条件，添加到对冲列表
+      const config = querySelectedConfig.value
+      
+      // 1. 更新服务器端配置（启用配置）
+      const updateData = {
+        list: [{
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 0,
+          isOpen: 1  // 启用
+        }]
+      }
+      
+      const updateResponse = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+        updateData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (updateResponse.data && updateResponse.data.code === 0) {
+        // 2. 更新本地显示状态
+        const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+        visibleData[config.id] = true
+        localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+        
+        // 3. 更新本地配置列表
+        const configInList = configList.value.find(c => c.id === config.id)
+        if (configInList) {
+          configInList.isOpen = 1
+          configInList.enabled = true
+        }
+        
+        // 4. 更新活动配置列表
+        updateActiveConfigs()
+        
+        // 5. 清空查询结果和输入
+        queryResult.value = null
+        querySelectedConfig.value = null
+        queryTrendingSearchText.value = ''
+        
+        showToast(`成功将 ${config.trending} 添加到对冲列表`, 'success')
+      } else {
+        throw new Error(updateResponse.data?.msg || '更新配置失败')
+      }
+    } else {
+      // 不符合条件，显示错误信息
+      let reason = '不符合对冲条件'
+      
+      // 检查价差
+      if (priceInfo.diff <= 0.15) {
+        if (!hedgeMode.isClose) {
+          // 开仓模式：检查买一深度
+          if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        } else {
+          // 平仓模式：检查卖一深度
+          if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        }
+      }
+      
+      queryResult.value = {
+        meetsCondition: false,
+        reason: reason,
+        priceInfo: priceInfo
+      }
+    }
+  } catch (error) {
+    // 获取订单薄失败，说明不符合条件
+    let reason = error.message || '获取订单薄数据失败'
+    
+    queryResult.value = {
+      meetsCondition: false,
+      reason: reason
+    }
+    console.error('插入失败:', error)
+  } finally {
+    isQuerying.value = false
+  }
 }
 
 /**
@@ -4470,24 +4692,64 @@ const hideAllConfigs = () => {
 /**
  * 取消所有拉黑
  */
-const cancelAllBlacklist = () => {
+const cancelAllBlacklist = async () => {
   if (confirm('确定要取消所有配置的拉黑状态吗？')) {
     try {
-      // 将所有配置的拉黑状态设置为 false
-      editConfigList.value.forEach(config => {
-        config.isBlacklisted = false
-      })
+      // 找出所有已拉黑的配置
+      const blacklistedConfigs = editConfigList.value.filter(config => 
+        config.isBlacklisted || config.a === "1" || config.a === 1
+      )
       
-      // 清空本地存储中的拉黑列表
-      localStorage.removeItem(CONFIG_BLACKLIST_KEY)
+      if (blacklistedConfigs.length === 0) {
+        alert('没有已拉黑的配置')
+        return
+      }
       
-      // 更新活动配置列表
-      updateActiveConfigs()
+      // 构建提交数据，将所有拉黑的配置的a字段设置为"0"
+      const submitData = {
+        list: blacklistedConfigs.map(config => ({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 0,
+          isOpen: config.isOpen || (config.enabled ? 1 : 0),
+          a: "0"  // 取消拉黑
+        }))
+      }
       
-      // alert('已取消所有配置的拉黑状态')
+      // 调用保存接口
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+        submitData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (response.data && response.data.code === 0) {
+        // 更新本地状态
+        blacklistedConfigs.forEach(config => {
+          config.isBlacklisted = false
+          config.a = "0"
+        })
+        
+        // 更新活动配置列表
+        updateActiveConfigs()
+        
+        alert(`已成功取消 ${blacklistedConfigs.length} 个配置的拉黑状态`)
+      } else {
+        throw new Error(response.data?.msg || '取消拉黑失败')
+      }
     } catch (error) {
       console.error('取消所有拉黑失败:', error)
-      alert('取消所有拉黑失败: ' + error.message)
+      alert('取消所有拉黑失败: ' + (error.response?.data?.msg || error.message))
     }
   }
 }
@@ -4548,23 +4810,14 @@ const saveConfigRating = (config) => {
 }
 
 /**
- * 加载配置拉黑状态（从本地存储获取）
+ * 加载配置拉黑状态（从服务器数据读取字段a）
  */
 const loadConfigBlacklist = () => {
   try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    if (blacklistStr) {
-      const blacklist = JSON.parse(blacklistStr)
-      editConfigList.value.forEach(config => {
-        // 从本地存储读取拉黑状态，使用 trending 作为 key
-        config.isBlacklisted = blacklist[config.trending] === true
-      })
-    } else {
-      // 如果没有本地存储数据，默认未拉黑
-      editConfigList.value.forEach(config => {
-        config.isBlacklisted = false
-      })
-    }
+    editConfigList.value.forEach(config => {
+      // 从服务器返回的数据中读取字段a，a === "1" 表示拉黑
+      config.isBlacklisted = config.a === "1" || config.a === 1
+    })
   } catch (error) {
     console.error('加载拉黑状态失败:', error)
     editConfigList.value.forEach(config => {
@@ -4574,54 +4827,81 @@ const loadConfigBlacklist = () => {
 }
 
 /**
- * 保存配置拉黑状态（保存到本地存储）
+ * 保存配置拉黑状态（保存到服务器）
  */
-const saveConfigBlacklist = (config) => {
+const saveConfigBlacklist = async (config) => {
   try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
+    // 更新本地状态
+    config.a = config.isBlacklisted ? "1" : "0"
     
-    if (config.isBlacklisted) {
-      blacklist[config.trending] = true
-    } else {
-      delete blacklist[config.trending]
+    // 构建提交数据
+    const submitData = {
+      list: [{
+        id: config.id,
+        trending: config.trending,
+        trendingPart1: config.trendingPart1 || null,
+        trendingPart2: config.trendingPart2 || null,
+        trendingPart3: config.trendingPart3 || null,
+        opUrl: config.opUrl || '',
+        polyUrl: config.polyUrl || '',
+        opTopicId: config.opTopicId || '',
+        weight: config.weight || 0,
+        isOpen: config.isOpen || (config.enabled ? 1 : 0),
+        a: config.a  // 拉黑状态：1=拉黑，0=未拉黑
+      }]
     }
     
-    localStorage.setItem(CONFIG_BLACKLIST_KEY, JSON.stringify(blacklist))
-    
-    // 如果被拉黑，需要关闭该主题的所有运行中的对冲任务
-    if (config.isBlacklisted) {
-      // 在 activeConfigs 中查找对应的配置（可能还在列表中）
-      const activeConfig = activeConfigs.value.find(c => c.id === config.id)
-      if (activeConfig && activeConfig.currentHedges) {
-        const runningHedges = activeConfig.currentHedges.filter(h => h.finalStatus === 'running')
-        if (runningHedges.length > 0) {
-          console.log(`[拉黑] 配置 ${config.trending} 有 ${runningHedges.length} 个运行中的对冲任务，开始关闭...`)
-          // 关闭所有运行中的对冲任务
-          runningHedges.forEach(hedge => {
-            hedge.finalStatus = 'blacklisted'
-            finishHedge(activeConfig, hedge)
-          })
-          console.log(`[拉黑] 配置 ${config.trending} 的所有对冲任务已关闭`)
+    // 调用保存接口
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      submitData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
         }
       }
+    )
+    
+    if (response.data && response.data.code === 0) {
+      // 如果被拉黑，需要关闭该主题的所有运行中的对冲任务
+      if (config.isBlacklisted) {
+        // 在 activeConfigs 中查找对应的配置（可能还在列表中）
+        const activeConfig = activeConfigs.value.find(c => c.id === config.id)
+        if (activeConfig && activeConfig.currentHedges) {
+          const runningHedges = activeConfig.currentHedges.filter(h => h.finalStatus === 'running')
+          if (runningHedges.length > 0) {
+            console.log(`[拉黑] 配置 ${config.trending} 有 ${runningHedges.length} 个运行中的对冲任务，开始关闭...`)
+            // 关闭所有运行中的对冲任务
+            runningHedges.forEach(hedge => {
+              hedge.finalStatus = 'blacklisted'
+              finishHedge(activeConfig, hedge)
+            })
+            console.log(`[拉黑] 配置 ${config.trending} 的所有对冲任务已关闭`)
+          }
+        }
+      }
+      
+      // 更新活动配置列表，确保拉黑的主题立即从自动分配中移除
+      updateActiveConfigs()
+      
+      console.log(`配置 ${config.trending} ${config.isBlacklisted ? '已拉黑' : '已解除拉黑'}`)
+    } else {
+      // 保存失败，恢复状态
+      config.isBlacklisted = !config.isBlacklisted
+      config.a = config.isBlacklisted ? "1" : "0"
+      throw new Error(response.data?.msg || '保存拉黑状态失败')
     }
-    
-    // 更新活动配置列表，确保拉黑的主题立即从自动分配中移除
-    updateActiveConfigs()
-    
-    console.log(`配置 ${config.trending} ${config.isBlacklisted ? '已拉黑' : '已解除拉黑'}`)
   } catch (error) {
     console.error('保存拉黑状态失败:', error)
-    alert('保存拉黑状态失败: ' + error.message)
+    alert('保存拉黑状态失败: ' + (error.response?.data?.msg || error.message))
   }
 }
 
 /**
  * 快速拉黑功能
- * 将输入框中的主题（按分号分隔）都设置为拉黑状态，并保存到本地存储
+ * 将输入框中的主题（按分号分隔）都设置为拉黑状态，并保存到服务器
  */
-const quickBlacklist = () => {
+const quickBlacklist = async () => {
   if (!quickBlacklistInput.value || !quickBlacklistInput.value.trim()) {
     alert('请输入要拉黑的主题，用分号(;)分隔')
     return
@@ -4639,13 +4919,9 @@ const quickBlacklist = () => {
   }
   
   try {
-    // 读取本地存储的拉黑列表
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    const blacklist = blacklistStr ? JSON.parse(blacklistStr) : {}
-    
     let matchedCount = 0
     let notFoundTopics = []
-    let newBlacklistedCount = 0
+    let newBlacklistedConfigs = []
     
     // 遍历所有配置，匹配主题并设置为拉黑（只进行完全匹配）
     editConfigList.value.forEach(config => {
@@ -4658,11 +4934,12 @@ const quickBlacklist = () => {
         // 完全匹配：去除首尾空格后完全相同
         if (configTrending === topicTrimmed) {
           // 检查是否已经拉黑
-          if (blacklist[config.trending] !== true) {
+          const isAlreadyBlacklisted = config.a === "1" || config.a === 1
+          if (!isAlreadyBlacklisted) {
             // 设置为拉黑
-            blacklist[config.trending] = true
             config.isBlacklisted = true
-            newBlacklistedCount++
+            config.a = "1"
+            newBlacklistedConfigs.push(config)
           } else {
             // 已经拉黑了，只更新界面状态
             config.isBlacklisted = true
@@ -4693,15 +4970,43 @@ const quickBlacklist = () => {
       }
     })
     
-    // 保存到本地存储
-    if (newBlacklistedCount > 0) {
-      localStorage.setItem(CONFIG_BLACKLIST_KEY, JSON.stringify(blacklist))
+    // 如果有新拉黑的配置，调用保存接口
+    if (newBlacklistedConfigs.length > 0) {
+      const submitData = {
+        list: newBlacklistedConfigs.map(config => ({
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 0,
+          isOpen: config.isOpen || (config.enabled ? 1 : 0),
+          a: "1"  // 拉黑状态
+        }))
+      }
+      
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+        submitData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (response.data && response.data.code !== 0) {
+        throw new Error(response.data?.msg || '保存拉黑状态失败')
+      }
       
       // 更新活动配置列表
       updateActiveConfigs()
       
       // 显示结果
-      let message = `已成功拉黑 ${matchedCount} 个主题（其中 ${newBlacklistedCount} 个新拉黑）`
+      let message = `已成功拉黑 ${matchedCount} 个主题（其中 ${newBlacklistedConfigs.length} 个新拉黑）`
       if (notFoundTopics.length > 0) {
         message += `\n\n未找到以下主题（${notFoundTopics.length} 个）:\n${notFoundTopics.slice(0, 10).join('\n')}`
         if (notFoundTopics.length > 10) {
@@ -4711,7 +5016,7 @@ const quickBlacklist = () => {
       alert(message)
       
       console.log('[快速拉黑] 匹配的主题数量:', matchedCount)
-      console.log('[快速拉黑] 新拉黑的配置数量:', newBlacklistedCount)
+      console.log('[快速拉黑] 新拉黑的配置数量:', newBlacklistedConfigs.length)
       console.log('[快速拉黑] 未找到的主题:', notFoundTopics)
     } else {
       // 没有需要更新的配置，只显示结果
@@ -4726,7 +5031,7 @@ const quickBlacklist = () => {
     }
   } catch (error) {
     console.error('快速拉黑失败:', error)
-    alert('快速拉黑失败: ' + error.message)
+    alert('快速拉黑失败: ' + (error.response?.data?.msg || error.message))
   }
 }
 
@@ -4848,17 +5153,9 @@ const getConfigBatch = (config) => {
  * 获取配置状态
  */
 const getConfigStatus = (config) => {
-  // 已拉黑：从本地存储判断
-  try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    if (blacklistStr) {
-      const blacklist = JSON.parse(blacklistStr)
-      if (blacklist[config.trending] === true) {
-        return '已拉黑'
-      }
-    }
-  } catch (error) {
-    console.error('读取拉黑状态失败:', error)
+  // 已拉黑：从服务器数据字段a判断
+  if (config.a === "1" || config.a === 1) {
+    return '已拉黑'
   }
   
   // 未添加：启用和显示有任意一个没有开启
@@ -5032,7 +5329,9 @@ const submitEditConfig = async () => {
         hasAnyChange = true
       }
       
-      // 比较需要提交到服务器的字段是否发生变化
+      // 比较需要提交到服务器的字段是否发生变化（包括拉黑状态a字段）
+      const currentA = currentConfig.a === "1" || currentConfig.a === 1 ? "1" : (currentConfig.a || "0")
+      const originalA = originalConfig.a === "1" || originalConfig.a === 1 ? "1" : (originalConfig.a || "0")
       const isServerFieldModified = 
         currentConfig.trending !== originalConfig.trending ||
         currentConfig.opUrl !== originalConfig.opUrl ||
@@ -5040,7 +5339,8 @@ const submitEditConfig = async () => {
         currentConfig.opTopicId !== originalConfig.opTopicId ||
         currentConfig.weight !== originalConfig.weight ||
         currentConfig.enabled !== originalConfig.enabled ||
-        currentConfig.group !== originalConfig.group
+        currentConfig.group !== originalConfig.group ||
+        currentA !== originalA
       
       if (isServerFieldModified) {
         hasAnyChange = true
@@ -5081,7 +5381,8 @@ const submitEditConfig = async () => {
         opTopicId: config.opTopicId,
         weight: config.weight || 0,
         isOpen: config.enabled ? 1 : 0,  // enabled 映射为 isOpen (true->1, false->0)
-        group: config.group || null  // 添加group字段
+        group: config.group || null,  // 添加group字段
+        a: config.a === "1" || config.a === 1 ? "1" : (config.a || "0")  // 拉黑状态：1=拉黑，0=未拉黑
         // 注意：visible 字段不提交到服务器
       }))
     }
@@ -5225,22 +5526,11 @@ const updateActiveConfigs = () => {
   // 先加载显示状态
   const configsWithVisible = loadConfigVisibleStatus(configList.value)
   
-  // 从本地存储读取拉黑状态
-  let blacklist = {}
-  try {
-    const blacklistStr = localStorage.getItem(CONFIG_BLACKLIST_KEY)
-    if (blacklistStr) {
-      blacklist = JSON.parse(blacklistStr)
-    }
-  } catch (error) {
-    console.error('读取拉黑状态失败:', error)
-  }
-  
-  // 过滤掉拉黑的配置（从本地存储判断）
+  // 过滤配置：启用状态(isOpen=1)、未拉黑(a !== "1")、且本地显示是打开的
   activeConfigs.value = configsWithVisible
     .filter(config => config.isOpen === 1 || config.enabled === true)  // 启用的配置
     .filter(config => config.visible !== false)  // 显示开关打开的配置
-    .filter(config => blacklist[config.trending] !== true)  // 过滤掉拉黑的配置
+    .filter(config => config.a !== "1" && config.a !== 1)  // 过滤掉拉黑的配置（a !== "1" 表示未拉黑）
     .map(config => {
       // 恢复保存的对冲信息
       const savedInfo = hedgeInfoMap.get(config.id)
@@ -12112,6 +12402,85 @@ onUnmounted(() => {
 
 .trending-dropdown-item:active {
   background-color: #e9ecef;
+}
+
+/* 查询区域样式 */
+.query-section {
+  margin-bottom: 1rem;
+  overflow: visible;
+  padding: 1rem 1.5rem;
+}
+
+.query-section .section-header-with-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  overflow: visible;
+  position: relative;
+  margin-bottom: 0;
+}
+
+.query-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.query-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex: 0 0 auto;
+}
+
+.query-controls .form-group {
+  flex: 0 0 auto;
+  min-width: 500px;
+  max-width: none;
+}
+
+.query-controls .form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.query-result {
+  flex: 1;
+  padding: 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  background-color: #f8f9fa;
+  min-width: 300px;
+}
+
+.query-result-error {
+  color: #721c24;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.query-result-reason {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: #fff;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  color: #721c24;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* 查询区域的下拉菜单需要更高的z-index */
+.query-section .trending-autocomplete-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
+.query-section .trending-dropdown {
+  z-index: 10001;
 }
 
 .form-actions {

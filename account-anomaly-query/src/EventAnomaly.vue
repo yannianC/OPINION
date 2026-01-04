@@ -266,6 +266,14 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="拉黑状态" width="120" align="center" fixed sortable :sort-method="(a, b) => sortByBlacklistStatus(a.blacklistStatus, b.blacklistStatus)">
+        <template #default="scope">
+          <span :class="scope.row.blacklistStatus === '1' || scope.row.blacklistStatus === 1 ? 'blacklisted' : 'not-blacklisted'">
+            {{ scope.row.blacklistStatus === '1' || scope.row.blacklistStatus === 1 ? '已拉黑' : '未拉黑' }}
+          </span>
+        </template>
+      </el-table-column>
+
       <!-- <el-table-column label="拉黑" width="100" align="center" fixed>
         <template #default="scope">
           <el-checkbox 
@@ -867,6 +875,32 @@ const sortByNumber = (a, b) => {
   const numA = parseFloat(a) || 0
   const numB = parseFloat(b) || 0
   return numA - numB
+}
+
+/**
+ * 拉黑状态排序方法
+ * 已拉黑（a === "1" 或 a === 1）排在前面，未拉黑排在后面
+ */
+const sortByBlacklistStatus = (a, b) => {
+  const isBlacklistedA = a === '1' || a === 1
+  const isBlacklistedB = b === '1' || b === 1
+  
+  // 如果都是拉黑或都不是拉黑，按原始值排序
+  if (isBlacklistedA === isBlacklistedB) {
+    // 如果都是拉黑，返回0（保持原顺序）
+    if (isBlacklistedA) {
+      return 0
+    }
+    // 如果都不是拉黑，按值排序（null/undefined 排在最后）
+    if (a === null || a === undefined) return 1
+    if (b === null || b === undefined) return -1
+    const numA = parseFloat(a) || 0
+    const numB = parseFloat(b) || 0
+    return numA - numB
+  }
+  
+  // 已拉黑排在前面
+  return isBlacklistedA ? -1 : 1
 }
 
 /**
@@ -1472,6 +1506,8 @@ const loadAndCalculate = async () => {
             ? parseFloat(matchedConfig.a) || 0 
             : 0
           event.configId = matchedConfig.id // 保存配置ID，用于更新
+          // 保存 a 字段的原始值，用于显示拉黑状态
+          event.blacklistStatus = matchedConfig.a !== null && matchedConfig.a !== undefined ? matchedConfig.a : null
           // 从配置的 b 字段获取拉黑状态：b=1 表示拉黑，b=0/null/undefined 表示未拉黑
           event.isBlacklisted = matchedConfig.b === 1 || matchedConfig.b === '1'
           // 保存原始 b 值，用于后续比较（处理 null、undefined、0、1 等情况）
@@ -1481,6 +1517,7 @@ const loadAndCalculate = async () => {
         } else {
           event.ignoreDiff = 0
           event.configId = null
+          event.blacklistStatus = null  // 未匹配到配置，拉黑状态为 null
           event.isBlacklisted = false
           event.originalB = 0  // 未匹配到配置，默认为未拉黑
           event.selected = false  // 未匹配到配置，默认不勾选
@@ -2125,6 +2162,16 @@ onMounted(() => {
 .negative {
   color: #f56c6c;
   font-weight: 600;
+}
+
+.blacklisted {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+.not-blacklisted {
+  color: #67c23a;
+  font-weight: 500;
 }
 
 .copied-content-display {
