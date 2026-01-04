@@ -205,6 +205,31 @@
               />
               <label style="margin-left: 5px;">分钟内有过任意操作的，不参与</label>
             </div>
+            <div class="trending-filter">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.needJudgeBalancePriority"
+                  :true-value="1"
+                  :false-value="0"
+                  :disabled="autoHedgeRunning"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                  @change="saveHedgeSettings"
+                />
+                <span style="cursor: pointer;">可用少于</span>
+                <input 
+                  v-model.number="hedgeMode.balancePriority" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  placeholder="2000"
+                  :disabled="autoHedgeRunning || hedgeMode.needJudgeBalancePriority === 0"
+                  @blur="saveHedgeSettings"
+                  style="width: 100px;"
+                />
+                <span style="cursor: pointer;">的账户，优先maker</span>
+              </label>
+            </div>
           </div>
           <div class="auto-hedge-controls">
             <!-- 账号选择设置 -->
@@ -2460,8 +2485,67 @@ const hedgeMode = reactive({
   singleCloseAmtMax: 500,  // 每个小仓位平仓时间的最大持仓(小于这个的才去平)
   closeAmtSumMin: 0,  // 这一轮最少平仓数量
   closeAmtSumMaxStart: 0,  // 这一轮最多平仓数量 随机最小
-  closeAmtSumMaxEnd: 0  // 这一轮最多平仓数量 随机最大
+  closeAmtSumMaxEnd: 0,  // 这一轮最多平仓数量 随机最大
+  // 资产优先级校验设置
+  needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
+  balancePriority: 2000  // 资产优先级校验值
 })
+
+// 每个主题的上一次先挂方记录（用于轮换）
+const FIRST_SIDE_STORAGE_KEY = 'firstSideHistory'
+const firstSideHistory = reactive({})  // 内存中的记录
+
+// 初始化先挂方历史记录（从localStorage加载）
+const initFirstSideHistory = () => {
+  try {
+    const stored = localStorage.getItem(FIRST_SIDE_STORAGE_KEY)
+    if (stored) {
+      const data = JSON.parse(stored)
+      Object.assign(firstSideHistory, data)
+    }
+  } catch (error) {
+    console.error('加载先挂方历史记录失败:', error)
+  }
+}
+
+// 保存先挂方历史记录到localStorage
+const saveFirstSideHistory = () => {
+  try {
+    localStorage.setItem(FIRST_SIDE_STORAGE_KEY, JSON.stringify(firstSideHistory))
+  } catch (error) {
+    console.error('保存先挂方历史记录失败:', error)
+  }
+}
+
+// 获取并更新主题的先挂方（轮换机制）
+const getNextFirstSide = (configId, yesBidPrice, noBidPrice, yesAskPrice, noAskPrice, isClose) => {
+  // 获取上一次的先挂方
+  const lastFirstSide = firstSideHistory[configId]
+  
+  let firstSide
+  
+  if (lastFirstSide) {
+    // 如果存在上一次记录，则轮换到另一个方向
+    firstSide = lastFirstSide === 'YES' ? 'NO' : 'YES'
+    console.log(`主题 ${configId} - 上一次先挂方: ${lastFirstSide}, 本次轮换为: ${firstSide}`)
+  } else {
+    // 如果不存在记录，使用原来的逻辑作为初始值
+    if (isClose) {
+      // 平仓：买一价更高的为先挂方
+      firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
+    } else {
+      // 开仓：卖一价更高的为先挂方
+      firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
+    }
+    console.log(`主题 ${configId} - 首次选择先挂方: ${firstSide}`)
+  }
+  
+  // 更新记录
+  firstSideHistory[configId] = firstSide
+  saveFirstSideHistory()
+  
+  return firstSide
+}
 
 // 交易费查询
 const feeQuery = reactive({
@@ -6455,21 +6539,14 @@ const parseOrderbookData = async (config, isClose) => {
     const noBidDepth = parseFloat(noBid.size)
     const noAskDepth = parseFloat(noAsk.size)
     
-    // 确定先挂方：根据开仓/平仓判断
+    // 确定先挂方：使用轮换机制（一个主题一次YES一次NO轮着来）
     let firstSide, price1, price2, depth1, depth2
     let firstBids, firstAsks
     
-    if (isClose) {
-      // 平仓：买一价更高的为先挂方
-      firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
-      firstBids = firstSide === 'YES' ? yesBids : noBids
-      firstAsks = firstSide === 'YES' ? yesAsks : noAsks
-    } else {
-      // 开仓：卖一价更高的为先挂方
-      firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
-      firstBids = firstSide === 'YES' ? yesBids : noBids
-      firstAsks = firstSide === 'YES' ? yesAsks : noAsks
-    }
+    // 使用轮换机制获取先挂方
+    firstSide = getNextFirstSide(config.id, yesBidPrice, noBidPrice, yesAskPrice, noAskPrice, isClose)
+    firstBids = firstSide === 'YES' ? yesBids : noBids
+    firstAsks = firstSide === 'YES' ? yesAsks : noAsks
     
     // 获取先挂方的买一价和卖一价
     if (firstSide === 'YES') {
@@ -6743,7 +6820,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           singleCloseAmtMax: hedgeMode.singleCloseAmtMax,  // 每个小仓位平仓时间的最大持仓
           closeAmtSumMin: hedgeMode.closeAmtSumMin,  // 这一轮最少平仓数量
           closeAmtSumMaxStart: hedgeMode.closeAmtSumMaxStart,  // 这一轮最多平仓数量 随机最小
-          closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd  // 这一轮最多平仓数量 随机最大
+          closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd,  // 这一轮最多平仓数量 随机最大
+          needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,  // 是否需要校验资产优先级 0不要 1要
+          balancePriority: hedgeMode.balancePriority  // 资产优先级校验值
         }
         // 如果 maxIpDelay 有值，则添加到请求参数中
         if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
@@ -7620,6 +7699,9 @@ const saveHedgeSettings = () => {
       closeAmtSumMin: hedgeMode.closeAmtSumMin,
       closeAmtSumMaxStart: hedgeMode.closeAmtSumMaxStart,
       closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd,
+      // 资产优先级校验设置
+      needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
+      balancePriority: hedgeMode.balancePriority,
       // 其他设置
       randomGetCount: randomGetCount.value,
       // yes数量大于、模式选择、账户选择
@@ -7681,6 +7763,14 @@ const loadHedgeSettings = () => {
     }
     if (settings.closeAmtSumMaxEnd !== undefined) {
       hedgeMode.closeAmtSumMaxEnd = settings.closeAmtSumMaxEnd
+    }
+    
+    // 资产优先级校验设置
+    if (settings.needJudgeBalancePriority !== undefined) {
+      hedgeMode.needJudgeBalancePriority = settings.needJudgeBalancePriority
+    }
+    if (settings.balancePriority !== undefined) {
+      hedgeMode.balancePriority = settings.balancePriority
     }
     
     // 其他设置
@@ -9078,7 +9168,9 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
       // 构建请求参数，包含失败的电脑组和浏览器编号
       const requestParams = {
         missionId: hedgeRecord.missionId,
-        closeLimitList: closeLimitListForRequest
+        closeLimitList: closeLimitListForRequest,
+        needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,  // 是否需要校验资产优先级 0不要 1要
+        balancePriority: hedgeMode.balancePriority  // 资产优先级校验值
       }
       
       // 如果有失败的电脑组或浏览器编号，添加到请求参数中
@@ -10372,6 +10464,9 @@ const resetAutoRefresh = () => {
 onMounted(() => {
   isConnected.value = true
   console.log('任务管理系统已启动')
+  
+  // 初始化先挂方历史记录
+  initFirstSideHistory()
   
   // 初始化交易费查询时间
   initFeeQueryTime()

@@ -1,5 +1,132 @@
 <template>
   <div class="event-anomaly-page">
+    <!-- 数量统计表 -->
+    <el-collapse v-model="statisticsCollapseActive" class="statistics-collapse">
+      <el-collapse-item name="statistics" title="表1-数量">
+        <el-table 
+          :data="quantityStatisticsData" 
+          border 
+          style="width: 100%"
+          class="statistics-table"
+        >
+          <el-table-column prop="label" label="" width="150" align="center" fixed />
+          <el-table-column prop="total" label="总量" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.total }}</span>
+              <span v-else>{{ formatNumber(scope.row.total) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range0_50" label="0到50" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range0_50 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range0_50) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range50_100" label="50到100" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range50_100 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range50_100) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range100_200" label="100到200" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range100_200 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range100_200) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range200_300" label="200到300" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range200_300 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range200_300) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range300_500" label="300到500" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range300_500 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range300_500) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range500_1000" label="500到1000" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range500_1000 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range500_1000) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range1000_2000" label="1000到2000" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range1000_2000 }}</span>
+              <span v-else>{{ formatNumber(scope.row.range1000_2000) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range2000_plus" label="2000+" width="120" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.label === 'yesno占总比'">{{ scope.row.range2000_plus }}</span>
+              <span v-else>{{ formatNumber(scope.row.range2000_plus) }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-collapse-item>
+    </el-collapse>
+
+    <!-- 仓位更新时间统计表 -->
+    <el-collapse v-model="timeStatisticsCollapseActive" class="statistics-collapse">
+      <el-collapse-item :name="'timeStatistics'" :title="`表2-仓位更新时间${dataUpdateTime ? ' (数据更新时间: ' + dataUpdateTime + ')' : ''}`">
+        <el-table 
+          :data="timeStatisticsData" 
+          border 
+          style="width: 100%"
+          class="statistics-table"
+        >
+          <el-table-column prop="label" label="" width="150" align="center" fixed />
+          <el-table-column prop="total" label="总量" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.total) : scope.row.total }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range0_1h" label="0到1小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range0_1h) : scope.row.range0_1h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range1_4h" label="1小时到4小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range1_4h) : scope.row.range1_4h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range4_8h" label="4小时到8小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range4_8h) : scope.row.range4_8h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range8_12h" label="8小时到12小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range8_12h) : scope.row.range8_12h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range12_24h" label="12小时到24小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range12_24h) : scope.row.range12_24h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range24_48h" label="24小时到48小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range24_48h) : scope.row.range24_48h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range48_96h" label="48小时到96小时" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range48_96h) : scope.row.range48_96h }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="range96h_plus" label="96小时以上" width="120" align="center">
+            <template #default="scope">
+              <span>{{ scope.row.label === '事件金额' ? formatNumber(scope.row.range96h_plus) : scope.row.range96h_plus }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-collapse-item>
+    </el-collapse>
+
     <h1 class="page-title">事件异常</h1>
     
     <div class="toolbar">
@@ -123,7 +250,7 @@
       border 
       style="width: 100%"
       v-loading="loading"
-      height="calc(100vh - 300px)"
+      height="calc(100vh - 500px)"
     >
       <el-table-column type="index" label="序号" width="60" align="center" :index="indexMethod" fixed />
       <el-table-column prop="eventName" label="事件名" width="400" fixed>
@@ -275,7 +402,12 @@ const groupConfigList = ref([]) // 存储当前分组的事件名列表
 const accountDataCache = ref([]) // 存储原始账户数据，用于导出浏览器编号
 const exchangeConfigList = ref([]) // 存储 exchangeConfig 配置列表
 const configMap = ref(new Map()) // 存储 trending -> config 的映射
+const idToTrendingMap = ref(new Map()) // 存储 id -> trending 的映射
 const savingBlacklist = ref(false) // 是否正在保存拉黑状态
+const statisticsCollapseActive = ref([]) // 统计表折叠状态，默认为空数组（折叠）
+const timeStatisticsCollapseActive = ref([]) // 时间统计表折叠状态，默认为空数组（折叠）
+const dataUpdateTime = ref('') // 数据更新时间（格式化字符串，用于显示）
+const dataUpdateTimestamp = ref(0) // 数据更新时间戳（用于计算）
 const copiedContent = ref({
   eventNames: '', // 导出勾选主题并复制的内容
   allBrowsers: '', // 导出所有浏览器编号的内容
@@ -293,6 +425,355 @@ const browserExportState = ref({
  */
 const selectedCount = computed(() => {
   return eventTableData.value.filter(item => item.selected).length
+})
+
+/**
+ * 计算数量统计数据
+ * 按每个账号每个事件的yes/no数量来统计区间
+ */
+const quantityStatisticsData = computed(() => {
+  // 定义区间范围
+  const ranges = [
+    { min: 0, max: 50, key: 'range0_50' },
+    { min: 50, max: 100, key: 'range50_100' },
+    { min: 100, max: 200, key: 'range100_200' },
+    { min: 200, max: 300, key: 'range200_300' },
+    { min: 300, max: 500, key: 'range300_500' },
+    { min: 500, max: 1000, key: 'range500_1000' },
+    { min: 1000, max: 2000, key: 'range1000_2000' },
+    { min: 2000, max: Infinity, key: 'range2000_plus' }
+  ]
+  
+  // 初始化统计数据
+  const stats = {
+    yes: {
+      total: 0,
+      range0_50: 0,
+      range50_100: 0,
+      range100_200: 0,
+      range200_300: 0,
+      range300_500: 0,
+      range500_1000: 0,
+      range1000_2000: 0,
+      range2000_plus: 0
+    },
+    no: {
+      total: 0,
+      range0_50: 0,
+      range50_100: 0,
+      range100_200: 0,
+      range200_300: 0,
+      range300_500: 0,
+      range500_1000: 0,
+      range1000_2000: 0,
+      range2000_plus: 0
+    }
+  }
+  
+  // 从accountDataCache遍历每个账号的每个事件
+  if (accountDataCache.value && accountDataCache.value.length > 0) {
+    for (const row of accountDataCache.value) {
+      // 从 trendingKey 中提取 id（格式：id::方向）
+      if (!row.trendingKey) {
+        continue
+      }
+      
+      const parts = row.trendingKey.split('::')
+      if (parts.length < 2) {
+        continue
+      }
+      
+      const configId = parts[0].trim()
+      const direction = parts[1].trim()
+      
+      // 通过 id 查找对应的 trending（事件名）
+      const eventName = idToTrendingMap.value.get(configId)
+      if (!eventName) {
+        continue
+      }
+      
+      // 获取该账号该事件的yes/no数量
+      const amount = Math.abs(parseFloat(row.amt) || 0)
+      const outComeUpper = (row.outCome || direction).toUpperCase()
+      
+      if (outComeUpper === 'YES') {
+        // 累加yes总量
+        stats.yes.total += amount
+        
+        // 统计yes数量区间
+        for (const range of ranges) {
+          if (range.max === Infinity) {
+            // 2000+区间
+            if (amount >= range.min) {
+              stats.yes[range.key] += amount
+              break
+            }
+          } else {
+            // 其他区间
+            if (amount >= range.min && amount < range.max) {
+              stats.yes[range.key] += amount
+              break
+            }
+          }
+        }
+      } else if (outComeUpper === 'NO') {
+        // 累加no总量
+        stats.no.total += amount
+        
+        // 统计no数量区间
+        for (const range of ranges) {
+          if (range.max === Infinity) {
+            // 2000+区间
+            if (amount >= range.min) {
+              stats.no[range.key] += amount
+              break
+            }
+          } else {
+            // 其他区间
+            if (amount >= range.min && amount < range.max) {
+              stats.no[range.key] += amount
+              break
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // 计算yes+no总量
+  const yesNoTotal = {
+    total: stats.yes.total + stats.no.total,
+    range0_50: stats.yes.range0_50 + stats.no.range0_50,
+    range50_100: stats.yes.range50_100 + stats.no.range50_100,
+    range100_200: stats.yes.range100_200 + stats.no.range100_200,
+    range200_300: stats.yes.range200_300 + stats.no.range200_300,
+    range300_500: stats.yes.range300_500 + stats.no.range300_500,
+    range500_1000: stats.yes.range500_1000 + stats.no.range500_1000,
+    range1000_2000: stats.yes.range1000_2000 + stats.no.range1000_2000,
+    range2000_plus: stats.yes.range2000_plus + stats.no.range2000_plus
+  }
+  
+  // 计算占比（yesno占总比）
+  const totalAmount = yesNoTotal.total
+  const percentage = {
+    total: totalAmount > 0 ? (totalAmount / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range0_50: totalAmount > 0 ? (yesNoTotal.range0_50 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range50_100: totalAmount > 0 ? (yesNoTotal.range50_100 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range100_200: totalAmount > 0 ? (yesNoTotal.range100_200 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range200_300: totalAmount > 0 ? (yesNoTotal.range200_300 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range300_500: totalAmount > 0 ? (yesNoTotal.range300_500 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range500_1000: totalAmount > 0 ? (yesNoTotal.range500_1000 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range1000_2000: totalAmount > 0 ? (yesNoTotal.range1000_2000 / totalAmount * 100).toFixed(2) + '%' : '0.00%',
+    range2000_plus: totalAmount > 0 ? (yesNoTotal.range2000_plus / totalAmount * 100).toFixed(2) + '%' : '0.00%'
+  }
+  
+  // 返回表格数据
+  return [
+    {
+      label: 'yes数量',
+      total: stats.yes.total,
+      range0_50: stats.yes.range0_50,
+      range50_100: stats.yes.range50_100,
+      range100_200: stats.yes.range100_200,
+      range200_300: stats.yes.range200_300,
+      range300_500: stats.yes.range300_500,
+      range500_1000: stats.yes.range500_1000,
+      range1000_2000: stats.yes.range1000_2000,
+      range2000_plus: stats.yes.range2000_plus
+    },
+    {
+      label: 'no数量',
+      total: stats.no.total,
+      range0_50: stats.no.range0_50,
+      range50_100: stats.no.range50_100,
+      range100_200: stats.no.range100_200,
+      range200_300: stats.no.range200_300,
+      range300_500: stats.no.range300_500,
+      range500_1000: stats.no.range500_1000,
+      range1000_2000: stats.no.range1000_2000,
+      range2000_plus: stats.no.range2000_plus
+    },
+    {
+      label: 'yes+no总量',
+      total: yesNoTotal.total,
+      range0_50: yesNoTotal.range0_50,
+      range50_100: yesNoTotal.range50_100,
+      range100_200: yesNoTotal.range100_200,
+      range200_300: yesNoTotal.range200_300,
+      range300_500: yesNoTotal.range300_500,
+      range500_1000: yesNoTotal.range500_1000,
+      range1000_2000: yesNoTotal.range1000_2000,
+      range2000_plus: yesNoTotal.range2000_plus
+    },
+    {
+      label: 'yesno占总比',
+      total: percentage.total,
+      range0_50: percentage.range0_50,
+      range50_100: percentage.range50_100,
+      range100_200: percentage.range100_200,
+      range200_300: percentage.range200_300,
+      range300_500: percentage.range300_500,
+      range500_1000: percentage.range500_1000,
+      range1000_2000: percentage.range1000_2000,
+      range2000_plus: percentage.range2000_plus
+    }
+  ]
+})
+
+/**
+ * 计算仓位更新时间统计数据
+ * 按每个事件的 ctime 与数据更新时间的差值来统计区间
+ */
+const timeStatisticsData = computed(() => {
+  // 定义时间区间范围（单位：毫秒）
+  const ranges = [
+    { min: 0, max: 1 * 60 * 60 * 1000, key: 'range0_1h' }, // 0到1小时
+    { min: 1 * 60 * 60 * 1000, max: 4 * 60 * 60 * 1000, key: 'range1_4h' }, // 1小时到4小时
+    { min: 4 * 60 * 60 * 1000, max: 8 * 60 * 60 * 1000, key: 'range4_8h' }, // 4小时到8小时
+    { min: 8 * 60 * 60 * 1000, max: 12 * 60 * 60 * 1000, key: 'range8_12h' }, // 8小时到12小时
+    { min: 12 * 60 * 60 * 1000, max: 24 * 60 * 60 * 1000, key: 'range12_24h' }, // 12小时到24小时
+    { min: 24 * 60 * 60 * 1000, max: 48 * 60 * 60 * 1000, key: 'range24_48h' }, // 24小时到48小时
+    { min: 48 * 60 * 60 * 1000, max: 96 * 60 * 60 * 1000, key: 'range48_96h' }, // 48小时到96小时
+    { min: 96 * 60 * 60 * 1000, max: Infinity, key: 'range96h_plus' } // 96小时以上
+  ]
+  
+  // 初始化统计数据
+  const stats = {
+    eventCount: {
+      total: 0,
+      range0_1h: 0,
+      range1_4h: 0,
+      range4_8h: 0,
+      range8_12h: 0,
+      range12_24h: 0,
+      range24_48h: 0,
+      range48_96h: 0,
+      range96h_plus: 0
+    },
+    eventAmount: {
+      total: 0,
+      range0_1h: 0,
+      range1_4h: 0,
+      range4_8h: 0,
+      range8_12h: 0,
+      range12_24h: 0,
+      range24_48h: 0,
+      range48_96h: 0,
+      range96h_plus: 0
+    }
+  }
+  
+  // 如果没有数据更新时间戳，返回空数据
+  if (!dataUpdateTimestamp.value || dataUpdateTimestamp.value === 0) {
+    return [
+      {
+        label: '事件数量',
+        total: 0,
+        range0_1h: 0,
+        range1_4h: 0,
+        range4_8h: 0,
+        range8_12h: 0,
+        range12_24h: 0,
+        range24_48h: 0,
+        range48_96h: 0,
+        range96h_plus: 0
+      },
+      {
+        label: '事件金额',
+        total: 0,
+        range0_1h: 0,
+        range1_4h: 0,
+        range4_8h: 0,
+        range8_12h: 0,
+        range12_24h: 0,
+        range24_48h: 0,
+        range48_96h: 0,
+        range96h_plus: 0
+      }
+    ]
+  }
+  
+  // 使用存储的时间戳
+  const updateTimestamp = dataUpdateTimestamp.value
+  
+  // 从accountDataCache遍历每个事件
+  if (accountDataCache.value && accountDataCache.value.length > 0) {
+    for (const row of accountDataCache.value) {
+      // 获取 ctime（仓位创建时间）
+      if (!row.ctime) {
+        continue
+      }
+      
+      const ctime = typeof row.ctime === 'string' ? parseInt(row.ctime) : row.ctime
+      if (isNaN(ctime)) {
+        continue
+      }
+      
+      // 计算时间差（数据更新时间 - ctime）
+      const timeDiff = updateTimestamp - ctime
+      
+      // 如果时间差为负数，跳过（ctime 晚于数据更新时间）
+      if (timeDiff < 0) {
+        continue
+      }
+      
+      // 获取事件金额：amt * avgPrice
+      const amt = parseFloat(row.amt) || 0
+      const avgPrice = parseFloat(row.avgPrice) || 0
+      const eventAmount = amt * avgPrice
+      
+      // 累加总量
+      stats.eventCount.total += 1
+      stats.eventAmount.total += eventAmount
+      
+      // 统计时间区间
+      for (const range of ranges) {
+        if (range.max === Infinity) {
+          // 96小时以上区间
+          if (timeDiff >= range.min) {
+            stats.eventCount[range.key] += 1
+            stats.eventAmount[range.key] += eventAmount
+            break
+          }
+        } else {
+          // 其他区间
+          if (timeDiff >= range.min && timeDiff < range.max) {
+            stats.eventCount[range.key] += 1
+            stats.eventAmount[range.key] += eventAmount
+            break
+          }
+        }
+      }
+    }
+  }
+  
+  // 返回表格数据
+  return [
+    {
+      label: '事件数量',
+      total: stats.eventCount.total,
+      range0_1h: stats.eventCount.range0_1h,
+      range1_4h: stats.eventCount.range1_4h,
+      range4_8h: stats.eventCount.range4_8h,
+      range8_12h: stats.eventCount.range8_12h,
+      range12_24h: stats.eventCount.range12_24h,
+      range24_48h: stats.eventCount.range24_48h,
+      range48_96h: stats.eventCount.range48_96h,
+      range96h_plus: stats.eventCount.range96h_plus
+    },
+    {
+      label: '事件金额',
+      total: stats.eventAmount.total,
+      range0_1h: stats.eventAmount.range0_1h,
+      range1_4h: stats.eventAmount.range1_4h,
+      range4_8h: stats.eventAmount.range4_8h,
+      range8_12h: stats.eventAmount.range8_12h,
+      range12_24h: stats.eventAmount.range12_24h,
+      range24_48h: stats.eventAmount.range24_48h,
+      range48_96h: stats.eventAmount.range48_96h,
+      range96h_plus: stats.eventAmount.range96h_plus
+    }
+  ]
 })
 
 /**
@@ -740,15 +1221,22 @@ const loadExchangeConfig = async () => {
       
       // 创建 trending -> config 的映射（完全匹配）
       const newConfigMap = new Map()
+      // 创建 id -> trending 的映射
+      const newIdToTrendingMap = new Map()
       for (const config of exchangeConfigList.value) {
         if (config.trending) {
           const trending = config.trending.trim()
           newConfigMap.set(trending, config)
         }
+        if (config.id && config.trending) {
+          newIdToTrendingMap.set(String(config.id), config.trending.trim())
+        }
       }
       configMap.value = newConfigMap
+      idToTrendingMap.value = newIdToTrendingMap
       
       console.log(`[事件异常] exchangeConfig 配置加载完成，共 ${exchangeConfigList.value.length} 个配置`)
+      console.log(`[事件异常] id -> trending 映射完成，共 ${newIdToTrendingMap.size} 个映射`)
       return exchangeConfigList.value
     } else {
       console.warn('[事件异常] 未获取到 exchangeConfig 配置数据')
@@ -810,6 +1298,50 @@ const loadChainStats = async () => {
 }
 
 /**
+ * 匹配并更新链上数据
+ */
+const matchAndUpdateChainData = (chainDataMap) => {
+  console.log('[事件异常] 开始匹配链上数据，事件数量:', eventTableData.value.length, '链上数据数量:', chainDataMap.size)
+  
+  // 直接更新表格数据中的链上数据
+  for (const event of eventTableData.value) {
+    const trimmedEventName = event.eventName.trim()
+    let matched = false
+    
+    // 尝试完全匹配
+    if (chainDataMap.has(trimmedEventName)) {
+      const chainData = chainDataMap.get(trimmedEventName)
+      event.chainYesPosition = chainData.yesTotal
+      event.chainNoPosition = chainData.noTotal
+      matched = true
+      console.log('[事件异常] 完全匹配成功:', trimmedEventName, '-> yes:', chainData.yesTotal, 'no:', chainData.noTotal)
+    } else {
+      // 遍历链上数据，尝试完全匹配（去除首尾空格）
+      for (const [chainTitle, chainData] of chainDataMap.entries()) {
+        if (trimmedEventName === chainData.fullTitle.trim() || trimmedEventName === chainTitle.trim()) {
+          event.chainYesPosition = chainData.yesTotal
+          event.chainNoPosition = chainData.noTotal
+          matched = true
+          console.log('[事件异常] 完全匹配成功（去除空格）:', trimmedEventName, '->', chainData.fullTitle, 'yes:', chainData.yesTotal, 'no:', chainData.noTotal)
+          break
+        }
+      }
+    }
+    
+    if (!matched) {
+      console.log('[事件异常] 未匹配到链上数据（需要完全匹配）:', trimmedEventName)
+    }
+    
+    // 重新计算链上相关差额
+    // 链上实际差额：链上yes持仓数量 - 链上no持仓数量
+    event.chainActualDiff = event.chainYesPosition - event.chainNoPosition
+    
+    // 链上成交后差额：链上实际差额 + 挂单差额（使用原有的挂单差额）
+    event.chainFinalDiff = event.chainActualDiff + event.orderDiff
+  }
+}
+
+/**
  * 加载数据并计算事件统计
  */
 const loadAndCalculate = async () => {
@@ -824,17 +1356,27 @@ const loadAndCalculate = async () => {
       groupConfigList.value = eventNames
     }
     
-    // 并行加载账户数据、链上数据和 exchangeConfig 配置
-    const [accountResponse, chainDataMap] = await Promise.all([
-      axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`),
-      loadChainStats()
-    ])
-    
-    // 加载 exchangeConfig 配置
+    // 先加载 exchangeConfig 配置（需要用于 id -> trending 映射）
     await loadExchangeConfig()
     
-    if (accountResponse.data && accountResponse.data.data) {
-      const data = accountResponse.data.data
+    // 加载账户数据（不等待链上数据）
+    const accountResponse = await axios.get(`${API_BASE_URL}/boost/getAllPosSnap`)
+    
+    // 记录数据更新时间（当前时间）
+    const now = new Date()
+    dataUpdateTimestamp.value = now.getTime() // 保存时间戳用于计算
+    dataUpdateTime.value = now.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+    
+    if (accountResponse.data && accountResponse.data.data && accountResponse.data.data.list) {
+      const data = accountResponse.data.data.list
       console.log(`[事件异常] 获取到 ${data.length} 条数据，开始解析...`)
       
       // 保存原始账户数据，用于导出浏览器编号
@@ -845,169 +1387,57 @@ const loadAndCalculate = async () => {
       
       // 处理每条数据
       for (const row of data) {
-        // 解析持仓数据（a字段）
-        if (row.a) {
-          const positions = parsePositions(row.a)
-          for (const pos of positions) {
-            const eventName = pos.title
-            if (!eventMap.has(eventName)) {
-              eventMap.set(eventName, {
-                eventName: eventName,
-                yesPosition: 0,
-                noPosition: 0,
-                actualDiff: 0,
-                orderYes: 0,
-                orderNo: 0,
-                orderDiff: 0,
-                finalDiff: 0,
-                chainYesPosition: 0,
-                chainNoPosition: 0,
-                chainActualDiff: 0,
-                chainFinalDiff: 0
-              })
-            }
-            
-            const event = eventMap.get(eventName)
-            const amount = Math.abs(pos.amount)
-            
-            // 特殊处理：First to 5k: Gold or ETH? 市场
-            // GOLD为yes，ETH为no
-            let isYes = false
-            let isNo = false
-            
-            if (eventName.includes('First to 5k')) {
-              if (pos.option === 'GOLD') {
-                isYes = true
-              } else if (pos.option === 'ETH') {
-                isNo = true
-              }
-            }
-            // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
-            // Monad为yes，MegaETH为no
-            else if (eventName.includes('Monad vs MegaETH')) {
-              if (pos.option === 'Monad') {
-                isYes = true
-              } else if (pos.option === 'MegaETH') {
-                isNo = true
-              }
-            }
-            // 普通事件
-            else {
-              if (pos.option === 'YES' || (pos.amount >= 0 && !pos.option)) {
-                isYes = true
-              } else if (pos.option === 'NO' || pos.amount < 0) {
-                isNo = true
-              }
-            }
-            
-            // 根据方向累加持仓数量（使用绝对值）
-            if (isYes) {
-              event.yesPosition += amount
-            } else if (isNo) {
-              event.noPosition += amount
-            }
-          }
+        // 从 trendingKey 中提取 id（格式：id::方向）
+        if (!row.trendingKey) {
+          continue
         }
         
-        // 解析挂单数据（b字段）
-        if (row.b) {
-          const orders = parseOrders(row.b)
-          for (const order of orders) {
-            const eventName = order.title
-            if (!eventMap.has(eventName)) {
-              eventMap.set(eventName, {
-                eventName: eventName,
-                yesPosition: 0,
-                noPosition: 0,
-                actualDiff: 0,
-                orderYes: 0,
-                orderNo: 0,
-                orderDiff: 0,
-                finalDiff: 0,
-                chainYesPosition: 0,
-                chainNoPosition: 0,
-                chainActualDiff: 0,
-                chainFinalDiff: 0
-              })
-            }
-            
-            const event = eventMap.get(eventName)
-            const pending = order.pending
-            const sign = order.buySellDirection === 'Buy' ? 1 : -1
-            
-            // 特殊处理：First to 5k: Gold or ETH? 市场
-            // GOLD为yes，ETH为no
-            let isYes = false
-            let isNo = false
-            
-            if (eventName.includes('First to 5k')) {
-              if (order.option === 'GOLD') {
-                isYes = true
-              } else if (order.option === 'ETH') {
-                isNo = true
-              }
-            }
-            // 特殊处理：Monad vs MegaETH — who has the higher FDV one day after launch? 市场
-            // Monad为yes，MegaETH为no
-            else if (eventName.includes('Monad vs MegaETH')) {
-              if (order.option === 'Monad') {
-                isYes = true
-              } else if (order.option === 'MegaETH') {
-                isNo = true
-              }
-            }
-            // 普通事件
-            else {
-              if (order.option === 'YES') {
-                isYes = true
-              } else if (order.option === 'NO') {
-                isNo = true
-              }
-            }
-            
-            // 根据方向累加挂单数量
-            if (isYes) {
-              event.orderYes += sign * pending
-            } else if (isNo) {
-              event.orderNo += sign * pending
-            }
-          }
+        const parts = row.trendingKey.split('::')
+        if (parts.length < 2) {
+          continue
+        }
+        
+        const configId = parts[0].trim()
+        const direction = parts[1].trim()
+        
+        // 通过 id 查找对应的 trending（事件名）
+        const eventName = idToTrendingMap.value.get(configId)
+        if (!eventName) {
+          console.warn(`[事件异常] 未找到 id=${configId} 对应的 trending`)
+          continue
+        }
+        
+        // 初始化事件数据
+        if (!eventMap.has(eventName)) {
+          eventMap.set(eventName, {
+            eventName: eventName,
+            yesPosition: 0,
+            noPosition: 0,
+            actualDiff: 0,
+            orderYes: 0,
+            orderNo: 0,
+            orderDiff: 0,
+            finalDiff: 0,
+            chainYesPosition: 0,
+            chainNoPosition: 0,
+            chainActualDiff: 0,
+            chainFinalDiff: 0
+          })
+        }
+        
+        const event = eventMap.get(eventName)
+        const amount = Math.abs(parseFloat(row.amt) || 0)
+        
+        // 根据 outCome 判断方向（YES/NO）
+        const outComeUpper = (row.outCome || direction).toUpperCase()
+        if (outComeUpper === 'YES') {
+          event.yesPosition += amount
+        } else if (outComeUpper === 'NO') {
+          event.noPosition += amount
         }
       }
       
-      // 匹配链上数据（必须完全匹配，包括###后面的部分）
-      console.log('[事件异常] 开始匹配链上数据，事件数量:', eventMap.size, '链上数据数量:', chainDataMap.size)
-      for (const [eventName, event] of eventMap.entries()) {
-        // 只使用完全匹配（去除首尾空格后比较）
-        const trimmedEventName = eventName.trim()
-        let matched = false
-        
-        // 尝试完全匹配
-        if (chainDataMap.has(trimmedEventName)) {
-          const chainData = chainDataMap.get(trimmedEventName)
-          event.chainYesPosition = chainData.yesTotal
-          event.chainNoPosition = chainData.noTotal
-          matched = true
-          console.log('[事件异常] 完全匹配成功:', trimmedEventName, '-> yes:', chainData.yesTotal, 'no:', chainData.noTotal)
-        } else {
-          // 遍历链上数据，尝试完全匹配（去除首尾空格）
-          for (const [chainTitle, chainData] of chainDataMap.entries()) {
-            if (trimmedEventName === chainData.fullTitle.trim() || trimmedEventName === chainTitle.trim()) {
-              event.chainYesPosition = chainData.yesTotal
-              event.chainNoPosition = chainData.noTotal
-              matched = true
-              console.log('[事件异常] 完全匹配成功（去除空格）:', trimmedEventName, '->', chainData.fullTitle, 'yes:', chainData.yesTotal, 'no:', chainData.noTotal)
-              break
-            }
-          }
-        }
-        
-        if (!matched) {
-          console.log('[事件异常] 未匹配到链上数据（需要完全匹配）:', trimmedEventName)
-        }
-      }
-      
-      // 计算差额
+      // 计算差额（先不包含链上数据）
       for (const event of eventMap.values()) {
         // 实际差额：yes持仓数量 - no持仓数量（将no置为负数后相加）
         event.actualDiff = event.yesPosition - event.noPosition
@@ -1018,10 +1448,10 @@ const loadAndCalculate = async () => {
         // 成交后差额：实际差额 + 挂单差额
         event.finalDiff = event.actualDiff + event.orderDiff
         
-        // 链上实际差额：链上yes持仓数量 - 链上no持仓数量
+        // 链上实际差额：链上yes持仓数量 - 链上no持仓数量（暂时为0）
         event.chainActualDiff = event.chainYesPosition - event.chainNoPosition
         
-        // 链上成交后差额：链上实际差额 + 挂单差额（使用原有的挂单差额）
+        // 链上成交后差额：链上实际差额 + 挂单差额（暂时为0）
         event.chainFinalDiff = event.chainActualDiff + event.orderDiff
       }
       
@@ -1111,8 +1541,19 @@ const loadAndCalculate = async () => {
       // 从本地存储恢复勾选状态
       loadSelectionState()
       
-      console.log('[事件异常] 计算完成')
+      console.log('[事件异常] 主要数据计算完成，开始异步加载链上数据...')
       ElMessage.success(`数据加载并计算完成，共 ${eventTableData.value.length} 个事件`)
+      
+      // 异步加载链上数据，加载完成后更新显示
+      loadChainStats().then(chainDataMap => {
+        console.log('[事件异常] 链上数据加载完成，开始匹配并更新...')
+        matchAndUpdateChainData(chainDataMap)
+        console.log('[事件异常] 链上数据匹配完成')
+        ElMessage.success('链上数据已更新')
+      }).catch(error => {
+        console.error('[事件异常] 加载链上数据失败:', error)
+        // 不显示错误提示，因为主要数据已经显示
+      })
     } else {
       ElMessage.warning('未获取到数据')
     }
@@ -1283,35 +1724,29 @@ const exportAllBrowsers = async () => {
   const browserSet = new Set()
   
   for (const row of accountDataCache.value) {
-    let hasSelectedEvent = false
-        
-    // 检查持仓（a字段）
-    if (row.a) {
-      const positions = parsePositions(row.a)
-      for (const pos of positions) {
-        if (selectedEventSet.has(pos.title.trim())) {
-          hasSelectedEvent = true
-          break
-        }
-      }
+    // 从 trendingKey 中提取 id（格式：id::方向）
+    if (!row.trendingKey) {
+      continue
     }
     
-    // 检查挂单（b字段）
-    if (!hasSelectedEvent && row.b) {
-      const orders = parseOrders(row.b)
-      for (const order of orders) {
-        if (selectedEventSet.has(order.title.trim())) {
-          hasSelectedEvent = true
-          break
-        }
-      }
+    const parts = row.trendingKey.split('::')
+    if (parts.length < 2) {
+      continue
     }
     
-    // 检查链上持仓（需要从链上数据中获取，这里暂时不处理，因为链上数据是单独加载的）
-    // 如果需要链上持仓，需要额外处理
+    const configId = parts[0].trim()
     
-    if (hasSelectedEvent && row.fingerprintNo) {
-      browserSet.add(String(row.fingerprintNo))
+    // 通过 id 查找对应的 trending（事件名）
+    const eventName = idToTrendingMap.value.get(configId)
+    if (!eventName) {
+      continue
+    }
+    
+    // 检查是否在选中的主题中
+    if (selectedEventSet.has(eventName.trim())) {
+      if (row.number) {
+        browserSet.add(String(row.number))
+      }
     }
   }
   
@@ -1341,7 +1776,7 @@ const exportAllBrowsers = async () => {
 }
 
 /**
- * 导出变红浏览器编号（包含选中主题的，且 d < f）
+ * 导出变红浏览器编号（包含选中主题的，且 catchTime < utime）
  */
 const exportRedBrowsers = async () => {
   const selectedEvents = eventTableData.value
@@ -1365,55 +1800,46 @@ const exportRedBrowsers = async () => {
   const browserSet = new Set()
   
   for (const row of accountDataCache.value) {
-    // 判断是否变红：d < f（仓位抓取时间 < 打开时间）
-    // 监控类型不需要检测
-    if (row.e === '监控' || row.platform === '监控') {
+    // 判断是否变红：catchTime < utime（抓取时间 < 仓位更新时间）
+    if (!row.catchTime || !row.utime) {
       continue
     }
     
-    if (!row.d || !row.f) {
+    const catchTime = typeof row.catchTime === 'string' ? parseInt(row.catchTime) : row.catchTime
+    const utime = typeof row.utime === 'string' ? parseInt(row.utime) : row.utime
+    
+    if (isNaN(catchTime) || isNaN(utime)) {
       continue
     }
     
-    const positionTime = typeof row.d === 'string' ? parseInt(row.d) : row.d
-    const openTime = typeof row.f === 'string' ? parseInt(row.f) : row.f
-    
-    if (isNaN(positionTime) || isNaN(openTime)) {
+    // 判断是否变红：仓位更新时间 > 抓取时间，即 catchTime < utime
+    if (utime <= catchTime) {
       continue
     }
     
-    // 判断是否变红：打开时间 > 仓位抓取时间，即 d < f
-    if (openTime <= positionTime) {
+    // 从 trendingKey 中提取 id（格式：id::方向）
+    if (!row.trendingKey) {
       continue
     }
     
-    // 检查是否包含选中的主题
-    let hasSelectedEvent = false
-        
-    // 检查持仓（a字段）
-    if (row.a) {
-      const positions = parsePositions(row.a)
-      for (const pos of positions) {
-        if (selectedEventSet.has(pos.title.trim())) {
-          hasSelectedEvent = true
-          break
-        }
+    const parts = row.trendingKey.split('::')
+    if (parts.length < 2) {
+      continue
+    }
+    
+    const configId = parts[0].trim()
+    
+    // 通过 id 查找对应的 trending（事件名）
+    const eventName = idToTrendingMap.value.get(configId)
+    if (!eventName) {
+      continue
+    }
+    
+    // 检查是否在选中的主题中
+    if (selectedEventSet.has(eventName.trim())) {
+      if (row.number) {
+        browserSet.add(String(row.number))
       }
-    }
-    
-    // 检查挂单（b字段）
-    if (!hasSelectedEvent && row.b) {
-      const orders = parseOrders(row.b)
-      for (const order of orders) {
-        if (selectedEventSet.has(order.title.trim())) {
-          hasSelectedEvent = true
-          break
-        }
-      }
-    }
-    
-    if (hasSelectedEvent && row.fingerprintNo) {
-      browserSet.add(String(row.fingerprintNo))
     }
   }
   
@@ -1675,6 +2101,14 @@ onMounted(() => {
 
 .toolbar {
   margin-bottom: 20px;
+}
+
+.statistics-collapse {
+  margin-bottom: 20px;
+}
+
+.statistics-table {
+  margin-top: 10px;
 }
 
 .event-name-cell {

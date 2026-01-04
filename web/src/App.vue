@@ -139,6 +139,31 @@
               />
             </div>
             <div class="trending-filter">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.needJudgeBalancePriority"
+                  :true-value="1"
+                  :false-value="0"
+                  :disabled="autoHedgeRunning"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                  @change="saveHedgeSettings"
+                />
+                <span style="cursor: pointer;">可用少于</span>
+                <input 
+                  v-model.number="hedgeMode.balancePriority" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  placeholder="2000"
+                  :disabled="autoHedgeRunning || hedgeMode.needJudgeBalancePriority === 0"
+                  @blur="saveHedgeSettings"
+                  style="width: 100px;"
+                />
+                <span style="cursor: pointer;">的账户，优先maker</span>
+              </label>
+            </div>
+            <div class="trending-filter">
               <label>订单薄至少组数:</label>
               <input 
                 v-model.number="hedgeMode.minOrderbookDepth" 
@@ -2333,7 +2358,10 @@ const hedgeMode = reactive({
   closeOpenHourArea: '12,36',  // 可平仓随机区间（小时）
   maxIpDelay: '',  // ip最大延迟（毫秒）
   needJudgeDF: false,  // 是否过滤超时仓位
-  maxDHour: 12  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
+  maxDHour: 12,  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
+  // 资产优先级校验设置
+  needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
+  balancePriority: 2000  // 资产优先级校验值
 })
 
 // 交易费查询
@@ -6614,6 +6642,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
           // 添加 minCloseMin 字段
           requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+          // 添加资产优先级校验字段
+          requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+          requestData.balancePriority = hedgeMode.balancePriority
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
@@ -6637,6 +6668,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
           // 添加 minCloseMin 字段
           requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+          // 添加资产优先级校验字段
+          requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+          requestData.balancePriority = hedgeMode.balancePriority
         } else {
           // 模式1：使用原有接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4'
@@ -6662,6 +6696,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
           // 添加 minCloseMin 字段
           requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+          // 添加资产优先级校验字段
+          requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+          requestData.balancePriority = hedgeMode.balancePriority
         }
         
         const response = await axios.post(
@@ -7486,6 +7523,9 @@ const saveHedgeSettings = () => {
       maxIpDelay: hedgeMode.maxIpDelay,
       needJudgeDF: hedgeMode.needJudgeDF,
       maxDHour: hedgeMode.maxDHour,
+      // 资产优先级校验设置
+      needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
+      balancePriority: hedgeMode.balancePriority,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
       hedgeTaskInterval: hedgeTaskInterval.value,
@@ -7581,6 +7621,14 @@ const loadHedgeSettings = () => {
     }
     if (settings.maxDHour !== undefined) {
       hedgeMode.maxDHour = settings.maxDHour
+    }
+    
+    // 资产优先级校验设置
+    if (settings.needJudgeBalancePriority !== undefined) {
+      hedgeMode.needJudgeBalancePriority = settings.needJudgeBalancePriority
+    }
+    if (settings.balancePriority !== undefined) {
+      hedgeMode.balancePriority = settings.balancePriority
     }
     
     // 其他设置

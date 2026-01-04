@@ -1324,9 +1324,11 @@ const filteredEventTableData = computed(() => {
             isNo = true
           }
         } else {
-          if (pos.option === 'YES' || (pos.amount >= 0 && !pos.option)) {
+          // 支持大小写不敏感的YES/NO匹配（如"Yes"、"YES"等）
+          const optionUpper = pos.option ? pos.option.toUpperCase() : ''
+          if (optionUpper === 'YES' || (pos.amount >= 0 && !pos.option)) {
             isYes = true
-          } else if (pos.option === 'NO' || pos.amount < 0) {
+          } else if (optionUpper === 'NO' || pos.amount < 0) {
             isNo = true
           }
         }
@@ -1381,9 +1383,11 @@ const filteredEventTableData = computed(() => {
             isNo = true
           }
         } else {
-          if (order.option === 'YES') {
+          // 支持大小写不敏感的YES/NO匹配（如"Yes"、"YES"等）
+          const optionUpper = order.option ? order.option.toUpperCase() : ''
+          if (optionUpper === 'YES') {
             isYes = true
-          } else if (order.option === 'NO') {
+          } else if (optionUpper === 'NO') {
             isNo = true
           }
         }
@@ -3150,7 +3154,11 @@ const loadData = async (silent = false) => {
     })
     
     if (response.data && response.data.data) {
-      const serverData = response.data.data
+      // 过滤掉电脑组 900 以上的数据
+      const serverData = response.data.data.filter(item => {
+        const computeGroup = Number(item.computeGroup)
+        return !computeGroup || computeGroup < 900
+      })
       
       // 提取所有的 fingerprintNo 并保存到 txt 文件
       const fingerprintNos = []
@@ -3781,12 +3789,18 @@ const fetchAccountConfig = async () => {
     const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`)
     
     if (response.data && response.data.data) {
-      accountConfigData.value = response.data.data
+      // 过滤掉电脑组 900 以上的数据
+      const filteredData = response.data.data.filter(item => {
+        const computeGroup = Number(item.computeGroup)
+        return !computeGroup || computeGroup < 900
+      })
+      
+      accountConfigData.value = filteredData
       
       // 建立浏览器编号到组号的映射（同时支持字符串和数字作为key）
       const browserToGroup = {}
       
-      response.data.data.forEach(item => {
+      filteredData.forEach(item => {
         if (item.fingerprintNo && item.computeGroup) {
           const fingerprintNo = item.fingerprintNo
           const fingerprintNoStr = String(fingerprintNo)
@@ -3803,7 +3817,7 @@ const fetchAccountConfig = async () => {
       
       browserToGroupMap.value = browserToGroup
       accountConfigLoaded.value = true
-      console.log(`账户配置加载成功，共 ${response.data.data.length} 条记录`)
+      console.log(`账户配置加载成功，共 ${filteredData.length} 条记录`)
       
       return true
     } else {

@@ -1392,7 +1392,7 @@ def get_mission_from_server():
     """
     try:
         url = f"{SERVER_BASE_URL}/mission/getOneMission"
-        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,5,6]}
+        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6]}
         
         log_print(f"\n[系统] 请求任务: {url}")
         log_print(f"[系统] 请求参数: {payload}")
@@ -7382,10 +7382,10 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
     def matches_option_type(p_text, opt_type):
         if opt_type == 'YES':
             log_print(f"[{browser_id}] 检查 p_text {p_text}  {opt_type}仓位...")
-            return opt_type in p_text or 'Monad' in p_text or 'Gold' in p_text
+            return opt_type in p_text or 'Monad' in p_text or 'Gold' in p_text or 'MONAD' in p_text or 'GOLD' in p_text
         elif opt_type == 'NO':
             log_print(f"[{browser_id}] 检查 p_text {p_text}  {opt_type}仓位...")
-            return 'YES' not in p_text and 'Monad' not in p_text and  'Gold' not in p_text
+            return 'YES' not in p_text and 'Monad' not in p_text and  'Gold' not in p_text and 'MONAD' not in p_text and  'GOLD' not in p_text
       
     
     try:
@@ -9140,8 +9140,9 @@ def click_opinion_position_and_get_data(driver, serial_number):
                     
                     # 解析第一个td的内容
                     if " - " in first_td_p:
-                        # 有子标题，例如 "Kendrick Lamar - YES"
-                        parts = first_td_p.split(" - ", 1)
+                        # 有子标题，例如 "Kendrick Lamar - YES" 或 "Artist - Song - YES"
+                        # 使用 rsplit 以最后一个 " - " 作为分隔符
+                        parts = first_td_p.rsplit(" - ", 1)
                         sub_title = parts[0].strip()
                         direction = parts[1].strip()
                         unique_title = f"{current_main_title}###{sub_title}"
@@ -9166,7 +9167,21 @@ def click_opinion_position_and_get_data(driver, serial_number):
                     
                     # 第四个td：均价
                     fourth_td_p = get_p_tag_text_from_element(td_tags[3])
-                    avg_price = fourth_td_p.strip() if fourth_td_p else ""
+                    if not fourth_td_p or not fourth_td_p.strip():
+                        # 如果p标签中没有文本，尝试直接获取td的文本内容
+                        try:
+                            fourth_td_text = td_tags[3].text.strip()
+                            if fourth_td_text:
+                                avg_price = fourth_td_text
+                                log_print(f"[{serial_number}] [OP] ⚠ 第四个td的p标签为空，使用td的文本内容作为均价: {avg_price}")
+                            else:
+                                avg_price = ""
+                                log_print(f"[{serial_number}] [OP] ⚠ 第四个td的文本内容也为空，均价将为空")
+                        except Exception as e:
+                            avg_price = ""
+                            log_print(f"[{serial_number}] [OP] ⚠ 获取第四个td的文本内容时出错: {str(e)}，均价将为空")
+                    else:
+                        avg_price = fourth_td_p.strip()
                     
                     # 拼接标准格式：唯一标题|||方向|||数量|||均价
                     position_str = f"{unique_title}|||{direction}|||{amount}|||{avg_price}"
@@ -9328,8 +9343,19 @@ def get_p_tag_text_from_element(element):
                 text = p.text.strip()
                 if text:
                     return text
+        # 如果没有找到p标签或p标签都为空，尝试直接获取元素的文本内容
+        element_text = element.text.strip()
+        if element_text:
+            return element_text
         return ""
-    except:
+    except Exception as e:
+        # 如果出现异常，尝试直接获取元素的文本内容
+        try:
+            element_text = element.text.strip()
+            if element_text:
+                return element_text
+        except:
+            pass
         return ""
 
 
@@ -10162,14 +10188,29 @@ def parse_position_string_to_list(position_string):
             
             # 解析数量（可能已经带正负号）
             try:
-                # 如果数量字符串已经带正负号，直接转换
-                if amount_str.startswith('+') or amount_str.startswith('-'):
-                    amount = float(amount_str.replace(',', ''))
+                # 处理 <0.01 的情况
+                if '<0.01' in amount_str:
+                    # 提取正负号
+                    if amount_str.startswith('+'):
+                        amount = 0.005  # 使用一个很小的正数
+                    elif amount_str.startswith('-'):
+                        amount = -0.005  # 使用一个很小的负数
+                    else:
+                        # 没有正负号，根据方向判断
+                        amount = 0.005 if direction.upper() == "YES" else -0.005
                 else:
-                    # 如果没有正负号，根据方向添加
-                    amount = float(amount_str.replace(',', ''))
-                    if direction.upper() == "NO":
-                        amount = -amount
+                    # 如果数量字符串已经带正负号，直接转换
+                    if amount_str.startswith('+') or amount_str.startswith('-'):
+                        amount = float(amount_str.replace(',', ''))
+                    else:
+                        # 如果没有正负号，根据方向添加
+                        amount = float(amount_str.replace(',', ''))
+                        if direction.upper() == "NO":
+                            amount = -amount
+                
+                # 如果 amount 的绝对值小于 1，跳过该项
+                if abs(amount) < 1:
+                    continue
             except:
                 continue
             
@@ -11094,6 +11135,12 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
                 option = pos.get('option', '')
                 amount = pos['amount']
                 avg_price = pos.get('avg_price', '')
+                # 如果 avg_price 是 None，转换为空字符串
+                if avg_price is None:
+                    avg_price = ''
+                # 记录均价信息，便于调试
+                if not avg_price:
+                    log_print(f"[{browser_id}] ⚠ 警告：仓位 '{title}' 的均价为空（原始值: {repr(pos.get('avg_price'))}）")
                 position_str_list.append(f"{title}|||{option}|||{amount:+.2f}|||{avg_price}")
             position_str = ";".join(position_str_list)
             
@@ -11224,6 +11271,11 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
                     return False
             
             # 6. 更新字段
+            # 打印完整的 "a" 字段内容（可能很长）
+            log_print(f"[{browser_id}] ========== 完整的 'a' 字段内容 ==========")
+            log_print(f"[{browser_id}] {position_str}")
+            log_print(f"[{browser_id}] ========================================")
+            
             account_config['a'] = position_str
             account_config['b'] = open_orders_str
             
@@ -12385,14 +12437,14 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                                 # 前往指定页面（随机选择一个）
                                 target_urls = [
                                     "https://app.opinion.trade/detail?topicId=213&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=79&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=210&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=80&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=211&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=175&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=78&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=115&type=multi",
-                                    # "https://app.opinion.trade/detail?topicId=193&type=multi"
+                                    "https://app.opinion.trade/detail?topicId=79&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=210&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=80&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=211&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=175&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=78&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=115&type=multi",
+                                    "https://app.opinion.trade/detail?topicId=193&type=multi"
                                 ]
                                 target_url = random.choice(target_urls)
                                 log_print(f"[{browser_id}] 前往页面获取可用余额: {target_url}")
@@ -13217,14 +13269,14 @@ def process_type2_mission(task_data, retry_count=0):
                             # 前往指定页面（随机选择一个）
                             target_urls = [
                                 "https://app.opinion.trade/detail?topicId=213&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=79&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=210&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=80&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=211&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=175&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=78&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=115&type=multi",
-                                # "https://app.opinion.trade/detail?topicId=193&type=multi"
+                                "https://app.opinion.trade/detail?topicId=79&type=multi",
+                                "https://app.opinion.trade/detail?topicId=210&type=multi",
+                                "https://app.opinion.trade/detail?topicId=80&type=multi",
+                                "https://app.opinion.trade/detail?topicId=211&type=multi",
+                                "https://app.opinion.trade/detail?topicId=175&type=multi",
+                                "https://app.opinion.trade/detail?topicId=78&type=multi",
+                                "https://app.opinion.trade/detail?topicId=115&type=multi",
+                                "https://app.opinion.trade/detail?topicId=193&type=multi"
                             ]
                             target_url = random.choice(target_urls)
                             log_print(f"[{browser_id}] 前往页面: {target_url}")

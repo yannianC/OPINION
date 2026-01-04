@@ -1963,9 +1963,11 @@ const calculateEventStats = (data, chainData) => {
             isNo = true
           }
         } else {
-          if (pos.option === 'YES' || (pos.amount >= 0 && !pos.option)) {
+          // 支持大小写不敏感的YES/NO匹配（如"Yes"、"YES"等）
+          const optionUpper = pos.option ? pos.option.toUpperCase() : ''
+          if (optionUpper === 'YES' || (pos.amount >= 0 && !pos.option)) {
             isYes = true
-          } else if (pos.option === 'NO' || pos.amount < 0) {
+          } else if (optionUpper === 'NO' || pos.amount < 0) {
             isNo = true
           }
         }

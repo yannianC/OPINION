@@ -280,7 +280,11 @@ const loadAndCalculate = async () => {
     })
     
     if (response.data && response.data.data) {
-      const data = response.data.data
+      // 过滤掉电脑组 900 以上的数据
+      const data = response.data.data.filter(item => {
+        const computeGroup = Number(item.computeGroup)
+        return !computeGroup || computeGroup < 900
+      })
       console.log(`[数据总计] 获取到 ${data.length} 条数据，开始解析...`)
       
       let totalBalance = 0
@@ -304,9 +308,13 @@ const loadAndCalculate = async () => {
           if (row.a) {
             const positions = parsePositions(row.a)
             for (const pos of positions) {
-              const title = pos.title
+              // 使用完整的 title 作为 key（title 中已包含选项信息，用 ### 分隔）
+              const title = pos.title.trim()
               const amount = parseFloat(pos.amount) || 0
-              positionMap.set(title, (positionMap.get(title) || 0) + amount)
+              // 只累加非零的数量
+              if (Math.abs(amount) > 0.0001) {
+                positionMap.set(title, (positionMap.get(title) || 0) + amount)
+              }
             }
           }
         }
