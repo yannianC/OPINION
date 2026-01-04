@@ -257,6 +257,29 @@ def get_mission_status(mission_id):
         return None
 
 
+def get_mission_info(mission_id):
+    """
+    获取任务完整信息（包括msg）
+    
+    Args:
+        mission_id: 任务ID
+        
+    Returns:
+        dict: 任务信息字典，包含status和msg等字段，失败返回None
+    """
+    try:
+        url = f"{SERVER_BASE_URL}/mission/status"
+        response = requests.get(url, params={"id": mission_id}, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('code') == 0 and data.get('data') and data['data'].get('mission'):
+                return data['data']['mission']
+        return None
+    except Exception as e:
+        log_print(f"[系统] 获取任务信息失败: {str(e)}")
+        return None
+
+
 def send_fingerprint_monitor_request(browser_id):
     """
     发送 fingerprint 监控请求
@@ -600,7 +623,36 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                             "delay": socks5_delay
                         })
                     else:
-                        # 如果都不通，也添加到列表，延迟设为最大值，排序时会排在最后
+                        # 如果都不通，检查是否有成功次数大于0的，用于优先级排序
+                        # 解析字段b（http的成功失败次数，格式："成功次数,失败次数"）
+                        http_success_count = 0
+                        b_value = ip_item.get("b")
+                        if b_value:
+                            try:
+                                b_parts = str(b_value).split(",")
+                                if len(b_parts) >= 1:
+                                    http_success_count = int(b_parts[0].strip())
+                            except (ValueError, TypeError, AttributeError):
+                                http_success_count = 0
+                        
+                        # 解析字段e（socks5的成功失败次数，格式："成功次数,失败次数"）
+                        socks5_success_count = 0
+                        e_value = ip_item.get("e")
+                        if e_value:
+                            try:
+                                e_parts = str(e_value).split(",")
+                                if len(e_parts) >= 1:
+                                    socks5_success_count = int(e_parts[0].strip())
+                            except (ValueError, TypeError, AttributeError):
+                                socks5_success_count = 0
+                        
+                        # 判断是否有成功次数大于0的
+                        has_success = (http_success_count > 0) or (socks5_success_count > 0)
+                        
+                        # 如果有成功次数，延迟设为999998（比999999小，排序时会排在前面）
+                        # 如果没有成功次数，延迟设为999999（排在最后）
+                        delay_value = 999998 if has_success else 999999
+                        
                         # 优先选择http类型
                         available_options.append({
                             "ip": ip,
@@ -608,7 +660,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                             "username": username,
                             "password": password,
                             "type": "http",
-                            "delay": 999999
+                            "delay": delay_value
                         })
                 
                 if not available_options:
@@ -13006,10 +13058,21 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             if mission_type == 5 and not success:
                 tp1 = mission.get('tp1')
                 if tp1:
-                    # 这是任务二，失败了，直接设置任务一状态为3（失败）
-                    log_print(f"[{browser_id}] Type 5 任务二失败，将任务一状态设置为3（失败）...")
-                    save_mission_result(tp1, 3, "")
-                    log_print(f"[{browser_id}] ✓ 任务一状态已更新为3（失败）")
+                    # 这是任务二，失败了，需要获取任务一的原msg并一起发送
+                    log_print(f"[{browser_id}] Type 5 任务二失败，获取任务一信息...")
+                    tp1_info = get_mission_info(tp1)
+                    original_msg = ""
+                    if tp1_info and tp1_info.get('msg'):
+                        original_msg = tp1_info.get('msg')
+                        log_print(f"[{browser_id}] 获取到任务一原msg: {original_msg}")
+                    
+                    # 合并原msg和新的失败原因
+                    if original_msg:
+                        combined_msg = f"{original_msg}"
+                    else:
+                        combined_msg = f"任务二失败导致失败: {failure_reason}"
+                    
+                    save_mission_result(tp1, 3, combined_msg)
             
             # # Type 5任务完成后发送 fingerprint 监控请求
             # if mission_type == 5 and task_browser_id:

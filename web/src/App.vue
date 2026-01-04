@@ -5580,12 +5580,15 @@ const executeAllTopics = async () => {
   }
   
   // 获取所有有效的主题列表
-  const validConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+  let validConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
   
   if (validConfigs.length === 0) {
     console.log('没有有效的主题配置')
     return
   }
+  
+  // 打乱主题顺序
+  validConfigs = [...validConfigs].sort(() => Math.random() - 0.5)
   
   console.log(`开始执行所有 ${validConfigs.length} 个主题（不分批模式）`)
   
@@ -5603,13 +5606,16 @@ const executeAllTopics = async () => {
       }
       
       // 重新获取有效的主题列表（因为可能有替换）
-      const currentValidConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+      let currentValidConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
+      
+      // 打乱主题顺序
+      currentValidConfigs = [...currentValidConfigs].sort(() => Math.random() - 0.5)
       
       if (currentValidConfigs.length > 0) {
         await executeAutoHedgeTasksForBatch(currentValidConfigs)
         await checkAndReplaceTopics()
       }
-    }, 20000)  // 20秒执行一次
+    }, 30000)  // 20秒执行一次
   }
 }
 

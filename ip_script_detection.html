@@ -1011,7 +1011,7 @@
                     // 如果启用了只显示失败，应用筛选
                     if (showFailedOnly) {
                         filteredData = filteredData.filter(item => {
-                            return !isSuccess(item);
+                            return isFailed(item);
                         });
                     }
                     
@@ -1251,7 +1251,7 @@
             // 失败筛选（只显示失败的）
             if (showFailedOnly) {
                 filteredData = filteredData.filter(item => {
-                    return !isSuccess(item);
+                    return isFailed(item);
                 });
             }
             
@@ -2182,7 +2182,7 @@
             // 如果启用了"只显示失败的"筛选，再应用失败筛选
             if (showFailedOnly) {
                 filteredData = filteredData.filter(item => {
-                    return !isSuccess(item);
+                    return isFailed(item);
                 });
             }
             
@@ -2311,6 +2311,47 @@
             const socks5Status = item.f !== null && item.f !== undefined ? parseInt(item.f) : null;
             const hasA = item.a && item.a !== null && item.a !== 'null' && item.a !== '';
             return ((httpStatus === 1) || (socks5Status === 1)) && hasA;
+        }
+
+        /**
+         * 判断是否失败（HTTP成功次数和SOCKS5成功次数都是0的，或者数据为空的）
+         */
+        function isFailed(item) {
+            // 解析HTTP成功次数（item.b格式为 "成功次数,失败次数"）
+            let httpSuccessCount = 0;
+            let httpDataEmpty = false;
+            if (item.b && item.b !== null && item.b !== 'null' && item.b !== '') {
+                const httpParts = String(item.b).split(',');
+                if (httpParts.length >= 1) {
+                    httpSuccessCount = parseInt(httpParts[0]) || 0;
+                }
+            } else {
+                // HTTP数据为空
+                httpDataEmpty = true;
+                httpSuccessCount = 0;
+            }
+            
+            // 解析SOCKS5成功次数（item.e格式为 "成功次数,失败次数"）
+            let socks5SuccessCount = 0;
+            let socks5DataEmpty = false;
+            if (item.e && item.e !== null && item.e !== 'null' && item.e !== '') {
+                const socks5Parts = String(item.e).split(',');
+                if (socks5Parts.length >= 1) {
+                    socks5SuccessCount = parseInt(socks5Parts[0]) || 0;
+                }
+            } else {
+                // SOCKS5数据为空
+                socks5DataEmpty = true;
+                socks5SuccessCount = 0;
+            }
+            
+            // 如果HTTP或SOCKS5任一有成功次数（>0），不算失败
+            if (httpSuccessCount > 0 || socks5SuccessCount > 0) {
+                return false;
+            }
+            
+            // HTTP成功次数和SOCKS5成功次数都是0的，为失败（包括数据为空的情况）
+            return httpSuccessCount === 0 && socks5SuccessCount === 0;
         }
 
         /**

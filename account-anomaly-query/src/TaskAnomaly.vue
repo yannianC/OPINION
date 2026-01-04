@@ -236,10 +236,11 @@
               <div class="summary-item buy-summary">
                 <div class="summary-title">开仓（买入）统计：</div>
                 <div class="summary-content">
+                  开仓组数{{ taskStatistics.total.buy/2}}，
                   开仓成功率{{ buyStatistics.successRate }}%，
-                  其中部分成交{{ buyStatistics.partialFilled }}%，
+                  部分成交{{ buyStatistics.partialFilled }}%，
                   单边成交{{ buyStatistics.singleSideFilled }}%，
-                  未成交的{{ buyStatistics.notFilled }}%，
+                  失败的{{ buyStatistics.notFilled }}%，
                   失败原因：IP问题{{ buyStatistics.ipProblem }}%，
                   资产更新不及时{{ buyStatistics.balanceOrPosition }}%，
                   挂单失败{{ buyStatistics.orderFailed }}%，
@@ -250,10 +251,11 @@
               <div class="summary-item sell-summary">
                 <div class="summary-title">平仓（卖出）统计：</div>
                 <div class="summary-content">
+                  平仓组数{{ taskStatistics.total.sell/2}}，
                   平仓成功率{{ sellStatistics.successRate }}%，
-                  其中部分成交{{ sellStatistics.partialFilled }}%，
+                  部分成交{{ sellStatistics.partialFilled }}%，
                   单边成交{{ sellStatistics.singleSideFilled }}%，
-                  未成交的{{ sellStatistics.notFilled }}%，
+                  失败的{{ sellStatistics.notFilled }}%，
                   失败原因：IP问题{{ sellStatistics.ipProblem }}%，
                   资产更新不及时{{ sellStatistics.balanceOrPosition }}%，
                   挂单失败{{ sellStatistics.orderFailed }}%，
