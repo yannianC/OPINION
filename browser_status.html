@@ -88,6 +88,53 @@
             margin-left: 4px;
         }
 
+        .use-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+
+        .use-type.open {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .use-type.close {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .use-type.grab {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .browser-item {
+            display: inline-block;
+            margin-right: 12px;
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            vertical-align: top;
+        }
+
+        .browser-number {
+            font-weight: 600;
+            color: #495057;
+            margin-right: 4px;
+        }
+
+        .browser-trending {
+            color: #667eea;
+            font-size: 12px;
+            margin-left: 4px;
+            display: inline;
+        }
+
         .refresh-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -599,6 +646,47 @@
     <script>
         // 浏览器编号到电脑组的映射
         let browserToGroupMap = {};
+        
+        // 事件ID到事件名称的映射
+        let trendingIdToNameMap = {};
+
+        // 获取事件配置并建立映射
+        async function fetchExchangeConfig() {
+            try {
+                const response = await fetch('https://sg.bicoin.com.cn/99l/mission/exchangeConfig');
+                const result = await response.json();
+
+                if (result.code === 0 && result.data && result.data.configList && Array.isArray(result.data.configList)) {
+                    // 建立事件ID到事件名称的映射（同时支持字符串和数字作为key）
+                    const trendingMap = {};
+                    
+                    result.data.configList.forEach(item => {
+                        if (item.id !== null && item.id !== undefined && item.trending) {
+                            const id = item.id;
+                            const idStr = String(id);
+                            const idNum = Number(id);
+                            
+                            // 事件ID -> 事件名称
+                            trendingMap[idStr] = item.trending;
+                            if (!isNaN(idNum)) {
+                                trendingMap[idNum] = item.trending;
+                            }
+                        }
+                    });
+                    
+                    trendingIdToNameMap = trendingMap;
+                    console.log('事件配置加载成功，共', result.data.configList.length, '条记录');
+                    console.log('事件ID到事件名称映射:', trendingMap);
+                    return true;
+                } else {
+                    console.warn('获取事件配置失败: 无数据');
+                    return false;
+                }
+            } catch (error) {
+                console.error('获取事件配置失败:', error);
+                return false;
+            }
+        }
 
         // 获取账户配置并建立映射
         async function fetchAccountConfig() {
@@ -765,13 +853,13 @@
             tableContainer.innerHTML = '<div class="loading">正在加载数据...</div>';
 
             try {
-                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/groupStatus');
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/groupStatusV2');
                 const result = await response.json();
 
                 if (result.code === 0 && result.data) {
                     // 记录刷新时间（当前时间戳）
                     const refreshTime = Date.now();
-                    displayData(result.data, result.data2 || {}, result.data3 || {}, refreshTime);
+                    displayData(result.data, refreshTime);
                 } else {
                     throw new Error(result.msg || '获取数据失败');
                 }
@@ -789,7 +877,45 @@
             }
         }
 
-        function displayData(data, data2, data3, refreshTime) {
+        // 获取使用类型文本
+        function getUseTypeText(useType) {
+            switch(useType) {
+                case 1:
+                    return '开仓';
+                case 2:
+                    return '平仓';
+                case 3:
+                    return '抓取';
+                default:
+                    return '未知';
+            }
+        }
+
+        // 获取使用类型CSS类
+        function getUseTypeClass(useType) {
+            switch(useType) {
+                case 1:
+                    return 'open';
+                case 2:
+                    return 'close';
+                case 3:
+                    return 'grab';
+                default:
+                    return '';
+            }
+        }
+
+        // 获取事件名称
+        function getTrendingName(trendingId) {
+            if (trendingId === null || trendingId === undefined) {
+                return '';
+            }
+            const idStr = String(trendingId);
+            const idNum = Number(trendingId);
+            return trendingIdToNameMap[idStr] || trendingIdToNameMap[idNum] || '';
+        }
+
+        function displayData(data, refreshTime) {
             const tableContainer = document.getElementById('tableContainer');
             const totalSumElement = document.getElementById('totalSum');
             const refreshTimeElement = document.getElementById('refreshTime');
@@ -817,12 +943,8 @@
             if (!data) {
                 data = {};
             }
-            if (!data2) {
-                data2 = {};
-            }
-            if (!data3) {
-                data3 = {};
-            }
+            
+            const detail = data.detail || {};
 
             // 计算总计个数之和
             let totalSum = 0;
@@ -847,47 +969,54 @@
                 const groupIdStr = String(groupId);
                 const groupIdNum = Number(groupId);
                 
-                // 尝试从data中获取浏览器ID列表（支持字符串和数字key）
-                const browserIds = data[groupIdStr] || data[groupIdNum] || [];
+                // 尝试从detail中获取浏览器列表（支持字符串和数字key）
+                const browserList = detail[groupIdStr] || detail[groupIdNum] || [];
                 
-                // 尝试从data2中获取总计个数（支持字符串和数字key）
-                const totalCount = data2[groupIdStr] !== undefined ? data2[groupIdStr] : 
-                                   (data2[groupIdNum] !== undefined ? data2[groupIdNum] : 0);
+                // 计算总计个数
+                const totalCount = browserList.length;
                 
-                // 构建浏览器ID字符串，每个ID后面加上时间差
-                let browserIdsWithTime = '';
-                if (browserIds && browserIds.length > 0) {
-                    browserIdsWithTime = browserIds.map(browserId => {
-                        // 尝试多种key格式：groupId_browserId（字符串和数字）、browserId（字符串和数字）
-                        const browserIdStr = String(browserId);
-                        const browserIdNum = Number(browserId);
+                // 构建浏览器ID字符串，每个ID显示详细信息
+                let browserIdsHtml = '';
+                if (browserList && browserList.length > 0) {
+                    browserIdsHtml = browserList.map(browserItem => {
+                        const number = browserItem.number || '';
+                        const useType = browserItem.useType !== undefined ? browserItem.useType : null;
+                        const useTime = browserItem.useTime || null;
+                        const trendingId = browserItem.trendingId;
                         
-                        // 尝试匹配的key格式
-                        const keys = [
-                            `${groupIdStr}_${browserIdStr}`,  // "2436_26"
-                            `${groupIdNum}_${browserIdNum}`,  // 数字格式
-                            `${groupIdStr}_${browserIdNum}`,  // 混合格式1
-                            `${groupIdNum}_${browserIdStr}`,  // 混合格式2
-                            browserIdStr,                     // "1338"
-                            browserIdNum                      // 1338
-                        ];
-                        
-                        let openTime = null;
-                        for (const key of keys) {
-                            if (data3[key] !== undefined) {
-                                openTime = data3[key];
-                                break;
-                            }
+                        // 计算时间差
+                        let timeHtml = '';
+                        if (useTime && refreshTime) {
+                            const timeDiff = Math.floor((refreshTime - useTime) / (1000 * 60));
+                            timeHtml = `<span class="browser-time">（${timeDiff}分钟）</span>`;
                         }
                         
-                        if (openTime && refreshTime) {
-                            // 计算时间差（分钟）
-                            const timeDiff = Math.floor((refreshTime - openTime) / (1000 * 60));
-                            return `${browserId}<span class="browser-time">（${timeDiff}分钟）</span>`;
-                        } else {
-                            return browserId;
+                        // 获取使用类型
+                        let useTypeHtml = '';
+                        if (useType !== null && useType !== undefined) {
+                            const useTypeText = getUseTypeText(useType);
+                            const useTypeClass = getUseTypeClass(useType);
+                            useTypeHtml = `<span class="use-type ${useTypeClass}">${useTypeText}</span>`;
                         }
-                    }).join(', ');
+                        
+                        // 获取事件名称
+                        let trendingHtml = '';
+                        const trendingName = getTrendingName(trendingId);
+                        if (trendingName) {
+                            trendingHtml = `<span class="browser-trending">[${trendingName}]</span>`;
+                        }
+                        
+                        return `
+                            <div class="browser-item">
+                                <span class="browser-number">${number}</span>
+                                ${useTypeHtml}
+                                ${timeHtml}
+                                ${trendingHtml}
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    browserIdsHtml = '-';
                 }
                 
                 // 累加总计个数
@@ -897,7 +1026,7 @@
                     <tr>
                         <td>${index + 1}</td>
                         <td><span class="group-id">${groupId}</span></td>
-                        <td class="browser-ids">${browserIdsWithTime || '-'}</td>
+                        <td class="browser-ids">${browserIdsHtml}</td>
                         <td><span class="total-count">${totalCount}</span></td>
                     </tr>
                 `;
@@ -1004,6 +1133,7 @@
         // 页面加载时自动加载数据
         window.addEventListener('DOMContentLoaded', async () => {
             await fetchAccountConfig(); // 加载账户配置并建立映射
+            await fetchExchangeConfig(); // 加载事件配置并建立映射
             loadMaxWaitTime(); // 加载浏览器占用时间
             loadData();
         });

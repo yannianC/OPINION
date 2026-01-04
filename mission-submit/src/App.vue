@@ -167,7 +167,7 @@
                 required
               />
               <div v-if="parsedBrowserIds.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
-                已解析: {{ parsedBrowserIds.join(', ') }}
+                已解析（共 {{ parsedBrowserIds.length }} 个）: {{ parsedBrowserIds.join(', ') }}
               </div>
             </div>
           </div>
@@ -837,15 +837,22 @@ const handleSubmit = async () => {
   
   // 获取要提交的浏览器ID列表
   let browserIdsToSubmit = []
+  // 建立浏览器ID到电脑组的映射（用于电脑组类型输入）
+  const browserIdToGroupNoMap = {}
   
   if (inputType.value === 'browser') {
     // 直接使用解析的浏览器ID
     browserIdsToSubmit = parsedBrowserIds.value
   } else {
-    // 从电脑组映射到浏览器ID
+    // 从电脑组映射到浏览器ID，同时建立浏览器ID到用户输入电脑组的映射
     for (const groupNo of parsedGroupNos.value) {
       const browserIds = groupToBrowserMap.value[groupNo] || []
       browserIdsToSubmit.push(...browserIds)
+      // 建立映射：浏览器ID -> 用户输入的电脑组号
+      for (const browserId of browserIds) {
+        browserIdToGroupNoMap[browserId] = groupNo
+        browserIdToGroupNoMap[String(browserId)] = groupNo
+      }
     }
     
     if (browserIdsToSubmit.length === 0) {
@@ -875,8 +882,8 @@ const handleSubmit = async () => {
         // 浏览器ID类型：根据批次获取电脑组
         groupNo = getGroupNoByBrowserIdAndBatch(browserId, browserBatchType.value)
       } else {
-        // 电脑组类型：直接从映射中获取
-        groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+        // 电脑组类型：使用用户输入的电脑组号（而不是从映射中获取）
+        groupNo = browserIdToGroupNoMap[browserId] || browserIdToGroupNoMap[String(browserId)]
       }
       
       if (!groupNo) {
@@ -1049,15 +1056,22 @@ const handlePositionUpdate = async () => {
   
   // 获取要提交的浏览器ID列表
   let browserIdsToSubmit = []
+  // 建立浏览器ID到电脑组的映射（用于电脑组类型输入）
+  const browserIdToGroupNoMap = {}
   
   if (inputType.value === 'browser') {
     // 直接使用解析的浏览器ID
     browserIdsToSubmit = parsedBrowserIds.value
   } else {
-    // 从电脑组映射到浏览器ID
+    // 从电脑组映射到浏览器ID，同时建立浏览器ID到用户输入电脑组的映射
     for (const groupNo of parsedGroupNos.value) {
       const browserIds = groupToBrowserMap.value[groupNo] || []
       browserIdsToSubmit.push(...browserIds)
+      // 建立映射：浏览器ID -> 用户输入的电脑组号
+      for (const browserId of browserIds) {
+        browserIdToGroupNoMap[browserId] = groupNo
+        browserIdToGroupNoMap[String(browserId)] = groupNo
+      }
     }
     
     if (browserIdsToSubmit.length === 0) {
@@ -1084,8 +1098,8 @@ const handlePositionUpdate = async () => {
         // 浏览器ID类型：根据批次获取电脑组
         groupNo = getGroupNoByBrowserIdAndBatch(browserId, browserBatchType.value)
       } else {
-        // 电脑组类型：直接从映射中获取
-        groupNo = browserToGroupMap.value[browserId] || browserToGroupMap.value[String(browserId)]
+        // 电脑组类型：使用用户输入的电脑组号（而不是从映射中获取）
+        groupNo = browserIdToGroupNoMap[browserId] || browserIdToGroupNoMap[String(browserId)]
       }
       
       if (!groupNo) {

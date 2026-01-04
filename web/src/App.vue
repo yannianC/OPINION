@@ -93,6 +93,58 @@
 
     <main class="main">
       <div class="container">
+        <!-- 查询功能 -->
+        <section class="section query-section">
+          <div class="section-header-with-filter">
+            <div class="query-wrapper">
+              <div class="query-controls">
+                <div class="form-group">
+                  <label for="queryTrendingId">Trending *</label>
+                  <div class="trending-autocomplete-wrapper">
+                    <input
+                      id="queryTrendingId"
+                      v-model="queryTrendingSearchText"
+                      type="text"
+                      placeholder="输入文字筛选或选择Trending"
+                      :disabled="isLoadingConfig || isQuerying"
+                      @input="onQueryTrendingSearchInput"
+                      @focus="showQueryTrendingDropdown = true"
+                      @blur="handleQueryTrendingBlur"
+                      autocomplete="off"
+                    />
+                    <div 
+                      v-if="showQueryTrendingDropdown && filteredQueryTrendingList.length > 0" 
+                      class="trending-dropdown"
+                    >
+                      <div
+                        v-for="config in filteredQueryTrendingList"
+                        :key="config.id"
+                        class="trending-dropdown-item"
+                        @mousedown.prevent="selectQueryTrending(config)"
+                      >
+                        {{ config.trending }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button 
+                  class="btn btn-primary" 
+                  @click="handleQuery"
+                  :disabled="!querySelectedConfig || isQuerying"
+                >
+                  {{ isQuerying ? '插入中...' : '插入' }}
+                </button>
+              </div>
+              <div v-if="queryResult && !queryResult.meetsCondition" class="query-result">
+                <div class="query-result-error">
+                  ❌ 不符合订单薄条件
+                  <div class="query-result-reason">{{ queryResult.reason }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        
         <!-- 自动对冲功能 -->
         <section class="section auto-hedge-section">
           <div class="section-header-with-filter">
@@ -2227,6 +2279,13 @@ const isQuickSelecting = ref(false)  // 是否正在自动获取
 const trendingSearchText = ref('')  // Trending搜索文本
 const showTrendingDropdown = ref(false)  // 是否显示Trending下拉列表
 const blackListText = ref('')  // 拉黑的浏览器列表
+
+// 查询功能相关
+const queryTrendingSearchText = ref('')  // 查询Trending搜索文本
+const showQueryTrendingDropdown = ref(false)  // 是否显示查询Trending下拉列表
+const querySelectedConfig = ref(null)  // 查询选中的配置
+const isQuerying = ref(false)  // 是否正在查询
+const queryResult = ref(null)  // 查询结果
 const missionList = ref([])
 const hedgeHistoryList = ref([])
 const hedgeHistorySection = ref(null)
@@ -2339,7 +2398,7 @@ const hedgeMode = reactive({
   isClose: false,  // false: 开仓, true: 平仓
   timePassMin: 60,  // 最近xx分钟内有过任意操作的，不参与
   minCloseMin: 60,  // 平仓使用：最近xx分钟内有过任意操作的，不参与
-  intervalType: 'success',  // 'success': 挂单成功再挂另一边, 'delay': 延时
+  intervalType: 'delay',  // 'success': 挂单成功再挂另一边, 'delay': 延时
   intervalDelay: 1000,  // 延时的毫秒数
   maxDepth: 100,  // 最大允许深度
   minUAmt: 10,  // 最小开单
@@ -2577,6 +2636,169 @@ const handleTrendingBlur = () => {
   setTimeout(() => {
     showTrendingDropdown.value = false
   }, 200)
+}
+
+/**
+ * 过滤后的查询Trending列表
+ */
+const filteredQueryTrendingList = computed(() => {
+  if (!queryTrendingSearchText.value || queryTrendingSearchText.value.trim() === '') {
+    return configList.value
+  }
+  const searchLower = queryTrendingSearchText.value.toLowerCase().trim()
+  return configList.value.filter(config => {
+    return config.trending.toLowerCase().includes(searchLower)
+  })
+})
+
+/**
+ * 查询Trending搜索输入处理
+ */
+const onQueryTrendingSearchInput = () => {
+  showQueryTrendingDropdown.value = true
+  // 如果输入的内容完全匹配某个选项，自动选择
+  const exactMatch = configList.value.find(config => {
+    return config.trending === queryTrendingSearchText.value
+  })
+  if (exactMatch) {
+    querySelectedConfig.value = exactMatch
+  }
+}
+
+/**
+ * 选择查询Trending
+ */
+const selectQueryTrending = (config) => {
+  querySelectedConfig.value = config
+  queryTrendingSearchText.value = config.trending
+  showQueryTrendingDropdown.value = false
+}
+
+/**
+ * 查询Trending输入框失焦处理
+ */
+const handleQueryTrendingBlur = () => {
+  // 延迟隐藏，以便点击下拉项时能触发
+  setTimeout(() => {
+    showQueryTrendingDropdown.value = false
+  }, 200)
+}
+
+/**
+ * 处理插入（查询并添加到对冲列表）
+ */
+const handleQuery = async () => {
+  if (!querySelectedConfig.value) {
+    showToast('请先选择Trending配置', 'warning')
+    return
+  }
+  
+  isQuerying.value = true
+  queryResult.value = null
+  
+  try {
+    // 获取订单薄信息
+    const priceInfo = await parseOrderbookData(querySelectedConfig.value, hedgeMode.isClose)
+    
+    // 判断是否符合条件
+    const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+    
+    if (meetsCondition) {
+      // 符合条件，添加到对冲列表
+      const config = querySelectedConfig.value
+      
+      // 1. 更新服务器端配置（启用配置）
+      const updateData = {
+        list: [{
+          id: config.id,
+          trending: config.trending,
+          trendingPart1: config.trendingPart1 || null,
+          trendingPart2: config.trendingPart2 || null,
+          trendingPart3: config.trendingPart3 || null,
+          opUrl: config.opUrl || '',
+          polyUrl: config.polyUrl || '',
+          opTopicId: config.opTopicId || '',
+          weight: config.weight || 0,
+          isOpen: 1  // 启用
+        }]
+      }
+      
+      const updateResponse = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+        updateData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (updateResponse.data && updateResponse.data.code === 0) {
+        // 2. 更新本地显示状态
+        const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+        visibleData[config.id] = true
+        localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+        
+        // 3. 更新本地配置列表
+        const configInList = configList.value.find(c => c.id === config.id)
+        if (configInList) {
+          configInList.isOpen = 1
+          configInList.enabled = true
+        }
+        
+        // 4. 更新活动配置列表
+        updateActiveConfigs()
+        
+        // 5. 清空查询结果和输入
+        queryResult.value = null
+        querySelectedConfig.value = null
+        queryTrendingSearchText.value = ''
+        
+        showToast(`成功将 ${config.trending} 添加到对冲列表`, 'success')
+      } else {
+        throw new Error(updateResponse.data?.msg || '更新配置失败')
+      }
+    } else {
+      // 不符合条件，显示错误信息
+      let reason = '不符合对冲条件'
+      
+      // 检查价差
+      if (priceInfo.diff <= 0.15) {
+        if (!hedgeMode.isClose) {
+          // 开仓模式：检查买一深度
+          if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        } else {
+          // 平仓模式：检查卖一深度
+          if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        }
+      }
+      
+      queryResult.value = {
+        meetsCondition: false,
+        reason: reason,
+        priceInfo: priceInfo
+      }
+    }
+  } catch (error) {
+    // 获取订单薄失败，说明不符合条件
+    let reason = error.message || '获取订单薄数据失败'
+    
+    queryResult.value = {
+      meetsCondition: false,
+      reason: reason
+    }
+    console.error('插入失败:', error)
+  } finally {
+    isQuerying.value = false
+  }
 }
 
 /**
@@ -11117,8 +11339,18 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   max-height: 300px;
   overflow-y: auto;
-  z-index: 1000;
+  z-index: 10000;
   margin-top: 4px;
+}
+
+/* 查询区域的下拉菜单需要更高的z-index */
+.query-section .trending-autocomplete-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
+.query-section .trending-dropdown {
+  z-index: 10001;
 }
 
 .trending-dropdown-item {
@@ -11138,6 +11370,75 @@ onUnmounted(() => {
 
 .trending-dropdown-item:active {
   background-color: #e9ecef;
+}
+
+/* 查询区域样式 */
+.query-section {
+  margin-bottom: 1rem;
+  overflow: visible;
+  padding: 1rem 1.5rem;
+}
+
+.query-section .section-header-with-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  overflow: visible;
+  position: relative;
+  margin-bottom: 0;
+}
+
+.query-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.query-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex: 0 0 auto;
+}
+
+.query-controls .form-group {
+  flex: 0 0 auto;
+  min-width: 500px;
+  max-width: none;
+}
+
+.query-controls .form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.query-result {
+  flex: 1;
+  padding: 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  background-color: #f8f9fa;
+  min-width: 300px;
+}
+
+.query-result-error {
+  color: #721c24;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.query-result-reason {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: #fff;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  color: #721c24;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .form-actions {
