@@ -334,7 +334,7 @@
       </div>
       <!-- 导出的浏览器编号显示区域 -->
       <div v-if="exportedBrowserIds" class="exported-browser-ids-container" style="margin-top: 16px; padding: 12px; background-color: #f5f7fa; border-radius: 4px;">
-        <div style="margin-bottom: 8px; font-weight: bold; color: #606266;">筛选结果的浏览器编号：</div>
+        <div style="margin-bottom: 8px; font-weight: bold; color: #606266;">筛选结果的浏览器编号：{{ exportedBrowserIdsCount > 0 ? `（共 ${exportedBrowserIdsCount} 个）` : '' }}</div>
         <div style="padding: 8px; background-color: #fff; border: 1px solid #dcdfe6; border-radius: 4px; word-break: break-all; cursor: text; user-select: all;">
           {{ exportedBrowserIds }}
         </div>
@@ -1558,6 +1558,10 @@ const exportingAddresses = ref(false)
  * 导出的浏览器编号
  */
 const exportedBrowserIds = ref('')
+/**
+ * 导出的浏览器编号数量
+ */
+const exportedBrowserIdsCount = ref(0)
 
 /**
  * 本地新增的行（未保存到服务器的）
@@ -5403,6 +5407,7 @@ const exportFilteredBrowserIds = () => {
     if (filteredData.length === 0) {
       ElMessage.warning('当前没有筛选结果')
       exportedBrowserIds.value = ''
+      exportedBrowserIdsCount.value = 0
       return
     }
     
@@ -5415,16 +5420,19 @@ const exportFilteredBrowserIds = () => {
     if (browserIds.length === 0) {
       ElMessage.warning('筛选结果中没有有效的浏览器编号')
       exportedBrowserIds.value = ''
+      exportedBrowserIdsCount.value = 0
       return
     }
     
     // 用逗号拼接
     exportedBrowserIds.value = browserIds.join(',')
+    exportedBrowserIdsCount.value = browserIds.length
     ElMessage.success(`已导出 ${browserIds.length} 个浏览器编号`)
   } catch (error) {
     console.error('导出浏览器编号失败:', error)
     ElMessage.error('导出浏览器编号失败: ' + (error.message || '未知错误'))
     exportedBrowserIds.value = ''
+    exportedBrowserIdsCount.value = 0
   }
 }
 
