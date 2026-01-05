@@ -148,6 +148,9 @@
       <el-button type="info" @click="snapAllPos" style="margin-left: 10px;">
         快照
       </el-button>
+      <el-button type="primary" @click="updateOrderbook" :loading="updatingOrderbook" style="margin-left: 10px;">
+        更新订单薄
+      </el-button>
       <el-select 
         v-model="selectedGroup" 
         @change="handleGroupChange"
@@ -394,6 +397,69 @@
           </span>
         </template>
       </el-table-column>
+
+      <el-table-column label="YES买一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesBidPrice, b.yesBidPrice)">
+        <template #default="scope">
+          <div v-if="scope.row.yesBidPrice !== null && scope.row.yesBidPrice !== undefined && scope.row.yesBidDepth !== null && scope.row.yesBidDepth !== undefined" style="line-height: 1.5;">
+            <div>{{ formatNumber(scope.row.yesBidPrice) }}</div>
+            <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.yesBidDepth) }}</div>
+          </div>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="YES卖一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesAskPrice, b.yesAskPrice)">
+        <template #default="scope">
+          <div v-if="scope.row.yesAskPrice !== null && scope.row.yesAskPrice !== undefined && scope.row.yesAskDepth !== null && scope.row.yesAskDepth !== undefined" style="line-height: 1.5;">
+            <div>{{ formatNumber(scope.row.yesAskPrice) }}</div>
+            <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.yesAskDepth) }}</div>
+          </div>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="NO买一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.noBidPrice, b.noBidPrice)">
+        <template #default="scope">
+          <div v-if="scope.row.noBidPrice !== null && scope.row.noBidPrice !== undefined && scope.row.noBidDepth !== null && scope.row.noBidDepth !== undefined" style="line-height: 1.5;">
+            <div>{{ formatNumber(scope.row.noBidPrice) }}</div>
+            <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.noBidDepth) }}</div>
+          </div>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="NO卖一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.noAskPrice, b.noAskPrice)">
+        <template #default="scope">
+          <div v-if="scope.row.noAskPrice !== null && scope.row.noAskPrice !== undefined && scope.row.noAskDepth !== null && scope.row.noAskDepth !== undefined" style="line-height: 1.5;">
+            <div>{{ formatNumber(scope.row.noAskPrice) }}</div>
+            <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.noAskDepth) }}</div>
+          </div>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="操作" width="180" align="center" fixed="right">
+        <template #default="scope">
+          <el-button 
+            type="primary" 
+            size="small" 
+            @click="updateSingleOrderbook(scope.row)"
+            :loading="scope.row.updatingOrderbook"
+            :disabled="!scope.row.trendingPart1 || !scope.row.trendingPart2"
+            style="margin-right: 5px;"
+          >
+            更新订单薄
+          </el-button>
+          <el-button 
+            type="success" 
+            size="small" 
+            @click="openOpUrl(scope.row)"
+            :disabled="!scope.row.opUrl"
+          >
+            打开
+          </el-button>
+        </template>
+      </el-table-column>
     </el-table>
   </div>
 </template>
@@ -405,6 +471,8 @@ import axios from 'axios'
 
 const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
 const CHAIN_STATS_API_URL = 'https://enstudyai.fatedreamer.com/t3/api/markets/stats'
+const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
+const ORDERBOOK_API_URL = 'https://proxy.opinion.trade:8443/openapi/token/orderbook'
 
 const loading = ref(false)
 const eventTableData = ref([])
@@ -415,6 +483,7 @@ const exchangeConfigList = ref([]) // 存储 exchangeConfig 配置列表
 const configMap = ref(new Map()) // 存储 trending -> config 的映射
 const idToTrendingMap = ref(new Map()) // 存储 id -> trending 的映射
 const savingBlacklist = ref(false) // 是否正在保存拉黑状态
+const updatingOrderbook = ref(false) // 是否正在更新订单薄
 const statisticsCollapseActive = ref([]) // 统计表折叠状态，默认为空数组（折叠）
 const timeStatisticsCollapseActive = ref([]) // 时间统计表折叠状态，默认为空数组（折叠）
 const dataUpdateTime = ref('') // 数据更新时间（格式化字符串，用于显示）
@@ -1458,7 +1527,19 @@ const loadAndCalculate = async () => {
             chainYesPosition: 0,
             chainNoPosition: 0,
             chainActualDiff: 0,
-            chainFinalDiff: 0
+            chainFinalDiff: 0,
+            yesBidPrice: null,
+            yesBidDepth: null,
+            yesAskPrice: null,
+            yesAskDepth: null,
+            noBidPrice: null,
+            noBidDepth: null,
+            noAskPrice: null,
+            noAskDepth: null,
+            trendingPart1: null,
+            trendingPart2: null,
+            opUrl: null,
+            updatingOrderbook: false
           })
         }
         
@@ -1517,6 +1598,11 @@ const loadAndCalculate = async () => {
           event.originalB = matchedConfig.b !== null && matchedConfig.b !== undefined ? matchedConfig.b : 0
           // 事件名前面的勾选状态从服务器的字段 b 获取：b=1 则勾选，b!=1 则不勾选
           event.selected = matchedConfig.b === 1 || matchedConfig.b === '1'
+          // 保存trendingPart1和trendingPart2，用于获取订单薄数据
+          event.trendingPart1 = matchedConfig.trendingPart1 || null
+          event.trendingPart2 = matchedConfig.trendingPart2 || null
+          // 保存opUrl，用于打开链接
+          event.opUrl = matchedConfig.opUrl || null
         } else {
           event.ignoreDiff = 0
           event.configId = null
@@ -1524,7 +1610,13 @@ const loadAndCalculate = async () => {
           event.isBlacklisted = false
           event.originalB = 0  // 未匹配到配置，默认为未拉黑
           event.selected = false  // 未匹配到配置，默认不勾选
+          event.trendingPart1 = null
+          event.trendingPart2 = null
+          event.opUrl = null
         }
+        
+        // 初始化更新订单薄状态
+        event.updatingOrderbook = false
         
         // 计算使用忽略后的差额：成交后差额 - 忽略的差额
         event.finalDiffAfterIgnore = event.finalDiff - event.ignoreDiff
@@ -2132,6 +2224,266 @@ const snapAllPos = async () => {
     console.error('[事件异常] 执行快照失败:', error)
     ElMessage.error('执行快照失败: ' + (error.message || '未知错误'))
   }
+}
+
+/**
+ * 请求订单薄数据
+ */
+const fetchOrderbook = async (tokenId) => {
+  try {
+    const response = await axios.get(ORDERBOOK_API_URL, {
+      params: {
+        token_id: tokenId
+      },
+      headers: {
+        'apikey': ORDERBOOK_API_KEY
+      }
+    })
+    
+    if (response.data && response.data.errno === 0 && response.data.result) {
+      return response.data.result
+    }
+    
+    throw new Error('订单薄数据格式错误')
+  } catch (error) {
+    console.error('[事件异常] 获取订单薄失败:', error)
+    throw error
+  }
+}
+
+/**
+ * 更新订单薄数据
+ */
+const updateOrderbook = async () => {
+  updatingOrderbook.value = true
+  
+  try {
+    console.log('[事件异常] 开始更新订单薄数据...')
+    
+    // 过滤出有trendingPart1和trendingPart2的事件
+    const eventsToUpdate = eventTableData.value.filter(event => 
+      event.trendingPart1 && event.trendingPart2
+    )
+    
+    if (eventsToUpdate.length === 0) {
+      ElMessage.warning({
+        message: '没有可更新订单薄的事件（缺少trendingPart1或trendingPart2）',
+        duration: 5000
+      })
+      return
+    }
+    
+    console.log(`[事件异常] 准备更新 ${eventsToUpdate.length} 个事件的订单薄数据`)
+    
+    // 批量更新订单薄数据（使用Promise.all并发请求，但限制并发数）
+    const batchSize = 10 // 每批处理10个
+    let successCount = 0
+    let failCount = 0
+    
+    for (let i = 0; i < eventsToUpdate.length; i += batchSize) {
+      const batch = eventsToUpdate.slice(i, i + batchSize)
+      
+      await Promise.all(batch.map(async (event) => {
+        try {
+          // 获取yes和no的订单薄数据
+          const [yesOrderbook, noOrderbook] = await Promise.all([
+            fetchOrderbook(event.trendingPart1),
+            fetchOrderbook(event.trendingPart2)
+          ])
+          
+          // 获取YES的买一价和卖一价
+          const yesBids = yesOrderbook.bids || []
+          const yesAsks = yesOrderbook.asks || []
+          const noBids = noOrderbook.bids || []
+          const noAsks = noOrderbook.asks || []
+          
+          // 基本数据检查
+          if (yesBids.length === 0 || yesAsks.length === 0 || 
+              noBids.length === 0 || noAsks.length === 0) {
+            console.warn(`[事件异常] ${event.eventName} 订单薄数据不完整`)
+            event.yesBidPrice = null
+            event.yesBidDepth = null
+            event.yesAskPrice = null
+            event.yesAskDepth = null
+            event.noBidPrice = null
+            event.noBidDepth = null
+            event.noAskPrice = null
+            event.noAskDepth = null
+            failCount++
+            return
+          }
+          
+          // 对 bids 和 asks 进行排序（确保顺序正确）
+          yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+          noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+          yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+          noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+          
+          // 获取YES方的买一和卖一
+          const yesBid = yesBids[0]
+          const yesAsk = yesAsks[0]
+          
+          // 获取NO方的买一和卖一  
+          const noBid = noBids[0]
+          const noAsk = noAsks[0]
+          
+          // 转换为百分比格式（API返回的是小数，需要乘以100）
+          event.yesBidPrice = parseFloat(yesBid.price) * 100
+          event.yesAskPrice = parseFloat(yesAsk.price) * 100
+          event.noBidPrice = parseFloat(noBid.price) * 100
+          event.noAskPrice = parseFloat(noAsk.price) * 100
+          
+          event.yesBidDepth = parseFloat(yesBid.size)
+          event.yesAskDepth = parseFloat(yesAsk.size)
+          event.noBidDepth = parseFloat(noBid.size)
+          event.noAskDepth = parseFloat(noAsk.size)
+          
+          successCount++
+        } catch (error) {
+          console.error(`[事件异常] 更新 ${event.eventName} 订单薄失败:`, error)
+          event.yesBidPrice = null
+          event.yesBidDepth = null
+          event.yesAskPrice = null
+          event.yesAskDepth = null
+          event.noBidPrice = null
+          event.noBidDepth = null
+          event.noAskPrice = null
+          event.noAskDepth = null
+          failCount++
+        }
+      }))
+      
+      // 显示进度
+      if (i + batchSize < eventsToUpdate.length) {
+        console.log(`[事件异常] 已处理 ${Math.min(i + batchSize, eventsToUpdate.length)}/${eventsToUpdate.length} 个事件`)
+      }
+    }
+    
+    console.log(`[事件异常] 订单薄更新完成: 成功 ${successCount} 个，失败 ${failCount} 个`)
+    ElMessage.success({
+      message: `订单薄更新完成: 成功 ${successCount} 个，失败 ${failCount} 个`,
+      duration: 5000
+    })
+  } catch (error) {
+    console.error('[事件异常] 更新订单薄失败:', error)
+    ElMessage.error({
+      message: '更新订单薄失败: ' + (error.message || '未知错误'),
+      duration: 5000
+    })
+  } finally {
+    updatingOrderbook.value = false
+  }
+}
+
+/**
+ * 更新单个事件的订单薄数据
+ */
+const updateSingleOrderbook = async (event) => {
+  if (!event.trendingPart1 || !event.trendingPart2) {
+    ElMessage.warning({
+      message: '该事件缺少trendingPart1或trendingPart2配置，无法更新订单薄',
+      duration: 5000
+    })
+    return
+  }
+  
+  event.updatingOrderbook = true
+  
+  try {
+    console.log(`[事件异常] 开始更新 ${event.eventName} 的订单薄数据...`)
+    
+    // 获取yes和no的订单薄数据
+    const [yesOrderbook, noOrderbook] = await Promise.all([
+      fetchOrderbook(event.trendingPart1),
+      fetchOrderbook(event.trendingPart2)
+    ])
+    
+    // 获取YES的买一价和卖一价
+    const yesBids = yesOrderbook.bids || []
+    const yesAsks = yesOrderbook.asks || []
+    const noBids = noOrderbook.bids || []
+    const noAsks = noOrderbook.asks || []
+    
+    // 基本数据检查
+    if (yesBids.length === 0 || yesAsks.length === 0 || 
+        noBids.length === 0 || noAsks.length === 0) {
+      console.warn(`[事件异常] ${event.eventName} 订单薄数据不完整`)
+      event.yesBidPrice = null
+      event.yesBidDepth = null
+      event.yesAskPrice = null
+      event.yesAskDepth = null
+      event.noBidPrice = null
+      event.noBidDepth = null
+      event.noAskPrice = null
+      event.noAskDepth = null
+      ElMessage.warning({
+        message: `${event.eventName} 订单薄数据不完整`,
+        duration: 5000
+      })
+      return
+    }
+    
+    // 对 bids 和 asks 进行排序（确保顺序正确）
+    yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    
+    // 获取YES方的买一和卖一
+    const yesBid = yesBids[0]
+    const yesAsk = yesAsks[0]
+    
+    // 获取NO方的买一和卖一  
+    const noBid = noBids[0]
+    const noAsk = noAsks[0]
+    
+    // 转换为百分比格式（API返回的是小数，需要乘以100）
+    event.yesBidPrice = parseFloat(yesBid.price) * 100
+    event.yesAskPrice = parseFloat(yesAsk.price) * 100
+    event.noBidPrice = parseFloat(noBid.price) * 100
+    event.noAskPrice = parseFloat(noAsk.price) * 100
+    
+    event.yesBidDepth = parseFloat(yesBid.size)
+    event.yesAskDepth = parseFloat(yesAsk.size)
+    event.noBidDepth = parseFloat(noBid.size)
+    event.noAskDepth = parseFloat(noAsk.size)
+    
+    console.log(`[事件异常] ${event.eventName} 订单薄更新成功`)
+    ElMessage.success({
+      message: `${event.eventName} 订单薄更新成功`,
+      duration: 5000
+    })
+  } catch (error) {
+    console.error(`[事件异常] 更新 ${event.eventName} 订单薄失败:`, error)
+    event.yesBidPrice = null
+    event.yesBidDepth = null
+    event.yesAskPrice = null
+    event.yesAskDepth = null
+    event.noBidPrice = null
+    event.noBidDepth = null
+    event.noAskPrice = null
+    event.noAskDepth = null
+    ElMessage.error({
+      message: `更新 ${event.eventName} 订单薄失败: ${error.message || '未知错误'}`,
+      duration: 5000
+    })
+  } finally {
+    event.updatingOrderbook = false
+  }
+}
+
+/**
+ * 打开opUrl链接
+ */
+const openOpUrl = (event) => {
+  if (!event.opUrl) {
+    ElMessage.warning('该事件没有配置opUrl')
+    return
+  }
+  
+  // 在新标签页中打开链接
+  window.open(event.opUrl, '_blank')
+  console.log(`[事件异常] 打开 ${event.eventName} 的opUrl:`, event.opUrl)
 }
 
 /**
