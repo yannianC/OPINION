@@ -372,6 +372,13 @@
                       >
                         查看日志
                       </button>
+                      <button 
+                        class="btn-snap" 
+                        @click="snapAllPos"
+                        style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                      >
+                        快照
+                      </button>
                     </span>
                     <span class="task-separator">|</span>
                     <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -478,6 +485,13 @@
                         >
                           查看日志
                         </button>
+                        <button 
+                          class="btn-snap" 
+                          @click="snapAllPos"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          快照
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -558,6 +572,13 @@
                         >
                           查看日志
                         </button>
+                        <button 
+                          class="btn-snap" 
+                          @click="snapAllPos"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          快照
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -635,6 +656,13 @@
                         >
                           查看日志
                         </button>
+                        <button 
+                          class="btn-snap" 
+                          @click="snapAllPos"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          快照
+                        </button>
                       </span>
                       <span class="task-separator">|</span>
                       <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>
@@ -711,6 +739,13 @@
                           style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
                         >
                           查看日志
+                        </button>
+                        <button 
+                          class="btn-snap" 
+                          @click="snapAllPos"
+                          style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                        >
+                          快照
                         </button>
                       </span>
                       <span class="task-separator">|</span>
@@ -2208,6 +2243,23 @@ export default {
       this.showBroLogDialog = false
       this.broLogs = []
       this.currentBroNumber = null
+    },
+    
+    /**
+     * 执行快照
+     */
+    async snapAllPos() {
+      try {
+        const response = await axios.post('https://sg.bicoin.com.cn/99l/boost/snapAllPos', {})
+        if (response.data && response.data.code === 0) {
+          this.showToast('快照执行成功', 'success')
+        } else {
+          this.showToast('快照执行失败', 'error')
+        }
+      } catch (error) {
+        console.error('执行快照失败:', error)
+        this.showToast('执行快照失败: ' + (error.message || '未知错误'), 'error')
+      }
     }
   }
 }
@@ -2989,6 +3041,19 @@ export default {
 
 .btn-view-log:hover {
   background: #5568d3;
+}
+
+.btn-snap {
+  background: #43e97b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-snap:hover {
+  background: #2dd163;
 }
 
 /* 弹窗样式 */

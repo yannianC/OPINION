@@ -9120,8 +9120,32 @@ def click_opinion_position_and_get_data(driver, serial_number):
         # 解析tr标签数据
         current_main_title = None
         
-        for tr in tr_tags:
+        # 使用索引遍历，避免stale element reference问题
+        tr_count = len(tr_tags)
+        tr_idx = 0
+        
+        while tr_idx < tr_count:
             try:
+                # 每次迭代时重新获取tr元素，避免stale element reference
+                try:
+                    # 重新获取position_div和tbody（防止页面更新导致元素失效）
+                    position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                    tbody = position_div.find_element(By.TAG_NAME, "tbody")
+                    current_tr_tags = tbody.find_elements(By.TAG_NAME, "tr")
+                    
+                    # 如果tr数量发生变化，更新tr_count
+                    if len(current_tr_tags) != tr_count:
+                        log_print(f"[{serial_number}] [OP] ⚠ tr数量从 {tr_count} 变为 {len(current_tr_tags)}，更新计数")
+                        tr_count = len(current_tr_tags)
+                        if tr_idx >= tr_count:
+                            break
+                    
+                    tr = current_tr_tags[tr_idx]
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr元素失败: {str(e)}，跳过当前tr")
+                    tr_idx += 1
+                    continue
+                
                 td_tags = tr.find_elements(By.TAG_NAME, "td")
                 
                 if len(td_tags) == 1:
@@ -9136,6 +9160,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
                     # 第一个td：子标题-方向 或 方向
                     first_td_p = get_p_tag_text_from_element(td_tags[0])
                     if not first_td_p:
+                        tr_idx += 1
                         continue
                     
                     # 解析第一个td的内容
@@ -9154,6 +9179,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
                     # 第二个td：数量
                     second_td_p = get_p_tag_text_from_element(td_tags[1])
                     if not second_td_p:
+                        tr_idx += 1
                         continue
                     
                     amount_str = second_td_p.strip()
@@ -9188,9 +9214,27 @@ def click_opinion_position_and_get_data(driver, serial_number):
                     result_parts.append(position_str)
                     log_print(f"[{serial_number}] [OP] 解析仓位: {position_str}")
                 
+                tr_idx += 1
+                
             except Exception as e:
-                log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
-                continue
+                error_msg = str(e)
+                if "stale element" in error_msg.lower():
+                    # 遇到stale element reference，重新获取tr列表
+                    log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签时遇到stale element，重新获取tr列表...")
+                    try:
+                        position_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-position']")
+                        tbody = position_div.find_element(By.TAG_NAME, "tbody")
+                        tr_tags = tbody.find_elements(By.TAG_NAME, "tr")
+                        tr_count = len(tr_tags)
+                        log_print(f"[{serial_number}] [OP] ✓ 重新获取到 {tr_count} 个 tr 标签，从索引 {tr_idx} 继续")
+                        # 不增加tr_idx，重新尝试当前索引
+                        continue
+                    except Exception as e2:
+                        log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr列表失败: {str(e2)}，跳过当前tr")
+                        tr_idx += 1
+                else:
+                    log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {error_msg}")
+                    tr_idx += 1
         
         return result_parts, False, False  # 返回解析结果，不是"No data yet"，不需要重试
     
@@ -9553,10 +9597,30 @@ def cancel_opinion_open_orders_by_tp1(driver, serial_number, tp1):
                 current_main_title = ""
                 found_order_to_cancel = False
                 i = 0
+                tr_count = len(tr_list)
                 
-                while i < len(tr_list):
-                    tr = tr_list[i]
+                while i < tr_count:
                     try:
+                        # 每次迭代时重新获取tr元素，避免stale element reference
+                        try:
+                            # 重新获取open_orders_div和tbody（防止页面更新导致元素失效）
+                            open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                            tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                            current_tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                            
+                            # 如果tr数量发生变化，更新tr_count
+                            if len(current_tr_list) != tr_count:
+                                log_print(f"[{serial_number}] [OP] ⚠ tr数量从 {tr_count} 变为 {len(current_tr_list)}，更新计数")
+                                tr_count = len(current_tr_list)
+                                if i >= tr_count:
+                                    break
+                            
+                            tr = current_tr_list[i]
+                        except Exception as e:
+                            log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr元素失败: {str(e)}，跳过当前tr")
+                            i += 1
+                            continue
+                        
                         td_list = tr.find_elements(By.TAG_NAME, "td")
                         
                         # 如果只有一个td，这是主标题
@@ -9637,9 +9701,24 @@ def cancel_opinion_open_orders_by_tp1(driver, serial_number, tp1):
                         
                         i += 1
                     except Exception as e:
-                        log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
-                        i += 1
-                        continue
+                        error_msg = str(e)
+                        if "stale element" in error_msg.lower():
+                            # 遇到stale element reference，重新获取tr列表
+                            log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签时遇到stale element，重新获取tr列表...")
+                            try:
+                                open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                                tr_count = len(tr_list)
+                                log_print(f"[{serial_number}] [OP] ✓ 重新获取到 {tr_count} 个 tr 标签，从索引 {i} 继续")
+                                # 不增加i，重新尝试当前索引
+                                continue
+                            except Exception as e2:
+                                log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr列表失败: {str(e2)}，跳过当前tr")
+                                i += 1
+                        else:
+                            log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {error_msg}")
+                            i += 1
                 
                 # 如果没有找到需要取消的订单，退出循环
                 if not found_order_to_cancel:
@@ -9736,10 +9815,30 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
         # 解析tr标签，构建标准格式字符串
         current_main_title = ""
         i = 0
+        tr_count = len(tr_list)
         
-        while i < len(tr_list):
-            tr = tr_list[i]
+        while i < tr_count:
             try:
+                # 每次迭代时重新获取tr元素，避免stale element reference
+                try:
+                    # 重新获取open_orders_div和tbody（防止页面更新导致元素失效）
+                    open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                    current_tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                    
+                    # 如果tr数量发生变化，更新tr_count
+                    if len(current_tr_list) != tr_count:
+                        log_print(f"[{serial_number}] [OP] ⚠ tr数量从 {tr_count} 变为 {len(current_tr_list)}，更新计数")
+                        tr_count = len(current_tr_list)
+                        if i >= tr_count:
+                            break
+                    
+                    tr = current_tr_list[i]
+                except Exception as e:
+                    log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr元素失败: {str(e)}，跳过当前tr")
+                    i += 1
+                    continue
+                
                 td_list = tr.find_elements(By.TAG_NAME, "td")
                 
                 # 如果只有一个td，这是主标题
@@ -9808,9 +9907,24 @@ def click_opinion_open_orders_and_get_data(driver, serial_number):
                 
                 i += 1
             except Exception as e:
-                log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {str(e)}")
-                i += 1
-                continue
+                error_msg = str(e)
+                if "stale element" in error_msg.lower():
+                    # 遇到stale element reference，重新获取tr列表
+                    log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签时遇到stale element，重新获取tr列表...")
+                    try:
+                        open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                        tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                        tr_count = len(tr_list)
+                        log_print(f"[{serial_number}] [OP] ✓ 重新获取到 {tr_count} 个 tr 标签，从索引 {i} 继续")
+                        # 不增加i，重新尝试当前索引
+                        continue
+                    except Exception as e2:
+                        log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr列表失败: {str(e2)}，跳过当前tr")
+                        i += 1
+                else:
+                    log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {error_msg}")
+                    i += 1
         
         return result_parts, False  # 返回解析结果，不是"No data yet"
     

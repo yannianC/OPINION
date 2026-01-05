@@ -145,6 +145,9 @@
       <el-button type="warning" @click="saveAllBlacklistStatus" :loading="savingBlacklist" style="margin-left: 10px;">
         保存勾选状态
       </el-button>
+      <el-button type="info" @click="snapAllPos" style="margin-left: 10px;">
+        快照
+      </el-button>
       <el-select 
         v-model="selectedGroup" 
         @change="handleGroupChange"
@@ -2111,6 +2114,23 @@ const saveAllBlacklistStatus = async () => {
     ElMessage.error('保存失败: ' + errorMsg)
   } finally {
     savingBlacklist.value = false
+  }
+}
+
+/**
+ * 执行快照
+ */
+const snapAllPos = async () => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/boost/snapAllPos`, {})
+    if (response.data && response.data.code === 0) {
+      ElMessage.success('快照执行成功')
+    } else {
+      ElMessage.error('快照执行失败')
+    }
+  } catch (error) {
+    console.error('[事件异常] 执行快照失败:', error)
+    ElMessage.error('执行快照失败: ' + (error.message || '未知错误'))
   }
 }
 

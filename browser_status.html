@@ -122,6 +122,11 @@
             vertical-align: top;
         }
 
+        .browser-item.duplicate {
+            background-color: #f8d7da;
+            border: 1px solid #dc3545;
+        }
+
         .browser-number {
             font-weight: 600;
             color: #495057;
@@ -691,30 +696,39 @@
         // 获取账户配置并建立映射
         async function fetchAccountConfig() {
             try {
-                const response = await fetch('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache');
+                const response = await fetch('https://sg.bicoin.com.cn/99l/hedge/groupStatusV2');
                 const result = await response.json();
 
-                if (result.code === 0 && result.data && Array.isArray(result.data)) {
+                if (result.code === 0 && result.data && result.data.detail) {
                     // 建立浏览器编号到组号的映射（同时支持字符串和数字作为key）
                     const browserToGroup = {};
+                    const detail = result.data.detail;
+                    let totalCount = 0;
                     
-                    result.data.forEach(item => {
-                        if (item.fingerprintNo && item.computeGroup) {
-                            const fingerprintNo = item.fingerprintNo;
-                            const fingerprintNoStr = String(fingerprintNo);
-                            const fingerprintNoNum = Number(fingerprintNo);
-                            const computeGroup = item.computeGroup;
-                            
-                            // 浏览器ID -> 电脑组
-                            browserToGroup[fingerprintNoStr] = computeGroup;
-                            if (!isNaN(fingerprintNoNum)) {
-                                browserToGroup[fingerprintNoNum] = computeGroup;
-                            }
+                    // 遍历每个组号
+                    Object.keys(detail).forEach(groupNo => {
+                        const browserList = detail[groupNo];
+                        if (Array.isArray(browserList)) {
+                            browserList.forEach(item => {
+                                if (item.number && item.groupNo) {
+                                    const number = item.number;
+                                    const numberStr = String(number);
+                                    const numberNum = Number(number);
+                                    const groupNoValue = item.groupNo;
+                                    
+                                    // 浏览器ID -> 电脑组
+                                    browserToGroup[numberStr] = groupNoValue;
+                                    if (!isNaN(numberNum)) {
+                                        browserToGroup[numberNum] = groupNoValue;
+                                    }
+                                    totalCount++;
+                                }
+                            });
                         }
                     });
                     
                     browserToGroupMap = browserToGroup;
-                    console.log('账户配置加载成功，共', result.data.length, '条记录');
+                    console.log('账户配置加载成功，共', totalCount, '条记录');
                     console.log('浏览器编号到组号映射:', browserToGroup);
                     return true;
                 } else {
@@ -946,6 +960,34 @@
             
             const detail = data.detail || {};
 
+            // 检测重复的浏览器ID（出现在多个组中的浏览器ID）
+            const browserIdGroupsMap = {}; // 浏览器ID -> 出现的组号列表
+            
+            Object.keys(detail).forEach(groupNo => {
+                const browserList = detail[groupNo];
+                if (Array.isArray(browserList)) {
+                    browserList.forEach(item => {
+                        if (item.number) {
+                            const number = String(item.number);
+                            if (!browserIdGroupsMap[number]) {
+                                browserIdGroupsMap[number] = [];
+                            }
+                            if (!browserIdGroupsMap[number].includes(groupNo)) {
+                                browserIdGroupsMap[number].push(groupNo);
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // 找出出现在多个组中的浏览器ID
+            const duplicateBrowserIds = new Set();
+            Object.keys(browserIdGroupsMap).forEach(number => {
+                if (browserIdGroupsMap[number].length > 1) {
+                    duplicateBrowserIds.add(number);
+                }
+            });
+
             // 计算总计个数之和
             let totalSum = 0;
 
@@ -1006,8 +1048,13 @@
                             trendingHtml = `<span class="browser-trending">[${trendingName}]</span>`;
                         }
                         
+                        // 检查是否为重复的浏览器ID
+                        const numberStr = String(number);
+                        const isDuplicate = duplicateBrowserIds.has(numberStr);
+                        const duplicateClass = isDuplicate ? ' duplicate' : '';
+                        
                         return `
-                            <div class="browser-item">
+                            <div class="browser-item${duplicateClass}">
                                 <span class="browser-number">${number}</span>
                                 ${useTypeHtml}
                                 ${timeHtml}

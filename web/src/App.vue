@@ -1695,6 +1695,7 @@
               <thead>
                 <tr>
                   <th style="width: 50px;">序号</th>
+                  <th style="width: 80px;">ID</th>
                   <th style="width: 100px;">启用</th>
                   <th style="width: 100px;">显示</th>
                   <th style="width: 400px;">Trending *</th>
@@ -1711,6 +1712,7 @@
               <tbody>
                 <tr v-for="(config, index) in filteredEditConfigList" :key="index" class="config-table-row">
                   <td class="config-index">{{ index + 1 }}</td>
+                  <td>{{ config.id || '-' }}</td>
                   <td>
                     <label class="switch-label">
                       <input 
