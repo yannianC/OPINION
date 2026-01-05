@@ -418,26 +418,6 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="NO买一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.noBidPrice, b.noBidPrice)">
-        <template #default="scope">
-          <div v-if="scope.row.noBidPrice !== null && scope.row.noBidPrice !== undefined && scope.row.noBidDepth !== null && scope.row.noBidDepth !== undefined" style="line-height: 1.5;">
-            <div>{{ formatNumber(scope.row.noBidPrice) }}</div>
-            <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.noBidDepth) }}</div>
-          </div>
-          <span v-else style="color: #909399;">-</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="NO卖一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.noAskPrice, b.noAskPrice)">
-        <template #default="scope">
-          <div v-if="scope.row.noAskPrice !== null && scope.row.noAskPrice !== undefined && scope.row.noAskDepth !== null && scope.row.noAskDepth !== undefined" style="line-height: 1.5;">
-            <div>{{ formatNumber(scope.row.noAskPrice) }}</div>
-            <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.noAskDepth) }}</div>
-          </div>
-          <span v-else style="color: #909399;">-</span>
-        </template>
-      </el-table-column>
-
       <el-table-column label="操作" width="180" align="center" fixed="right">
         <template #default="scope">
           <el-button 
