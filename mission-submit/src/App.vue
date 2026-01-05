@@ -266,7 +266,8 @@
                 </div>
               </div>
               <div v-if="isLooping" style="margin-top: 8px; color: #28a745; font-size: 12px;">
-                循环执行中... 下次执行时间: {{ nextExecuteTime }}
+                <div>循环执行中... {{ currentLoopingContent }}</div>
+                <div style="margin-top: 4px;">下次执行时间: {{ nextExecuteTime }}</div>
               </div>
             </div>
           </div>
@@ -282,10 +283,10 @@
               <span v-else>更新仓位</span>
             </button>
             <button type="button" class="btn btn-success" @click="startLooping" :disabled="isLooping || isSubmitting || isUpdatingPosition || !delayMinutes || !intervalMinutes || delayMinutes < 0 || intervalMinutes < 1">
-              开始循环
+              开始循环更新仓位
             </button>
             <button type="button" class="btn btn-danger" @click="stopLooping" :disabled="!isLooping">
-              停止循环
+              停止循环更新仓位
             </button>
             <button type="button" class="btn btn-secondary" @click="resetForm">
               重置
@@ -532,6 +533,18 @@ const parsedBrowserIds = computed(() => {
 // 解析后的电脑组列表
 const parsedGroupNos = computed(() => {
   return parseInput(groupNosInput.value)
+})
+
+// 当前循环执行的内容描述
+const currentLoopingContent = computed(() => {
+  if (!isLooping.value) return ''
+  
+  if (inputType.value === 'browser' && parsedBrowserIds.value.length > 0) {
+    return `浏览器ID: ${parsedBrowserIds.value.join(', ')}`
+  } else if (inputType.value === 'group' && parsedGroupNos.value.length > 0) {
+    return `电脑组: ${parsedGroupNos.value.join(', ')}`
+  }
+  return ''
 })
 
 // 解析后的清除任务电脑组列表
@@ -1207,16 +1220,19 @@ const handlePositionUpdate = async (skipReset = false) => {
 
 /**
  * 计算并更新下次执行时间
- * @param {number} additionalDelay - 额外的延迟时间（毫秒），用于延迟执行的情况
+ * @param {number} additionalDelay - 额外的延迟时间（毫秒），用于延迟执行的情况。如果提供了此参数，则只使用延迟时间，不加间隔时间（用于第一次执行）
+ * @param {boolean} isFirstExecution - 是否是第一次执行（有延迟时），如果是，则只显示延迟时间，不加间隔时间
  */
-const updateNextExecuteTime = (additionalDelay = 0) => {
+const updateNextExecuteTime = (additionalDelay = 0, isFirstExecution = false) => {
   if (!isLooping.value) {
     nextExecuteTime.value = ''
     return
   }
   
   const now = new Date()
-  const nextTime = new Date(now.getTime() + additionalDelay + intervalMinutes.value * 60 * 1000)
+  // 如果是第一次执行（有延迟），只使用延迟时间，不加间隔时间
+  const timeToAdd = isFirstExecution ? additionalDelay : (additionalDelay + intervalMinutes.value * 60 * 1000)
+  const nextTime = new Date(now.getTime() + timeToAdd)
   const hours = String(nextTime.getHours()).padStart(2, '0')
   const minutes = String(nextTime.getMinutes()).padStart(2, '0')
   const seconds = String(nextTime.getSeconds()).padStart(2, '0')
@@ -1229,7 +1245,7 @@ const updateNextExecuteTime = (additionalDelay = 0) => {
 const executePositionUpdateOnce = async () => {
   if (!isLooping.value) return
   
-  // 更新下次执行时间
+  // 更新下次执行时间（在执行前更新，这样用户可以看到下次执行时间）
   updateNextExecuteTime()
   
   // 执行更新仓位（不重置表单）
@@ -1242,14 +1258,19 @@ const executePositionUpdateOnce = async () => {
 const startLooping = () => {
   if (isLooping.value) return
   
-  // 验证输入
-  if (inputType.value === 'browser' && parsedBrowserIds.value.length === 0) {
-    showMessage('请正确输入浏览器ID', 'error')
-    return
-  }
-  
-  if (inputType.value === 'group' && parsedGroupNos.value.length === 0) {
-    showMessage('请正确输入电脑组', 'error')
+  // 验证输入类型和内容
+  if (inputType.value === 'browser') {
+    if (parsedBrowserIds.value.length === 0) {
+      showMessage('请正确输入浏览器ID', 'error')
+      return
+    }
+  } else if (inputType.value === 'group') {
+    if (parsedGroupNos.value.length === 0) {
+      showMessage('请正确输入电脑组', 'error')
+      return
+    }
+  } else {
+    showMessage('请选择输入类型（浏览器ID或电脑组）', 'error')
     return
   }
   
@@ -1263,6 +1284,11 @@ const startLooping = () => {
     return
   }
   
+  // 显示当前选择的类型和内容
+  const currentSelection = inputType.value === 'browser' 
+    ? `浏览器ID: ${parsedBrowserIds.value.join(', ')}` 
+    : `电脑组: ${parsedGroupNos.value.join(', ')}`
+  
   isLooping.value = true
   
   // 延迟执行
@@ -1271,22 +1297,23 @@ const startLooping = () => {
   
   if (delayMs > 0) {
     // 有延迟，先等待延迟时间
-    showMessage(`将在 ${delayMinutes.value} 分钟后开始循环执行，每 ${intervalMinutes.value} 分钟执行一次`, 'info')
-    updateNextExecuteTime(delayMs) // 计算延迟后的首次执行时间
+    showMessage(`将在 ${delayMinutes.value} 分钟后开始循环更新仓位（${currentSelection}），每 ${intervalMinutes.value} 分钟执行一次`, 'info')
+    updateNextExecuteTime(delayMs, true) // 计算延迟后的首次执行时间（只加延迟时间，不加间隔时间）
+    
     delayTimer.value = setTimeout(() => {
       // 延迟时间到，立即执行一次
+      showMessage(`延迟时间到，开始执行第一次更新仓位（${currentSelection}）`, 'info')
       executePositionUpdateOnce()
       
-      // 然后设置循环定时器
+      // 然后设置循环定时器，每隔指定时间执行一次
       loopTimer.value = setInterval(() => {
         executePositionUpdateOnce()
       }, intervalMs)
     }, delayMs)
   } else {
     // 无延迟，立即执行一次
-    showMessage(`开始循环执行，每 ${intervalMinutes.value} 分钟执行一次`, 'info')
-    updateNextExecuteTime() // 计算下次执行时间
-    executePositionUpdateOnce()
+    showMessage(`开始循环更新仓位（${currentSelection}），每 ${intervalMinutes.value} 分钟执行一次`, 'info')
+    executePositionUpdateOnce() // 执行第一次，内部会更新下次执行时间
     
     // 设置循环定时器
     loopTimer.value = setInterval(() => {
