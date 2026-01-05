@@ -10675,8 +10675,6 @@ def convert_time_to_beijing(original_time_str, ip, serial_number=None, cached_ti
         # 转换为时间戳（毫秒）
         beijing_timestamp = int(beijing_dt.timestamp() * 1000)
         
-        log_print(f"[时间转换] 原始时间: {original_time_str} ({timezone_name or 'UTC'}, 来源: {timezone_source}) -> 北京时间戳: {beijing_timestamp}")
-        
         return original_time_str, beijing_timestamp
         
     except Exception as e:

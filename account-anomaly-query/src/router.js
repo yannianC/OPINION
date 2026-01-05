@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import TaskAnomaly from './TaskAnomaly.vue'
 import AccountAnomaly from './AccountAnomaly.vue'
 import EventAnomaly from './EventAnomaly.vue'
+import PositionDetail from './PositionDetail.vue'
 
 const routes = [
   {
@@ -22,6 +23,11 @@ const routes = [
     path: '/event-anomaly',
     name: 'EventAnomaly',
     component: EventAnomaly
+  },
+  {
+    path: '/position-detail',
+    name: 'PositionDetail',
+    component: PositionDetail
   }
 ]
 

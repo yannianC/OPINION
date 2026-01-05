@@ -233,15 +233,59 @@
             </div>
           </div>
 
+          <!-- 循环执行设置 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>循环执行更新仓位</label>
+              <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label style="font-weight: normal; white-space: nowrap;">延迟</label>
+                  <input
+                    v-model.number="delayMinutes"
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="分钟"
+                    style="width: 80px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;"
+                    :disabled="isLooping"
+                  />
+                  <span style="white-space: nowrap;">分钟后开始</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label style="font-weight: normal; white-space: nowrap;">每间隔</label>
+                  <input
+                    v-model.number="intervalMinutes"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="分钟"
+                    style="width: 80px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;"
+                    :disabled="isLooping"
+                  />
+                  <span style="white-space: nowrap;">分钟执行一次</span>
+                </div>
+              </div>
+              <div v-if="isLooping" style="margin-top: 8px; color: #28a745; font-size: 12px;">
+                循环执行中... 下次执行时间: {{ nextExecuteTime }}
+              </div>
+            </div>
+          </div>
+
           <!-- 提交按钮 -->
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary" :disabled="isSubmitting || isUpdatingPosition">
+            <button type="submit" class="btn btn-primary" :disabled="isSubmitting || isUpdatingPosition || isLooping">
               <span v-if="isSubmitting">提交中...</span>
               <span v-else>撤单并更新</span>
             </button>
-            <button type="button" class="btn btn-primary" @click="handlePositionUpdate" :disabled="isSubmitting || isUpdatingPosition">
+            <button type="button" class="btn btn-primary" @click="handlePositionUpdate" :disabled="isSubmitting || isUpdatingPosition || isLooping">
               <span v-if="isUpdatingPosition">更新中...</span>
               <span v-else>更新仓位</span>
+            </button>
+            <button type="button" class="btn btn-success" @click="startLooping" :disabled="isLooping || isSubmitting || isUpdatingPosition || !delayMinutes || !intervalMinutes || delayMinutes < 0 || intervalMinutes < 1">
+              开始循环
+            </button>
+            <button type="button" class="btn btn-danger" @click="stopLooping" :disabled="!isLooping">
+              停止循环
             </button>
             <button type="button" class="btn btn-secondary" @click="resetForm">
               重置
@@ -363,6 +407,14 @@ const isSubmitting = ref(false)
 const isUpdatingPosition = ref(false)
 const isRetrying = ref(false)
 const failedBrowserIds = ref([]) // 存储失败的浏览器ID [{browserId, error, groupNo, tp1}]
+
+// 循环执行相关
+const delayMinutes = ref(0) // 延迟时间（分钟）
+const intervalMinutes = ref(5) // 间隔时间（分钟）
+const isLooping = ref(false) // 是否正在循环执行
+const loopTimer = ref(null) // 循环定时器
+const delayTimer = ref(null) // 延迟定时器
+const nextExecuteTime = ref('') // 下次执行时间
 
 // 清除任务相关
 const cleanGroupNosInput = ref('')
@@ -720,12 +772,17 @@ const loadMappings = async () => {
  * 重置表单
  */
 const resetForm = () => {
+  // 停止循环执行
+  stopLooping()
+  
   browserIdsInput.value = ''
   browserBatchType.value = 'second' // 重置为默认批次
   groupNosInput.value = ''
   selectedTrending.value = 'all'
   trendingSearchText.value = ''
   inputType.value = 'browser'
+  delayMinutes.value = 0
+  intervalMinutes.value = 5
 }
 
 /**
@@ -1039,8 +1096,9 @@ const confirmCleanMission = async () => {
 
 /**
  * 更新仓位
+ * @param {boolean} skipReset - 是否跳过重置表单（用于循环执行）
  */
-const handlePositionUpdate = async () => {
+const handlePositionUpdate = async (skipReset = false) => {
   if (isUpdatingPosition.value) return
   
   // 验证输入
@@ -1135,14 +1193,130 @@ const handlePositionUpdate = async () => {
       showMessage(`更新仓位失败：所有请求都失败了`, 'error')
     }
     
-    // 重置表单
-    resetForm()
+    // 重置表单（循环执行时不重置）
+    if (!skipReset) {
+      resetForm()
+    }
   } catch (error) {
     console.error('更新仓位失败:', error)
     showMessage('更新仓位失败: ' + (error.message || '未知错误'), 'error')
   } finally {
     isUpdatingPosition.value = false
   }
+}
+
+/**
+ * 计算并更新下次执行时间
+ * @param {number} additionalDelay - 额外的延迟时间（毫秒），用于延迟执行的情况
+ */
+const updateNextExecuteTime = (additionalDelay = 0) => {
+  if (!isLooping.value) {
+    nextExecuteTime.value = ''
+    return
+  }
+  
+  const now = new Date()
+  const nextTime = new Date(now.getTime() + additionalDelay + intervalMinutes.value * 60 * 1000)
+  const hours = String(nextTime.getHours()).padStart(2, '0')
+  const minutes = String(nextTime.getMinutes()).padStart(2, '0')
+  const seconds = String(nextTime.getSeconds()).padStart(2, '0')
+  nextExecuteTime.value = `${hours}:${minutes}:${seconds}`
+}
+
+/**
+ * 执行一次更新仓位（用于循环执行）
+ */
+const executePositionUpdateOnce = async () => {
+  if (!isLooping.value) return
+  
+  // 更新下次执行时间
+  updateNextExecuteTime()
+  
+  // 执行更新仓位（不重置表单）
+  await handlePositionUpdate(true)
+}
+
+/**
+ * 开始循环执行
+ */
+const startLooping = () => {
+  if (isLooping.value) return
+  
+  // 验证输入
+  if (inputType.value === 'browser' && parsedBrowserIds.value.length === 0) {
+    showMessage('请正确输入浏览器ID', 'error')
+    return
+  }
+  
+  if (inputType.value === 'group' && parsedGroupNos.value.length === 0) {
+    showMessage('请正确输入电脑组', 'error')
+    return
+  }
+  
+  if (!delayMinutes.value && delayMinutes.value !== 0) {
+    showMessage('请输入延迟时间', 'error')
+    return
+  }
+  
+  if (!intervalMinutes.value || intervalMinutes.value < 1) {
+    showMessage('请输入有效的间隔时间（至少1分钟）', 'error')
+    return
+  }
+  
+  isLooping.value = true
+  
+  // 延迟执行
+  const delayMs = delayMinutes.value * 60 * 1000
+  const intervalMs = intervalMinutes.value * 60 * 1000
+  
+  if (delayMs > 0) {
+    // 有延迟，先等待延迟时间
+    showMessage(`将在 ${delayMinutes.value} 分钟后开始循环执行，每 ${intervalMinutes.value} 分钟执行一次`, 'info')
+    updateNextExecuteTime(delayMs) // 计算延迟后的首次执行时间
+    delayTimer.value = setTimeout(() => {
+      // 延迟时间到，立即执行一次
+      executePositionUpdateOnce()
+      
+      // 然后设置循环定时器
+      loopTimer.value = setInterval(() => {
+        executePositionUpdateOnce()
+      }, intervalMs)
+    }, delayMs)
+  } else {
+    // 无延迟，立即执行一次
+    showMessage(`开始循环执行，每 ${intervalMinutes.value} 分钟执行一次`, 'info')
+    updateNextExecuteTime() // 计算下次执行时间
+    executePositionUpdateOnce()
+    
+    // 设置循环定时器
+    loopTimer.value = setInterval(() => {
+      executePositionUpdateOnce()
+    }, intervalMs)
+  }
+}
+
+/**
+ * 停止循环执行
+ */
+const stopLooping = () => {
+  if (!isLooping.value) return
+  
+  isLooping.value = false
+  
+  // 清除延迟定时器
+  if (delayTimer.value) {
+    clearTimeout(delayTimer.value)
+    delayTimer.value = null
+  }
+  
+  // 清除循环定时器
+  if (loopTimer.value) {
+    clearInterval(loopTimer.value)
+    loopTimer.value = null
+  }
+  
+  nextExecuteTime.value = ''
+  showMessage('循环执行已停止', 'info')
 }
 
 // 监听输入类型变化，清空另一个输入框
@@ -1509,9 +1683,10 @@ onMounted(() => {
   loadMappings()
 })
 
-// 组件卸载时清除轮询定时器
+// 组件卸载时清除轮询定时器和循环定时器
 onUnmounted(() => {
   stopStatusPolling()
+  stopLooping()
 })
 </script>
 
@@ -1523,6 +1698,16 @@ onUnmounted(() => {
 
 .task-form {
   margin-top: 20px;
+}
+
+/* 成功按钮样式 */
+.btn-success {
+  background: #28a745;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #218838;
 }
 
 /* 危险按钮样式 */
