@@ -34,6 +34,21 @@
             font-weight: 600;
             color: #333;
             letter-spacing: 2px;
+            margin-bottom: 20px;
+        }
+
+        .time-label {
+            font-size: 18px;
+            color: #667eea;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .local-time-display {
+            font-size: 48px;
+            font-weight: 600;
+            color: #764ba2;
+            letter-spacing: 1px;
             margin-bottom: 40px;
         }
 
@@ -89,7 +104,16 @@
 </head>
 <body>
     <div class="container">
+        <div class="time-label">北京时间 (UTC+8)</div>
         <div class="time-display" id="timeDisplay"></div>
+        
+        <div class="time-label">本地时间</div>
+        <div class="local-time-display" id="localTimeDisplay"></div>
+        <div class="info-item" style="margin-top: 10px; margin-bottom: 30px;">
+            <span class="info-label">时区:</span>
+            <span class="info-value" id="timezoneDisplay">-</span>
+        </div>
+        
         <div class="info-section" id="infoSection" style="display: none;">
             <div class="info-item">
                 <span class="info-label">当前IP:</span>
@@ -98,6 +122,10 @@
             <div class="info-item">
                 <span class="info-label">延迟:</span>
                 <span class="info-value" id="delayDisplay">-</span>
+            </div>
+            <div class="info-item" id="ipTimezoneItem" style="display: none;">
+                <span class="info-label">IP时区:</span>
+                <span class="info-value" id="ipTimezoneDisplay">-</span>
             </div>
         </div>
         <div id="loadingInfo" class="loading" style="display: none;">正在获取IP和延迟信息...</div>
@@ -121,26 +149,53 @@
             return beijingTime;
         }
 
-        // 格式化显示（格式：28日 14:30:25）
+        // 格式化显示（格式：时:分:秒）
         function formatDisplay(date) {
-            const day = date.getDate();
             const hours = String(date.getHours()).padStart(2, '0');
             const minutes = String(date.getMinutes()).padStart(2, '0');
             const seconds = String(date.getSeconds()).padStart(2, '0');
             return `${hours}:${minutes}:${seconds}`;
         }
 
+        // 获取浏览器本地时间
+        function getLocalTime() {
+            return new Date();
+        }
+
+        // 获取浏览器时区信息
+        function getBrowserTimezone() {
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const offset = -new Date().getTimezoneOffset() / 60;
+            const offsetStr = offset >= 0 ? `UTC+${offset}` : `UTC${offset}`;
+            return {
+                timezone: timezone,
+                offset: offsetStr,
+                full: `${timezone} (${offsetStr})`
+            };
+        }
+
         // 更新页面显示
         function updateDisplay() {
+            // 更新北京时间
             const beijingTime = getBeijingTime();
-            const displayStr = formatDisplay(beijingTime);
+            const beijingDisplayStr = formatDisplay(beijingTime);
+            document.getElementById('timeDisplay').textContent = beijingDisplayStr;
+            
+            // 更新本地时间
+            const localTime = getLocalTime();
+            const localDisplayStr = formatDisplay(localTime);
+            document.getElementById('localTimeDisplay').textContent = localDisplayStr;
+            
+            // 更新时区信息
+            const tzInfo = getBrowserTimezone();
+            document.getElementById('timezoneDisplay').textContent = tzInfo.full;
             
             // 获取IP和延迟
             const ip = getUrlParam('ip');
             const delay = getUrlParam('delay');
             
             // 构建标题：时：分：秒  ip  延迟
-            let titleStr = displayStr;
+            let titleStr = beijingDisplayStr;
             
             if (delay !== null && delay !== undefined && delay !== '') {
                 const delayNum = parseInt(delay);
@@ -150,8 +205,6 @@
             if (ip) {
                 titleStr += `||${ip}`;
             }
-            // 更新页面内容
-            document.getElementById('timeDisplay').textContent = displayStr;
             
             // 更新页面标题
             document.getElementById('pageTitle').textContent = titleStr;
@@ -171,13 +224,55 @@
             }
         }
 
+        // 通过API获取IP时区信息
+        async function fetchIpTimezone(ip) {
+            if (!ip) return null;
+            
+            try {
+                // 使用 ip-api.com 免费API（无需API密钥）
+                const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,timezone,offset`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const offsetHours = data.offset / 3600;
+                    const offsetStr = offsetHours >= 0 ? `UTC+${offsetHours}` : `UTC${offsetHours}`;
+                    return {
+                        timezone: data.timezone,
+                        offset: offsetStr,
+                        full: `${data.timezone} (${offsetStr})`
+                    };
+                }
+            } catch (error) {
+                console.error('获取IP时区失败:', error);
+                // 如果失败，尝试备用API
+                try {
+                    const response = await fetch(`https://ipapi.co/${ip}/json/`);
+                    const data = await response.json();
+                    if (data.timezone) {
+                        const offsetHours = data.utc_offset ? data.utc_offset / 100 : 0;
+                        const offsetStr = offsetHours >= 0 ? `UTC+${offsetHours}` : `UTC${offsetHours}`;
+                        return {
+                            timezone: data.timezone,
+                            offset: offsetStr,
+                            full: `${data.timezone} (${offsetStr})`
+                        };
+                    }
+                } catch (error2) {
+                    console.error('备用API也失败:', error2);
+                }
+            }
+            return null;
+        }
+
         // 显示IP和延迟信息（从URL参数获取）
-        function displayIpAndDelay() {
+        async function displayIpAndDelay() {
             const infoSection = document.getElementById('infoSection');
             const loadingInfo = document.getElementById('loadingInfo');
             const errorInfo = document.getElementById('errorInfo');
             const ipDisplay = document.getElementById('ipDisplay');
             const delayDisplay = document.getElementById('delayDisplay');
+            const ipTimezoneItem = document.getElementById('ipTimezoneItem');
+            const ipTimezoneDisplay = document.getElementById('ipTimezoneDisplay');
 
             // 从URL参数获取IP和延迟
             const ip = getUrlParam('ip');
@@ -202,12 +297,56 @@
                     delayDisplay.className = 'info-value';
                 }
                 
+                // 尝试获取IP时区信息
+                loadingInfo.textContent = '正在获取IP时区信息...';
+                loadingInfo.style.display = 'block';
+                
+                const ipTimezone = await fetchIpTimezone(ip);
+                if (ipTimezone) {
+                    ipTimezoneDisplay.textContent = ipTimezone.full;
+                    ipTimezoneItem.style.display = 'block';
+                } else {
+                    ipTimezoneItem.style.display = 'none';
+                }
+                
+                loadingInfo.style.display = 'none';
+                
                 // 显示信息区域
                 infoSection.style.display = 'block';
             } else {
-                // 如果没有IP参数，显示提示
-                errorInfo.textContent = '未提供IP信息';
-                errorInfo.style.display = 'block';
+                // 如果没有IP参数，不显示错误，因为本地时间已经显示了
+                infoSection.style.display = 'none';
+            }
+        }
+
+        // 将时区信息暴露到 window 对象，方便外部脚本获取
+        function exposeTimezoneInfo() {
+            const browserTz = getBrowserTimezone();
+            const ip = getUrlParam('ip');
+            
+            // 暴露浏览器时区信息
+            window.beijingTimePageInfo = {
+                browserTimezone: browserTz.timezone,
+                browserTimezoneOffset: browserTz.offset,
+                browserTimezoneFull: browserTz.full,
+                ip: ip || null,
+                ipTimezone: null,
+                ready: false
+            };
+            
+            // 如果有IP，尝试获取IP时区
+            if (ip) {
+                fetchIpTimezone(ip).then(ipTimezone => {
+                    if (ipTimezone) {
+                        window.beijingTimePageInfo.ipTimezone = ipTimezone.timezone;
+                        window.beijingTimePageInfo.ipTimezoneFull = ipTimezone.full;
+                    }
+                    window.beijingTimePageInfo.ready = true;
+                }).catch(() => {
+                    window.beijingTimePageInfo.ready = true;
+                });
+            } else {
+                window.beijingTimePageInfo.ready = true;
             }
         }
 
@@ -215,6 +354,9 @@
         window.onload = function() {
             // 立即显示时间
             updateDisplay();
+
+            // 暴露时区信息
+            exposeTimezoneInfo();
 
             // 从URL参数直接显示IP和延迟信息
             displayIpAndDelay();

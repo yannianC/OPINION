@@ -372,13 +372,7 @@
                       >
                         查看日志
                       </button>
-                      <button 
-                        class="btn-snap" 
-                        @click="snapAllPos"
-                        style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
-                      >
-                        快照
-                      </button>
+                 
                     </span>
                     <span class="task-separator">|</span>
                     <span class="task-info msg-value">{{ formatTaskMsg(task.msg) || '无' }}</span>

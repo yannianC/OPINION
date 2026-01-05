@@ -3519,6 +3519,20 @@ const refreshPosition = async (row) => {
     // 服务器返回 {} 或 status 200 都视为成功
     if (taskResponse.status === 200) {
       ElMessage.success(`任务已提交，正在采集数据...`)
+      
+      // 任务提交成功后，立即重置 refreshing 状态，让按钮可以再次点击
+      const updatedDataAfterSubmit = [...tableData.value]
+      const idxAfterSubmit = updatedDataAfterSubmit.findIndex(r => {
+        if (row.id && r.id) {
+          return r.id === row.id
+        }
+        return r.fingerprintNo === row.fingerprintNo && 
+               r.computeGroup === row.computeGroup
+      })
+      if (idxAfterSubmit !== -1) {
+        updatedDataAfterSubmit[idxAfterSubmit] = { ...updatedDataAfterSubmit[idxAfterSubmit], refreshing: false }
+        tableData.value = updatedDataAfterSubmit
+      }
     } else {
       throw new Error('任务提交失败')
     }

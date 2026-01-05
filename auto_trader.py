@@ -395,6 +395,10 @@ LAST_PROXY_CONFIG = {}
 # 浏览器编号到用户ID的映射
 FINGERPRINT_TO_USERID = {}
 
+# 存储从 beijing_time.html 页面获取的时区信息
+# 格式: {serial_number: timezone_name}
+BEIJING_TIME_PAGE_TIMEZONE = {}
+
 # 最大重试次数
 MAX_RETRIES = 3
 
@@ -990,10 +994,12 @@ def try_update_ip_before_start(browser_id, bro_log_list=None):
                     add_bro_log_entry(bro_log_list, browser_id, f"初始IP更新成功: IP={current_ip}, Delay={current_delay}")
                 return True, current_ip, current_delay
             else:
-                log_print(f"[{browser_id}] ⚠ 代理配置更新失败")
+                log_print(f"[{browser_id}] ⚠ 代理配置更新失败，但仍保存获取到的代理配置信息")
+                # 即使更新失败，也保存获取到的代理配置，以便后续使用
+                LAST_PROXY_CONFIG[str(browser_id)] = proxy_config.copy()
                 if bro_log_list is not None:
-                    add_bro_log_entry(bro_log_list, browser_id, "代理配置更新失败")
-                return False, None, None
+                    add_bro_log_entry(bro_log_list, browser_id, f"代理配置更新失败，但已保存配置: IP={current_ip}, Delay={current_delay}")
+                return False, current_ip, current_delay
         else:
             log_print(f"[{browser_id}] 8秒内未获取到新代理配置")
             # 尝试从LAST_PROXY_CONFIG获取当前使用的IP和延迟
@@ -1793,10 +1799,82 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
         success = open_new_tab_with_url(driver, beijing_time_url, serial_number)
         if success:
             log_print(f"[{serial_number}] ✓ beijing_time.html 页面已打开")
+            
+            # 尝试从页面获取时区信息
+            try:
+                # 获取所有窗口句柄，找到新打开的窗口
+                all_windows = driver.window_handles
+                beijing_time_window = None
+                for window in all_windows:
+                    if window != main_window:
+                        try:
+                            driver.switch_to.window(window)
+                            current_url = driver.current_url
+                            if "beijing_time.html" in current_url:
+                                beijing_time_window = window
+                                break
+                        except:
+                            continue
+                
+                if beijing_time_window:
+                    driver.switch_to.window(beijing_time_window)
+                    
+                    # 等待页面加载完成
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            lambda d: d.execute_script("return document.readyState") == "complete"
+                        )
+                        # 额外等待一下，确保 JavaScript 执行完成
+                        time.sleep(2)
+                        
+                        # 执行 JavaScript 获取时区信息
+                        timezone_info = driver.execute_script("""
+                            if (window.beijingTimePageInfo && window.beijingTimePageInfo.ready) {
+                                // 优先使用IP时区，如果没有则使用浏览器时区
+                                return window.beijingTimePageInfo.ipTimezone || window.beijingTimePageInfo.browserTimezone;
+                            }
+                            // 如果还没准备好，等待一下再试
+                            return null;
+                        """)
+                        
+                        if timezone_info:
+                            BEIJING_TIME_PAGE_TIMEZONE[serial_number] = timezone_info
+                            log_print(f"[{serial_number}] ✓ 从 beijing_time.html 页面获取到时区: {timezone_info}")
+                        else:
+                            # 再等待一下，可能是异步获取IP时区还没完成
+                            time.sleep(3)
+                            timezone_info = driver.execute_script("""
+                                if (window.beijingTimePageInfo && window.beijingTimePageInfo.ready) {
+                                    return window.beijingTimePageInfo.ipTimezone || window.beijingTimePageInfo.browserTimezone;
+                                }
+                                return null;
+                            """)
+                            if timezone_info:
+                                BEIJING_TIME_PAGE_TIMEZONE[serial_number] = timezone_info
+                                log_print(f"[{serial_number}] ✓ 从 beijing_time.html 页面获取到时区: {timezone_info}")
+                            else:
+                                log_print(f"[{serial_number}] ⚠ 无法从 beijing_time.html 页面获取时区，将使用IP查询方式")
+                    except Exception as e:
+                        log_print(f"[{serial_number}] ⚠ 获取页面时区信息失败: {str(e)}，将使用IP查询方式")
+                    
+                    # 切换回主窗口
+                    driver.switch_to.window(main_window)
+                else:
+                    log_print(f"[{serial_number}] ⚠ 未找到 beijing_time.html 窗口，将使用IP查询方式")
+                    driver.switch_to.window(main_window)
+            except Exception as e:
+                log_print(f"[{serial_number}] ⚠ 获取页面时区信息异常: {str(e)}，将使用IP查询方式")
+                try:
+                    driver.switch_to.window(main_window)
+                except:
+                    pass
         else:
             log_print(f"[{serial_number}] ⚠ 预打开 beijing_time.html 失败，继续执行...")
-        # 切换回主窗口
-        driver.switch_to.window(main_window)
+        # 确保切换回主窗口
+        try:
+            driver.switch_to.window(main_window)
+        except:
+            pass
         time.sleep(1)
     except Exception as e:
         log_print(f"[{serial_number}] ⚠ 预打开 beijing_time.html 异常: {str(e)}，继续执行...")
@@ -3188,9 +3266,9 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             return False, "本任务正常，等待任务一确认超时"
                                         
                                         tp1_status = get_mission_status(tp1)
-                                        #### CCCCCCC
                                         if tp1_status == 7 or tp1_status == 2 or tp1_status == 8 or tp1_status == 12:
                                             time.sleep(5)
+                                            
                                             log_msg = f"[OP] ✓ 任务一已点击确认（状态7）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3203,6 +3281,41 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             return False, "本任务正常，任务一确认失败"
                                         
                                         time.sleep(10)
+                                    
+                                    # 检查 tp2 是否有值，如果有则等待
+                                    tp2 = mission.get('tp2')
+                                    if tp2:
+                                        wait_time = tp2 + 30  # tp2的值+30秒
+                                        log_msg = f"[OP] 任务二: 检测到tp2={tp2}，需要等待{wait_time}秒..."
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        
+                                        start_wait_time = time.time()
+                                        check_interval = 30  # 每30秒检查一次
+                                        last_check_time = start_wait_time
+                                        
+                                        while time.time() - start_wait_time < wait_time:
+                                            # 每隔30秒检查一次任务一状态
+                                            if time.time() - last_check_time >= check_interval:
+                                                tp1_status = get_mission_status(tp1)
+                                                log_msg = f"[OP] 任务二: 等待期间检查任务一状态: {tp1_status}"
+                                                log_print(f"[{serial_number}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                
+                                                if tp1_status == 3:
+                                                    log_msg = f"[OP] 本任务正常，任务一确认失败，点击取消"
+                                                    log_print(f"[{serial_number}] {log_msg}")
+                                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                    buttons[0].click()  # 点击取消按钮
+                                                    return False, "本任务正常，任务一确认失败"
+                                                
+                                                last_check_time = time.time()
+                                            
+                                            time.sleep(1)  # 每秒检查一次是否到达检查间隔
+                                        
+                                        log_msg = f"[OP] ✓ 任务二: 等待{wait_time}秒完成，任务一状态正常，继续流程"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     
                                     # 点击确认按钮
                                     log_msg = f"[OP] 任务二: 点击OKX确认按钮..."
@@ -3828,25 +3941,24 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
                     
                     if is_task1:
-                        # 任务一检测到变化
-                        if current_status == 11:
-                            # 任务一状态已经是11，改为10
-                            log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
-                            save_mission_result(target_mission_id, 10)
-                        else:
-                            # 任务一检测到变化，改为8
-                            log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为8...")
-                            save_mission_result(target_mission_id, 8)
+                            # 任务一检测到变化
+                                if current_status == 13 or current_status == 14:
+                                    # 任务一状态已经是11，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务一检测到变化，改为8
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
+                                    save_mission_result(target_mission_id, 12)
                     else:
-                        # 任务二检测到变化
-                        if current_status == 8:
-                            # 任务一状态已经是8，改为10
-                            log_print(f"[{serial_number}] [{task_label}] 任务一状态为8，更改为10...")
-                            save_mission_result(target_mission_id, 10)
-                        else:
-                            # 任务二检测到变化，改为9
-                            log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
-                            save_mission_result(target_mission_id, 11)
+                                # 任务二检测到变化
+                                if current_status == 12 or current_status == 14:
+                                    # 任务一状态已经是8，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务二检测到变化，改为9
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                     
                     break
                 
@@ -3869,19 +3981,24 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         current_status = get_mission_status(target_mission_id)
                         log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
                         if is_task1:
-                            if current_status == 13:
+                            # 任务一检测到变化
+                                if current_status == 13 or current_status == 14:
+                                    # 任务一状态已经是11，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                            else:
-                                    # 任务1检测到closed orders时间变化，将任务1的状态改为12
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到Closed Orders时间变化，更改状态为12（为任务1，已出现挂单）...")
+                                else:
+                                    # 任务一检测到变化，改为8
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                         else:
-                            if current_status == 12:
+                                # 任务二检测到变化
+                                if current_status == 12 or current_status == 14:
+                                    # 任务一状态已经是8，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                            else:
-                                    # 任务2检测到closed orders时间变化，将任务1的状态改为13
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到Closed Orders时间变化，更改任务一状态为13（为任务2，已出现挂单）...")
-                                    save_mission_result(target_mission_id, 13)
+                                else:
+                                    # 任务二检测到变化，改为9
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                         hava_order = True
                         break;
                         
@@ -3906,20 +4023,24 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
                             
                             if is_task1:
-                                if current_status == 13:
+                            # 任务一检测到变化
+                                if current_status == 13 or current_status == 14:
+                                    # 任务一状态已经是11，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
                                 else:
-                                    # 任务1检测到closed orders时间变化，将任务1的状态改为12
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到Closed Orders时间变化，更改状态为12（为任务1，已出现挂单）...")
+                                    # 任务一检测到变化，改为8
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                             else:
-                                if current_status == 12:
+                                # 任务二检测到变化
+                                if current_status == 12 or current_status == 14:
+                                    # 任务一状态已经是8，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                   
                                 else:
-                                    # 任务2检测到closed orders时间变化，将任务1的状态改为13
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到Closed Orders时间变化，更改任务一状态为13（为任务2，已出现挂单）...")
-                                    save_mission_result(target_mission_id, 13)
+                                    # 任务二检测到变化，改为9
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                             hava_order = True
                       # 继续等待，不退出循环
                     time.sleep(check_interval)
@@ -3997,25 +4118,24 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
                     
                     if is_task1:
-                        # 任务一检测到变化
-                        if current_status == 11:
-                            # 任务一状态已经是11，改为10
-                            log_print(f"[{serial_number}] [{task_label}] 任务一状态为9，更改为10...")
-                            save_mission_result(target_mission_id, 10)
-                        else:
-                            # 任务一检测到变化，改为8
-                            log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为8...")
-                            save_mission_result(target_mission_id, 8)
+                            # 任务一检测到变化
+                                if current_status == 13 or current_status == 14:
+                                    # 任务一状态已经是11，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务一检测到变化，改为8
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
+                                    save_mission_result(target_mission_id, 12)
                     else:
-                        # 任务二检测到变化
-                        if current_status == 8:
-                            # 任务一状态已经是8，改为10
-                            log_print(f"[{serial_number}] [{task_label}] 任务一状态为8，更改为10...")
-                            save_mission_result(target_mission_id, 10)
-                        else:
-                            # 任务二检测到变化，改为9
-                            log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为9...")
-                            save_mission_result(target_mission_id, 11)
+                                # 任务二检测到变化
+                                if current_status == 12 or current_status == 14:
+                                    # 任务一状态已经是8，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务二检测到变化，改为9
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                     
                     break
                 
@@ -4039,13 +4159,25 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
                         
                         if is_task1:
-                            # 任务1检测到open order数量变化，将任务1的状态改为12
-                            log_print(f"[{serial_number}] [{task_label}] 任务一检测到Open Orders数量变化，更改状态为12（为任务1，已出现挂单）...")
-                            save_mission_result(target_mission_id, 12)
+                            # 任务一检测到变化
+                                if current_status == 13 or current_status == 14:
+                                    # 任务一状态已经是11，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务一检测到变化，改为8
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
+                                    save_mission_result(target_mission_id, 12)
                         else:
-                            # 任务2检测到open order数量变化，将任务1的状态改为13
-                            log_print(f"[{serial_number}] [{task_label}] 任务二检测到Open Orders数量变化，更改任务一状态为13（为任务2，已出现挂单）...")
-                            save_mission_result(target_mission_id, 13)
+                                # 任务二检测到变化
+                                if current_status == 12 or current_status == 14:
+                                    # 任务一状态已经是8，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务二检测到变化，改为9
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    save_mission_result(target_mission_id, 13)
                         
                         # 继续等待，不退出循环
                         time.sleep(check_interval)
@@ -4070,13 +4202,25 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
                             
                             if is_task1:
-                                # 任务1检测到closed orders时间变化，将任务1的状态改为12
-                                log_print(f"[{serial_number}] [{task_label}] 任务一检测到Closed Orders时间变化，更改状态为12（为任务1，已出现挂单）...")
-                                save_mission_result(target_mission_id, 12)
+                            # 任务一检测到变化
+                                if current_status == 13 or current_status == 14:
+                                    # 任务一状态已经是11，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务一检测到变化，改为8
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
+                                    save_mission_result(target_mission_id, 12)
                             else:
-                                # 任务2检测到closed orders时间变化，将任务1的状态改为13
-                                log_print(f"[{serial_number}] [{task_label}] 任务二检测到Closed Orders时间变化，更改任务一状态为13（为任务2，已出现挂单）...")
-                                save_mission_result(target_mission_id, 13)
+                                # 任务二检测到变化
+                                if current_status == 12 or current_status == 14:
+                                    # 任务一状态已经是8，改为10
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                                    save_mission_result(target_mission_id, 14)
+                                else:
+                                    # 任务二检测到变化，改为9
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    save_mission_result(target_mission_id, 13)
                             
                             # 继续等待，不退出循环
                             time.sleep(check_interval)
@@ -10368,6 +10512,294 @@ def click_opinion_closed_orders_and_get_data(driver, serial_number):
         return "", False
 
 
+def parse_progress_string(progress_str):
+    """
+    解析进度字符串，拆分出成交数量和总共
+    
+    Args:
+        progress_str: 进度字符串，如 "$0/$6.69" 或 "43.32/55.96shares"
+        
+    Returns:
+        tuple: (fillAmt, amt) - (成交数量, 总共)，如果解析失败返回 (None, None)
+    """
+    if not progress_str:
+        return None, None
+    
+    try:
+        # 移除所有空格
+        progress_str = progress_str.strip().replace(" ", "")
+        
+        # 检查是否包含 "/"
+        if "/" not in progress_str:
+            return None, None
+        
+        # 分割
+        parts = progress_str.split("/")
+        if len(parts) != 2:
+            return None, None
+        
+        fill_part = parts[0].strip()
+        amt_part = parts[1].strip()
+        
+        # 移除货币符号和单位
+        fill_part = fill_part.replace("$", "").replace("shares", "").strip()
+        amt_part = amt_part.replace("$", "").replace("shares", "").strip()
+        
+        # 转换为浮点数
+        try:
+            fill_amt = float(fill_part) if fill_part else 0.0
+            amt = float(amt_part) if amt_part else 0.0
+            return fill_amt, amt
+        except ValueError:
+            return None, None
+            
+    except Exception as e:
+        log_print(f"[解析进度] ⚠ 解析进度字符串失败: {progress_str}, 错误: {str(e)}")
+        return None, None
+
+
+def get_timezone_from_ip(ip):
+    """
+    根据IP获取时区信息（使用免费API）
+    
+    Args:
+        ip: IP地址
+        
+    Returns:
+        str: 时区名称（如 "America/New_York"），失败返回 None
+    """
+    if not ip or ip == "None" or str(ip).strip() == "":
+        log_print(f"[时区查询] ⚠ IP地址为空或无效，无法获取时区")
+        return None
+    
+    try:
+        # 使用 ip-api.com 免费API获取时区信息
+        url = f"http://ip-api.com/json/{ip}"
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "success":
+                timezone = data.get("timezone")
+                if timezone:
+                    log_print(f"[时区查询] IP {ip} 的时区: {timezone}")
+                    return timezone
+        
+        log_print(f"[时区查询] ⚠ 无法获取IP {ip} 的时区信息")
+        return None
+    except Exception as e:
+        log_print(f"[时区查询] ⚠ 获取IP {ip} 时区失败: {str(e)}")
+        return None
+
+
+def convert_time_to_beijing(original_time_str, ip, serial_number=None):
+    """
+    将原始时间转换为北京时间时间戳
+    
+    Args:
+        original_time_str: 原始时间字符串，格式如 "Jan 05, 2026 13:30:43"
+        ip: IP地址，用于获取时区（备用方案）
+        serial_number: 浏览器序列号，用于从页面获取时区（优先方案）
+        
+    Returns:
+        tuple: (原始时间字符串, 转换后的北京时间戳（毫秒）)
+               格式: "Jan 05, 2026 13:30:43", 1736086200000
+    """
+    if not original_time_str:
+        return original_time_str, 0
+    
+    try:
+        # 解析原始时间字符串
+        # 格式: "Jan 05, 2026 13:30:43" 或 "Dec 26, 2025 19:47:03"
+        from datetime import datetime
+        import pytz
+        import time
+        
+        # 解析时间字符串
+        try:
+            original_dt = datetime.strptime(original_time_str, "%b %d, %Y %H:%M:%S")
+        except ValueError:
+            log_print(f"[时间转换] ⚠ 无法解析时间格式: {original_time_str}")
+            return original_time_str, 0
+        
+        # 优先使用从 beijing_time.html 页面获取的时区
+        timezone_name = None
+        timezone_source = None
+        
+        if serial_number and serial_number in BEIJING_TIME_PAGE_TIMEZONE:
+            timezone_name = BEIJING_TIME_PAGE_TIMEZONE[serial_number]
+            timezone_source = "页面"
+            log_print(f"[时间转换] ✓ 使用从 beijing_time.html 页面获取的时区: {timezone_name}")
+        
+        # 如果页面时区获取失败，则使用IP查询时区
+        if not timezone_name:
+            if ip:
+                timezone_name = get_timezone_from_ip(ip)
+                timezone_source = "IP查询"
+                if timezone_name:
+                    log_print(f"[时间转换] ✓ 使用IP查询获取的时区: {timezone_name}")
+            else:
+                log_print(f"[时间转换] ⚠ 无法获取时区（无serial_number和IP），假设原始时间为UTC")
+        
+        # 设置源时区
+        if not timezone_name:
+            # 如果无法获取时区，假设原始时间是UTC时间
+            log_print(f"[时间转换] ⚠ 无法获取时区，假设原始时间为UTC")
+            source_tz = pytz.UTC
+            timezone_source = "默认UTC"
+        else:
+            try:
+                source_tz = pytz.timezone(timezone_name)
+            except Exception as e:
+                log_print(f"[时间转换] ⚠ 时区名称无效: {timezone_name}, 使用UTC: {str(e)}")
+                source_tz = pytz.UTC
+                timezone_source = "默认UTC（时区无效）"
+        
+        # 将原始时间设置为源时区
+        original_dt = source_tz.localize(original_dt)
+        
+        # 转换为北京时间（UTC+8）
+        beijing_tz = pytz.timezone("Asia/Shanghai")
+        beijing_dt = original_dt.astimezone(beijing_tz)
+        
+        # 转换为时间戳（毫秒）
+        beijing_timestamp = int(beijing_dt.timestamp() * 1000)
+        
+        log_print(f"[时间转换] 原始时间: {original_time_str} ({timezone_name or 'UTC'}, 来源: {timezone_source}) -> 北京时间戳: {beijing_timestamp}")
+        
+        return original_time_str, beijing_timestamp
+        
+    except Exception as e:
+        log_print(f"[时间转换] ⚠ 时间转换失败: {str(e)}")
+        return original_time_str, 0
+
+
+def upload_closed_orders_data(browser_id, closed_orders_data_str, current_ip):
+    """
+    上传 Closed Orders 数据到接口
+    
+    Args:
+        browser_id: 浏览器编号
+        closed_orders_data_str: Closed Orders 数据字符串，格式: "唯一标题|||买卖方向|||选项|||限价类型|||价格|||进度|||状态|||时间;..."
+        current_ip: 当前使用的IP地址
+        
+    Returns:
+        bool: 上传成功返回True，失败返回False
+    """
+    if not closed_orders_data_str or closed_orders_data_str.strip() == "":
+        log_print(f"[{browser_id}] Closed Orders 数据为空，跳过上传")
+        return True  # 空数据不算失败
+    
+    # 如果 current_ip 为 None，尝试从 LAST_PROXY_CONFIG 获取
+    if current_ip is None:
+        log_print(f"[{browser_id}] ⚠ current_ip 为 None，尝试从 LAST_PROXY_CONFIG 获取...")
+        last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+        if last_config:
+            current_ip = last_config.get("ip")
+            if current_ip:
+                log_print(f"[{browser_id}] ✓ 从 LAST_PROXY_CONFIG 获取到IP: {current_ip}")
+            else:
+                log_print(f"[{browser_id}] ⚠ LAST_PROXY_CONFIG 中的IP也为空")
+        else:
+            log_print(f"[{browser_id}] ⚠ LAST_PROXY_CONFIG 中没有该浏览器的配置")
+    
+    # 如果仍然为 None，记录警告但继续处理（使用空字符串）
+    if current_ip is None:
+        log_print(f"[{browser_id}] ⚠ 无法获取当前IP，时间转换将使用UTC时区")
+    
+    try:
+        # 解析数据字符串
+        orders_list = []
+        order_strings = closed_orders_data_str.split(";")
+        
+        for order_str in order_strings:
+            if not order_str or not order_str.strip():
+                continue
+            
+            parts = order_str.split("|||")
+            if len(parts) < 8:
+                log_print(f"[{browser_id}] ⚠ Closed Orders 数据格式不正确，跳过: {order_str}")
+                continue
+            
+            trending = parts[0].strip()  # 唯一标题（事件）
+            side = parts[1].strip().upper()  # 买卖方向（SELL/BUY）
+            out_come = parts[2].strip().upper()  # 选项（YES/NO）
+            type_str = parts[3].strip().upper()  # 限价类型（LIMIT/MARKET）
+            price_raw = parts[4].strip()  # 价格（原始，可能包含美分符号）
+            progress = parts[5].strip()  # 进度
+            status = parts[6].strip().lower()  # 状态（filled/canceled）
+            time_str = parts[7].strip()  # 时间
+            
+            # 处理价格：去掉美分符号（¢），只保留数字
+            price = price_raw.replace("¢", "").strip()
+            
+            # 解析进度，拆分出成交数量和总共
+            fill_amt, amt = parse_progress_string(progress)
+            if fill_amt is None or amt is None:
+                log_print(f"[{browser_id}] ⚠ 无法解析进度字符串: {progress}，跳过该订单")
+                continue
+            
+            # 转换时间（优先使用页面获取的时区）
+            original_time, convert_time_timestamp = convert_time_to_beijing(time_str, current_ip, serial_number=browser_id)
+            
+            # 构建订单数据
+            order_data = {
+                "trending": trending,
+                "side": side,
+                "type": type_str,
+                "outCome": out_come,
+                "fillAmt": fill_amt,
+                "amt": amt,
+                "price": price,
+                "status": status,
+                "ip": current_ip if current_ip else "",
+                "time": original_time,
+                "convertTime": convert_time_timestamp
+            }
+            
+            orders_list.append(order_data)
+        
+        if len(orders_list) == 0:
+            log_print(f"[{browser_id}] ⚠ 没有有效的 Closed Orders 数据需要上传")
+            return True
+        
+        # 提交数据到接口
+        url = f"{SERVER_BASE_URL}/boost/insertClosedOrder"
+        payload = {
+            "number": str(browser_id),
+            "list": orders_list
+        }
+        
+        log_print(f"[{browser_id}] 开始上传 Closed Orders 数据到 /boost/insertClosedOrder，共 {len(orders_list)} 条...")
+        
+        # 打印数据详情（用于调试）
+        import json
+        payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
+        log_print(f"[{browser_id}] ==================== Closed Orders 数据详情 ====================")
+        log_print(f"[{browser_id}] {payload_str}")
+        log_print(f"[{browser_id}] =================================================================")
+        
+        response = requests.post(url, json=payload, timeout=15)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("code") == 0:
+                log_print(f"[{browser_id}] ✓ Closed Orders 数据上传成功")
+                return True
+            else:
+                log_print(f"[{browser_id}] ✗ Closed Orders 数据上传失败: {result.get('msg', '未知错误')}")
+                return False
+        else:
+            log_print(f"[{browser_id}] ✗ Closed Orders 数据上传失败: HTTP {response.status_code}")
+            return False
+            
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ 上传 Closed Orders 数据异常: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        return False
+
+
 def click_opinion_transactions_and_get_data(driver, serial_number):
     """
     点击 Opinion Trade Transactions 按钮并获取数据
@@ -13800,6 +14232,33 @@ def process_type2_mission(task_data, retry_count=0):
                         else:
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Closed Orders 数据获取失败，不提交数据")
                             return False, ""
+                    
+                    # 上传 Closed Orders 数据
+                    if closed_orders_data:
+                        log_print(f"[{browser_id}] 步骤8.6: 上传 Closed Orders 数据...")
+                        # 确保 current_ip 不为 None，如果为 None 则尝试从 LAST_PROXY_CONFIG 获取
+                        upload_ip = current_ip
+                        if upload_ip is None:
+                            log_print(f"[{browser_id}] ⚠ current_ip 为 None，尝试从 LAST_PROXY_CONFIG 获取...")
+                            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                            if last_config:
+                                upload_ip = last_config.get("ip")
+                                if upload_ip:
+                                    log_print(f"[{browser_id}] ✓ 从 LAST_PROXY_CONFIG 获取到IP: {upload_ip}")
+                                    # 更新 current_ip 以便后续使用
+                                    current_ip = upload_ip
+                                else:
+                                    log_print(f"[{browser_id}] ⚠ LAST_PROXY_CONFIG 中的IP也为空")
+                            else:
+                                log_print(f"[{browser_id}] ⚠ LAST_PROXY_CONFIG 中没有该浏览器的配置")
+                        
+                        upload_success = upload_closed_orders_data(browser_id, closed_orders_data, upload_ip)
+                        if upload_success:
+                            log_print(f"[{browser_id}] ✓ Closed Orders 数据上传完成")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ Closed Orders 数据上传失败，但继续执行后续步骤")
+                    else:
+                        log_print(f"[{browser_id}] Closed Orders 数据为空，跳过上传")
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤9: 点击 Transactions 并获取数据...")
                     transactions_data, need_retry_transactions = click_opinion_transactions_and_get_data(driver, browser_id)

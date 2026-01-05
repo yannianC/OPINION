@@ -276,6 +276,66 @@
                 @blur="saveHedgeSettings"
               />
             </div>
+            <div class="trending-filter">
+              <label>深度差15以上延时检测时间(秒):</label>
+              <input 
+                v-model="hedgeMode.delayTimeGt15" 
+                type="text" 
+                class="filter-input" 
+                placeholder="300-600"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>深度差2-15延时检测时间(秒):</label>
+              <input 
+                v-model="hedgeMode.delayTime2To15" 
+                type="text" 
+                class="filter-input" 
+                placeholder="30-60"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>深度差0.2-2延时检测时间(秒):</label>
+              <input 
+                v-model="hedgeMode.delayTime02To2" 
+                type="text" 
+                class="filter-input" 
+                placeholder="0.5-0.5"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>深度差0.1最大多吃价值(U):</label>
+              <input 
+                v-model.number="hedgeMode.maxEatValue01" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                step="0.1"
+                placeholder="20"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
+            <div class="trending-filter">
+              <label>先挂方价格最大波动(%):</label>
+              <input 
+                v-model.number="hedgeMode.maxPriceVolatility" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                max="100"
+                step="0.1"
+                placeholder="10"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+              />
+            </div>
           </div>
           <div class="auto-hedge-controls">
             <div class="hedge-amount-info">
@@ -2422,7 +2482,13 @@ const hedgeMode = reactive({
   maxDHour: 12,  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
-  balancePriority: 2000  // 资产优先级校验值
+  balancePriority: 2000,  // 资产优先级校验值
+  // 深度差相关设置
+  delayTimeGt15: '300-600',  // 深度差15以上挂单后延时检测时间（秒）
+  delayTime2To15: '30-60',  // 深度差2-15挂单后延时检测时间（秒）
+  delayTime02To2: '0.5-0.5',  // 深度差0.2-2挂单后延时检测时间（秒）
+  maxEatValue01: 20,  // 深度差0.1时，最大多吃价值（U）
+  maxPriceVolatility: 10  // 先挂方价格最大波动（买卖深度差的百分比）
 })
 
 // 交易费查询
@@ -6530,20 +6596,27 @@ const subtractLimitOrdersFromOrderbook = (orderbook, limitOrders) => {
  * 类似 parseType3Message 的处理方式，直接返回先挂方的数据
  * 增加深度和价差判断
  * 新增：从订单薄中减去 calLimitOrder 返回的挂单数量
+ * 新增：根据深度差范围计算价格和 tp2 值
  */
 const parseOrderbookData = async (config, isClose) => {
   try {
-    // 获取yes和no的订单薄数据
-    const [yesOrderbook, noOrderbook] = await Promise.all([
+    // 获取yes和no的订单薄数据（原始数据，不剔除挂单）
+    const [yesOrderbookRaw, noOrderbookRaw] = await Promise.all([
       fetchOrderbook(config.trendingPart1),
       fetchOrderbook(config.trendingPart2)
     ])
     
-    // 获取YES的买一价和卖一价
-    let yesBids = yesOrderbook.bids || []
-    let yesAsks = yesOrderbook.asks || []
-    let noBids = noOrderbook.bids || []
-    let noAsks = noOrderbook.asks || []
+    // 保存原始订单薄数据（用于后续计算）
+    const yesBidsRaw = [...(yesOrderbookRaw.bids || [])]
+    const yesAsksRaw = [...(yesOrderbookRaw.asks || [])]
+    const noBidsRaw = [...(noOrderbookRaw.bids || [])]
+    const noAsksRaw = [...(noOrderbookRaw.asks || [])]
+    
+    // 获取YES的买一价和卖一价（用于判断先挂方和深度差）
+    let yesBids = [...yesBidsRaw]
+    let yesAsks = [...yesAsksRaw]
+    let noBids = [...noBidsRaw]
+    let noAsks = [...noAsksRaw]
     
     // 请求 calLimitOrder API 获取挂单数据
     try {
@@ -6599,15 +6672,20 @@ const parseOrderbookData = async (config, isClose) => {
     // bids 按价格从高到低排序
     yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
     noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
-    // asks 按价格从低到高排序
     yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
     noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
     
-    // 获取YES方的买一和卖一
+    // 原始数据也排序
+    yesBidsRaw.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    noBidsRaw.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    yesAsksRaw.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    noAsksRaw.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+    
+    // 获取YES方的买一和卖一（剔除挂单后的数据）
     const yesBid = yesBids[0]
     const yesAsk = yesAsks[0]
     
-    // 获取NO方的买一和卖一  
+    // 获取NO方的买一和卖一（剔除挂单后的数据）
     const noBid = noBids[0]
     const noAsk = noAsks[0]
     
@@ -6625,20 +6703,25 @@ const parseOrderbookData = async (config, isClose) => {
     // 确定先挂方：根据开仓/平仓判断
     let firstSide, price1, price2, depth1, depth2
     let firstBids, firstAsks
+    let firstBidsRaw, firstAsksRaw  // 原始数据
     
     if (isClose) {
       // 平仓：买一价更高的为先挂方
       firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
       firstBids = firstSide === 'YES' ? yesBids : noBids
       firstAsks = firstSide === 'YES' ? yesAsks : noAsks
+      firstBidsRaw = firstSide === 'YES' ? yesBidsRaw : noBidsRaw
+      firstAsksRaw = firstSide === 'YES' ? yesAsksRaw : noAsksRaw
     } else {
       // 开仓：卖一价更高的为先挂方
       firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
       firstBids = firstSide === 'YES' ? yesBids : noBids
       firstAsks = firstSide === 'YES' ? yesAsks : noAsks
+      firstBidsRaw = firstSide === 'YES' ? yesBidsRaw : noBidsRaw
+      firstAsksRaw = firstSide === 'YES' ? yesAsksRaw : noAsksRaw
     }
     
-    // 获取先挂方的买一价和卖一价
+    // 获取先挂方的买一价和卖一价（剔除挂单后的数据）
     if (firstSide === 'YES') {
       price1 = yesBidPrice  // 先挂方的买一价
       price2 = yesAskPrice  // 先挂方的卖一价
@@ -6650,6 +6733,10 @@ const parseOrderbookData = async (config, isClose) => {
       depth1 = noBidDepth   // 先挂方的买一深度
       depth2 = noAskDepth   // 先挂方的卖一深度
     }
+    
+    // 计算深度差（卖一减去买一的绝对值）
+    const depthDiff = Math.abs(price2 - price1)
+    console.log(`配置 ${config.id} - 先挂方 ${firstSide} - 深度差: ${depthDiff.toFixed(2)}`)
     
     // === 新增判断：深度检查 ===
     // 累加 bids 价格最高的N组数据的 size
@@ -6693,6 +6780,152 @@ const parseOrderbookData = async (config, isClose) => {
       }
     }
     
+    // 获取原始数据的买一和卖一价格
+    const rawBid1 = parseFloat(firstBidsRaw[0].price) * 100
+    const rawAsk1 = parseFloat(firstAsksRaw[0].price) * 100
+    const rawBid1Depth = parseFloat(firstBidsRaw[0].size)
+    const rawAsk1Depth = parseFloat(firstAsksRaw[0].size)
+    
+    // 根据深度差范围计算价格和 tp2
+    let finalPrice = null
+    let tp2 = null
+    const maxPriceVolatility = hedgeMode.maxPriceVolatility / 100  // 转换为小数
+    
+    // 辅助函数：从范围字符串中获取随机值（秒）
+    const getRandomFromRange = (rangeStr) => {
+      const [min, max] = rangeStr.split('-').map(v => parseFloat(v.trim()))
+      return Math.random() * (max - min) + min
+    }
+    
+    // 辅助函数：计算价格调整值（深度差的1%到10%之间，最小0.1）
+    const calculatePriceAdjustment = (diff) => {
+      const minAdjust = Math.max(0.1, diff * 0.01)
+      const maxAdjust = diff * maxPriceVolatility
+      return Math.random() * (maxAdjust - minAdjust) + minAdjust
+    }
+    
+    if (depthDiff > 15) {
+      // 深度差 > 15：先判断 (买一价+卖一价)/2 是否大于"先挂方价格区间"的最小值
+      const avgPrice = (price1 + price2) / 2
+      const priceMin = hedgeMode.priceRangeMin
+      
+      console.log(`深度差 > 15 - 平均价格: ${avgPrice.toFixed(2)}, 最小价格要求: ${priceMin}`)
+      
+      if (avgPrice <= priceMin) {
+        throw new Error(`深度差>15时，平均价格 ${avgPrice.toFixed(2)} 不大于价格区间最小值 ${priceMin}`)
+      }
+      
+      // 使用原始数据计算价格
+      if (isClose) {
+        // 平仓：原始数据的卖一价 - 深度差的1%-10%之间取随机值
+        const adjustment = calculatePriceAdjustment(depthDiff)
+        finalPrice = rawAsk1 - adjustment
+      } else {
+        // 开仓：原始数据的买一价 + 深度差的1%-10%之间取随机值
+        const adjustment = calculatePriceAdjustment(depthDiff)
+        finalPrice = rawBid1 + adjustment
+      }
+      
+      // tp2 为深度差15以上挂单后延时检测时间的随机值（秒）
+      const delayRange = hedgeMode.delayTimeGt15
+      tp2 = getRandomFromRange(delayRange)
+      
+      console.log(`深度差 > 15 - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
+      
+    } else if (depthDiff >= 2) {
+      // 深度差 2-15
+      if (isClose) {
+        // 平仓：原始数据的卖一价 - 深度差的1%-10%之间取随机值
+        const adjustment = calculatePriceAdjustment(depthDiff)
+        finalPrice = rawAsk1 - adjustment
+      } else {
+        // 开仓：原始数据的买一价 + 深度差的1%-10%之间取随机值
+        const adjustment = calculatePriceAdjustment(depthDiff)
+        finalPrice = rawBid1 + adjustment
+      }
+      
+      // tp2 为深度差2-15挂单后延时检测时间的随机值（秒）
+      const delayRange = hedgeMode.delayTime2To15
+      tp2 = getRandomFromRange(delayRange)
+      
+      console.log(`深度差 2-15 - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
+      
+    } else if (depthDiff >= 0.2) {
+      // 深度差 0.2-2
+      if (isClose) {
+        // 平仓：原始数据的卖一价 - 深度差的1%-10%之间取随机值
+        const adjustment = calculatePriceAdjustment(depthDiff)
+        finalPrice = rawAsk1 - adjustment
+      } else {
+        // 开仓：原始数据的买一价 + 深度差的1%-10%之间取随机值
+        const adjustment = calculatePriceAdjustment(depthDiff)
+        finalPrice = rawBid1 + adjustment
+      }
+      
+      // tp2 为深度差0.2-2挂单后延时检测时间的随机值（秒）
+      const delayRange = hedgeMode.delayTime02To2
+      tp2 = getRandomFromRange(delayRange)
+      
+      console.log(`深度差 0.2-2 - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
+      
+    } else if (Math.abs(depthDiff - 0.1) < 0.01) {
+      // 深度差 0.1（允许0.09-0.11的误差）
+      const maxEatValue = hedgeMode.maxEatValue01
+      const maxDepth = hedgeMode.maxDepth
+      
+      if (isClose) {
+        // 平仓：先用卖一价*深度（即数量），得到价值
+        const askValue = rawAsk1 * rawAsk1Depth
+        
+        if (askValue < maxDepth) {
+          // 价值小于最大允许深度，符合要求
+          finalPrice = rawAsk1
+          console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)} < 最大允许深度 ${maxDepth}，使用卖一价: ${finalPrice.toFixed(2)}`)
+        } else {
+          // 价值大于最大允许深度，检查买一价的价值是否小于最大多吃价值
+          const bidValue = rawBid1 * rawBid1Depth
+          
+          if (bidValue < maxEatValue) {
+            finalPrice = rawBid1
+            console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，但买一价值 ${bidValue.toFixed(2)} < 最大多吃价值 ${maxEatValue}，使用买一价: ${finalPrice.toFixed(2)}`)
+          } else {
+            throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，且买一价值 ${bidValue.toFixed(2)} >= 最大多吃价值 ${maxEatValue}`)
+          }
+        }
+      } else {
+        // 开仓：先用买一价*深度（即数量），得到价值
+        const bidValue = rawBid1 * rawBid1Depth
+        
+        if (bidValue < maxDepth) {
+          // 价值小于最大允许深度，符合要求
+          finalPrice = rawBid1
+          console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)} < 最大允许深度 ${maxDepth}，使用买一价: ${finalPrice.toFixed(2)}`)
+        } else {
+          // 价值大于最大允许深度，检查卖一价的价值是否小于最大多吃价值
+          const askValue = rawAsk1 * rawAsk1Depth
+          
+          if (askValue < maxEatValue) {
+            finalPrice = rawAsk1
+            console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，但卖一价值 ${askValue.toFixed(2)} < 最大多吃价值 ${maxEatValue}，使用卖一价: ${finalPrice.toFixed(2)}`)
+          } else {
+            throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，且卖一价值 ${askValue.toFixed(2)} >= 最大多吃价值 ${maxEatValue}`)
+          }
+        }
+      }
+      
+      // 深度差0.1时，tp2 为深度差0.2-2挂单后延时检测时间的随机值（秒）
+      const delayRange = hedgeMode.delayTime02To2
+      tp2 = getRandomFromRange(delayRange)
+      
+      console.log(`深度差 0.1 - 最终价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
+      
+    } else {
+      // 其他深度差范围，使用原来的逻辑
+      finalPrice = (price1 + price2) / 2
+      tp2 = null
+      console.log(`深度差 ${depthDiff.toFixed(2)} - 使用平均价格: ${finalPrice.toFixed(2)}`)
+    }
+    
     // === 新增判断：先挂方价格区间检查 ===
     const priceMin = hedgeMode.priceRangeMin
     const priceMax = hedgeMode.priceRangeMax
@@ -6715,15 +6948,17 @@ const parseOrderbookData = async (config, isClose) => {
     
     return {
       firstSide,
-      price1,           // 先挂方的买一价
-      price2,           // 先挂方的卖一价
+      price1,           // 先挂方的买一价（剔除挂单后）
+      price2,           // 先挂方的卖一价（剔除挂单后）
       depth1,           // 先挂方的买一深度
       depth2,           // 先挂方的卖一深度
-      diff: Math.abs(price1 - price2),  // 先挂方买卖价差
+      diff: depthDiff,  // 先挂方买卖价差（深度差）
       minPrice: Math.min(price1, price2),
       maxPrice: Math.max(price1, price2),
       topNBidsDepth,    // 买1-N深度累计
-      topNAsksDepth     // 卖1-N深度累计
+      topNAsksDepth,    // 卖1-N深度累计
+      finalPrice,       // 计算出的最终价格
+      tp2               // 延时检测时间（秒）
     }
   } catch (error) {
     console.error('解析订单薄数据失败:', error)
@@ -6856,28 +7091,36 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
  * 从订单薄数据执行对冲
  * price1: 先挂方的买一价
  * price2: 先挂方的卖一价
+ * finalPrice: 计算出的最终价格
+ * tp2: 延时检测时间（秒）
  * 支持同时执行多个对冲任务
  */
 const executeHedgeFromOrderbook = async (config, priceInfo) => {
   try {
     console.log(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
     
-    // 计算订单价格
+    // 使用计算出的最终价格，如果没有则使用原来的逻辑
     let orderPrice
-    if (priceInfo.diff > 0.15) {
-      // 先挂方买卖价差大于0.15，取平均价
-      orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
-      console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
+    if (priceInfo.finalPrice !== null && priceInfo.finalPrice !== undefined) {
+      orderPrice = priceInfo.finalPrice.toFixed(1)
+      console.log(`使用计算出的最终价格: ${orderPrice}`)
     } else {
-      // 差值小于等于0.15，根据开仓/平仓取价格
-      if (!hedgeMode.isClose) {
-        // 开仓模式：取较小的价格（买一价）
-        orderPrice = priceInfo.minPrice.toFixed(1)
-        console.log(`开仓模式，订单价格（买一价）: ${orderPrice}`)
+      // 兼容旧逻辑
+      if (priceInfo.diff > 0.15) {
+        // 先挂方买卖价差大于0.15，取平均价
+        orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
+        console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
       } else {
-        // 平仓模式：取较大的价格（卖一价）
-        orderPrice = priceInfo.maxPrice.toFixed(1)
-        console.log(`平仓模式，订单价格（卖一价）: ${orderPrice}`)
+        // 差值小于等于0.15，根据开仓/平仓取价格
+        if (!hedgeMode.isClose) {
+          // 开仓模式：取较小的价格（买一价）
+          orderPrice = priceInfo.minPrice.toFixed(1)
+          console.log(`开仓模式，订单价格（买一价）: ${orderPrice}`)
+        } else {
+          // 平仓模式：取较大的价格（卖一价）
+          orderPrice = priceInfo.maxPrice.toFixed(1)
+          console.log(`平仓模式，订单价格（卖一价）: ${orderPrice}`)
+        }
       }
     }
     
@@ -7013,14 +7256,16 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             await executeHedgeTaskV2(config, {
               ...hedgeData,
               currentPrice: orderPrice,
-              firstSide: priceInfo.firstSide
+              firstSide: priceInfo.firstSide,
+              tp2: priceInfo.tp2  // 传递 tp2 值
             })
           } else {
             // 模式1：使用原有逻辑
             await executeHedgeTask(config, {
               ...hedgeData,
               currentPrice: orderPrice,
-              firstSide: priceInfo.firstSide
+              firstSide: priceInfo.firstSide,
+              tp2: priceInfo.tp2  // 传递 tp2 值
             })
           }
           
@@ -7818,6 +8063,12 @@ const saveHedgeSettings = () => {
       // 资产优先级校验设置
       needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
       balancePriority: hedgeMode.balancePriority,
+      // 深度差相关设置
+      delayTimeGt15: hedgeMode.delayTimeGt15,
+      delayTime2To15: hedgeMode.delayTime2To15,
+      delayTime02To2: hedgeMode.delayTime02To2,
+      maxEatValue01: hedgeMode.maxEatValue01,
+      maxPriceVolatility: hedgeMode.maxPriceVolatility,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
       hedgeTaskInterval: hedgeTaskInterval.value,
@@ -7921,6 +8172,23 @@ const loadHedgeSettings = () => {
     }
     if (settings.balancePriority !== undefined) {
       hedgeMode.balancePriority = settings.balancePriority
+    }
+    
+    // 深度差相关设置
+    if (settings.delayTimeGt15 !== undefined) {
+      hedgeMode.delayTimeGt15 = settings.delayTimeGt15
+    }
+    if (settings.delayTime2To15 !== undefined) {
+      hedgeMode.delayTime2To15 = settings.delayTime2To15
+    }
+    if (settings.delayTime02To2 !== undefined) {
+      hedgeMode.delayTime02To2 = settings.delayTime02To2
+    }
+    if (settings.maxEatValue01 !== undefined) {
+      hedgeMode.maxEatValue01 = settings.maxEatValue01
+    }
+    if (settings.maxPriceVolatility !== undefined) {
+      hedgeMode.maxPriceVolatility = settings.maxPriceVolatility
     }
     
     // 其他设置
@@ -8212,6 +8480,12 @@ const executeHedgeTask = async (config, hedgeData) => {
       amt: roundedShare,  // 保留2位小数向下取整
       price: hedgeData.currentPrice,
       tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
+    }
+    
+    // 如果提供了 tp2 值，添加到任务数据中（秒，取整）
+    if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+      taskData.tp2 = Math.round(hedgeData.tp2)  // 取整秒数
+      console.log(`添加 tp2 字段: ${taskData.tp2} 秒`)
     }
     
     const response = await axios.post(
@@ -8616,6 +8890,12 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
         }
         
+        // 如果提供了 tp2 值，添加到任务数据中（秒，取整）
+        if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+          taskData.tp2 = Math.round(hedgeData.tp2)  // 取整秒数
+          console.log(`[executeHedgeTaskV2] 先挂方任务添加 tp2 字段: ${taskData.tp2} 秒`)
+        }
+        
         const response = await axios.post(
           'https://sg.bicoin.com.cn/99l/mission/add',
           taskData,
@@ -8720,6 +9000,12 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
             price: taskPrice,
             tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
             // 不再需要tp1
+          }
+          
+          // 如果提供了 tp2 值，添加到任务数据中（秒，取整）
+          if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+            taskData.tp2 = Math.round(hedgeData.tp2)  // 取整秒数
+            console.log(`[executeHedgeTaskV2] 后挂方任务添加 tp2 字段: ${taskData.tp2} 秒`)
           }
           
           const response = await axios.post(
