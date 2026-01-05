@@ -9354,7 +9354,12 @@ def click_opinion_position_and_get_data(driver, serial_number):
                         unique_title = f"{current_main_title}###{sub_title}"
                     else:
                         # 没有子标题，直接是方向
-                        direction = first_td_p.strip()
+                        direction = first_td_p.strip().lower()
+                        # 特殊处理：将特定方向转换为标准格式
+                        if direction == "monad" or direction == "gold":
+                            direction = "YES"
+                        elif direction == "megaeth" or direction == "eth":
+                            direction = "NO"
                         unique_title = current_main_title
                     
                     # 第二个td：数量
@@ -10592,7 +10597,7 @@ def get_timezone_from_ip(ip):
         return None
 
 
-def convert_time_to_beijing(original_time_str, ip, serial_number=None):
+def convert_time_to_beijing(original_time_str, ip, serial_number=None, cached_timezone=None):
     """
     将原始时间转换为北京时间时间戳
     
@@ -10600,6 +10605,7 @@ def convert_time_to_beijing(original_time_str, ip, serial_number=None):
         original_time_str: 原始时间字符串，格式如 "Jan 05, 2026 13:30:43"
         ip: IP地址，用于获取时区（备用方案）
         serial_number: 浏览器序列号，用于从页面获取时区（优先方案）
+        cached_timezone: 已缓存的时区名称，如果提供则直接使用，不再查询IP
         
     Returns:
         tuple: (原始时间字符串, 转换后的北京时间戳（毫秒）)
@@ -10631,9 +10637,13 @@ def convert_time_to_beijing(original_time_str, ip, serial_number=None):
             timezone_source = "页面"
             log_print(f"[时间转换] ✓ 使用从 beijing_time.html 页面获取的时区: {timezone_name}")
         
-        # 如果页面时区获取失败，则使用IP查询时区
+        # 如果页面时区获取失败，则使用缓存的时区或IP查询时区
         if not timezone_name:
-            if ip:
+            if cached_timezone:
+                # 使用已缓存的时区，不再查询
+                timezone_name = cached_timezone
+                timezone_source = "IP查询（已缓存）"
+            elif ip:
                 timezone_name = get_timezone_from_ip(ip)
                 timezone_source = "IP查询"
                 if timezone_name:
@@ -10707,6 +10717,15 @@ def upload_closed_orders_data(browser_id, closed_orders_data_str, current_ip):
     if current_ip is None:
         log_print(f"[{browser_id}] ⚠ 无法获取当前IP，时间转换将使用UTC时区")
     
+    # 在开始转换前，先查询一次时区（如果页面时区获取失败的话）
+    cached_timezone = None
+    if browser_id not in BEIJING_TIME_PAGE_TIMEZONE:
+        # 页面时区获取失败，需要查询IP时区
+        if current_ip:
+            cached_timezone = get_timezone_from_ip(current_ip)
+            if cached_timezone:
+                log_print(f"[{browser_id}] ✓ 预先查询时区成功: {cached_timezone}，后续转换将使用此缓存")
+    
     try:
         # 解析数据字符串
         orders_list = []
@@ -10739,8 +10758,8 @@ def upload_closed_orders_data(browser_id, closed_orders_data_str, current_ip):
                 log_print(f"[{browser_id}] ⚠ 无法解析进度字符串: {progress}，跳过该订单")
                 continue
             
-            # 转换时间（优先使用页面获取的时区）
-            original_time, convert_time_timestamp = convert_time_to_beijing(time_str, current_ip, serial_number=browser_id)
+            # 转换时间（优先使用页面获取的时区，如果失败则使用预先查询的缓存时区）
+            original_time, convert_time_timestamp = convert_time_to_beijing(time_str, current_ip, serial_number=browser_id, cached_timezone=cached_timezone)
             
             # 构建订单数据
             order_data = {

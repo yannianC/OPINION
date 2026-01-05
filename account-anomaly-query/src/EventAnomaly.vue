@@ -1513,14 +1513,21 @@ const loadAndCalculate = async () => {
       const data = accountResponse.data.data.list
       console.log(`[事件异常] 获取到 ${data.length} 条数据，开始解析...`)
       
-      // 保存原始账户数据，用于导出浏览器编号
-      accountDataCache.value = data
+      // 过滤掉 amt < 1 的数据
+      const filteredData = data.filter(row => {
+        const amt = parseFloat(row.amt) || 0
+        return amt >= 1
+      })
+      console.log(`[事件异常] 过滤后剩余 ${filteredData.length} 条数据（已过滤掉 ${data.length - filteredData.length} 条 amt < 1 的数据）`)
+      
+      // 保存原始账户数据，用于导出浏览器编号（使用过滤后的数据）
+      accountDataCache.value = filteredData
       
       // 使用 Map 存储每个事件的统计数据
       const eventMap = new Map()
       
-      // 处理每条数据
-      for (const row of data) {
+      // 处理每条数据（使用过滤后的数据）
+      for (const row of filteredData) {
         // 从 trendingKey 中提取 id（格式：id::方向）
         if (!row.trendingKey) {
           continue
