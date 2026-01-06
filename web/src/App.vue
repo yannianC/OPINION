@@ -155,6 +155,11 @@
                   <div class="query-result-reason">{{ queryResult.reason }}</div>
                 </div>
               </div>
+              <div style="margin-top: 15px; text-align: right;">
+                <span style="font-size: 24px; font-weight: bold; color: #28a745;">
+                  正在运行的任务组数: {{ runningHedgeGroupsCount }}
+                </span>
+              </div>
             </div>
           </div>
         </section>
@@ -2488,6 +2493,7 @@ const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
 const hedgeTasksPerTopic = ref(2)  // 一个主题同时执行的对冲任务数量，默认为2
 const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不等待）
+const runningHedgeGroupsCount = ref(0)  // 当前正在运行的任务组数
 
 // 分批执行相关
 const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
@@ -8700,6 +8706,10 @@ const saveHedgeSettings = () => {
       taskCountThreshold: hedgeMode.taskCountThreshold,
       waitTimeLessThanThreshold: hedgeMode.waitTimeLessThanThreshold,
       waitTimeGreaterThanThreshold: hedgeMode.waitTimeGreaterThanThreshold,
+      // 订单薄更新设置
+      minPositionForClose: hedgeMode.minPositionForClose,
+      minPositionForOpen: hedgeMode.minPositionForOpen,
+      orderbookMismatchInterval: hedgeMode.orderbookMismatchInterval,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -8827,6 +8837,17 @@ const loadHedgeSettings = () => {
     }
     if (settings.waitTimeGreaterThanThreshold !== undefined) {
       hedgeMode.waitTimeGreaterThanThreshold = settings.waitTimeGreaterThanThreshold
+    }
+    
+    // 订单薄更新设置
+    if (settings.minPositionForClose !== undefined) {
+      hedgeMode.minPositionForClose = settings.minPositionForClose
+    }
+    if (settings.minPositionForOpen !== undefined) {
+      hedgeMode.minPositionForOpen = settings.minPositionForOpen
+    }
+    if (settings.orderbookMismatchInterval !== undefined) {
+      hedgeMode.orderbookMismatchInterval = settings.orderbookMismatchInterval
     }
     
     // yes数量大于、模式选择、账户选择
@@ -9074,6 +9095,9 @@ const executeHedgeTask = async (config, hedgeData) => {
   
   // 添加到数组中
   config.currentHedges.push(hedgeRecord)
+  
+  // 增加正在运行的任务组数
+  runningHedgeGroupsCount.value++
   
   // 为了兼容旧代码，也设置 currentHedge（指向最新的）
   config.currentHedge = hedgeRecord
@@ -9449,6 +9473,9 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
   
   // 添加到数组中
   config.currentHedges.push(hedgeRecord)
+  
+  // 增加正在运行的任务组数
+  runningHedgeGroupsCount.value++
   
   // 为了兼容旧代码，也设置 currentHedge（指向最新的）
   config.currentHedge = hedgeRecord
@@ -9839,7 +9866,14 @@ const finishHedge = (config, hedgeRecord) => {
   if (config.currentHedges) {
     const index = config.currentHedges.findIndex(h => h.id === hedgeRecord.id)
     if (index !== -1) {
+      // 在移除前检查任务状态，只有状态为 'running' 的任务才会计入统计
+      const hedgeToRemove = config.currentHedges[index]
+      const wasRunning = hedgeToRemove.finalStatus === 'running'
       config.currentHedges.splice(index, 1)
+      // 减少正在运行的任务组数（只有曾经是 running 状态的任务才减少）
+      if (wasRunning && runningHedgeGroupsCount.value > 0) {
+        runningHedgeGroupsCount.value--
+      }
     }
     
     // 如果还有运行中的对冲任务，设置 currentHedge 为最新的运行中的任务
@@ -9859,6 +9893,10 @@ const finishHedge = (config, hedgeRecord) => {
     // 兼容旧代码
     config.currentHedge = null
     pausedType3Tasks.value.delete(config.id)
+    // 减少正在运行的任务组数
+    if (runningHedgeGroupsCount.value > 0) {
+      runningHedgeGroupsCount.value--
+    }
   }
 }
 
