@@ -4116,7 +4116,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                                     save_mission_result(target_mission_id, 13)
-                        
+                        hava_order = True
                         # 继续等待，不退出循环
                         time.sleep(check_interval)
                         continue
@@ -4145,7 +4145,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status != None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -4159,7 +4159,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                                     save_mission_result(target_mission_id, 13)
-                            
+                            hava_order = True
                             # 继续等待，不退出循环
                             time.sleep(check_interval)
                             continue
@@ -4173,56 +4173,54 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     
     both_hava_order = False
      
-    if not position_changed:
-        log_print(f"[{serial_number}] [{task_label}] ✗ Position未检测到变化，超时")
         
-        if hava_order:
-            # 在10分钟内，每隔30秒检测一次任务一的状态
-            log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务一状态）...")
-            phase2_timeout = 600  # 10分钟
-            phase2_check_interval = 30  # 30秒
-            phase2_start_time = time.time()
-            
-            while time.time() - phase2_start_time < phase2_timeout:
-                try:
-                    elapsed = int(time.time() - phase2_start_time)
-                    # 获取任务一的状态
-                    current_status = get_mission_status(target_mission_id)
-                    if is_task1:
-                        if current_status == 14:
-                            both_hava_order = True
-                            break;
-                        elif current_status == 12:
-                            continue;
-                        elif current_status == 13:
-                            both_hava_order = True
-                            break;
-                        elif current_status == 11:
-                            both_hava_order = True
-                            break;
-                    else:
-                        if current_status == 14:
-                            both_hava_order = True
-                            break;
-                        elif current_status == 13:
-                            continue;
-                        elif current_status == 12:
-                            both_hava_order = True
-                            break;
-                        elif current_status == 8:
-                            both_hava_order = True
-                            break;
-                    
-                    # 等待30秒后继续下一次检测
-                    time.sleep(phase2_check_interval)
-                    
-                except Exception as e:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 检测任务一状态时出错: {str(e)}")
-                    time.sleep(phase2_check_interval)
+    if hava_order or position_changed:
+        # 在10分钟内，每隔30秒检测一次任务一的状态
+        log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务状态）...")
+        phase2_timeout = 90  # 10分钟
+        phase2_check_interval = 20  # 30秒
+        phase2_start_time = time.time()
         
-        log_print(f"[{serial_number}] [{task_label}] 10分钟定期检测结束")
+        while time.time() - phase2_start_time < phase2_timeout:
+            try:
+                elapsed = int(time.time() - phase2_start_time)
+                # 获取任务一的状态
+                current_status = get_mission_status(target_mission_id)
+                if is_task1:
+                    if current_status == 14:
+                        both_hava_order = True
+                        break;
+                    elif current_status == 12:
+                        continue;
+                    elif current_status == 13:
+                        both_hava_order = True
+                        break;
+                    elif current_status == 11:
+                        both_hava_order = True
+                        break;
+                else:
+                    if current_status == 14:
+                        both_hava_order = True
+                        break;
+                    elif current_status == 13:
+                        continue;
+                    elif current_status == 12:
+                        both_hava_order = True
+                        break;
+                    elif current_status == 8:
+                        both_hava_order = True
+                        break;
+                
+                # 等待30秒后继续下一次检测
+                time.sleep(phase2_check_interval)
+                
+            except Exception as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 检测任务一状态时出错: {str(e)}")
+                time.sleep(phase2_check_interval)
     
-    if not position_changed and not both_hava_order: 
+    log_print(f"[{serial_number}] [{task_label}] 90s定期检测结束")
+    
+    if  not both_hava_order: 
   
         try:
             # 点击Open Orders按钮
@@ -4248,7 +4246,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not open_orders_div:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
-                return False, "Position未检测到变化超时,未找到挂单"
+                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
             
             # 获取 tbody 和 tr
             try:
@@ -4256,11 +4254,11 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 tr_list = tbody.find_elements(By.TAG_NAME, "tr")
             except:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
-                return False, "Position未检测到变化超时,未找到挂单"
+                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
             
             if not tr_list or len(tr_list) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
-                return False, "Position未检测到变化超时,未找到挂单"
+                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
             
             # 有挂单，检查任务一状态，判断另一个任务是否已经变化
             log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，检查任务一状态，判断另一个任务是否已变化...")
@@ -4272,14 +4270,14 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             tds = first_tr.find_elements(By.TAG_NAME, "td")
             if len(tds) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
-                return False, "Position未检测到变化超时,未找到挂单"
+                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
             
             last_td = tds[-1]  # 最后一个td
             svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
             
             if not svg_elements or len(svg_elements) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
-                return False, "Position未检测到变化超时，挂单取消失败"
+                return False, "未检测到都拥有单子,尝试取消挂单，挂单取消失败"
             
             log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
             svg_elements[0].click()
@@ -4311,7 +4309,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not confirm_found:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
-                return False, "Position未检测到变化超时，挂单取消失败"
+                return False, "未检测到都拥有单子,尝试取消挂单，挂单取消失败"
             
             # 等待10秒
             log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
@@ -4345,13 +4343,13 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 return False, "吃单失败，有挂单，已取消挂单"
             else:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
-                return False, "Position未检测到变化超时,且取消挂单失败"
+                return False, "未检测到都拥有单子,尝试取消挂单,且取消挂单失败"
                 
         except Exception as e:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
             import traceback
             log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-            return False, "Position未检测到变化超时,且取消挂单出错"
+            return False, "未检测到都拥有单子,尝试取消挂单,且取消挂单出错"
     
         
     # 第三阶段：获取Position和Open Orders的详细数据
@@ -4400,31 +4398,72 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not position_div:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Position div")
-                return False, "未找到Position数据"
-            
-            # 获取 tbody 和 tr
-            tbody = position_div.find_element(By.TAG_NAME, "tbody")
-            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-            
-            if not tr_list or len(tr_list) == 0:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ Position中没有tr")
-                return False, "Position中没有数据"
-            
-            # 等待tr中的内容完全加载
-            log_print(f"[{serial_number}] [{task_label}] 等待tr内容加载...")
-            time.sleep(3)
-            if trending_part1:
-                # 有子标题：找到包含子标题的tr
-                log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的行...")
-                for tr in tr_list:
-                    try:
-                        # 获取第一个td的div下的p标签
-                        tds = tr.find_elements(By.TAG_NAME, "td")
-                        if len(tds) > 0:
-                            first_td_ps = tds[0].find_elements(By.TAG_NAME, "p")
-                            first_td_text = " ".join([p.text.strip() for p in first_td_ps])
-                            if trending_part1 in first_td_text:
-                                log_print(f"[{serial_number}] [{task_label}] ✓ 找到包含子标题的行")
+                filled_amount = "0"
+                filled_price = "--"
+                log_print(f"[{serial_number}] [{task_label}] 设置 filled_amount = 0，跳过获取tr数据")
+            else:
+                # 获取 tbody 和 tr
+                try:
+                    tbody = position_div.find_element(By.TAG_NAME, "tbody")
+                    tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                    
+                    if not tr_list or len(tr_list) == 0:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ Position中没有tr")
+                        filled_amount = "0"
+                        filled_price = "--"
+                        log_print(f"[{serial_number}] [{task_label}] 设置 filled_amount = 0，跳过获取tr数据")
+                    else:
+                        # 等待tr中的内容完全加载
+                        log_print(f"[{serial_number}] [{task_label}] 等待tr内容加载...")
+                        time.sleep(3)
+                        if trending_part1:
+                            # 有子标题：找到包含子标题的tr
+                            log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的行...")
+                            for tr in tr_list:
+                                try:
+                                    # 获取第一个td的div下的p标签
+                                    tds = tr.find_elements(By.TAG_NAME, "td")
+                                    if len(tds) > 0:
+                                        first_td_ps = tds[0].find_elements(By.TAG_NAME, "p")
+                                        first_td_text = " ".join([p.text.strip() for p in first_td_ps])
+                                        if trending_part1 in first_td_text:
+                                            log_print(f"[{serial_number}] [{task_label}] ✓ 找到包含子标题的行")
+                                            # 【DEBUG】打印所有td的详细内容
+                                            log_print(f"[{serial_number}] [{task_label}] === 开始打印该tr下所有td的详细内容 ===")
+                                            for td_idx, td in enumerate(tds):
+                                                # 方法1：直接获取td.text
+                                                td_text = td.text.strip()
+                                                # 方法2：查找p标签
+                                                td_ps = td.find_elements(By.TAG_NAME, "p")
+                                                td_p_texts = [p.text.strip() for p in td_ps]
+                                                # 方法3：查找div标签
+                                                td_divs = td.find_elements(By.TAG_NAME, "div")
+                                                # 方法4：获取innerHTML
+                                       
+                                                log_print(f"[{serial_number}] [{task_label}] TD[{td_idx}]:")
+                                                log_print(f"[{serial_number}] [{task_label}]   - td.text: '{td_text}'")
+                                                log_print(f"[{serial_number}] [{task_label}]   - p标签: {td_p_texts}")
+                                                log_print(f"[{serial_number}] [{task_label}]   - div数量: {len(td_divs)}")
+                          
+                                            log_print(f"[{serial_number}] [{task_label}] === 打印完毕 ===")
+                                            # 第2个td（index=1）：已成交数量
+                                            if len(tds) > 1:
+                                                td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                                                filled_amount = td2_ps[0].text.strip() if td2_ps else ""
+                                            # 第4个td（index=3）：价格
+                                            if len(tds) > 3:
+                                                td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
+                                                filled_price = td4_ps[0].text.strip() if td4_ps else ""
+                                            break
+                                except Exception as e:
+                                    log_print(f"[{serial_number}] [{task_label}] ⚠ 解析Position行失败: {str(e)}")
+                                    continue
+                        else:
+                            # 无子标题：第一个tr
+                            log_print(f"[{serial_number}] [{task_label}] 无子标题，获取第一行数据...")
+                            try:
+                                first_tr = tr_list[0]
+                                tds = first_tr.find_elements(By.TAG_NAME, "td")
                                 # 【DEBUG】打印所有td的详细内容
                                 log_print(f"[{serial_number}] [{task_label}] === 开始打印该tr下所有td的详细内容 ===")
                                 for td_idx, td in enumerate(tds):
@@ -4435,13 +4474,13 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     td_p_texts = [p.text.strip() for p in td_ps]
                                     # 方法3：查找div标签
                                     td_divs = td.find_elements(By.TAG_NAME, "div")
-                                    # 方法4：获取innerHTML
-                           
+                       
+                                    
                                     log_print(f"[{serial_number}] [{task_label}] TD[{td_idx}]:")
                                     log_print(f"[{serial_number}] [{task_label}]   - td.text: '{td_text}'")
                                     log_print(f"[{serial_number}] [{task_label}]   - p标签: {td_p_texts}")
                                     log_print(f"[{serial_number}] [{task_label}]   - div数量: {len(td_divs)}")
-                  
+             
                                 log_print(f"[{serial_number}] [{task_label}] === 打印完毕 ===")
                                 # 第2个td（index=1）：已成交数量
                                 if len(tds) > 1:
@@ -4451,44 +4490,13 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                 if len(tds) > 3:
                                     td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
                                     filled_price = td4_ps[0].text.strip() if td4_ps else ""
-                                break
-                    except Exception as e:
-                        log_print(f"[{serial_number}] [{task_label}] ⚠ 解析Position行失败: {str(e)}")
-                        continue
-            else:
-                # 无子标题：第一个tr
-                log_print(f"[{serial_number}] [{task_label}] 无子标题，获取第一行数据...")
-                try:
-                    first_tr = tr_list[0]
-                    tds = first_tr.find_elements(By.TAG_NAME, "td")
-                    # 【DEBUG】打印所有td的详细内容
-                    log_print(f"[{serial_number}] [{task_label}] === 开始打印该tr下所有td的详细内容 ===")
-                    for td_idx, td in enumerate(tds):
-                        # 方法1：直接获取td.text
-                        td_text = td.text.strip()
-                        # 方法2：查找p标签
-                        td_ps = td.find_elements(By.TAG_NAME, "p")
-                        td_p_texts = [p.text.strip() for p in td_ps]
-                        # 方法3：查找div标签
-                        td_divs = td.find_elements(By.TAG_NAME, "div")
-           
-                        
-                        log_print(f"[{serial_number}] [{task_label}] TD[{td_idx}]:")
-                        log_print(f"[{serial_number}] [{task_label}]   - td.text: '{td_text}'")
-                        log_print(f"[{serial_number}] [{task_label}]   - p标签: {td_p_texts}")
-                        log_print(f"[{serial_number}] [{task_label}]   - div数量: {len(td_divs)}")
-     
-                    log_print(f"[{serial_number}] [{task_label}] === 打印完毕 ===")
-                    # 第2个td（index=1）：已成交数量
-                    if len(tds) > 1:
-                        td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
-                        filled_amount = td2_ps[0].text.strip() if td2_ps else ""
-                    # 第4个td（index=3）：价格
-                    if len(tds) > 3:
-                        td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
-                        filled_price = td4_ps[0].text.strip() if td4_ps else ""
+                            except Exception as e:
+                                log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Position数据失败: {str(e)}")
                 except Exception as e:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Position数据失败: {str(e)}")
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 获取tbody或tr失败: {str(e)}")
+                    filled_amount = "0"
+                    filled_price = "--"
+                    log_print(f"[{serial_number}] [{task_label}] 设置 filled_amount = 0，跳过获取tr数据")
         
         # 如果提供了trending参数（前面使用了链上数据），重新获取链上数据
         if trending:
@@ -7762,6 +7770,21 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         
                         has_open_orders = cancel_opinion_open_orders_simple(driver, browser_id)
+                         # 拉黑事件
+                        exchange_config_id = exchange_config.get('id')
+                        if exchange_config_id:
+                            save_exchange_config_blacklist(
+                                    exchange_config_id,
+                                    exchange_config.get('trending', ''),
+                                    exchange_config.get('trendingPart1'),
+                                    exchange_config.get('trendingPart2'),
+                                    exchange_config.get('trendingPart3'),
+                                    exchange_config.get('opUrl', ''),
+                                    exchange_config.get('polyUrl', ''),
+                                    exchange_config.get('opTopicId', ''),
+                                    exchange_config.get('weight', 0),
+                                    exchange_config.get('isOpen', 1)
+                            )
                         
                         # 更改任务状态为3
                         mission_id = mission.get('id')
@@ -8004,10 +8027,10 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
     def matches_option_type(p_text, opt_type):
         if opt_type == 'YES':
             log_print(f"[{browser_id}] 检查 p_text {p_text}  {opt_type}仓位...")
-            return opt_type in p_text or 'Monad' in p_text or 'Gold' in p_text or 'MONAD' in p_text or 'GOLD' in p_text
+            return opt_type in p_text or 'Monad' in p_text or 'Gold' in p_text or 'MONAD' in p_text or 'GOLD' in p_text or 'Yes' in p_text or 'yes' in p_text
         elif opt_type == 'NO':
             log_print(f"[{browser_id}] 检查 p_text {p_text}  {opt_type}仓位...")
-            return 'YES' not in p_text and 'Monad' not in p_text and  'Gold' not in p_text and 'MONAD' not in p_text and  'GOLD' not in p_text
+            return 'YES' not in p_text and 'Monad' not in p_text and  'Gold' not in p_text and 'MONAD' not in p_text and  'GOLD' not in p_text and 'Yes' not in p_text and 'yes' not in p_text
       
     
     try:

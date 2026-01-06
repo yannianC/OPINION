@@ -616,8 +616,8 @@
               </div>
             </template>
             
-            <!-- 模式选择下拉框 - 仅在平仓模式时显示 -->
-            <div v-if="hedgeMode.isClose" class="hedge-mode-select">
+            <!-- 模式选择下拉框 - 一直显示 -->
+            <div class="hedge-mode-select">
               <span class="filter-label">模式:</span>
               <select 
                 v-model.number="hedgeMode.hedgeMode" 
@@ -630,6 +630,34 @@
                 <option :value="3">模式3</option>
               </select>
             </div>
+            
+            <!-- 模式一开仓专属设置 - 仅在开仓且模式一时显示 -->
+            <template v-if="!hedgeMode.isClose && hedgeMode.hedgeMode === 1">
+              <div class="hedge-amount-range">
+                <span class="filter-label">优先开仓区间:</span>
+                <input 
+                  v-model="hedgeMode.posPriorityArea" 
+                  type="text" 
+                  class="amount-range-input" 
+                  placeholder="0.02,250"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+              
+              <div class="hedge-amount-range">
+                <span class="filter-label">开仓最大仓位限制:</span>
+                <input 
+                  v-model.number="hedgeMode.maxPosLimit" 
+                  type="number" 
+                  class="amount-range-input" 
+                  min="0"
+                  placeholder="3000"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+            </template>
             
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
@@ -2551,7 +2579,10 @@ const hedgeMode = reactive({
   orderbookMismatchInterval: 10,  // 订单薄不匹配时抓一轮的间隔时间（分钟），默认10分钟
   taskCountThreshold: 5,  // 每一轮任务个数阈值，默认5个
   waitTimeLessThanThreshold: 300,  // 小于阈值时的等待时间（秒），默认300秒（5分钟）
-  waitTimeGreaterThanThreshold: 60  // 大于阈值时的等待时间（秒），默认60秒（1分钟）
+  waitTimeGreaterThanThreshold: 60,  // 大于阈值时的等待时间（秒），默认60秒（1分钟）
+  // 模式一开仓专属设置
+  posPriorityArea: '0.02,250',  // 优先开仓区间
+  maxPosLimit: 3000  // 开仓最大仓位限制
 })
 
 // 交易费查询
@@ -3909,9 +3940,16 @@ const fetchMissionList = async () => {
       missionList.value = allMissions
       
       // 更新对冲任务状态（使用新接口）
+      // 监控所有运行中的对冲任务，不仅仅是 currentHedge
       for (const config of activeConfigs.value) {
-        if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-          const hedgeRecord = config.currentHedge
+        // 获取所有运行中的对冲任务
+        const runningHedges = (config.currentHedges || []).filter(h => h.finalStatus === 'running')
+        
+        for (const hedgeRecord of runningHedges) {
+          // 跳过模式2的任务，它们有自己的监控逻辑
+          if (hedgeRecord.isMode2) {
+            continue
+          }
           
           // 通过新接口获取任务状态
           if (hedgeRecord.yesTaskId) {
@@ -5985,13 +6023,14 @@ const paginatedAllHedgeLogs = computed(() => {
  * 更新活动配置列表（启用的配置）
  */
 const updateActiveConfigs = () => {
-  // 先保存当前活动配置的对冲信息（避免被清空）
+  // 先保存当前活动配置的对冲信息和订单薄信息（避免被清空）
   const hedgeInfoMap = new Map()
   for (const config of activeConfigs.value) {
-    if (config.currentHedges || config.currentHedge) {
+    if (config.currentHedges || config.currentHedge || config.orderbookData) {
       hedgeInfoMap.set(config.id, {
         currentHedges: config.currentHedges || [],
         currentHedge: config.currentHedge || null,
+        orderbookData: config.orderbookData || null,  // 保存订单薄数据
       })
     }
   }
@@ -6005,15 +6044,17 @@ const updateActiveConfigs = () => {
     .filter(config => config.visible !== false)  // 显示开关打开的配置
     .filter(config => config.a !== "1" && config.a !== 1)  // 过滤掉拉黑的配置（a !== "1" 表示未拉黑）
     .map(config => {
-      // 恢复保存的对冲信息
+      // 恢复保存的对冲信息和订单薄信息
       const savedInfo = hedgeInfoMap.get(config.id)
       
       return {
         ...config,
-        orderbookData: config.orderbookData || null,  // 订单薄数据
+        // 优先使用保存的订单薄数据，如果没有保存的则使用原配置中的数据，最后才为null
+        orderbookData: savedInfo ? (savedInfo.orderbookData || config.orderbookData || null) : (config.orderbookData || null),
         weight: config.weight || 0,
-        currentHedges: savedInfo ? savedInfo.currentHedges : (config.currentHedges || []),  // 恢复对冲任务数组
-        currentHedge: savedInfo ? savedInfo.currentHedge : (config.currentHedge || null),  // 当前对冲任务
+        // 优先使用保存的对冲任务数组，如果没有保存的则使用原配置中的数据
+        currentHedges: savedInfo ? (savedInfo.currentHedges.length > 0 ? savedInfo.currentHedges : (config.currentHedges || [])) : (config.currentHedges || []),
+        currentHedge: savedInfo ? (savedInfo.currentHedge || config.currentHedge || null) : (config.currentHedge || null),  // 当前对冲任务
         lastRequestTime: config.lastRequestTime || null,  // 上次请求时间
         lastHedgeTime: config.lastHedgeTime || null,  // 上次对冲时间
         noHedgeSince: config.noHedgeSince || null,  // 开始无法对冲的时间
@@ -7996,6 +8037,15 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+          // 如果是开仓模式，添加模式一专属设置
+          if (!hedgeMode.isClose) {
+            if (hedgeMode.posPriorityArea && hedgeMode.posPriorityArea !== '') {
+              requestData.posPriorityArea = hedgeMode.posPriorityArea
+            }
+            if (hedgeMode.maxPosLimit !== undefined && hedgeMode.maxPosLimit !== null && hedgeMode.maxPosLimit !== '') {
+              requestData.maxPosLimit = Number(hedgeMode.maxPosLimit)
+            }
+          }
         }
         
         const response = await axios.post(
@@ -8710,6 +8760,9 @@ const saveHedgeSettings = () => {
       minPositionForClose: hedgeMode.minPositionForClose,
       minPositionForOpen: hedgeMode.minPositionForOpen,
       orderbookMismatchInterval: hedgeMode.orderbookMismatchInterval,
+      // 模式一开仓专属设置
+      posPriorityArea: hedgeMode.posPriorityArea,
+      maxPosLimit: hedgeMode.maxPosLimit,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -8848,6 +8901,14 @@ const loadHedgeSettings = () => {
     }
     if (settings.orderbookMismatchInterval !== undefined) {
       hedgeMode.orderbookMismatchInterval = settings.orderbookMismatchInterval
+    }
+    
+    // 模式一开仓专属设置
+    if (settings.posPriorityArea !== undefined) {
+      hedgeMode.posPriorityArea = settings.posPriorityArea
+    }
+    if (settings.maxPosLimit !== undefined) {
+      hedgeMode.maxPosLimit = settings.maxPosLimit
     }
     
     // yes数量大于、模式选择、账户选择
