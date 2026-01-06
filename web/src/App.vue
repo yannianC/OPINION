@@ -6699,9 +6699,175 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         let priceInfo = null
         let orderbookReason = null  // 不满足原因
         
+        // 判断是否为平仓且模式1
+        const currentMode = hedgeMode.isClose ? hedgeMode.hedgeMode : 1
+        const isCloseMode1 = hedgeMode.isClose && currentMode === 1
+        
+        // 如果是平仓且模式1，先请求 calReadyToHedgeCanClose 接口
+        if (isCloseMode1) {
+          try {
+            console.log(`配置 ${config.id} - 平仓模式1，先请求 calReadyToHedgeCanClose 接口...`)
+            
+            // 构建请求参数（与 calReadyToHedgeV4 一样，除了 currentPrice 不传）
+            const canCloseRequestData = {
+              trendingId: config.id,
+              isClose: hedgeMode.isClose,
+              // currentPrice 不传
+              priceOutCome: 'YES',  // 先挂方，随便传一个值
+              timePassMin: hedgeMode.timePassMin,
+              minUAmt: hedgeMode.minUAmt,  // 最小开单
+              maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+              minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+              maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
+              closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+              numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+            }
+            // 如果 maxIpDelay 有值，则添加到请求参数中
+            if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+              canCloseRequestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
+            }
+            // 添加 needJudgeDF 和 maxDHour 字段
+            canCloseRequestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+            canCloseRequestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+            // 添加 minCloseMin 字段
+            canCloseRequestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+            // 添加资产优先级校验字段
+            canCloseRequestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+            canCloseRequestData.balancePriority = hedgeMode.balancePriority
+            
+            const canCloseResponse = await axios.post(
+              'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeCanClose',
+              canCloseRequestData,
+              {
+                headers: {
+                  'Content-Type': 'application/json'
+                }
+              }
+            )
+            
+            // 处理返回结果，与 calReadyToHedgeV4 一样
+            if (canCloseResponse.data && canCloseResponse.data.data) {
+              const canCloseData = canCloseResponse.data.data
+              if (canCloseData.yesNumber) {
+                console.log(`配置 ${config.id} - calReadyToHedgeCanClose 返回 yesNumber，可以开，继续请求订单薄`)
+              } else {
+                console.log(`配置 ${config.id} - calReadyToHedgeCanClose 未返回 yesNumber，不能开，跳过本次请求`)
+                // 不能开，跳过本次请求
+                config.isFetching = false
+                continue
+              }
+            } else if (canCloseResponse.data && canCloseResponse.data.msg) {
+              // 服务器返回错误消息，添加到对冲信息中（与 calReadyToHedgeV4 一样）
+              console.warn(`配置 ${config.id} - calReadyToHedgeCanClose 服务器返回错误:`, canCloseResponse.data.msg)
+              
+              // 初始化 currentHedges 数组（如果不存在）
+              if (!config.currentHedges) {
+                config.currentHedges = []
+              }
+              
+              // 创建一个错误记录
+              const errorRecord = {
+                id: Date.now(),
+                trendingId: config.id,
+                trendingName: config.trending,
+                startTime: new Date().toISOString(),
+                endTime: new Date().toISOString(),
+                finalStatus: 'failed',
+                errorMsg: canCloseResponse.data.msg
+              }
+              config.currentHedges.push(errorRecord)
+              
+              // 跳过本次请求
+              config.isFetching = false
+              continue
+            } else {
+              console.log(`配置 ${config.id} - calReadyToHedgeCanClose 返回数据异常，跳过本次请求`)
+              config.isFetching = false
+              continue
+            }
+          } catch (canCloseError) {
+            console.error(`配置 ${config.id} - 请求 calReadyToHedgeCanClose 失败:`, canCloseError)
+            // 请求失败，提取错误消息并添加到对冲信息中
+            let errorMessage = '请求 calReadyToHedgeCanClose 失败'
+            if (canCloseError.response?.data?.msg) {
+              errorMessage = canCloseError.response.data.msg
+            } else if (canCloseError.message) {
+              errorMessage = canCloseError.message
+            }
+            
+            // 初始化 currentHedges 数组（如果不存在）
+            if (!config.currentHedges) {
+              config.currentHedges = []
+            }
+            
+            // 创建一个错误记录
+            const errorRecord = {
+              id: Date.now(),
+              trendingId: config.id,
+              trendingName: config.trending,
+              startTime: new Date().toISOString(),
+              endTime: new Date().toISOString(),
+              finalStatus: 'failed',
+              errorMsg: errorMessage
+            }
+            config.currentHedges.push(errorRecord)
+            
+            // 跳过本次请求
+            config.isFetching = false
+            continue
+          }
+        }
+        
         try {
           // 尝试解析订单薄数据（包含完整检查）
-          priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+          // 如果是平仓且模式1，需要重试5次
+          let orderbookSuccess = false
+          let lastOrderbookError = null
+          
+          if (isCloseMode1) {
+            // 平仓模式1：重试5次（只对接口请求失败进行重试，不对数据处理失败重试）
+            for (let retryCount = 0; retryCount < 5; retryCount++) {
+              try {
+                priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+                if (priceInfo) {
+                  orderbookSuccess = true
+                  break
+                }
+              } catch (orderbookError) {
+                lastOrderbookError = orderbookError
+                const errorMsg = orderbookError.message || ''
+                
+                // 判断是否为接口请求失败（需要重试）
+                // 如果是数据处理失败（深度不足、价差过大等），不需要重试
+                const isInterfaceError = errorMsg.includes('订单薄接口错误') || 
+                                         errorMsg.includes('errno') ||
+                                         errorMsg.includes('网络') ||
+                                         errorMsg.includes('timeout') ||
+                                         errorMsg.includes('ECONNREFUSED') ||
+                                         errorMsg.includes('ENOTFOUND')
+                
+                if (isInterfaceError) {
+                  // 接口请求失败，需要重试
+                  console.warn(`配置 ${config.id} - 请求订单薄接口失败 (第 ${retryCount + 1}/5 次):`, errorMsg)
+                  if (retryCount < 4) {
+                    // 等待一小段时间后重试
+                    await new Promise(resolve => setTimeout(resolve, 500))
+                  }
+                } else {
+                  // 数据处理失败（深度不足、价差过大等），不需要重试，直接抛出错误
+                  console.warn(`配置 ${config.id} - 订单薄数据处理失败（不重试）:`, errorMsg)
+                  throw orderbookError
+                }
+              }
+            }
+            
+            if (!orderbookSuccess) {
+              throw lastOrderbookError || new Error('请求订单薄失败（重试5次后仍失败）')
+            }
+          } else {
+            // 非平仓模式1：使用原来的逻辑
+            priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+          }
           
           if (!priceInfo) {
             throw new Error('解析订单薄数据失败')
@@ -6880,12 +7046,25 @@ const fetchOrderbook = async (tokenId) => {
       }
     })
     
-    if (response.data && response.data.errno === 0 && response.data.result) {
-      return response.data.result
+    // errno = 0 表示请求成功，即使 result 为空也应该返回
+    if (response.data && response.data.errno === 0) {
+      return response.data.result || {}
     }
     
-    throw new Error('订单薄数据格式错误')
+    // errno !== 0 表示接口返回错误，需要重试
+    const errorMsg = response.data?.errmsg || response.data?.msg || '订单薄接口返回错误'
+    throw new Error(`订单薄接口错误: ${errorMsg} (errno: ${response.data?.errno})`)
   } catch (error) {
+    // 如果是 axios 错误（网络错误等），需要重试
+    if (error.response) {
+      // HTTP 错误响应
+      const errno = error.response.data?.errno
+      if (errno !== undefined && errno !== 0) {
+        // 接口返回 errno !== 0，需要重试
+        const errorMsg = error.response.data?.errmsg || error.response.data?.msg || '订单薄接口返回错误'
+        throw new Error(`订单薄接口错误: ${errorMsg} (errno: ${errno})`)
+      }
+    }
     console.error('获取订单薄失败:', error)
     throw error
   }
@@ -9957,9 +10136,175 @@ const executeAutoHedgeTasks = async () => {
         let priceInfo = null
         let orderbookReason = null  // 不满足原因
         
+        // 判断是否为平仓且模式1
+        const currentMode = hedgeMode.isClose ? hedgeMode.hedgeMode : 1
+        const isCloseMode1 = hedgeMode.isClose && currentMode === 1
+        
+        // 如果是平仓且模式1，先请求 calReadyToHedgeCanClose 接口
+        if (isCloseMode1) {
+          try {
+            console.log(`配置 ${config.id} - 平仓模式1，先请求 calReadyToHedgeCanClose 接口...`)
+            
+            // 构建请求参数（与 calReadyToHedgeV4 一样，除了 currentPrice 不传）
+            const canCloseRequestData = {
+              trendingId: config.id,
+              isClose: hedgeMode.isClose,
+              // currentPrice 不传
+              priceOutCome: 'YES',  // 先挂方，随便传一个值
+              timePassMin: hedgeMode.timePassMin,
+              minUAmt: hedgeMode.minUAmt,  // 最小开单
+              maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+              minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+              maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
+              closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+              numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+            }
+            // 如果 maxIpDelay 有值，则添加到请求参数中
+            if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+              canCloseRequestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
+            }
+            // 添加 needJudgeDF 和 maxDHour 字段
+            canCloseRequestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+            canCloseRequestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+            // 添加 minCloseMin 字段
+            canCloseRequestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+            // 添加资产优先级校验字段
+            canCloseRequestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+            canCloseRequestData.balancePriority = hedgeMode.balancePriority
+            
+            const canCloseResponse = await axios.post(
+              'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeCanClose',
+              canCloseRequestData,
+              {
+                headers: {
+                  'Content-Type': 'application/json'
+                }
+              }
+            )
+            
+            // 处理返回结果，与 calReadyToHedgeV4 一样
+            if (canCloseResponse.data && canCloseResponse.data.data) {
+              const canCloseData = canCloseResponse.data.data
+              if (canCloseData.yesNumber) {
+                console.log(`配置 ${config.id} - calReadyToHedgeCanClose 返回 yesNumber，可以开，继续请求订单薄`)
+              } else {
+                console.log(`配置 ${config.id} - calReadyToHedgeCanClose 未返回 yesNumber，不能开，跳过本次请求`)
+                // 不能开，跳过本次请求
+                config.isFetching = false
+                continue
+              }
+            } else if (canCloseResponse.data && canCloseResponse.data.msg) {
+              // 服务器返回错误消息，添加到对冲信息中（与 calReadyToHedgeV4 一样）
+              console.warn(`配置 ${config.id} - calReadyToHedgeCanClose 服务器返回错误:`, canCloseResponse.data.msg)
+              
+              // 初始化 currentHedges 数组（如果不存在）
+              if (!config.currentHedges) {
+                config.currentHedges = []
+              }
+              
+              // 创建一个错误记录
+              const errorRecord = {
+                id: Date.now(),
+                trendingId: config.id,
+                trendingName: config.trending,
+                startTime: new Date().toISOString(),
+                endTime: new Date().toISOString(),
+                finalStatus: 'failed',
+                errorMsg: canCloseResponse.data.msg
+              }
+              config.currentHedges.push(errorRecord)
+              
+              // 跳过本次请求
+              config.isFetching = false
+              continue
+            } else {
+              console.log(`配置 ${config.id} - calReadyToHedgeCanClose 返回数据异常，跳过本次请求`)
+              config.isFetching = false
+              continue
+            }
+          } catch (canCloseError) {
+            console.error(`配置 ${config.id} - 请求 calReadyToHedgeCanClose 失败:`, canCloseError)
+            // 请求失败，提取错误消息并添加到对冲信息中
+            let errorMessage = '请求 calReadyToHedgeCanClose 失败'
+            if (canCloseError.response?.data?.msg) {
+              errorMessage = canCloseError.response.data.msg
+            } else if (canCloseError.message) {
+              errorMessage = canCloseError.message
+            }
+            
+            // 初始化 currentHedges 数组（如果不存在）
+            if (!config.currentHedges) {
+              config.currentHedges = []
+            }
+            
+            // 创建一个错误记录
+            const errorRecord = {
+              id: Date.now(),
+              trendingId: config.id,
+              trendingName: config.trending,
+              startTime: new Date().toISOString(),
+              endTime: new Date().toISOString(),
+              finalStatus: 'failed',
+              errorMsg: errorMessage
+            }
+            config.currentHedges.push(errorRecord)
+            
+            // 跳过本次请求
+            config.isFetching = false
+            continue
+          }
+        }
+        
         try {
           // 尝试解析订单薄数据（包含完整检查）
-          priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+          // 如果是平仓且模式1，需要重试5次
+          let orderbookSuccess = false
+          let lastOrderbookError = null
+          
+          if (isCloseMode1) {
+            // 平仓模式1：重试5次（只对接口请求失败进行重试，不对数据处理失败重试）
+            for (let retryCount = 0; retryCount < 5; retryCount++) {
+              try {
+                priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+                if (priceInfo) {
+                  orderbookSuccess = true
+                  break
+                }
+              } catch (orderbookError) {
+                lastOrderbookError = orderbookError
+                const errorMsg = orderbookError.message || ''
+                
+                // 判断是否为接口请求失败（需要重试）
+                // 如果是数据处理失败（深度不足、价差过大等），不需要重试
+                const isInterfaceError = errorMsg.includes('订单薄接口错误') || 
+                                         errorMsg.includes('errno') ||
+                                         errorMsg.includes('网络') ||
+                                         errorMsg.includes('timeout') ||
+                                         errorMsg.includes('ECONNREFUSED') ||
+                                         errorMsg.includes('ENOTFOUND')
+                
+                if (isInterfaceError) {
+                  // 接口请求失败，需要重试
+                  console.warn(`配置 ${config.id} - 请求订单薄接口失败 (第 ${retryCount + 1}/5 次):`, errorMsg)
+                  if (retryCount < 4) {
+                    // 等待一小段时间后重试
+                    await new Promise(resolve => setTimeout(resolve, 500))
+                  }
+                } else {
+                  // 数据处理失败（深度不足、价差过大等），不需要重试，直接抛出错误
+                  console.warn(`配置 ${config.id} - 订单薄数据处理失败（不重试）:`, errorMsg)
+                  throw orderbookError
+                }
+              }
+            }
+            
+            if (!orderbookSuccess) {
+              throw lastOrderbookError || new Error('请求订单薄失败（重试5次后仍失败）')
+            }
+          } else {
+            // 非平仓模式1：使用原来的逻辑
+            priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+          }
           
           if (!priceInfo) {
             throw new Error('解析订单薄数据失败')
