@@ -3884,7 +3884,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -3894,9 +3894,10 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    save_mission_result(target_mission_id, 13)
                     
                     break
                 
@@ -3924,7 +3925,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -3934,9 +3935,10 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    save_mission_result(target_mission_id, 13)
                         hava_order = True
                         break;
                         
@@ -3966,7 +3968,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -3976,9 +3978,10 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    save_mission_result(target_mission_id, 13)
                             hava_order = True
                       # 继续等待，不退出循环
                     time.sleep(check_interval)
@@ -4061,7 +4064,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -4071,9 +4074,10 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    save_mission_result(target_mission_id, 13)
                     
                     break
                 
@@ -4102,7 +4106,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -4112,7 +4116,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                                     save_mission_result(target_mission_id, 13)
@@ -4145,7 +4149,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                elif current_status != None:
+                                elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
@@ -4155,7 +4159,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
-                                else:
+                                elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                                     save_mission_result(target_mission_id, 13)
