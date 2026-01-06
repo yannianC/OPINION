@@ -291,6 +291,75 @@
               />
             </div>
           </div>
+          
+          <!-- 订单薄更新设置 -->
+          <div class="orderbook-update-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
+            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">订单薄更新设置</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
+              <div class="trending-filter">
+                <label style="color: #000;">平仓模式下yes和no持仓的最小值（万）:</label>
+                <input 
+                  v-model.number="hedgeMode.minPositionForClose" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0.2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">订单薄不匹配时X（分钟）内不抓取:</label>
+                <input 
+                  v-model.number="hedgeMode.orderbookMismatchInterval" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  placeholder="10"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">每一轮任务个数阈值</label>
+                <input 
+                  v-model.number="hedgeMode.taskCountThreshold" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  placeholder="5"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 60px; margin: 0 5px;"
+                />
+                <span style="color: #000;">（小于这个数，下一轮等待</span>
+                <input 
+                  v-model.number="hedgeMode.waitTimeLessThanThreshold" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  placeholder="300"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                />
+                <span style="color: #000;">秒，大于等待</span>
+                <input 
+                  v-model.number="hedgeMode.waitTimeGreaterThanThreshold" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  placeholder="60"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                />
+                <span style="color: #000;">秒）</span>
+              </div>
+            </div>
+          </div>
+          
           <div class="auto-hedge-controls">
             <div class="hedge-amount-info">
               <span class="amount-label">累计对冲数量:</span>
@@ -2398,6 +2467,8 @@ const isAccountConfigMapped = ref(false)  // 账户配置是否成功映射
 const autoHedgeRunning = ref(false)
 const autoHedgeInterval = ref(null)
 const activeConfigs = ref([])  // 启用的配置列表
+const lastRoundTaskCount = ref(0)  // 上一轮开出的任务总数
+const lastRoundEndTime = ref(null)  // 上一轮结束时间
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
@@ -2454,7 +2525,13 @@ const hedgeMode = reactive({
   maxDHour: 12,  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
-  balancePriority: 2000  // 资产优先级校验值
+  balancePriority: 2000,  // 资产优先级校验值
+  // 订单薄更新设置
+  minPositionForClose: 0.2,  // 平仓模式下yes和no持仓的最小值（万），默认0.2万
+  orderbookMismatchInterval: 10,  // 订单薄不匹配时抓一轮的间隔时间（分钟），默认10分钟
+  taskCountThreshold: 5,  // 每一轮任务个数阈值，默认5个
+  waitTimeLessThanThreshold: 300,  // 小于阈值时的等待时间（秒），默认300秒（5分钟）
+  waitTimeGreaterThanThreshold: 60  // 大于阈值时的等待时间（秒），默认60秒（1分钟）
 })
 
 // 交易费查询
@@ -6594,6 +6671,9 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
     }
   }
   
+  // 统计这一轮开出的任务总数
+  let roundTaskCount = 0
+  
   for (let i = 0; i < batchConfigs.length; i++) {
     const config = batchConfigs[i]
     
@@ -6676,6 +6756,27 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         config.nextRequestTime = null
       }
       
+      // 根据上一轮任务数调整轮询间隔
+      // 如果上一轮任务数大于阈值，使用配置的等待时间；否则使用配置的等待时间
+      const maxWaitTime = Math.max(
+        (hedgeMode.waitTimeLessThanThreshold || 300) * 1000,
+        (hedgeMode.waitTimeGreaterThanThreshold || 60) * 1000
+      )
+      if (lastRoundEndTime.value && now - lastRoundEndTime.value < maxWaitTime) {
+        // 上一轮刚结束，根据任务数设置等待时间
+        const taskCountThreshold = hedgeMode.taskCountThreshold || 5
+        const waitSeconds = lastRoundTaskCount.value > taskCountThreshold 
+          ? (hedgeMode.waitTimeGreaterThanThreshold || 60)
+          : (hedgeMode.waitTimeLessThanThreshold || 300)
+        const waitTime = waitSeconds * 1000
+        
+        if (now - lastRoundEndTime.value < waitTime) {
+          const remaining = Math.ceil((waitTime - (now - lastRoundEndTime.value)) / 1000)
+          console.log(`配置 ${config.id} - 上一轮任务数 ${lastRoundTaskCount.value}，等待 ${waitSeconds} 秒后轮询（还需等待 ${remaining} 秒）`)
+          continue
+        }
+      }
+      
       // 检查常规请求间隔（20秒）
       const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
       
@@ -6683,6 +6784,26 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
         console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
         continue
+      }
+      
+      // 平仓模式下，先检查持仓是否满足条件
+      if (hedgeMode.isClose) {
+        const positionData = positionDataMap.value.get(config.trending?.trim())
+        if (positionData) {
+          const minPosition = hedgeMode.minPositionForClose * 10000  // 转换为实际数量（万转数量）
+          const yesPosition = positionData.yesPosition || 0
+          const noPosition = positionData.noPosition || 0
+          
+          if (yesPosition < minPosition || noPosition < minPosition) {
+            console.log(`配置 ${config.id} - 平仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: >= ${hedgeMode.minPositionForClose}万)，跳过本次请求`)
+            config.isFetching = false
+            continue
+          }
+        } else {
+          console.log(`配置 ${config.id} - 平仓模式：未获取到持仓数据，跳过本次请求`)
+          config.isFetching = false
+          continue
+        }
       }
       
       // 开始请求订单薄
@@ -6934,11 +7055,12 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         config.orderbookData = priceInfo
         config.retryCount = 0  // 重置重试次数
         
-        // 如果订单薄成功获取到了数据，且不满足条件，设置下次请求时间为10分钟后
+        // 如果订单薄成功获取到了数据，且不满足条件，设置下次请求时间为配置的间隔时间后
         if (priceInfo && priceInfo.updateTime && orderbookReason) {
-          // 成功获取但不满足条件，设置10分钟后才能再次请求
-          config.nextRequestTime = now + 10 * 60 * 1000  // 10分钟
-          console.log(`配置 ${config.id} - 订单薄获取成功但不满足条件，下次请求将在10分钟后`)
+          // 成功获取但不满足条件，设置配置的间隔时间后才能再次请求
+          const intervalMinutes = hedgeMode.orderbookMismatchInterval || 10
+          config.nextRequestTime = now + intervalMinutes * 60 * 1000
+          console.log(`配置 ${config.id} - 订单薄获取成功但不满足条件，下次请求将在 ${intervalMinutes} 分钟后`)
         } else {
           // 获取失败或满足条件，清除延迟请求时间，使用原来的20秒逻辑
           config.nextRequestTime = null
@@ -6961,8 +7083,9 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
             // 清空无法对冲时间和标记
             config.noHedgeSince = null
             
-            // 执行对冲
-            await executeHedgeFromOrderbook(config, priceInfo)
+            // 执行对冲，并统计任务数
+            const taskCount = await executeHedgeFromOrderbook(config, priceInfo)
+            roundTaskCount += taskCount || 0
             
             // 记录对冲时间
             config.lastHedgeTime = Date.now()
@@ -7909,8 +8032,12 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     
     const successCount = hedgeResults.filter(r => r === true).length
     console.log(`配置 ${config.id} - 已提交 ${successCount}/${availableSlots} 个对冲任务`)
+    
+    // 返回成功提交的任务数
+    return successCount
   } catch (error) {
     console.error(`配置 ${config.id} - 执行对冲失败:`, error)
+    return 0
   }
 }
 
@@ -8538,6 +8665,10 @@ const saveHedgeSettings = () => {
       enableBatchMode: enableBatchMode.value,
       batchSize: batchSize.value,
       batchExecutionTime: batchExecutionTime.value,
+      // 任务个数阈值和等待时间设置
+      taskCountThreshold: hedgeMode.taskCountThreshold,
+      waitTimeLessThanThreshold: hedgeMode.waitTimeLessThanThreshold,
+      waitTimeGreaterThanThreshold: hedgeMode.waitTimeGreaterThanThreshold,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -8654,6 +8785,17 @@ const loadHedgeSettings = () => {
     }
     if (settings.batchExecutionTime !== undefined) {
       batchExecutionTime.value = settings.batchExecutionTime
+    }
+    
+    // 任务个数阈值和等待时间设置
+    if (settings.taskCountThreshold !== undefined) {
+      hedgeMode.taskCountThreshold = settings.taskCountThreshold
+    }
+    if (settings.waitTimeLessThanThreshold !== undefined) {
+      hedgeMode.waitTimeLessThanThreshold = settings.waitTimeLessThanThreshold
+    }
+    if (settings.waitTimeGreaterThanThreshold !== undefined) {
+      hedgeMode.waitTimeGreaterThanThreshold = settings.waitTimeGreaterThanThreshold
     }
     
     // yes数量大于、模式选择、账户选择
@@ -10113,6 +10255,27 @@ const executeAutoHedgeTasks = async () => {
         config.nextRequestTime = null
       }
       
+      // 根据上一轮任务数调整轮询间隔
+      // 如果上一轮任务数大于阈值，使用配置的等待时间；否则使用配置的等待时间
+      const maxWaitTime = Math.max(
+        (hedgeMode.waitTimeLessThanThreshold || 300) * 1000,
+        (hedgeMode.waitTimeGreaterThanThreshold || 60) * 1000
+      )
+      if (lastRoundEndTime.value && now - lastRoundEndTime.value < maxWaitTime) {
+        // 上一轮刚结束，根据任务数设置等待时间
+        const taskCountThreshold = hedgeMode.taskCountThreshold || 5
+        const waitSeconds = lastRoundTaskCount.value > taskCountThreshold 
+          ? (hedgeMode.waitTimeGreaterThanThreshold || 60)
+          : (hedgeMode.waitTimeLessThanThreshold || 300)
+        const waitTime = waitSeconds * 1000
+        
+        if (now - lastRoundEndTime.value < waitTime) {
+          const remaining = Math.ceil((waitTime - (now - lastRoundEndTime.value)) / 1000)
+          console.log(`配置 ${config.id} - 上一轮任务数 ${lastRoundTaskCount.value}，等待 ${waitSeconds} 秒后轮询（还需等待 ${remaining} 秒）`)
+          continue
+        }
+      }
+      
       // 检查常规请求间隔（20秒）
       const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
       
@@ -10120,6 +10283,26 @@ const executeAutoHedgeTasks = async () => {
         const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
         console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
         continue
+      }
+      
+      // 平仓模式下，先检查持仓是否满足条件
+      if (hedgeMode.isClose) {
+        const positionData = positionDataMap.value.get(config.trending?.trim())
+        if (positionData) {
+          const minPosition = hedgeMode.minPositionForClose * 10000  // 转换为实际数量（万转数量）
+          const yesPosition = positionData.yesPosition || 0
+          const noPosition = positionData.noPosition || 0
+          
+          if (yesPosition < minPosition || noPosition < minPosition) {
+            console.log(`配置 ${config.id} - 平仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: >= ${hedgeMode.minPositionForClose}万)，跳过本次请求`)
+            config.isFetching = false
+            continue
+          }
+        } else {
+          console.log(`配置 ${config.id} - 平仓模式：未获取到持仓数据，跳过本次请求`)
+          config.isFetching = false
+          continue
+        }
       }
       
       // 开始请求订单薄
@@ -10371,11 +10554,12 @@ const executeAutoHedgeTasks = async () => {
         config.orderbookData = priceInfo
         config.retryCount = 0  // 重置重试次数
         
-        // 如果订单薄成功获取到了数据，且不满足条件，设置下次请求时间为10分钟后
+        // 如果订单薄成功获取到了数据，且不满足条件，设置下次请求时间为配置的间隔时间后
         if (priceInfo && priceInfo.updateTime && orderbookReason) {
-          // 成功获取但不满足条件，设置10分钟后才能再次请求
-          config.nextRequestTime = now + 10 * 60 * 1000  // 10分钟
-          console.log(`配置 ${config.id} - 订单薄获取成功但不满足条件，下次请求将在10分钟后`)
+          // 成功获取但不满足条件，设置配置的间隔时间后才能再次请求
+          const intervalMinutes = hedgeMode.orderbookMismatchInterval || 10
+          config.nextRequestTime = now + intervalMinutes * 60 * 1000
+          console.log(`配置 ${config.id} - 订单薄获取成功但不满足条件，下次请求将在 ${intervalMinutes} 分钟后`)
         } else {
           // 获取失败或满足条件，清除延迟请求时间，使用原来的20秒逻辑
           config.nextRequestTime = null
@@ -10398,8 +10582,9 @@ const executeAutoHedgeTasks = async () => {
             // 清空无法对冲时间和标记
             config.noHedgeSince = null
             
-            // 执行对冲
-            await executeHedgeFromOrderbook(config, priceInfo)
+            // 执行对冲，并统计任务数
+            const taskCount = await executeHedgeFromOrderbook(config, priceInfo)
+            roundTaskCount += taskCount || 0
             
             // 记录对冲时间
             config.lastHedgeTime = Date.now()
