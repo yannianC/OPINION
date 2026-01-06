@@ -424,7 +424,11 @@
 
       <el-table-column label="YES买一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesBidPrice, b.yesBidPrice)">
         <template #default="scope">
-          <div v-if="scope.row.yesBidPrice !== null && scope.row.yesBidPrice !== undefined && scope.row.yesBidDepth !== null && scope.row.yesBidDepth !== undefined" style="line-height: 1.5;">
+          <div 
+            v-if="scope.row.yesBidPrice !== null && scope.row.yesBidPrice !== undefined && scope.row.yesBidDepth !== null && scope.row.yesBidDepth !== undefined" 
+            :class="{ 'depth-qualified': isDepthQualified(scope.row) }"
+            style="line-height: 1.5;"
+          >
             <div>{{ formatNumber(scope.row.yesBidPrice) }}</div>
             <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.yesBidDepth) }}</div>
           </div>
@@ -434,7 +438,11 @@
 
       <el-table-column label="YES卖一价及深度" width="140" align="center" sortable :sort-method="(a, b) => sortByNumber(a.yesAskPrice, b.yesAskPrice)">
         <template #default="scope">
-          <div v-if="scope.row.yesAskPrice !== null && scope.row.yesAskPrice !== undefined && scope.row.yesAskDepth !== null && scope.row.yesAskDepth !== undefined" style="line-height: 1.5;">
+          <div 
+            v-if="scope.row.yesAskPrice !== null && scope.row.yesAskPrice !== undefined && scope.row.yesAskDepth !== null && scope.row.yesAskDepth !== undefined" 
+            :class="{ 'depth-qualified': isDepthQualified(scope.row) }"
+            style="line-height: 1.5;"
+          >
             <div>{{ formatNumber(scope.row.yesAskPrice) }}</div>
             <div style="font-size: 12px; color: #909399;">{{ formatNumber(scope.row.yesAskDepth) }}</div>
           </div>
@@ -1004,6 +1012,39 @@ const sortByBlacklistStatus = (a, b) => {
 }
 
 /**
+ * 判断深度是否符合条件
+ * 条件：卖一价减去买一价大于0.15，或者买一价或卖一价的深度小于100
+ */
+const isDepthQualified = (row) => {
+  if (!row) {
+    return false
+  }
+  
+  const bidPrice = parseFloat(row.yesBidPrice) || 0
+  const askPrice = parseFloat(row.yesAskPrice) || 0
+  const bidDepth = parseFloat(row.yesBidDepth) || 0
+  const askDepth = parseFloat(row.yesAskDepth) || 0
+  
+  // 如果数据不完整，返回false
+  if (bidPrice === 0 && askPrice === 0) {
+    return false
+  }
+  
+  // 卖一价减去买一价大于0.15
+  const priceDiff = askPrice - bidPrice
+  if (priceDiff > 0.15) {
+    return true
+  }
+  
+  // 买一价或卖一价的深度小于100
+  if (bidDepth < 100 || askDepth < 100) {
+    return true
+  }
+  
+  return false
+}
+
+/**
  * 解析持仓数据字符串（a字段）
  * 格式: "事件唯一名|||方向|||数量|||价格;..."
  */
@@ -1448,7 +1489,7 @@ const matchAndUpdateChainData = (chainDataMap) => {
       event.chainYesPosition = chainData.yesTotal
       event.chainNoPosition = chainData.noTotal
       matched = true
-      console.log('[事件异常] 完全匹配成功:', trimmedEventName, '-> yes:', chainData.yesTotal, 'no:', chainData.noTotal)
+  
     } else {
       // 遍历链上数据，尝试完全匹配（去除首尾空格）
       for (const [chainTitle, chainData] of chainDataMap.entries()) {
@@ -1672,12 +1713,12 @@ const loadAndCalculate = async () => {
               }
             }
             // 打印所有符合条件的账户
-            if (recentAccountNumbers.size > 0) {
-              console.log(`[事件异常] 事件 "${event.eventName}" 最近一次仓位更新时间小于3分钟，符合条件的账户：`)
-              recentAccountNumbers.forEach(number => {
-                console.log(`  - number: ${number}, 事件名: ${event.eventName}`)
-              })
-            }
+            // if (recentAccountNumbers.size > 0) {
+            //   console.log(`[事件异常] 事件 "${event.eventName}" 最近一次仓位更新时间小于3分钟，符合条件的账户：`)
+            //   recentAccountNumbers.forEach(number => {
+            //     console.log(`  - number: ${number}, 事件名: ${event.eventName}`)
+            //   })
+            // }
           }
         } else {
           event.latestUpdateTime = null
@@ -2721,6 +2762,12 @@ onMounted(() => {
 .export-actions {
   margin-top: 10px;
   text-align: left;
+}
+
+.depth-qualified {
+  background-color: #e6f4ff !important;
+  padding: 5px;
+  border-radius: 4px;
 }
 </style>
 
