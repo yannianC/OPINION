@@ -297,9 +297,22 @@
             <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">订单薄更新设置</h3>
             <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
               <div class="trending-filter">
-                <label style="color: #000;">平仓模式下yes和no持仓的最小值（万）:</label>
+                <label style="color: #000;">平仓模式：yes和no持仓小于（万）时不更新:</label>
                 <input 
                   v-model.number="hedgeMode.minPositionForClose" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0.2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">开仓模式：yes或no持仓大于（万）时不更新:</label>
+                <input 
+                  v-model.number="hedgeMode.minPositionForOpen" 
                   type="number" 
                   class="filter-input" 
                   min="0"
@@ -2528,6 +2541,7 @@ const hedgeMode = reactive({
   balancePriority: 2000,  // 资产优先级校验值
   // 订单薄更新设置
   minPositionForClose: 0.2,  // 平仓模式下yes和no持仓的最小值（万），默认0.2万
+  minPositionForOpen: 0.2,  // 开仓模式下yes或no持仓的最大值（万），默认0.2万
   orderbookMismatchInterval: 10,  // 订单薄不匹配时抓一轮的间隔时间（分钟），默认10分钟
   taskCountThreshold: 5,  // 每一轮任务个数阈值，默认5个
   waitTimeLessThanThreshold: 300,  // 小于阈值时的等待时间（秒），默认300秒（5分钟）
@@ -6806,6 +6820,23 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         }
       }
       
+      // 开仓模式下，检查持仓是否满足条件
+      if (!hedgeMode.isClose) {
+        const positionData = positionDataMap.value.get(config.trending?.trim())
+        if (positionData) {
+          const maxPosition = hedgeMode.minPositionForOpen * 10000  // 转换为实际数量（万转数量）
+          const yesPosition = positionData.yesPosition || 0
+          const noPosition = positionData.noPosition || 0
+          
+          // 开仓模式下，yes或no任一一个大于了这个值，就不更新订单薄
+          if (yesPosition > maxPosition || noPosition > maxPosition) {
+            console.log(`配置 ${config.id} - 开仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)，跳过本次请求`)
+            config.isFetching = false
+            continue
+          }
+        }
+      }
+      
       // 开始请求订单薄
       config.isFetching = true
       config.lastRequestTime = now
@@ -10302,6 +10333,23 @@ const executeAutoHedgeTasks = async () => {
           console.log(`配置 ${config.id} - 平仓模式：未获取到持仓数据，跳过本次请求`)
           config.isFetching = false
           continue
+        }
+      }
+      
+      // 开仓模式下，检查持仓是否满足条件
+      if (!hedgeMode.isClose) {
+        const positionData = positionDataMap.value.get(config.trending?.trim())
+        if (positionData) {
+          const maxPosition = hedgeMode.minPositionForOpen * 10000  // 转换为实际数量（万转数量）
+          const yesPosition = positionData.yesPosition || 0
+          const noPosition = positionData.noPosition || 0
+          
+          // 开仓模式下，yes或no任一一个大于了这个值，就不更新订单薄
+          if (yesPosition > maxPosition || noPosition > maxPosition) {
+            console.log(`配置 ${config.id} - 开仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)，跳过本次请求`)
+            config.isFetching = false
+            continue
+          }
         }
       }
       
