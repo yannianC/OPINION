@@ -169,8 +169,25 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "997": "cx142359.",
     "998": "cx142359.",
     "999": "cx142359.",
-    "1000": "cx142359.",
-    
+    "1000":"cx142359.",
+    "206":"cx142359.",
+    "207":"cx142359.",
+    "208":"cx142359.",
+    "209":"cx142359.",
+    "210":"cx142359.",
+    "211":"cx142359.",
+    "212":"cx142359.",
+    "213":"cx142359.",
+    "214":"cx142359.",
+    "215":"cx142359.",
+    "216":"cx142359.",
+    "217":"cx142359.",
+    "218":"cx142359.",
+    "219":"cx142359.",
+    "220":"cx142359.",
+    "221":"cx142359.",
+    "222":"cx142359.",
+    "223":"cx142359.",
 }
 
 # 电脑组对应的默认密码配置
@@ -407,91 +424,6 @@ MAX_RETRIES = 3
 # 代理IP管理相关函数
 # ============================================================================
 
-def add_more_ip_for_browser(browser_id, timeout=15):
-    """
-    请求添加更多IP的接口（用于IP延迟过高时）
-    
-    Args:
-        browser_id: 浏览器编号
-        timeout: 请求超时时间（秒），默认15秒
-        
-    Returns:
-        dict: 代理配置信息，包含 ip, port, username, password, type, isMain，失败返回None
-    """
-    try:
-        log_print(f"[{browser_id}] 调用添加更多IP接口（超时: {timeout}秒）...")
-        
-        url = "https://sg.bicoin.com.cn/99l/bro/addMoreIp"
-        payload = {"number": browser_id}
-        
-        response = requests.post(url, json=payload, timeout=timeout)
-        
-        if response.status_code == 200:
-            result = response.json()
-            log_print(f"[{browser_id}] 添加IP接口返回: {result}")
-            
-            code = result.get("code")
-            if code == 0:
-                data = result.get("data", {})
-                ip = data.get("ip")
-                is_main = data.get("isMain", 0)
-                
-                if not ip:
-                    log_print(f"[{browser_id}] ⚠ 返回数据中没有IP字段")
-                    return None
-                
-                is_main = 1
-                # 根据 isMain 字段决定如何构建代理配置
-                if is_main == 1:
-                    port = data.get("port")
-                    username = data.get("username")
-                    password = data.get("password")
-                    isNew = data.get("isNew")
-                    
-                    if ip and port and username and password:
-                        proxy_config = {
-                            "ip": ip,
-                            "port": str(port),
-                            "username": username,
-                            "password": password,
-                            "type": "http",
-                            "isMain": is_main,
-                            "isNew": isNew
-                        }
-                        log_print(f"[{browser_id}] ✓ 成功获取新代理配置 (isMain=1): IP={ip}, Port={port}, Type=http")
-                        return proxy_config
-                    else:
-                        log_print(f"[{browser_id}] ⚠ isMain=1 但返回数据中缺少必要字段")
-                        return None
-                else:
-                    proxy_config = {
-                        "ip": ip,
-                        "port": "50101",
-                        "username": "nolanwang",
-                        "password": "HFVsyegfeyigrfkjb",
-                        "type": "socks5",
-                        "isMain": is_main
-                    }
-                    log_print(f"[{browser_id}] ✓ 成功获取新代理配置 (isMain={is_main}): IP={ip}, 其他字段使用默认值")
-                    return proxy_config
-            else:
-                log_print(f"[{browser_id}] ⚠ 添加IP失败: code={code}, msg={result.get('msg')}")
-                return None
-        else:
-            log_print(f"[{browser_id}] ✗ 添加IP请求失败: HTTP状态码 {response.status_code}")
-            return None
-        
-    except requests.exceptions.Timeout:
-        log_print(f"[{browser_id}] ✗ 添加IP请求超时（{timeout}秒）")
-        return None
-    except requests.exceptions.RequestException as e:
-        log_print(f"[{browser_id}] ✗ 添加IP网络请求失败: {str(e)}")
-        return None
-    except Exception as e:
-        log_print(f"[{browser_id}] ✗ 添加IP异常: {str(e)}")
-        import traceback
-        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
-        return None
 
 
 def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
@@ -537,6 +469,12 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                     ip = ip_item.get("ip")
                     username = ip_item.get("username")
                     password = ip_item.get("password")
+                    # 获取端口字段：http使用port，socks5使用socketPort
+                    http_port = ip_item.get("port")
+                    socks5_port = ip_item.get("socketPort")
+                    # 将端口转换为字符串，如果没有则使用默认值
+                    http_port_str = str(http_port) if http_port is not None else "50100"
+                    socks5_port_str = str(socks5_port) if socks5_port is not None else "50101"
                     
                     if not ip or not username or not password:
                         continue
@@ -570,7 +508,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                                 # http延迟更低或相等，选择http
                                 available_options.append({
                                     "ip": ip,
-                                    "port": "50100",
+                                    "port": http_port_str,
                                     "username": username,
                                     "password": password,
                                     "type": "http",
@@ -580,7 +518,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                                 # socks5延迟更低，选择socks5
                                 available_options.append({
                                     "ip": ip,
-                                    "port": "50101",
+                                    "port": socks5_port_str,
                                     "username": username,
                                     "password": password,
                                     "type": "socks5",
@@ -590,7 +528,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                             # 只有http有延迟数据，选择http
                             available_options.append({
                                 "ip": ip,
-                                "port": "50100",
+                                "port": http_port_str,
                                 "username": username,
                                 "password": password,
                                 "type": "http",
@@ -600,7 +538,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                             # 只有socks5有延迟数据，选择socks5
                             available_options.append({
                                 "ip": ip,
-                                "port": "50101",
+                                "port": socks5_port_str,
                                 "username": username,
                                 "password": password,
                                 "type": "socks5",
@@ -610,7 +548,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                         # 只有http通，选择http
                         available_options.append({
                             "ip": ip,
-                            "port": "50100",
+                            "port": http_port_str,
                             "username": username,
                             "password": password,
                             "type": "http",
@@ -620,7 +558,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                         # 只有socks5通，选择socks5
                         available_options.append({
                             "ip": ip,
-                            "port": "50101",
+                            "port": socks5_port_str,
                             "username": username,
                             "password": password,
                             "type": "socks5",
@@ -660,7 +598,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                         # 优先选择http类型
                         available_options.append({
                             "ip": ip,
-                            "port": "50100",
+                            "port": http_port_str,
                             "username": username,
                             "password": password,
                             "type": "http",

@@ -14,7 +14,58 @@
     <!-- 筛选条件 -->
     <div class="filter-section">
       <el-card class="filter-card">
-        <div class="filter-row">
+        <!-- 服务器端筛选（需要重新请求数据） -->
+        <div class="filter-row search-row">
+          <div class="filter-item">
+            <span class="filter-label">事件名：</span>
+            <el-input 
+              v-model="filterEventName" 
+              placeholder="输入事件名进行模糊匹配"
+              style="width: 200px;"
+              clearable
+              @keyup.enter="searchData"
+            />
+          </div>
+          
+          <div class="filter-item">
+            <span class="filter-label">方向：</span>
+            <el-select v-model="filterOutCome" style="width: 120px;" clearable placeholder="全部" disabled>
+              <el-option label="YES" value="YES" />
+              <el-option label="NO" value="NO" />
+            </el-select>
+            <span style="margin-left: 5px; color: #909399; font-size: 12px;">(已按方向分表显示)</span>
+          </div>
+          
+          <div class="filter-item">
+            <span class="filter-label">电脑组：</span>
+            <el-input 
+              v-model="filterGroupFilter" 
+              placeholder="多个用逗号分隔，如：4,5,907"
+              style="width: 200px;"
+              clearable
+              @keyup.enter="searchData"
+            />
+          </div>
+          
+          <div class="filter-item">
+            <span class="filter-label">浏览器编号：</span>
+            <el-input 
+              v-model="filterNumberFilter" 
+              placeholder="多个用逗号分隔，如：2009,2981"
+              style="width: 200px;"
+              clearable
+              @keyup.enter="searchData"
+            />
+          </div>
+          
+          <div class="filter-item">
+            <el-button type="primary" @click="searchData" :loading="loading">搜索</el-button>
+            <el-button @click="resetFilter" style="margin-left: 10px;">重置</el-button>
+          </div>
+        </div>
+        
+        <!-- 前端筛选（只对现有数据进行筛选） -->
+        <div class="filter-row filter-row-local">
           <div class="filter-item">
             <span class="filter-label">数量：</span>
             <el-select v-model="filterAmountOperator" style="width: 100px;">
@@ -45,104 +96,106 @@
             />
             <span style="margin-left: 5px;">小时前</span>
           </div>
-          
-          <div class="filter-item">
-            <span class="filter-label">事件名：</span>
-            <el-input 
-              v-model="filterEventName" 
-              placeholder="输入事件名进行模糊匹配"
-              style="width: 200px;"
-              clearable
-            />
-          </div>
-          
-          <div class="filter-item">
-            <span class="filter-label">方向：</span>
-            <el-select v-model="filterOutCome" style="width: 120px;" clearable placeholder="全部">
-              <el-option label="YES" value="YES" />
-              <el-option label="NO" value="NO" />
-            </el-select>
-          </div>
-          
-          <div class="filter-item">
-            <el-button type="primary" @click="applyFilter">应用筛选</el-button>
-            <el-button @click="resetFilter" style="margin-left: 10px;">重置</el-button>
-          </div>
         </div>
       </el-card>
     </div>
 
-    <!-- 持仓详情表格 -->
-    <el-table 
-      :data="filteredTableData" 
-      border 
-      style="width: 100%; min-width: 1800px;"
-      v-loading="loading"
-      height="calc(100vh - 350px)"
-    >
-      <el-table-column type="index" label="序号" width="60" align="center" :index="indexMethod" fixed />
-      
-      <el-table-column prop="number" label="浏览器编号" width="120" align="center" sortable fixed />
-      
-      <el-table-column prop="eventName" label="事件名" width="300" sortable>
-        <template #default="scope">
-          <div class="event-name-cell">
-            {{ scope.row.eventName || '-' }}
-          </div>
-        </template>
-      </el-table-column>
+    <!-- YES方向持仓表格 -->
+    <div class="table-section">
+      <h2 class="table-title yes-title">
+        YES 方向持仓 ({{ yesTableData.length }} 条)
+      </h2>
+      <div v-loading="loading" class="loading-wrapper">
+        <VirtualTable
+          :data="yesTableData"
+          :columns="yesColumns"
+          :height="yesTableHeight"
+          :row-height="40"
+          :header-height="40"
+          :buffer="10"
+          :get-row-key="(row, index) => `yes-${index}`"
+          @sort-change="handleYesSortChange"
+        >
+          <template #eventName="{ row }">
+            <div class="event-name-cell">
+              {{ row.eventName || '-' }}
+            </div>
+          </template>
+          <template #amt="{ row }">
+            <span>{{ formatNumber(row.amt) }}</span>
+          </template>
+          <template #avgPrice="{ row }">
+            <span>{{ formatNumber(row.avgPrice) }}</span>
+          </template>
+          <template #ctime="{ row }">
+            <span>{{ formatDateTime(row.ctime) }}</span>
+          </template>
+          <template #utime="{ row }">
+            <span>{{ formatDateTime(row.utime) }}</span>
+          </template>
+          <template #catchTime="{ row }">
+            <span>{{ formatDateTime(row.catchTime) }}</span>
+          </template>
+          <template #reason="{ row }">
+            <span>{{ row.reason || '-' }}</span>
+          </template>
+        </VirtualTable>
+      </div>
+    </div>
 
-      <el-table-column prop="outCome" label="方向" width="100" align="center" sortable>
-        <template #default="scope">
-          <span :class="scope.row.outCome === 'YES' ? 'yes-color' : 'no-color'">
-            {{ scope.row.outCome || '-' }}
-          </span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="amt" label="数量" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.amt, b.amt)">
-        <template #default="scope">
-          <span>{{ formatNumber(scope.row.amt) }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="avgPrice" label="价格" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.avgPrice, b.avgPrice)">
-        <template #default="scope">
-          <span>{{ formatNumber(scope.row.avgPrice) }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="ctime" label="仓位创建时间" width="180" align="center" sortable :sort-method="(a, b) => sortByTime(a.ctime, b.ctime)">
-        <template #default="scope">
-          <span>{{ formatDateTime(scope.row.ctime) }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="utime" label="仓位更新时间" width="180" align="center" sortable :sort-method="(a, b) => sortByTime(a.utime, b.utime)">
-        <template #default="scope">
-          <span>{{ formatDateTime(scope.row.utime) }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="catchTime" label="抓取时间" width="180" align="center" sortable :sort-method="(a, b) => sortByTime(a.catchTime, b.catchTime)">
-        <template #default="scope">
-          <span>{{ formatDateTime(scope.row.catchTime) }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="reason" label="原因" width="300" align="center">
-        <template #default="scope">
-          <span>{{ scope.row.reason || '-' }}</span>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- NO方向持仓表格 -->
+    <div class="table-section">
+      <h2 class="table-title no-title">
+        NO 方向持仓 ({{ noTableData.length }} 条)
+      </h2>
+      <div v-loading="loading" class="loading-wrapper">
+        <VirtualTable
+          :data="noTableData"
+          :columns="noColumns"
+          :height="noTableHeight"
+          :row-height="40"
+          :header-height="40"
+          :buffer="10"
+          :get-row-key="(row, index) => `no-${index}`"
+          @sort-change="handleNoSortChange"
+        >
+          <template #eventName="{ row }">
+            <div class="event-name-cell">
+              {{ row.eventName || '-' }}
+            </div>
+          </template>
+          <template #amt="{ row }">
+            <span>{{ formatNumber(row.amt) }}</span>
+          </template>
+          <template #avgPrice="{ row }">
+            <span>{{ formatNumber(row.avgPrice) }}</span>
+          </template>
+          <template #ctime="{ row }">
+            <span>{{ formatDateTime(row.ctime) }}</span>
+          </template>
+          <template #utime="{ row }">
+            <span>{{ formatDateTime(row.utime) }}</span>
+          </template>
+          <template #catchTime="{ row }">
+            <span>{{ formatDateTime(row.catchTime) }}</span>
+          </template>
+          <template #reason="{ row }">
+            <span>{{ row.reason || '-' }}</span>
+          </template>
+        </VirtualTable>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import VirtualTable from './components/VirtualTable.vue'
+
+const route = useRoute()
 
 const API_BASE_URL = 'https://sg.bicoin.com.cn/99l'
 const ORDERBOOK_API_URL = 'https://enstudyai.fatedreamer.com/t3/api/orderbooks'
@@ -163,11 +216,46 @@ const filterAmountOperator = ref('gt') // 'gt' 或 'lt'
 const filterAmountValue = ref(null)
 const filterTimeOperator = ref('gt') // 'gt' 或 'lt'
 const filterTimeValue = ref(null) // 小时数
-const filterEventName = ref('') // 事件名模糊匹配
-const filterOutCome = ref('') // YES/NO筛选
+const filterEventName = ref('') // 事件名模糊匹配（前端筛选）
+const filterOutCome = ref('') // YES/NO筛选（服务器端筛选）
+const filterGroupFilter = ref('') // 电脑组筛选（服务器端筛选），多个用逗号分隔
+const filterNumberFilter = ref('') // 浏览器编号筛选（服务器端筛选），多个用逗号分隔
+const filterTrending = ref('') // 主题名字筛选（服务器端筛选），从URL参数获取
 
 // 深度显示状态
 const depthFullShown = ref(new Set()) // 存储已展开完整深度的事件名
+
+// 排序状态
+const yesSortState = ref({ column: null, order: null })
+const noSortState = ref({ column: null, order: null })
+
+// YES表格列定义
+const yesColumns = ref([
+  { type: 'index', label: '序号', width: 60, fixed: 'left' },
+  { prop: 'number', label: '浏览器编号', width: 120, sortable: true, fixed: 'left', sortMethod: (a, b) => sortByString(a.number, b.number) },
+  { prop: 'group', label: '电脑组', width: 100, sortable: true, fixed: 'left', sortMethod: (a, b) => sortByNumber(a.group, b.group) },
+  { prop: 'eventName', label: '事件名', width: 300, sortable: true, sortMethod: (a, b) => sortByString(a.eventName, b.eventName) },
+  { prop: 'amt', label: '数量', width: 120, sortable: true, sortMethod: (a, b) => sortByNumber(a.amt, b.amt) },
+  { prop: 'avgPrice', label: '价格', width: 120, sortable: true, sortMethod: (a, b) => sortByNumber(a.avgPrice, b.avgPrice) },
+  { prop: 'ctime', label: '仓位创建时间', width: 180, sortable: true, sortMethod: (a, b) => sortByTime(a.ctime, b.ctime) },
+  { prop: 'utime', label: '仓位更新时间', width: 180, sortable: true, sortMethod: (a, b) => sortByTime(a.utime, b.utime) },
+  { prop: 'catchTime', label: '抓取时间', width: 180, sortable: true, sortMethod: (a, b) => sortByTime(a.catchTime, b.catchTime) },
+  { prop: 'reason', label: '原因', width: 300 }
+])
+
+// NO表格列定义
+const noColumns = ref([
+  { type: 'index', label: '序号', width: 60, fixed: 'left' },
+  { prop: 'number', label: '浏览器编号', width: 120, sortable: true, fixed: 'left', sortMethod: (a, b) => sortByString(a.number, b.number) },
+  { prop: 'group', label: '电脑组', width: 100, sortable: true, fixed: 'left', sortMethod: (a, b) => sortByNumber(a.group, b.group) },
+  { prop: 'eventName', label: '事件名', width: 300, sortable: true, sortMethod: (a, b) => sortByString(a.eventName, b.eventName) },
+  { prop: 'amt', label: '数量', width: 120, sortable: true, sortMethod: (a, b) => sortByNumber(a.amt, b.amt) },
+  { prop: 'avgPrice', label: '价格', width: 120, sortable: true, sortMethod: (a, b) => sortByNumber(a.avgPrice, b.avgPrice) },
+  { prop: 'ctime', label: '仓位创建时间', width: 180, sortable: true, sortMethod: (a, b) => sortByTime(a.ctime, b.ctime) },
+  { prop: 'utime', label: '仓位更新时间', width: 180, sortable: true, sortMethod: (a, b) => sortByTime(a.utime, b.utime) },
+  { prop: 'catchTime', label: '抓取时间', width: 180, sortable: true, sortMethod: (a, b) => sortByTime(a.catchTime, b.catchTime) },
+  { prop: 'reason', label: '原因', width: 300 }
+])
 
 /**
  * 序号计算方法（从1开始）
@@ -175,6 +263,86 @@ const depthFullShown = ref(new Set()) // 存储已展开完整深度的事件名
 const indexMethod = (index) => {
   return index + 1
 }
+
+/**
+ * YES表格序号计算方法（从1开始）
+ */
+const indexMethodForYes = (index) => {
+  return index + 1
+}
+
+/**
+ * NO表格序号计算方法（从1开始）
+ */
+const indexMethodForNo = (index) => {
+  return index + 1
+}
+
+/**
+ * YES方向的数据（计算属性，支持排序）
+ */
+const yesTableData = computed(() => {
+  let data = filteredTableData.value.filter(row => row.outCome === 'YES')
+  
+  // 应用排序
+  if (yesSortState.value.column && yesSortState.value.order) {
+    const column = yesColumns.value.find(col => (col.prop || col.type) === yesSortState.value.column)
+    if (column && column.sortMethod) {
+      const sorted = [...data].sort((a, b) => {
+        const result = column.sortMethod(a[yesSortState.value.column], b[yesSortState.value.column])
+        return yesSortState.value.order === 'asc' ? result : -result
+      })
+      data = sorted
+    }
+  }
+  
+  return data
+})
+
+/**
+ * NO方向的数据（计算属性，支持排序）
+ */
+const noTableData = computed(() => {
+  let data = filteredTableData.value.filter(row => row.outCome === 'NO')
+  
+  // 应用排序
+  if (noSortState.value.column && noSortState.value.order) {
+    const column = noColumns.value.find(col => (col.prop || col.type) === noSortState.value.column)
+    if (column && column.sortMethod) {
+      const sorted = [...data].sort((a, b) => {
+        const result = column.sortMethod(a[noSortState.value.column], b[noSortState.value.column])
+        return noSortState.value.order === 'asc' ? result : -result
+      })
+      data = sorted
+    }
+  }
+  
+  return data
+})
+
+/**
+ * YES表格高度（动态计算）
+ */
+const yesTableHeight = computed(() => {
+  if (typeof window === 'undefined') return 400
+  const baseHeight = 350
+  const tableCount = 2 // YES 和 NO 两个表格
+  const titleHeight = 50 // 每个表格标题高度
+  const availableHeight = window.innerHeight - baseHeight - (tableCount * titleHeight)
+  return Math.max(200, availableHeight / 2)
+})
+
+/**
+ * NO表格高度（动态计算）
+ */
+const noTableHeight = computed(() => {
+  if (typeof window === 'undefined') return 400
+  const baseHeight = 350
+  const tableCount = 2 // YES 和 NO 两个表格
+  const titleHeight = 50 // 每个表格标题高度
+  const availableHeight = window.innerHeight - baseHeight - (tableCount * titleHeight)
+  return Math.max(200, availableHeight / 2)
+})
 
 /**
  * 格式化数字
@@ -318,8 +486,32 @@ const loadData = async () => {
     // 先加载 exchangeConfig 配置
     await loadExchangeConfig()
     
-    // 加载账户数据
-    const accountResponse = await axios.get(`${API_BASE_URL}/boost/getAllPosSnap`)
+    // 构建服务器端筛选参数
+    const serverFilterParams = {}
+    
+    // 电脑组筛选
+    if (filterGroupFilter.value && filterGroupFilter.value.trim()) {
+      serverFilterParams.groupFilter = filterGroupFilter.value.trim()
+    }
+    
+    // 浏览器编号筛选
+    if (filterNumberFilter.value && filterNumberFilter.value.trim()) {
+      serverFilterParams.numberFilter = filterNumberFilter.value.trim()
+    }
+    
+    // 主题名字筛选（从URL参数或筛选条件获取）
+    if (filterTrending.value && filterTrending.value.trim()) {
+      serverFilterParams.trending = filterTrending.value.trim()
+    }
+    
+    // 注意：方向筛选已移除，因为现在按方向分表显示，不再需要服务器端方向筛选
+    
+    console.log('[持仓详情] 服务器端筛选参数:', serverFilterParams)
+    
+    // 加载账户数据（带服务器端筛选参数）
+    const accountResponse = await axios.get(`${API_BASE_URL}/boost/getAllPosSnap`, {
+      params: serverFilterParams
+    })
     
     if (accountResponse.data && accountResponse.data.data && accountResponse.data.data.list) {
       const data = accountResponse.data.data.list
@@ -351,6 +543,7 @@ const loadData = async () => {
           ...row,
           eventName: eventName,
           number: row.number ? String(row.number) : '',
+          group: row.group ? (typeof row.group === 'string' ? parseInt(row.group) : row.group) : null,
           outCome: row.outCome || '',
           amt: parseFloat(row.amt) || 0,
           avgPrice: parseFloat(row.avgPrice) || 0,
@@ -368,8 +561,8 @@ const loadData = async () => {
       if (reasonMap.value.size > 0) {
         updateTableDataReasons()
       } else {
-        // 应用筛选
-        applyFilter()
+        // 应用前端筛选
+        applyClientFilter()
       }
       
       console.log('[持仓详情] 数据加载完成')
@@ -593,6 +786,20 @@ const handleExpandChange = (row, expandedRows) => {
 }
 
 /**
+ * 处理YES表格排序变化
+ */
+const handleYesSortChange = ({ column, order, sortMethod }) => {
+  yesSortState.value = { column, order }
+}
+
+/**
+ * 处理NO表格排序变化
+ */
+const handleNoSortChange = ({ column, order, sortMethod }) => {
+  noSortState.value = { column, order }
+}
+
+/**
  * 判断深度是否符合条件
  * 条件：卖一价减去买一价大于0.15，或者买一价或卖一价的深度小于100
  */
@@ -627,12 +834,27 @@ const isDepthQualified = (depthData) => {
 }
 
 /**
- * 应用筛选条件
+ * 搜索数据（服务器端筛选，重新请求数据）
+ * 服务器端筛选：电脑组、浏览器编号、主题名字
  */
-const applyFilter = () => {
+const searchData = () => {
+  // 重新加载数据（应用服务器端筛选）
+  loadData()
+}
+
+/**
+ * 应用前端筛选（在数据加载完成后调用）
+ */
+const applyClientFilter = () => {
   let filtered = [...tableData.value]
   
-  // 数量筛选
+  // 始终过滤掉 amt < 1 的数据（必须保留的逻辑）
+  filtered = filtered.filter(row => {
+    const amt = parseFloat(row.amt) || 0
+    return amt >= 1
+  })
+  
+  // 数量筛选（前端筛选）
   if (filterAmountValue.value !== null && filterAmountValue.value !== undefined) {
     const amountValue = parseFloat(filterAmountValue.value) || 0
     if (filterAmountOperator.value === 'gt') {
@@ -648,7 +870,7 @@ const applyFilter = () => {
     }
   }
   
-  // 更新时间筛选（筛选仓位更新时间）
+  // 更新时间筛选（前端筛选，筛选仓位更新时间）
   if (filterTimeValue.value !== null && filterTimeValue.value !== undefined) {
     const timeValue = parseFloat(filterTimeValue.value) || 0
     const timeThreshold = Date.now() - timeValue * 60 * 60 * 1000 // 转换为时间戳（小时转毫秒）
@@ -666,7 +888,7 @@ const applyFilter = () => {
     })
   }
   
-  // 事件名模糊匹配筛选
+  // 事件名模糊匹配筛选（前端筛选）
   if (filterEventName.value && filterEventName.value.trim()) {
     const searchText = filterEventName.value.trim().toLowerCase()
     filtered = filtered.filter(row => {
@@ -675,16 +897,23 @@ const applyFilter = () => {
     })
   }
   
-  // 方向筛选
-  if (filterOutCome.value) {
-    filtered = filtered.filter(row => {
-      return row.outCome === filterOutCome.value
-    })
-  }
-  
   filteredTableData.value = filtered
-  console.log(`[持仓详情] 筛选完成，共 ${filtered.length} 条数据`)
+  console.log(`[持仓详情] 前端筛选完成，共 ${filtered.length} 条数据`)
 }
+
+/**
+ * 监听前端筛选条件变化，自动应用筛选
+ */
+watch(
+  [filterAmountValue, filterAmountOperator, filterTimeValue, filterTimeOperator, filterEventName],
+  () => {
+    // 当数量、更新时间或事件名筛选条件变化时，自动应用前端筛选
+    if (tableData.value.length > 0) {
+      applyClientFilter()
+    }
+  },
+  { deep: true }
+)
 
 /**
  * 重置筛选条件
@@ -696,7 +925,11 @@ const resetFilter = () => {
   filterTimeValue.value = null
   filterEventName.value = ''
   filterOutCome.value = ''
-  applyFilter()
+  filterGroupFilter.value = ''
+  filterNumberFilter.value = ''
+  filterTrending.value = ''
+  // 重置后重新搜索数据
+  searchData()
 }
 
 /**
@@ -747,14 +980,15 @@ const loadTestCacheData = async (uid) => {
       console.log('[持仓详情] 获取到测试缓存数据:', data)
       
       // 构建原因映射
+      // 注意：YES方向的持仓只匹配 closeYesPass 的原因，NO方向的持仓只匹配 closeNoPass 的原因
       const newReasonMap = new Map()
       
-      // 处理 closeYesPass
+      // 处理 closeYesPass（只用于 YES 方向的持仓）
       if (data.closeYesPass && typeof data.closeYesPass === 'object') {
         for (const [reason, numbers] of Object.entries(data.closeYesPass)) {
           if (Array.isArray(numbers)) {
             for (const number of numbers) {
-              const key = `YES_${number}`
+              const key = `YES_${number}` // YES方向的key
               if (!newReasonMap.has(key)) {
                 newReasonMap.set(key, [])
               }
@@ -764,12 +998,12 @@ const loadTestCacheData = async (uid) => {
         }
       }
       
-      // 处理 closeNoPass
+      // 处理 closeNoPass（只用于 NO 方向的持仓）
       if (data.closeNoPass && typeof data.closeNoPass === 'object') {
         for (const [reason, numbers] of Object.entries(data.closeNoPass)) {
           if (Array.isArray(numbers)) {
             for (const number of numbers) {
-              const key = `NO_${number}`
+              const key = `NO_${number}` // NO方向的key
               if (!newReasonMap.has(key)) {
                 newReasonMap.set(key, [])
               }
@@ -782,7 +1016,10 @@ const loadTestCacheData = async (uid) => {
       reasonMap.value = newReasonMap
       console.log('[持仓详情] 原因映射构建完成，共', newReasonMap.size, '条记录')
       
-      // 更新表格数据中的原因字段
+      // 将测试缓存数据合并到列表中
+      await mergeTestCacheDataToTable(data)
+      
+      // 更新表格数据中的原因字段（合并后更新）
       updateTableDataReasons()
       
       return data
@@ -797,7 +1034,118 @@ const loadTestCacheData = async (uid) => {
 }
 
 /**
+ * 将测试缓存数据合并到表格中
+ */
+const mergeTestCacheDataToTable = async (cacheData) => {
+  try {
+    console.log('[持仓详情] 开始合并测试缓存数据到表格...')
+    
+    // 先加载 exchangeConfig 配置（如果还没加载）
+    if (idToTrendingMap.value.size === 0) {
+      await loadExchangeConfig()
+    }
+    
+    // 获取URL参数中的id（trendingId）
+    const urlParams = parseUrlParams()
+    const trendingId = urlParams.id ? String(urlParams.id) : null
+    
+    if (!trendingId) {
+      console.warn('[持仓详情] 未找到trendingId参数，无法合并测试缓存数据')
+      return
+    }
+    
+    // 获取事件名
+    const eventName = idToTrendingMap.value.get(trendingId) || ''
+    if (!eventName) {
+      console.warn('[持仓详情] 未找到对应的事件名，trendingId:', trendingId)
+      return
+    }
+    
+    // 合并到现有数据中（只更新已存在的数据，不添加新数据）
+    // 以 getAllPosSnap 返回的数据为基准，只更新已存在的记录
+    let updatedCount = 0
+    let skippedCount = 0
+    
+    // 处理 closeYesPass（只匹配 YES 方向的持仓）
+    if (cacheData.closeYesPass && typeof cacheData.closeYesPass === 'object') {
+      for (const [reason, numbers] of Object.entries(cacheData.closeYesPass)) {
+        if (Array.isArray(numbers)) {
+          for (const number of numbers) {
+            const numberStr = String(number)
+            const trendingKey = `${trendingId}::YES`
+            
+            // 只查找 YES 方向的持仓
+            const existingIndex = tableData.value.findIndex(item => 
+              item.number === numberStr && 
+              item.outCome === 'YES' &&
+              item.trendingKey === trendingKey
+            )
+            
+            if (existingIndex >= 0) {
+              // 如果已存在（在 getAllPosSnap 返回的数据中），更新原因
+              const existingReason = tableData.value[existingIndex].reason
+              if (existingReason) {
+                tableData.value[existingIndex].reason = `${existingReason}; ${reason}`
+              } else {
+                tableData.value[existingIndex].reason = reason
+              }
+              updatedCount++
+            } else {
+              // 如果不存在（不在 getAllPosSnap 返回的数据中），跳过，不添加
+              skippedCount++
+              console.log(`[持仓详情] 跳过测试缓存数据：number=${numberStr}, outCome=YES（不在 getAllPosSnap 返回的数据中）`)
+            }
+          }
+        }
+      }
+    }
+    
+    // 处理 closeNoPass（只匹配 NO 方向的持仓）
+    if (cacheData.closeNoPass && typeof cacheData.closeNoPass === 'object') {
+      for (const [reason, numbers] of Object.entries(cacheData.closeNoPass)) {
+        if (Array.isArray(numbers)) {
+          for (const number of numbers) {
+            const numberStr = String(number)
+            const trendingKey = `${trendingId}::NO`
+            
+            // 只查找 NO 方向的持仓
+            const existingIndex = tableData.value.findIndex(item => 
+              item.number === numberStr && 
+              item.outCome === 'NO' &&
+              item.trendingKey === trendingKey
+            )
+            
+            if (existingIndex >= 0) {
+              // 如果已存在（在 getAllPosSnap 返回的数据中），更新原因
+              const existingReason = tableData.value[existingIndex].reason
+              if (existingReason) {
+                tableData.value[existingIndex].reason = `${existingReason}; ${reason}`
+              } else {
+                tableData.value[existingIndex].reason = reason
+              }
+              updatedCount++
+            } else {
+              // 如果不存在（不在 getAllPosSnap 返回的数据中），跳过，不添加
+              skippedCount++
+              console.log(`[持仓详情] 跳过测试缓存数据：number=${numberStr}, outCome=NO（不在 getAllPosSnap 返回的数据中）`)
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`[持仓详情] 测试缓存数据合并完成，更新 ${updatedCount} 条记录，跳过 ${skippedCount} 条记录（不在 getAllPosSnap 返回的数据中）`)
+    
+    // 应用前端筛选
+    applyClientFilter()
+  } catch (error) {
+    console.error('[持仓详情] 合并测试缓存数据失败:', error)
+  }
+}
+
+/**
  * 更新表格数据中的原因字段
+ * 确保：YES方向的持仓只显示 closeYesPass 的原因，NO方向的持仓只显示 closeNoPass 的原因
  */
 const updateTableDataReasons = () => {
   // 获取URL参数中的id（trendingId）
@@ -820,13 +1168,32 @@ const updateTableDataReasons = () => {
           // 事件ID匹配，查找原因
           const number = String(row.number || '')
           const outCome = row.outCome || ''
-          const key = `${outCome}_${number}`
           
-          const reasons = reasonMap.value.get(key)
-          if (reasons && reasons.length > 0) {
-            // 如果有多个原因，用分号连接
-            row.reason = reasons.join('; ')
+          // 确保严格按照方向匹配：
+          // YES方向只匹配 closeYesPass 的原因（key: YES_${number}）
+          // NO方向只匹配 closeNoPass 的原因（key: NO_${number}）
+          if (outCome === 'YES') {
+            // YES方向，只查找 closeYesPass 的原因
+            const key = `YES_${number}`
+            const reasons = reasonMap.value.get(key)
+            if (reasons && reasons.length > 0) {
+              // 如果有多个原因，用分号连接
+              row.reason = reasons.join('; ')
+            } else {
+              row.reason = null
+            }
+          } else if (outCome === 'NO') {
+            // NO方向，只查找 closeNoPass 的原因
+            const key = `NO_${number}`
+            const reasons = reasonMap.value.get(key)
+            if (reasons && reasons.length > 0) {
+              // 如果有多个原因，用分号连接
+              row.reason = reasons.join('; ')
+            } else {
+              row.reason = null
+            }
           } else {
+            // 其他方向，不显示原因
             row.reason = null
           }
         } else {
@@ -840,28 +1207,93 @@ const updateTableDataReasons = () => {
     }
   }
   
-  // 重新应用筛选
-  applyFilter()
+  // 重新应用前端筛选
+  applyClientFilter()
 }
 
 /**
- * 组件挂载时初始化（不自动加载数据）
+ * 初始化数据（根据URL参数决定是否自动加载）
  */
-onMounted(async () => {
-  // 初始化筛选后的数据为空数组
-  filteredTableData.value = []
-  
+const initializeData = async () => {
   // 解析URL参数
   const urlParams = parseUrlParams()
   const uid = urlParams.uid
   const id = urlParams.id
   
-  if (uid) {
-    console.log('[持仓详情] 检测到uid参数:', uid, 'trendingId:', id)
-    // 加载测试缓存数据
-    await loadTestCacheData(uid)
+  // 检查是否有任何URL参数
+  const hasUrlParams = Object.keys(urlParams).length > 0
+  
+  // 只有当URL有参数时才自动请求数据
+  if (hasUrlParams) {
+    console.log('[持仓详情] 检测到URL参数，自动加载数据')
+    
+    // 如果URL参数中有id（trendingId），设置默认的主题名字筛选和事件名
+    if (id) {
+      console.log('[持仓详情] 检测到trendingId参数:', id)
+      // 先加载配置，获取事件名
+      await loadExchangeConfig()
+      const eventName = idToTrendingMap.value.get(String(id))
+      if (eventName) {
+        filterTrending.value = eventName
+        // 同时设置事件名到事件名输入框
+        filterEventName.value = eventName
+        console.log('[持仓详情] 设置默认主题名字筛选和事件名:', eventName)
+      }
+    }
+    
+    // 如果URL参数中有minUAmt，设置数量筛选的"大于"值
+    const minUAmt = urlParams.minUAmt
+    if (minUAmt) {
+      const minUAmtValue = parseFloat(minUAmt)
+      if (!isNaN(minUAmtValue)) {
+        filterAmountValue.value = minUAmtValue
+        filterAmountOperator.value = 'gt' // 设置为"大于"
+        console.log('[持仓详情] 设置数量筛选条件: 大于', minUAmtValue)
+      }
+    }
+    
+    // 加载数据（会应用默认的主题名字筛选）
+    await loadData()
+    
+    // 如果URL参数中有uid，加载测试缓存数据并合并到列表中
+    if (uid) {
+      console.log('[持仓详情] 检测到uid参数:', uid, 'trendingId:', id)
+      // 加载测试缓存数据（会自动合并到列表中）
+      await loadTestCacheData(uid)
+    }
+  } else {
+    console.log('[持仓详情] 未检测到URL参数，不自动加载数据，请手动点击刷新或搜索')
   }
+}
+
+/**
+ * 组件挂载时初始化
+ */
+onMounted(async () => {
+  // 初始化筛选后的数据为空数组
+  filteredTableData.value = []
+  
+  // 初始化数据（根据URL参数决定是否自动加载）
+  await initializeData()
 })
+
+/**
+ * 监听路由变化（处理组件复用的情况）
+ */
+watch(
+  () => route.fullPath,
+  async (newPath, oldPath) => {
+    // 只有当路由确实发生变化时才重新初始化
+    if (newPath !== oldPath && newPath.includes('/position-detail')) {
+      console.log('[持仓详情] 检测到路由变化，重新初始化')
+      // 清空当前数据
+      filteredTableData.value = []
+      tableData.value = []
+      // 重新初始化数据
+      await initializeData()
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -888,6 +1320,13 @@ onMounted(async () => {
   font-size: 13px;
   line-height: 1.4;
   word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-height: 2.8em;
 }
 
 .depth-container {
@@ -975,6 +1414,16 @@ onMounted(async () => {
   gap: 20px;
 }
 
+.search-row {
+  padding-bottom: 15px;
+  border-bottom: 1px solid #ebeef5;
+  margin-bottom: 15px;
+}
+
+.filter-row-local {
+  padding-top: 5px;
+}
+
 .filter-item {
   display: flex;
   align-items: center;
@@ -1001,6 +1450,34 @@ onMounted(async () => {
 .no-color {
   color: #f56c6c;
   font-weight: 600;
+}
+
+.table-section {
+  margin-bottom: 30px;
+}
+
+.table-section:last-child {
+  margin-bottom: 0;
+}
+
+.table-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  padding: 10px 0;
+}
+
+.yes-title {
+  color: #67c23a;
+}
+
+.no-title {
+  color: #f56c6c;
+}
+
+.loading-wrapper {
+  position: relative;
+  min-width: 1800px;
 }
 </style>
 

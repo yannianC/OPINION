@@ -134,6 +134,20 @@
                 >
                   {{ isQuerying ? '插入中...' : '插入' }}
                 </button>
+                <button 
+                  class="btn btn-primary" 
+                  @click="handleTest"
+                  :disabled="!querySelectedConfig || isTesting"
+                  style="margin-left: 8px;"
+                >
+                  {{ isTesting ? '测试中...' : '测试' }}
+                </button>
+              </div>
+              <div v-if="testResult && !testResult.meetsCondition" class="query-result" style="margin-top: 8px;">
+                <div class="query-result-error">
+                  ❌ 不符合订单薄条件
+                  <div class="query-result-reason">{{ testResult.reason }}</div>
+                </div>
               </div>
               <div v-if="queryResult && !queryResult.meetsCondition" class="query-result">
                 <div class="query-result-error">
@@ -272,66 +286,6 @@
                 class="filter-input" 
                 min="0"
                 placeholder="2000"
-                :disabled="autoHedgeRunning"
-                @blur="saveHedgeSettings"
-              />
-            </div>
-            <div class="trending-filter">
-              <label>深度差15以上延时检测时间(秒):</label>
-              <input 
-                v-model="hedgeMode.delayTimeGt15" 
-                type="text" 
-                class="filter-input" 
-                placeholder="300-600"
-                :disabled="autoHedgeRunning"
-                @blur="saveHedgeSettings"
-              />
-            </div>
-            <div class="trending-filter">
-              <label>深度差2-15延时检测时间(秒):</label>
-              <input 
-                v-model="hedgeMode.delayTime2To15" 
-                type="text" 
-                class="filter-input" 
-                placeholder="30-60"
-                :disabled="autoHedgeRunning"
-                @blur="saveHedgeSettings"
-              />
-            </div>
-            <div class="trending-filter">
-              <label>深度差0.2-2延时检测时间(秒):</label>
-              <input 
-                v-model="hedgeMode.delayTime02To2" 
-                type="text" 
-                class="filter-input" 
-                placeholder="0.5-0.5"
-                :disabled="autoHedgeRunning"
-                @blur="saveHedgeSettings"
-              />
-            </div>
-            <div class="trending-filter">
-              <label>深度差0.1最大多吃价值(U):</label>
-              <input 
-                v-model.number="hedgeMode.maxEatValue01" 
-                type="number" 
-                class="filter-input" 
-                min="0"
-                step="0.1"
-                placeholder="20"
-                :disabled="autoHedgeRunning"
-                @blur="saveHedgeSettings"
-              />
-            </div>
-            <div class="trending-filter">
-              <label>先挂方价格最大波动(%):</label>
-              <input 
-                v-model.number="hedgeMode.maxPriceVolatility" 
-                type="number" 
-                class="filter-input" 
-                min="0"
-                max="100"
-                step="0.1"
-                placeholder="10"
                 :disabled="autoHedgeRunning"
                 @blur="saveHedgeSettings"
               />
@@ -730,6 +684,17 @@
                     <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
                       ❌ 关闭任务
                     </button>
+                    <span v-if="getPositionText(config)" :class="['position-info', shouldShowPositionGreen(config) ? 'position-info-green' : '']" style="margin-left: 8px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.8);">
+                      {{ getPositionText(config) }}
+                    </span>
+                    <button 
+                      class="btn-test btn-sm" 
+                      @click="handleTestForConfig(config)"
+                      :disabled="isTestingConfig(config)"
+                      style="margin-left: 8px;"
+                    >
+                      {{ isTestingConfig(config) ? '测试中...' : '测试' }}
+                    </button>
                     <span v-if="config.errorMessage" class="error-badge">
                       {{ config.errorMessage }}
                     </span>
@@ -746,24 +711,24 @@
                         <span class="task-label">先挂方: {{ config.orderbookData.firstSide }}</span>
                         <span class="task-status-badge status-success">已更新</span>
                       </div>
-                      <div v-if="config.lastRequestTime" class="task-time">
-                        {{ formatTime(config.lastRequestTime) }}
+                      <div v-if="config.orderbookData.pollTime" :class="['task-time', isOrderbookConditionMet(config.orderbookData) ? 'task-time-success' : 'task-time-error']">
+                        {{ getOrderbookStatusText(config.orderbookData) }}
                       </div>
                       <div class="task-msg">
                         <div class="orderbook-detail">
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.price1 !== null && config.orderbookData.price1 !== undefined" class="price-row">
                             <span class="label">先挂价格:</span>
                             <span class="value">{{ config.orderbookData.price1.toFixed(2) }}¢</span>
                           </div>
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.price2 !== null && config.orderbookData.price2 !== undefined" class="price-row">
                             <span class="label">后挂价格:</span>
                             <span class="value">{{ config.orderbookData.price2.toFixed(2) }}¢</span>
                           </div>
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.diff !== null && config.orderbookData.diff !== undefined" class="price-row">
                             <span class="label">价差:</span>
                             <span class="value highlight">{{ config.orderbookData.diff.toFixed(2) }}¢</span>
                           </div>
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.depth1 !== null && config.orderbookData.depth1 !== undefined && config.orderbookData.depth2 !== null && config.orderbookData.depth2 !== undefined" class="price-row">
                             <span class="label">深度:</span>
                             <span class="value">{{ config.orderbookData.depth1.toFixed(2) }} / {{ config.orderbookData.depth2.toFixed(2) }}</span>
                           </div>
@@ -2347,7 +2312,9 @@ const queryTrendingSearchText = ref('')  // 查询Trending搜索文本
 const showQueryTrendingDropdown = ref(false)  // 是否显示查询Trending下拉列表
 const querySelectedConfig = ref(null)  // 查询选中的配置
 const isQuerying = ref(false)  // 是否正在查询
+const isTesting = ref(false)  // 是否正在测试
 const queryResult = ref(null)  // 查询结果
+const testResult = ref(null)  // 测试结果
 const missionList = ref([])
 const hedgeHistoryList = ref([])
 const hedgeHistorySection = ref(null)
@@ -2441,6 +2408,11 @@ const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不
 // 分批执行相关
 const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
 const batchSize = ref(10)  // 每一批的个数
+
+// 持仓数据相关
+const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据，key为事件名(trending)，value为{yesPosition, noPosition}
+const idToTrendingMap = ref(new Map())  // 存储 id -> trending 的映射
+const testingConfigIds = ref(new Set())  // 正在测试的配置ID集合
 const batchExecutionTime = ref(1)  // 每一批的执行时间（分钟），默认1分钟
 const currentBatchIndex = ref(0)  // 当前执行批次索引
 const batchTimer = ref(null)  // 批次定时器
@@ -2482,13 +2454,7 @@ const hedgeMode = reactive({
   maxDHour: 12,  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
-  balancePriority: 2000,  // 资产优先级校验值
-  // 深度差相关设置
-  delayTimeGt15: '300-600',  // 深度差15以上挂单后延时检测时间（秒）
-  delayTime2To15: '30-60',  // 深度差2-15挂单后延时检测时间（秒）
-  delayTime02To2: '0.5-0.5',  // 深度差0.2-2挂单后延时检测时间（秒）
-  maxEatValue01: 20,  // 深度差0.1时，最大多吃价值（U）
-  maxPriceVolatility: 10  // 先挂方价格最大波动（买卖深度差的百分比）
+  balancePriority: 2000  // 资产优先级校验值
 })
 
 // 交易费查询
@@ -2870,6 +2836,415 @@ const handleQuery = async () => {
 }
 
 /**
+ * 处理测试（发送测试请求）
+ */
+const handleTest = async () => {
+  if (!querySelectedConfig.value) {
+    showToast('请先选择Trending配置', 'warning')
+    return
+  }
+  
+  isTesting.value = true
+  testResult.value = null
+  
+  const config = querySelectedConfig.value
+  
+  // 设置 isFetching 标志，防止自动对冲逻辑同时请求订单薄
+  const originalIsFetching = config.isFetching || false
+  config.isFetching = true
+  
+  try {
+    // 重试逻辑：最多重试5次
+    const maxRetries = 5
+    let retryCount = 0
+    let priceInfo = null
+    
+    // 获取订单薄信息，如果失败则重试（最多5次）
+    while (retryCount < maxRetries) {
+      try {
+        priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        // 成功获取订单薄，跳出重试循环
+        break
+      } catch (error) {
+        retryCount++
+        console.warn(`获取订单薄失败，重试 ${retryCount}/${maxRetries}:`, error.message)
+        
+        if (retryCount >= maxRetries) {
+          // 达到最大重试次数，设置错误结果
+          const reason = error.message || '获取订单薄数据失败（已重试5次）'
+          testResult.value = {
+            meetsCondition: false,
+            reason: reason
+          }
+          console.error('获取订单薄失败，已达到最大重试次数:', error)
+          return
+        }
+        
+        // 等待一段时间后重试（避免立即重试）
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+    
+    // 判断是否符合条件
+    const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+    
+    if (!meetsCondition) {
+      // 不符合条件，显示错误信息（与 handleQuery 的逻辑相同）
+      let reason = '不符合对冲条件'
+      
+      // 检查价差
+      if (priceInfo.diff <= 0.15) {
+        if (!hedgeMode.isClose) {
+          // 开仓模式：检查买一深度
+          if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        } else {
+          // 平仓模式：检查卖一深度
+          if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        }
+      }
+      
+      testResult.value = {
+        meetsCondition: false,
+        reason: reason,
+        priceInfo: priceInfo
+      }
+      return
+    }
+    
+    // 符合条件，继续发送测试请求到 calReadyToHedgeV4Test
+    // 计算订单价格（与 executeHedgeFromOrderbook 中的逻辑相同）
+    let orderPrice
+    if (priceInfo.finalPrice !== null && priceInfo.finalPrice !== undefined) {
+      orderPrice = priceInfo.finalPrice.toFixed(1)
+    } else {
+      // 兼容旧逻辑
+      if (priceInfo.diff > 0.15) {
+        // 先挂方买卖价差大于0.15，取平均价
+        orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
+      } else {
+        // 差值小于等于0.15，根据开仓/平仓取价格
+        if (!hedgeMode.isClose) {
+          // 开仓模式：取较小的价格（买一价）
+          orderPrice = priceInfo.minPrice.toFixed(1)
+        } else {
+          // 平仓模式：取较大的价格（卖一价）
+          orderPrice = priceInfo.maxPrice.toFixed(1)
+        }
+      }
+    }
+    
+    // 构建请求参数（与第7210-7239行的逻辑相同）
+    const requestData = {
+      trendingId: config.id,  // 使用输入框对应的trendingId
+      isClose: hedgeMode.isClose,
+      currentPrice: orderPrice,
+      priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
+      timePassMin: hedgeMode.timePassMin,
+      minUAmt: hedgeMode.minUAmt,  // 最小开单
+      maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+      minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+      maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
+      closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+      numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+    }
+    // 如果 maxIpDelay 有值，则添加到请求参数中
+    if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+      requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
+    }
+    // 添加 needJudgeDF 和 maxDHour 字段
+    requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+    requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+    // 添加 minCloseMin 字段
+    requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+    // 添加资产优先级校验字段
+    requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+    requestData.balancePriority = hedgeMode.balancePriority
+    
+    // 发送测试请求到 calReadyToHedgeV4Test
+    console.log('发送测试请求到 calReadyToHedgeV4Test:', requestData)
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4Test',
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    console.log('测试请求响应:', response.data)
+    
+    // 判断返回结果
+    if (response.data && response.data.code === 0 && response.data.data) {
+      const uid = response.data.data.uid
+      if (uid) {
+        // 获取配置ID
+        const trendingId = config.id
+        // 获取最小开单值
+        const minUAmt = hedgeMode.minUAmt || 0
+        showToast('测试请求发送成功，5秒后打开持仓详情页面', 'success')
+        
+        // 等待5秒后打开持仓详情页面
+        await new Promise(resolve => setTimeout(resolve, 5000))
+        
+        // 打开持仓详情页面，传递 uid、trendingId 和 minUAmt
+        const url = `https://oss.w3id.info/Opanomaly/index.html#/position-detail?uid=${uid}&id=${trendingId}&minUAmt=${minUAmt}`
+        window.open(url, '_blank')
+        showToast('已打开持仓详情页面', 'success')
+      } else {
+        showToast('测试请求发送成功，但未获取到uid', 'warning')
+      }
+    } else {
+      const errorMsg = response.data?.msg || '测试请求失败'
+      showToast(`测试请求失败: ${errorMsg}`, 'error')
+    }
+    
+    // 清空测试结果（因为成功发送了请求）
+    testResult.value = null
+  } catch (error) {
+    console.error('测试过程发生错误:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    showToast(`测试失败: ${errorMsg}`, 'error')
+  } finally {
+    // 恢复 isFetching 标志
+    config.isFetching = originalIsFetching
+    isTesting.value = false
+  }
+}
+
+/**
+ * 判断持仓数量是否满足绿色显示条件（yes和no都大于0.1w，即1000）
+ */
+const shouldShowPositionGreen = (config) => {
+  if (!config || !config.trending) {
+    return false
+  }
+  
+  const positionData = positionDataMap.value.get(config.trending.trim())
+  if (!positionData) {
+    return false
+  }
+  
+  // 判断yes和no持仓数量都大于0.1w（1000）
+  return positionData.yesPosition > 1000 && positionData.noPosition > 1000
+}
+
+/**
+ * 获取持仓文本（格式化显示）
+ */
+const getPositionText = (config) => {
+  if (!config || !config.trending) {
+    return ''
+  }
+  
+  const positionData = positionDataMap.value.get(config.trending.trim())
+  if (!positionData) {
+    return ''
+  }
+  
+  const yesPosition = (positionData.yesPosition / 10000).toFixed(2)
+  const noPosition = (positionData.noPosition / 10000).toFixed(2)
+  
+  return `持仓: YES ${yesPosition}万 / NO ${noPosition}万`
+}
+
+/**
+ * 检查配置是否正在测试
+ */
+const isTestingConfig = (config) => {
+  if (!config || !config.id) {
+    return false
+  }
+  return testingConfigIds.value.has(String(config.id))
+}
+
+/**
+ * 为指定配置执行测试
+ */
+const handleTestForConfig = async (config) => {
+  if (!config) {
+    showToast('配置不存在', 'warning')
+    return
+  }
+  
+  const configId = String(config.id)
+  testingConfigIds.value.add(configId)
+  
+  // 设置 isFetching 标志，防止自动对冲逻辑同时请求订单薄
+  const originalIsFetching = config.isFetching || false
+  config.isFetching = true
+  
+  try {
+    // 重试逻辑：最多重试5次
+    const maxRetries = 5
+    let retryCount = 0
+    let priceInfo = null
+    
+    // 获取订单薄信息，如果失败则重试（最多5次）
+    while (retryCount < maxRetries) {
+      try {
+        priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        // 成功获取订单薄，跳出重试循环
+        break
+      } catch (error) {
+        retryCount++
+        console.warn(`获取订单薄失败，重试 ${retryCount}/${maxRetries}:`, error.message)
+        
+        if (retryCount >= maxRetries) {
+          // 达到最大重试次数，显示错误
+          const reason = error.message || '获取订单薄数据失败（已重试5次）'
+          showToast(`测试失败: ${reason}`, 'error')
+          config.errorMessage = reason
+          return
+        }
+        
+        // 等待一段时间后重试（避免立即重试）
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+    
+    // 判断是否符合条件
+    const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+    
+    if (!meetsCondition) {
+      // 不符合条件，显示错误信息
+      let reason = '不符合对冲条件'
+      
+      // 检查价差
+      if (priceInfo.diff <= 0.15) {
+        if (!hedgeMode.isClose) {
+          // 开仓模式：检查买一深度
+          if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        } else {
+          // 平仓模式：检查卖一深度
+          if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        }
+      }
+      
+      config.errorMessage = reason
+      showToast(`测试失败: ${reason}`, 'error')
+      return
+    }
+    
+    // 符合条件，继续发送测试请求到 calReadyToHedgeV4Test
+    // 计算订单价格（与 executeHedgeFromOrderbook 中的逻辑相同）
+    let orderPrice
+    if (priceInfo.finalPrice !== null && priceInfo.finalPrice !== undefined) {
+      orderPrice = priceInfo.finalPrice.toFixed(1)
+    } else {
+      // 兼容旧逻辑
+      if (priceInfo.diff > 0.15) {
+        // 先挂方买卖价差大于0.15，取平均价
+        orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
+      } else {
+        // 差值小于等于0.15，根据开仓/平仓取价格
+        if (!hedgeMode.isClose) {
+          // 开仓模式：取较小的价格（买一价）
+          orderPrice = priceInfo.minPrice.toFixed(1)
+        } else {
+          // 平仓模式：取较大的价格（卖一价）
+          orderPrice = priceInfo.maxPrice.toFixed(1)
+        }
+      }
+    }
+    
+    // 构建请求参数
+    const requestData = {
+      trendingId: config.id,
+      isClose: hedgeMode.isClose,
+      currentPrice: orderPrice,
+      priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
+      timePassMin: hedgeMode.timePassMin,
+      minUAmt: hedgeMode.minUAmt,  // 最小开单
+      maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+      minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+      maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
+      closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+      numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+    }
+    // 如果 maxIpDelay 有值，则添加到请求参数中
+    if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+      requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
+    }
+    // 添加 needJudgeDF 和 maxDHour 字段
+    requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+    requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+    // 添加 minCloseMin 字段
+    requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+    // 添加资产优先级校验字段
+    requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+    requestData.balancePriority = hedgeMode.balancePriority
+    
+    // 发送测试请求到 calReadyToHedgeV4Test
+    console.log('发送测试请求到 calReadyToHedgeV4Test:', requestData)
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4Test',
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    console.log('测试请求响应:', response.data)
+    
+    // 判断返回结果
+    if (response.data && response.data.code === 0 && response.data.data) {
+      const uid = response.data.data.uid
+      if (uid) {
+        // 获取配置ID
+        const trendingId = config.id
+        // 获取最小开单值
+        const minUAmt = hedgeMode.minUAmt || 0
+        showToast('测试请求发送成功，5秒后打开持仓详情页面', 'success')
+        
+        // 等待5秒后打开持仓详情页面
+        await new Promise(resolve => setTimeout(resolve, 5000))
+        
+        // 打开持仓详情页面，传递 uid、trendingId 和 minUAmt
+        const url = `https://oss.w3id.info/Opanomaly/index.html#/position-detail?uid=${uid}&id=${trendingId}&minUAmt=${minUAmt}`
+        window.open(url, '_blank')
+        showToast('已打开持仓详情页面', 'success')
+        // 清除错误信息
+        config.errorMessage = null
+      } else {
+        showToast('测试请求发送成功，但未获取到uid', 'warning')
+      }
+    } else {
+      const errorMsg = response.data?.msg || '测试请求失败'
+      showToast(`测试请求失败: ${errorMsg}`, 'error')
+      config.errorMessage = errorMsg
+    }
+  } catch (error) {
+    console.error('测试过程发生错误:', error)
+    const errorMsg = error.response?.data?.message || error.message || '未知错误'
+    showToast(`测试失败: ${errorMsg}`, 'error')
+    config.errorMessage = errorMsg
+  } finally {
+    // 恢复 isFetching 标志
+    config.isFetching = originalIsFetching
+    testingConfigIds.value.delete(configId)
+  }
+}
+
+/**
  * 判断是否可以点击自动获取按钮
  * 需要：预测方向、买卖方向、Trending和价格
  */
@@ -2964,6 +3339,80 @@ const handleQuickSelectOrderAcc = async () => {
 }
 
 /**
+ * 加载持仓数据（从 getAllPosSnap 获取）
+ */
+const loadPositionData = async () => {
+  try {
+    console.log('[持仓数据] 开始加载持仓数据...')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnap')
+    
+    if (response.data && response.data.data && response.data.data.list) {
+      const data = response.data.data.list
+      console.log(`[持仓数据] 获取到 ${data.length} 条数据，开始解析...`)
+      
+      // 过滤掉 amt < 1 的数据
+      const filteredData = data.filter(row => {
+        const amt = parseFloat(row.amt) || 0
+        return amt >= 1
+      })
+      console.log(`[持仓数据] 过滤后剩余 ${filteredData.length} 条数据`)
+      
+      // 使用 Map 存储每个事件的持仓数据
+      const eventMap = new Map()
+      
+      // 处理每条数据
+      for (const row of filteredData) {
+        // 从 trendingKey 中提取 id（格式：id::方向）
+        if (!row.trendingKey) {
+          continue
+        }
+        
+        const parts = row.trendingKey.split('::')
+        if (parts.length < 2) {
+          continue
+        }
+        
+        const configId = parts[0].trim()
+        const direction = parts[1].trim()
+        
+        // 通过 id 查找对应的 trending（事件名）
+        const eventName = idToTrendingMap.value.get(configId)
+        if (!eventName) {
+          continue
+        }
+        
+        // 初始化事件数据
+        if (!eventMap.has(eventName)) {
+          eventMap.set(eventName, {
+            yesPosition: 0,
+            noPosition: 0
+          })
+        }
+        
+        const event = eventMap.get(eventName)
+        const amount = Math.abs(parseFloat(row.amt) || 0)
+        
+        // 根据 outCome 判断方向（YES/NO）
+        const outComeUpper = (row.outCome || direction).toUpperCase()
+        if (outComeUpper === 'YES') {
+          event.yesPosition += amount
+        } else if (outComeUpper === 'NO') {
+          event.noPosition += amount
+        }
+      }
+      
+      // 更新 positionDataMap
+      positionDataMap.value = eventMap
+      console.log(`[持仓数据] 持仓数据加载完成，共 ${eventMap.size} 个事件`)
+    } else {
+      console.warn('[持仓数据] 未获取到持仓数据')
+    }
+  } catch (error) {
+    console.error('[持仓数据] 加载持仓数据失败:', error)
+  }
+}
+
+/**
  * 获取交易所和Trending配置
  */
 const fetchExchangeConfig = async () => {
@@ -3010,8 +3459,21 @@ const fetchExchangeConfig = async () => {
       
       console.log(`配置加载成功：${exchangeList.value.length} 个交易所，${configList.value.length} 个Trending`)
       
+      // 构建 id -> trending 的映射
+      const newIdToTrendingMap = new Map()
+      for (const config of configList.value) {
+        if (config.id && config.trending) {
+          newIdToTrendingMap.set(String(config.id), config.trending.trim())
+        }
+      }
+      idToTrendingMap.value = newIdToTrendingMap
+      console.log(`id -> trending 映射完成，共 ${newIdToTrendingMap.size} 个映射`)
+      
       // 更新活动配置列表
       updateActiveConfigs()
+      
+      // 加载持仓数据
+      loadPositionData()
     } else {
       console.warn(`获取配置失败: ${response.data?.msg || '未知错误'}`)
     }
@@ -3437,64 +3899,96 @@ const handleSubmit = async () => {
   
   isSubmitting.value = true
   
-  try {
-    // 构建提交数据
-    const submitData = {
-      groupNo: formData.groupNo,
-      numberList: parseInt(formData.numberList),
-      type: parseInt(formData.type),
-      trendingId: parseInt(formData.trendingId),
-      exchangeName: formData.exchangeName,
-      side: parseInt(formData.side),
-      psSide: parseInt(formData.psSide),
-      amt: parseFloat(formData.amt)
-    }
-    
-    // 如果填写了价格，则添加价格字段
-    if (formData.price !== null && formData.price !== '') {
-      submitData.price = parseFloat(formData.price)
-    }
-    
-    // 如果是type=1或type=5，根据模式添加tp3参数
-    const taskType = parseInt(formData.type)
-    if (taskType === 1 || taskType === 5) {
-      submitData.tp3 = isFastMode.value ? "1" : "0"
-    }
-    
-    console.log('正在提交任务...', submitData)
-    
-    // 发送请求
-    const response = await axios.post(
-      'https://sg.bicoin.com.cn/99l/mission/add',
-      submitData,
-      {
-        headers: {
-          'Content-Type': 'application/json'
+  // 构建提交数据
+  const submitData = {
+    groupNo: formData.groupNo,
+    numberList: parseInt(formData.numberList),
+    type: parseInt(formData.type),
+    trendingId: parseInt(formData.trendingId),
+    exchangeName: formData.exchangeName,
+    side: parseInt(formData.side),
+    psSide: parseInt(formData.psSide),
+    amt: parseFloat(formData.amt)
+  }
+  
+  // 如果填写了价格，则添加价格字段
+  if (formData.price !== null && formData.price !== '') {
+    submitData.price = parseFloat(formData.price)
+  }
+  
+  // 如果是type=1或type=5，根据模式添加tp3参数
+  const taskType = parseInt(formData.type)
+  if (taskType === 1 || taskType === 5) {
+    submitData.tp3 = isFastMode.value ? "1" : "0"
+  }
+  
+  console.log('正在提交任务...', submitData)
+  
+  // 重试机制：最多重试5次
+  const maxRetries = 5
+  let lastError = null
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 发送请求
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/add',
+        submitData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      // 判断返回的 code 是否等于 0
+      if (response.data && response.data.code === 0) {
+        console.log('任务添加成功！响应:', response.data)
+        alert('任务添加成功！')
+        // 清空表单（仅清空需要重新输入的字段）
+        formData.numberList = ''
+        formData.amt = null
+        formData.price = null
+        // exchangeName, trendingId, side, psSide 保持上次选择的值，方便批量添加
+        
+        // 刷新任务列表
+        setTimeout(() => {
+          fetchMissionList()
+        }, 500)
+        
+        isSubmitting.value = false
+        return // 成功，退出函数
+      } else {
+        // code 不等于 0，视为失败
+        const errorMsg = response.data?.msg || `返回码: ${response.data?.code || '未知'}`
+        lastError = new Error(errorMsg)
+        console.warn(`第 ${attempt} 次提交失败: ${errorMsg}`)
+        
+        // 如果不是最后一次尝试，等待3秒后重试
+        if (attempt < maxRetries) {
+          console.log(`等待 3 秒后进行第 ${attempt + 1} 次重试...`)
+          await new Promise(resolve => setTimeout(resolve, 3000))
         }
       }
-    )
-    
-    if (response.data) {
-      console.log('任务添加成功！响应:', response.data)
-      alert('任务添加成功！')
-      // 清空表单（仅清空需要重新输入的字段）
-      formData.numberList = ''
-      formData.amt = null
-      formData.price = null
-      // exchangeName, trendingId, side, psSide 保持上次选择的值，方便批量添加
+    } catch (error) {
+      lastError = error
+      console.error(`第 ${attempt} 次提交异常:`, error)
+      const errorMsg = error.response?.data?.message || error.message || '未知错误'
+      console.warn(`第 ${attempt} 次提交失败: ${errorMsg}`)
       
-      // 刷新任务列表
-      setTimeout(() => {
-        fetchMissionList()
-      }, 500)
+      // 如果不是最后一次尝试，等待3秒后重试
+      if (attempt < maxRetries) {
+        console.log(`等待 3 秒后进行第 ${attempt + 1} 次重试...`)
+        await new Promise(resolve => setTimeout(resolve, 3000))
+      }
     }
-  } catch (error) {
-    console.error('提交失败:', error)
-    const errorMsg = error.response?.data?.message || error.message || '未知错误'
-    alert(`任务添加失败: ${errorMsg}`)
-  } finally {
-    isSubmitting.value = false
   }
+  
+  // 所有重试都失败
+  console.error('提交失败: 已重试 ' + maxRetries + ' 次，均失败')
+  const finalErrorMsg = lastError?.response?.data?.message || lastError?.message || '未知错误'
+  alert(`任务添加失败: ${finalErrorMsg}（已重试 ${maxRetries} 次）`)
+  isSubmitting.value = false
 }
 
 /**
@@ -5290,15 +5784,30 @@ const submitEditConfig = async () => {
  * 筛选后的活动配置列表（用于自动对冲功能块显示）
  */
 const filteredActiveConfigs = computed(() => {
-  if (!autoHedgeFilter.value || !autoHedgeFilter.value.trim()) {
-    return activeConfigs.value
+  let result = activeConfigs.value
+  
+  // 按持仓yes大小排序，持仓大的排最上方
+  result = [...result].sort((a, b) => {
+    const positionDataA = positionDataMap.value.get(a.trending?.trim())
+    const positionDataB = positionDataMap.value.get(b.trending?.trim())
+    
+    const yesPositionA = positionDataA?.yesPosition || 0
+    const yesPositionB = positionDataB?.yesPosition || 0
+    
+    // 按持仓yes大小降序排序（大的在前）
+    return yesPositionB - yesPositionA
+  })
+  
+  // 应用筛选
+  if (autoHedgeFilter.value && autoHedgeFilter.value.trim()) {
+    const keyword = autoHedgeFilter.value.trim().toLowerCase()
+    result = result.filter(config => {
+      const trending = (config.trending || '').toLowerCase()
+      return trending.includes(keyword)
+    })
   }
   
-  const keyword = autoHedgeFilter.value.trim().toLowerCase()
-  return activeConfigs.value.filter(config => {
-    const trending = (config.trending || '').toLowerCase()
-    return trending.includes(keyword)
-  })
+  return result
 })
 
 /**
@@ -5386,8 +5895,6 @@ const updateActiveConfigs = () => {
       hedgeInfoMap.set(config.id, {
         currentHedges: config.currentHedges || [],
         currentHedge: config.currentHedge || null,
-        lastValidOrderbookTime: config.lastValidOrderbookTime || null,
-        needsReplacement: config.needsReplacement || false
       })
     }
   }
@@ -5412,8 +5919,6 @@ const updateActiveConfigs = () => {
         currentHedge: savedInfo ? savedInfo.currentHedge : (config.currentHedge || null),  // 当前对冲任务
         lastRequestTime: config.lastRequestTime || null,  // 上次请求时间
         lastHedgeTime: config.lastHedgeTime || null,  // 上次对冲时间
-        lastValidOrderbookTime: savedInfo ? savedInfo.lastValidOrderbookTime : (config.lastValidOrderbookTime || null),  // 上次订单薄符合条件的时间
-        needsReplacement: savedInfo ? savedInfo.needsReplacement : (config.needsReplacement || false),  // 是否需要替换
         noHedgeSince: config.noHedgeSince || null,  // 开始无法对冲的时间
         isFetching: config.isFetching || false,  // 是否正在请求中
         retryCount: config.retryCount || 0,  // 重试次数
@@ -5981,9 +6486,6 @@ const executeAllTopics = async () => {
   // 执行所有主题的任务
   await executeAutoHedgeTasksForBatch(validConfigs)
   
-  // 检查并执行自动替换
-  await checkAndReplaceTopics()
-  
   // 设置定时器，定期执行（每20秒执行一次）
   if (autoHedgeRunning.value) {
     autoHedgeInterval.value = setInterval(async () => {
@@ -5999,7 +6501,6 @@ const executeAllTopics = async () => {
       
       if (currentValidConfigs.length > 0) {
         await executeAutoHedgeTasksForBatch(currentValidConfigs)
-        await checkAndReplaceTopics()
       }
     }, 30000)  // 20秒执行一次
   }
@@ -6034,9 +6535,6 @@ const executeBatch = async () => {
   
   // 执行当前批次的任务
   await executeAutoHedgeTasksForBatch(currentBatchConfigs)
-  
-  // 检查并执行自动替换
-  await checkAndReplaceTopics()
   
   // 计算剩余时间（将分钟转换为毫秒）
   const elapsed = Date.now() - batchStartTime
@@ -6096,7 +6594,14 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
     }
   }
   
-  for (const config of batchConfigs) {
+  for (let i = 0; i < batchConfigs.length; i++) {
+    const config = batchConfigs[i]
+    
+    // 每个主题之间间隔0.5秒（第一个主题不需要延迟）
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    
     try {
       // 检查该主题是否正在执行对冲
       const currentHedges = config.currentHedges || []
@@ -6158,6 +6663,20 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
       
       // 检查是否需要请求订单薄
       const now = Date.now()
+      
+      // 先检查是否有延迟请求时间（10分钟延迟）
+      if (config.nextRequestTime && now < config.nextRequestTime) {
+        const remaining = Math.ceil((config.nextRequestTime - now) / 1000)
+        console.log(`配置 ${config.id} - 订单薄不满足条件，距离下次请求还有 ${remaining} 秒（${Math.ceil(remaining / 60)} 分钟）`)
+        continue
+      }
+      
+      // 清除延迟请求时间（如果已过期）
+      if (config.nextRequestTime && now >= config.nextRequestTime) {
+        config.nextRequestTime = null
+      }
+      
+      // 检查常规请求间隔（20秒）
       const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
       
       if (!shouldFetch) {
@@ -6170,40 +6689,111 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
       config.isFetching = true
       config.lastRequestTime = now
       
+      // 记录轮询时间（每次请求的时间）
+      const pollTime = now
+      config.pollTime = pollTime
+      
       try {
         console.log(`配置 ${config.id} - 开始请求订单薄...`)
         
-        // 解析订单薄数据
-        const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        let priceInfo = null
+        let orderbookReason = null  // 不满足原因
         
-        if (!priceInfo) {
-          throw new Error('解析订单薄数据失败')
+        try {
+          // 尝试解析订单薄数据（包含完整检查）
+          priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+          
+          if (!priceInfo) {
+            throw new Error('解析订单薄数据失败')
+          }
+          
+          // 检查是否满足对冲条件
+          const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+          
+          if (!meetsCondition) {
+            // 不满足条件，获取不满足的原因
+            if (priceInfo.diff <= 0.15) {
+              if (!hedgeMode.isClose) {
+                // 开仓模式：检查买一深度
+                if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+                  orderbookReason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+                } else {
+                  orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+                }
+              } else {
+                // 平仓模式：检查卖一深度
+                if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+                  orderbookReason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+                } else {
+                  orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+                }
+              }
+            } else {
+              orderbookReason = '不符合对冲条件'
+            }
+          }
+          
+          // 记录更新时间（成功获取订单薄的时间）
+          priceInfo.updateTime = Date.now()
+          priceInfo.pollTime = pollTime
+          priceInfo.reason = orderbookReason
+          
+        } catch (error) {
+          // parseOrderbookData失败，尝试获取基本订单薄数据
+          console.warn(`配置 ${config.id} - 完整订单薄检查失败，尝试获取基本数据:`, error.message)
+          
+          try {
+            const basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+            
+            if (basicInfo) {
+              // 使用基本数据
+              priceInfo = {
+                ...basicInfo,
+                updateTime: Date.now(),  // 记录更新时间
+                pollTime: pollTime,      // 记录轮询时间
+                reason: error.message || '订单薄数据不满足条件'  // 记录不满足原因
+              }
+              orderbookReason = priceInfo.reason
+            } else {
+              throw new Error('获取基本订单薄数据失败')
+            }
+          } catch (basicError) {
+            // 基本数据也获取失败
+            console.error(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+            throw error  // 抛出原始错误
+          }
         }
         
-        // 保存订单薄数据
+        // 保存订单薄数据（无论是否满足条件都保存）
         config.orderbookData = priceInfo
         config.retryCount = 0  // 重置重试次数
-        config.errorMessage = null  // 清除错误信息
+        
+        // 如果订单薄成功获取到了数据，且不满足条件，设置下次请求时间为10分钟后
+        if (priceInfo && priceInfo.updateTime && orderbookReason) {
+          // 成功获取但不满足条件，设置10分钟后才能再次请求
+          config.nextRequestTime = now + 10 * 60 * 1000  // 10分钟
+          console.log(`配置 ${config.id} - 订单薄获取成功但不满足条件，下次请求将在10分钟后`)
+        } else {
+          // 获取失败或满足条件，清除延迟请求时间，使用原来的20秒逻辑
+          config.nextRequestTime = null
+        }
         
         console.log(`配置 ${config.id} - 订单薄数据:`, {
           先挂方: priceInfo.firstSide,
           先挂价格: priceInfo.price1,
           后挂价格: priceInfo.price2,
-          价差: priceInfo.diff
+          价差: priceInfo.diff,
+          不满足原因: orderbookReason
         })
         
         // 只有在可以开始新对冲时才判断是否执行对冲
-        if (canStartNewHedge) {
+        if (canStartNewHedge && !orderbookReason) {
           // 检查是否满足对冲条件
           if (checkOrderbookHedgeCondition(priceInfo)) {
             console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
             // 清空无法对冲时间和标记
             config.noHedgeSince = null
-            config.needsReplacement = false  // 清除需要替换的标记
-            
-            // 记录订单薄符合条件的时间（用于自动替换机制）
-            config.lastValidOrderbookTime = Date.now()
             
             // 执行对冲
             await executeHedgeFromOrderbook(config, priceInfo)
@@ -6225,26 +6815,36 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
               }
             }
             
-            // 检查是否超过10分钟都没有符合条件的订单薄（用于自动替换）
-            if (config.lastValidOrderbookTime) {
-              const noValidElapsed = (Date.now() - config.lastValidOrderbookTime) / 1000 / 60
-              if (noValidElapsed >= 10) {
-                config.needsReplacement = true
-                console.warn(`配置 ${config.id} - 已连续 ${Math.floor(noValidElapsed)} 分钟没有符合条件的订单薄，标记为需要替换`)
-              }
-            } else {
-              // 如果没有记录过符合条件的时间，且当前不符合条件，记录当前时间作为起始时间
-              // 但只有在自动对冲运行时才记录
-              if (autoHedgeRunning.value) {
-                config.lastValidOrderbookTime = Date.now()
-              }
-            }
           }
         }
         
       } catch (error) {
         console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
         config.retryCount++
+        
+        // 获取失败，清除延迟请求时间，使用原来的逻辑
+        config.nextRequestTime = null
+        
+        // 提取错误消息
+        let errorMessage = '获取深度失败'
+        if (error.response?.data?.message) {
+          errorMessage = error.response.data.message
+        } else if (error.message) {
+          errorMessage = error.message
+        }
+        
+        // 即使请求失败，也保存轮询时间和错误信息
+        config.orderbookData = {
+          pollTime: pollTime,
+          updateTime: null,  // 请求失败，没有更新时间
+          reason: errorMessage,
+          firstSide: null,
+          price1: null,
+          price2: null,
+          depth1: null,
+          depth2: null,
+          diff: null
+        }
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
@@ -6596,27 +7196,20 @@ const subtractLimitOrdersFromOrderbook = (orderbook, limitOrders) => {
  * 类似 parseType3Message 的处理方式，直接返回先挂方的数据
  * 增加深度和价差判断
  * 新增：从订单薄中减去 calLimitOrder 返回的挂单数量
- * 新增：根据深度差范围计算价格和 tp2 值
  */
 const parseOrderbookData = async (config, isClose) => {
   try {
-    // 获取yes和no的订单薄数据（原始数据，不剔除挂单）
-    const [yesOrderbookRaw, noOrderbookRaw] = await Promise.all([
+    // 获取yes和no的订单薄数据
+    const [yesOrderbook, noOrderbook] = await Promise.all([
       fetchOrderbook(config.trendingPart1),
       fetchOrderbook(config.trendingPart2)
     ])
     
-    // 保存原始订单薄数据（用于后续计算）
-    const yesBidsRaw = [...(yesOrderbookRaw.bids || [])]
-    const yesAsksRaw = [...(yesOrderbookRaw.asks || [])]
-    const noBidsRaw = [...(noOrderbookRaw.bids || [])]
-    const noAsksRaw = [...(noOrderbookRaw.asks || [])]
-    
-    // 获取YES的买一价和卖一价（用于判断先挂方和深度差）
-    let yesBids = [...yesBidsRaw]
-    let yesAsks = [...yesAsksRaw]
-    let noBids = [...noBidsRaw]
-    let noAsks = [...noAsksRaw]
+    // 获取YES的买一价和卖一价
+    let yesBids = yesOrderbook.bids || []
+    let yesAsks = yesOrderbook.asks || []
+    let noBids = noOrderbook.bids || []
+    let noAsks = noOrderbook.asks || []
     
     // 请求 calLimitOrder API 获取挂单数据
     try {
@@ -6672,20 +7265,15 @@ const parseOrderbookData = async (config, isClose) => {
     // bids 按价格从高到低排序
     yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
     noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    // asks 按价格从低到高排序
     yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
     noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
     
-    // 原始数据也排序
-    yesBidsRaw.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
-    noBidsRaw.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
-    yesAsksRaw.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
-    noAsksRaw.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
-    
-    // 获取YES方的买一和卖一（剔除挂单后的数据）
+    // 获取YES方的买一和卖一
     const yesBid = yesBids[0]
     const yesAsk = yesAsks[0]
     
-    // 获取NO方的买一和卖一（剔除挂单后的数据）
+    // 获取NO方的买一和卖一  
     const noBid = noBids[0]
     const noAsk = noAsks[0]
     
@@ -6703,25 +7291,20 @@ const parseOrderbookData = async (config, isClose) => {
     // 确定先挂方：根据开仓/平仓判断
     let firstSide, price1, price2, depth1, depth2
     let firstBids, firstAsks
-    let firstBidsRaw, firstAsksRaw  // 原始数据
     
     if (isClose) {
       // 平仓：买一价更高的为先挂方
       firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
       firstBids = firstSide === 'YES' ? yesBids : noBids
       firstAsks = firstSide === 'YES' ? yesAsks : noAsks
-      firstBidsRaw = firstSide === 'YES' ? yesBidsRaw : noBidsRaw
-      firstAsksRaw = firstSide === 'YES' ? yesAsksRaw : noAsksRaw
     } else {
       // 开仓：卖一价更高的为先挂方
       firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
       firstBids = firstSide === 'YES' ? yesBids : noBids
       firstAsks = firstSide === 'YES' ? yesAsks : noAsks
-      firstBidsRaw = firstSide === 'YES' ? yesBidsRaw : noBidsRaw
-      firstAsksRaw = firstSide === 'YES' ? yesAsksRaw : noAsksRaw
     }
     
-    // 获取先挂方的买一价和卖一价（剔除挂单后的数据）
+    // 获取先挂方的买一价和卖一价
     if (firstSide === 'YES') {
       price1 = yesBidPrice  // 先挂方的买一价
       price2 = yesAskPrice  // 先挂方的卖一价
@@ -6733,10 +7316,6 @@ const parseOrderbookData = async (config, isClose) => {
       depth1 = noBidDepth   // 先挂方的买一深度
       depth2 = noAskDepth   // 先挂方的卖一深度
     }
-    
-    // 计算深度差（卖一减去买一的绝对值）
-    const depthDiff = Math.abs(price2 - price1)
-    console.log(`配置 ${config.id} - 先挂方 ${firstSide} - 深度差: ${depthDiff.toFixed(2)}`)
     
     // === 新增判断：深度检查 ===
     // 累加 bids 价格最高的N组数据的 size
@@ -6780,152 +7359,6 @@ const parseOrderbookData = async (config, isClose) => {
       }
     }
     
-    // 获取原始数据的买一和卖一价格
-    const rawBid1 = parseFloat(firstBidsRaw[0].price) * 100
-    const rawAsk1 = parseFloat(firstAsksRaw[0].price) * 100
-    const rawBid1Depth = parseFloat(firstBidsRaw[0].size)
-    const rawAsk1Depth = parseFloat(firstAsksRaw[0].size)
-    
-    // 根据深度差范围计算价格和 tp2
-    let finalPrice = null
-    let tp2 = null
-    const maxPriceVolatility = hedgeMode.maxPriceVolatility / 100  // 转换为小数
-    
-    // 辅助函数：从范围字符串中获取随机值（秒）
-    const getRandomFromRange = (rangeStr) => {
-      const [min, max] = rangeStr.split('-').map(v => parseFloat(v.trim()))
-      return Math.random() * (max - min) + min
-    }
-    
-    // 辅助函数：计算价格调整值（深度差的1%到10%之间，最小0.1）
-    const calculatePriceAdjustment = (diff) => {
-      const minAdjust = Math.max(0.1, diff * 0.01)
-      const maxAdjust = diff * maxPriceVolatility
-      return Math.random() * (maxAdjust - minAdjust) + minAdjust
-    }
-    
-    if (depthDiff > 15) {
-      // 深度差 > 15：先判断 (买一价+卖一价)/2 是否大于"先挂方价格区间"的最小值
-      const avgPrice = (price1 + price2) / 2
-      const priceMin = hedgeMode.priceRangeMin
-      
-      console.log(`深度差 > 15 - 平均价格: ${avgPrice.toFixed(2)}, 最小价格要求: ${priceMin}`)
-      
-      if (avgPrice <= priceMin) {
-        throw new Error(`深度差>15时，平均价格 ${avgPrice.toFixed(2)} 不大于价格区间最小值 ${priceMin}`)
-      }
-      
-      // 使用原始数据计算价格
-      if (isClose) {
-        // 平仓：原始数据的卖一价 - 深度差的1%-10%之间取随机值
-        const adjustment = calculatePriceAdjustment(depthDiff)
-        finalPrice = rawAsk1 - adjustment
-      } else {
-        // 开仓：原始数据的买一价 + 深度差的1%-10%之间取随机值
-        const adjustment = calculatePriceAdjustment(depthDiff)
-        finalPrice = rawBid1 + adjustment
-      }
-      
-      // tp2 为深度差15以上挂单后延时检测时间的随机值（秒）
-      const delayRange = hedgeMode.delayTimeGt15
-      tp2 = getRandomFromRange(delayRange)
-      
-      console.log(`深度差 > 15 - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
-      
-    } else if (depthDiff >= 2) {
-      // 深度差 2-15
-      if (isClose) {
-        // 平仓：原始数据的卖一价 - 深度差的1%-10%之间取随机值
-        const adjustment = calculatePriceAdjustment(depthDiff)
-        finalPrice = rawAsk1 - adjustment
-      } else {
-        // 开仓：原始数据的买一价 + 深度差的1%-10%之间取随机值
-        const adjustment = calculatePriceAdjustment(depthDiff)
-        finalPrice = rawBid1 + adjustment
-      }
-      
-      // tp2 为深度差2-15挂单后延时检测时间的随机值（秒）
-      const delayRange = hedgeMode.delayTime2To15
-      tp2 = getRandomFromRange(delayRange)
-      
-      console.log(`深度差 2-15 - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
-      
-    } else if (depthDiff >= 0.2) {
-      // 深度差 0.2-2
-      if (isClose) {
-        // 平仓：原始数据的卖一价 - 深度差的1%-10%之间取随机值
-        const adjustment = calculatePriceAdjustment(depthDiff)
-        finalPrice = rawAsk1 - adjustment
-      } else {
-        // 开仓：原始数据的买一价 + 深度差的1%-10%之间取随机值
-        const adjustment = calculatePriceAdjustment(depthDiff)
-        finalPrice = rawBid1 + adjustment
-      }
-      
-      // tp2 为深度差0.2-2挂单后延时检测时间的随机值（秒）
-      const delayRange = hedgeMode.delayTime02To2
-      tp2 = getRandomFromRange(delayRange)
-      
-      console.log(`深度差 0.2-2 - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
-      
-    } else if (Math.abs(depthDiff - 0.1) < 0.01) {
-      // 深度差 0.1（允许0.09-0.11的误差）
-      const maxEatValue = hedgeMode.maxEatValue01
-      const maxDepth = hedgeMode.maxDepth
-      
-      if (isClose) {
-        // 平仓：先用卖一价*深度（即数量），得到价值
-        const askValue = rawAsk1 * rawAsk1Depth
-        
-        if (askValue < maxDepth) {
-          // 价值小于最大允许深度，符合要求
-          finalPrice = rawAsk1
-          console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)} < 最大允许深度 ${maxDepth}，使用卖一价: ${finalPrice.toFixed(2)}`)
-        } else {
-          // 价值大于最大允许深度，检查买一价的价值是否小于最大多吃价值
-          const bidValue = rawBid1 * rawBid1Depth
-          
-          if (bidValue < maxEatValue) {
-            finalPrice = rawBid1
-            console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，但买一价值 ${bidValue.toFixed(2)} < 最大多吃价值 ${maxEatValue}，使用买一价: ${finalPrice.toFixed(2)}`)
-          } else {
-            throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，且买一价值 ${bidValue.toFixed(2)} >= 最大多吃价值 ${maxEatValue}`)
-          }
-        }
-      } else {
-        // 开仓：先用买一价*深度（即数量），得到价值
-        const bidValue = rawBid1 * rawBid1Depth
-        
-        if (bidValue < maxDepth) {
-          // 价值小于最大允许深度，符合要求
-          finalPrice = rawBid1
-          console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)} < 最大允许深度 ${maxDepth}，使用买一价: ${finalPrice.toFixed(2)}`)
-        } else {
-          // 价值大于最大允许深度，检查卖一价的价值是否小于最大多吃价值
-          const askValue = rawAsk1 * rawAsk1Depth
-          
-          if (askValue < maxEatValue) {
-            finalPrice = rawAsk1
-            console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，但卖一价值 ${askValue.toFixed(2)} < 最大多吃价值 ${maxEatValue}，使用卖一价: ${finalPrice.toFixed(2)}`)
-          } else {
-            throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，且卖一价值 ${askValue.toFixed(2)} >= 最大多吃价值 ${maxEatValue}`)
-          }
-        }
-      }
-      
-      // 深度差0.1时，tp2 为深度差0.2-2挂单后延时检测时间的随机值（秒）
-      const delayRange = hedgeMode.delayTime02To2
-      tp2 = getRandomFromRange(delayRange)
-      
-      console.log(`深度差 0.1 - 最终价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
-      
-    } else {
-      // 其他深度差范围，使用原来的逻辑
-      finalPrice = (price1 + price2) / 2
-      tp2 = null
-      console.log(`深度差 ${depthDiff.toFixed(2)} - 使用平均价格: ${finalPrice.toFixed(2)}`)
-    }
-    
     // === 新增判断：先挂方价格区间检查 ===
     const priceMin = hedgeMode.priceRangeMin
     const priceMax = hedgeMode.priceRangeMax
@@ -6948,17 +7381,15 @@ const parseOrderbookData = async (config, isClose) => {
     
     return {
       firstSide,
-      price1,           // 先挂方的买一价（剔除挂单后）
-      price2,           // 先挂方的卖一价（剔除挂单后）
+      price1,           // 先挂方的买一价
+      price2,           // 先挂方的卖一价
       depth1,           // 先挂方的买一深度
       depth2,           // 先挂方的卖一深度
-      diff: depthDiff,  // 先挂方买卖价差（深度差）
+      diff: Math.abs(price1 - price2),  // 先挂方买卖价差
       minPrice: Math.min(price1, price2),
       maxPrice: Math.max(price1, price2),
       topNBidsDepth,    // 买1-N深度累计
-      topNAsksDepth,    // 卖1-N深度累计
-      finalPrice,       // 计算出的最终价格
-      tp2               // 延时检测时间（秒）
+      topNAsksDepth     // 卖1-N深度累计
     }
   } catch (error) {
     console.error('解析订单薄数据失败:', error)
@@ -7091,36 +7522,28 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
  * 从订单薄数据执行对冲
  * price1: 先挂方的买一价
  * price2: 先挂方的卖一价
- * finalPrice: 计算出的最终价格
- * tp2: 延时检测时间（秒）
  * 支持同时执行多个对冲任务
  */
 const executeHedgeFromOrderbook = async (config, priceInfo) => {
   try {
     console.log(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
     
-    // 使用计算出的最终价格，如果没有则使用原来的逻辑
+    // 计算订单价格
     let orderPrice
-    if (priceInfo.finalPrice !== null && priceInfo.finalPrice !== undefined) {
-      orderPrice = priceInfo.finalPrice.toFixed(1)
-      console.log(`使用计算出的最终价格: ${orderPrice}`)
+    if (priceInfo.diff > 0.15) {
+      // 先挂方买卖价差大于0.15，取平均价
+      orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
+      console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
     } else {
-      // 兼容旧逻辑
-      if (priceInfo.diff > 0.15) {
-        // 先挂方买卖价差大于0.15，取平均价
-        orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
-        console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
+      // 差值小于等于0.15，根据开仓/平仓取价格
+      if (!hedgeMode.isClose) {
+        // 开仓模式：取较小的价格（买一价）
+        orderPrice = priceInfo.minPrice.toFixed(1)
+        console.log(`开仓模式，订单价格（买一价）: ${orderPrice}`)
       } else {
-        // 差值小于等于0.15，根据开仓/平仓取价格
-        if (!hedgeMode.isClose) {
-          // 开仓模式：取较小的价格（买一价）
-          orderPrice = priceInfo.minPrice.toFixed(1)
-          console.log(`开仓模式，订单价格（买一价）: ${orderPrice}`)
-        } else {
-          // 平仓模式：取较大的价格（卖一价）
-          orderPrice = priceInfo.maxPrice.toFixed(1)
-          console.log(`平仓模式，订单价格（卖一价）: ${orderPrice}`)
-        }
+        // 平仓模式：取较大的价格（卖一价）
+        orderPrice = priceInfo.maxPrice.toFixed(1)
+        console.log(`平仓模式，订单价格（卖一价）: ${orderPrice}`)
       }
     }
     
@@ -7256,16 +7679,14 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             await executeHedgeTaskV2(config, {
               ...hedgeData,
               currentPrice: orderPrice,
-              firstSide: priceInfo.firstSide,
-              tp2: priceInfo.tp2  // 传递 tp2 值
+              firstSide: priceInfo.firstSide
             })
           } else {
             // 模式1：使用原有逻辑
             await executeHedgeTask(config, {
               ...hedgeData,
               currentPrice: orderPrice,
-              firstSide: priceInfo.firstSide,
-              tp2: priceInfo.tp2  // 传递 tp2 值
+              firstSide: priceInfo.firstSide
             })
           }
           
@@ -7394,138 +7815,6 @@ const closeConfigTask = async (config) => {
   } catch (error) {
     console.error('关闭任务失败:', error)
     showToast(`关闭任务失败: ${error.message}`, 'error')
-  }
-}
-
-/**
- * 检查并执行自动替换主题
- * 当需要替换的主题大于10个时，自动关闭这些主题并随机获取新主题替换
- */
-const checkAndReplaceTopics = async () => {
-  if (!autoHedgeRunning.value) {
-    return
-  }
-  
-  try {
-    // 找出所有需要替换的主题（有对冲信息的要保留）
-    const topicsToReplace = activeConfigs.value.filter(config => {
-      // 需要替换的条件：标记为需要替换，且没有正在运行的对冲任务
-      if (!config.needsReplacement) {
-        return false
-      }
-      
-      // 检查是否有正在运行的对冲任务
-      const currentHedges = config.currentHedges || []
-      const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
-      
-      // 如果有正在运行的对冲任务，不替换
-      if (runningHedges.length > 0) {
-        console.log(`配置 ${config.id} - 有正在运行的对冲任务，暂不替换`)
-        return false
-      }
-      
-      return true
-    })
-    
-    console.log(`需要替换的主题数量: ${topicsToReplace.length}`)
-    
-    // 如果需要替换的主题数量大于10个，执行替换
-    if (topicsToReplace.length > 10) {
-      console.log(`开始自动替换 ${topicsToReplace.length} 个主题`)
-      showToast(`开始自动替换 ${topicsToReplace.length} 个主题...`, 'info')
-      
-      // 保存需要保留的对冲信息（用于后续恢复）
-      const hedgeInfoMap = new Map()
-      for (const config of activeConfigs.value) {
-        if (config.currentHedges && config.currentHedges.length > 0) {
-          // 只保留有运行中任务的主题的对冲信息
-          const runningHedges = config.currentHedges.filter(h => h.finalStatus === 'running')
-          if (runningHedges.length > 0) {
-            hedgeInfoMap.set(config.id, {
-              currentHedges: config.currentHedges,
-              currentHedge: config.currentHedge
-            })
-          }
-        }
-      }
-      
-      // 关闭需要替换的主题
-      const closePromises = topicsToReplace.map(async (config) => {
-        try {
-          // 更新服务器配置，将isOpen设为0
-          const updateData = {
-            list: [{
-              id: config.id,
-              trending: config.trending,
-              trendingPart1: config.trendingPart1,
-              trendingPart2: config.trendingPart2,
-              trendingPart3: config.trendingPart3,
-              opUrl: config.opUrl,
-              polyUrl: config.polyUrl,
-              opTopicId: config.opTopicId,
-              weight: config.weight,
-              isOpen: 0  // 关闭任务
-            }]
-          }
-          
-          await axios.post(
-            'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
-            updateData,
-            {
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            }
-          )
-          
-          // 更新本地配置列表
-          const configInList = configList.value.find(c => c.id === config.id)
-          if (configInList) {
-            configInList.isOpen = 0
-            configInList.enabled = false
-          }
-          
-          console.log(`配置 ${config.id} 已关闭`)
-        } catch (error) {
-          console.error(`关闭配置 ${config.id} 失败:`, error)
-        }
-      })
-      
-      await Promise.all(closePromises)
-      
-      // 更新活动配置列表（这会移除已关闭的主题）
-      updateActiveConfigs()
-      
-      // 恢复保留的对冲信息
-      for (const config of activeConfigs.value) {
-        const savedInfo = hedgeInfoMap.get(config.id)
-        if (savedInfo) {
-          config.currentHedges = savedInfo.currentHedges
-          config.currentHedge = savedInfo.currentHedge
-          console.log(`恢复配置 ${config.id} 的对冲信息`)
-        }
-      }
-      
-      // 随机获取相同数量的新主题
-      const replaceCount = topicsToReplace.length
-      console.log(`开始随机获取 ${replaceCount} 个新主题替换...`)
-      
-      // 临时设置获取数量
-      const originalCount = randomGetCount.value
-      randomGetCount.value = replaceCount
-      
-      try {
-        await randomGetAvailableTopic()
-      } finally {
-        // 恢复原始数量
-        randomGetCount.value = originalCount
-      }
-      
-      showToast(`✅ 已自动替换 ${replaceCount} 个主题`, 'success')
-    }
-  } catch (error) {
-    console.error('自动替换主题失败:', error)
-    showToast(`自动替换失败: ${error.message}`, 'error')
   }
 }
 
@@ -8063,12 +8352,6 @@ const saveHedgeSettings = () => {
       // 资产优先级校验设置
       needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
       balancePriority: hedgeMode.balancePriority,
-      // 深度差相关设置
-      delayTimeGt15: hedgeMode.delayTimeGt15,
-      delayTime2To15: hedgeMode.delayTime2To15,
-      delayTime02To2: hedgeMode.delayTime02To2,
-      maxEatValue01: hedgeMode.maxEatValue01,
-      maxPriceVolatility: hedgeMode.maxPriceVolatility,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
       hedgeTaskInterval: hedgeTaskInterval.value,
@@ -8172,23 +8455,6 @@ const loadHedgeSettings = () => {
     }
     if (settings.balancePriority !== undefined) {
       hedgeMode.balancePriority = settings.balancePriority
-    }
-    
-    // 深度差相关设置
-    if (settings.delayTimeGt15 !== undefined) {
-      hedgeMode.delayTimeGt15 = settings.delayTimeGt15
-    }
-    if (settings.delayTime2To15 !== undefined) {
-      hedgeMode.delayTime2To15 = settings.delayTime2To15
-    }
-    if (settings.delayTime02To2 !== undefined) {
-      hedgeMode.delayTime02To2 = settings.delayTime02To2
-    }
-    if (settings.maxEatValue01 !== undefined) {
-      hedgeMode.maxEatValue01 = settings.maxEatValue01
-    }
-    if (settings.maxPriceVolatility !== undefined) {
-      hedgeMode.maxPriceVolatility = settings.maxPriceVolatility
     }
     
     // 其他设置
@@ -8480,12 +8746,6 @@ const executeHedgeTask = async (config, hedgeData) => {
       amt: roundedShare,  // 保留2位小数向下取整
       price: hedgeData.currentPrice,
       tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
-    }
-    
-    // 如果提供了 tp2 值，添加到任务数据中（秒，取整）
-    if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-      taskData.tp2 = Math.round(hedgeData.tp2)  // 取整秒数
-      console.log(`添加 tp2 字段: ${taskData.tp2} 秒`)
     }
     
     const response = await axios.post(
@@ -8890,12 +9150,6 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
         }
         
-        // 如果提供了 tp2 值，添加到任务数据中（秒，取整）
-        if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-          taskData.tp2 = Math.round(hedgeData.tp2)  // 取整秒数
-          console.log(`[executeHedgeTaskV2] 先挂方任务添加 tp2 字段: ${taskData.tp2} 秒`)
-        }
-        
         const response = await axios.post(
           'https://sg.bicoin.com.cn/99l/mission/add',
           taskData,
@@ -9000,12 +9254,6 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
             price: taskPrice,
             tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
             // 不再需要tp1
-          }
-          
-          // 如果提供了 tp2 值，添加到任务数据中（秒，取整）
-          if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-            taskData.tp2 = Math.round(hedgeData.tp2)  // 取整秒数
-            console.log(`[executeHedgeTaskV2] 后挂方任务添加 tp2 字段: ${taskData.tp2} 秒`)
           }
           
           const response = await axios.post(
@@ -9597,7 +9845,15 @@ const executeAutoHedgeTasks = async () => {
     }
   }
   
-  for (const config of activeConfigs.value) {
+  const configsArray = activeConfigs.value
+  for (let i = 0; i < configsArray.length; i++) {
+    const config = configsArray[i]
+    
+    // 每个主题之间间隔0.5秒（第一个主题不需要延迟）
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    
     try {
       // 检查该主题的token是否配置完整
       if (!config.trendingPart1 || !config.trendingPart2) {
@@ -9665,6 +9921,20 @@ const executeAutoHedgeTasks = async () => {
       
       // 检查是否需要请求订单薄
       const now = Date.now()
+      
+      // 先检查是否有延迟请求时间（10分钟延迟）
+      if (config.nextRequestTime && now < config.nextRequestTime) {
+        const remaining = Math.ceil((config.nextRequestTime - now) / 1000)
+        console.log(`配置 ${config.id} - 订单薄不满足条件，距离下次请求还有 ${remaining} 秒（${Math.ceil(remaining / 60)} 分钟）`)
+        continue
+      }
+      
+      // 清除延迟请求时间（如果已过期）
+      if (config.nextRequestTime && now >= config.nextRequestTime) {
+        config.nextRequestTime = null
+      }
+      
+      // 检查常规请求间隔（20秒）
       const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
       
       if (!shouldFetch) {
@@ -9677,40 +9947,111 @@ const executeAutoHedgeTasks = async () => {
       config.isFetching = true
       config.lastRequestTime = now
       
+      // 记录轮询时间（每次请求的时间）
+      const pollTime = now
+      config.pollTime = pollTime
+      
       try {
         console.log(`配置 ${config.id} - 开始请求订单薄...`)
         
-        // 解析订单薄数据
-        const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+        let priceInfo = null
+        let orderbookReason = null  // 不满足原因
         
-        if (!priceInfo) {
-          throw new Error('解析订单薄数据失败')
+        try {
+          // 尝试解析订单薄数据（包含完整检查）
+          priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+          
+          if (!priceInfo) {
+            throw new Error('解析订单薄数据失败')
+          }
+          
+          // 检查是否满足对冲条件
+          const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+          
+          if (!meetsCondition) {
+            // 不满足条件，获取不满足的原因
+            if (priceInfo.diff <= 0.15) {
+              if (!hedgeMode.isClose) {
+                // 开仓模式：检查买一深度
+                if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+                  orderbookReason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+                } else {
+                  orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+                }
+              } else {
+                // 平仓模式：检查卖一深度
+                if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+                  orderbookReason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+                } else {
+                  orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+                }
+              }
+            } else {
+              orderbookReason = '不符合对冲条件'
+            }
+          }
+          
+          // 记录更新时间（成功获取订单薄的时间）
+          priceInfo.updateTime = Date.now()
+          priceInfo.pollTime = pollTime
+          priceInfo.reason = orderbookReason
+          
+        } catch (error) {
+          // parseOrderbookData失败，尝试获取基本订单薄数据
+          console.warn(`配置 ${config.id} - 完整订单薄检查失败，尝试获取基本数据:`, error.message)
+          
+          try {
+            const basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+            
+            if (basicInfo) {
+              // 使用基本数据
+              priceInfo = {
+                ...basicInfo,
+                updateTime: Date.now(),  // 记录更新时间
+                pollTime: pollTime,      // 记录轮询时间
+                reason: error.message || '订单薄数据不满足条件'  // 记录不满足原因
+              }
+              orderbookReason = priceInfo.reason
+            } else {
+              throw new Error('获取基本订单薄数据失败')
+            }
+          } catch (basicError) {
+            // 基本数据也获取失败
+            console.error(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+            throw error  // 抛出原始错误
+          }
         }
         
-        // 保存订单薄数据
+        // 保存订单薄数据（无论是否满足条件都保存）
         config.orderbookData = priceInfo
         config.retryCount = 0  // 重置重试次数
-        config.errorMessage = null  // 清除错误信息
+        
+        // 如果订单薄成功获取到了数据，且不满足条件，设置下次请求时间为10分钟后
+        if (priceInfo && priceInfo.updateTime && orderbookReason) {
+          // 成功获取但不满足条件，设置10分钟后才能再次请求
+          config.nextRequestTime = now + 10 * 60 * 1000  // 10分钟
+          console.log(`配置 ${config.id} - 订单薄获取成功但不满足条件，下次请求将在10分钟后`)
+        } else {
+          // 获取失败或满足条件，清除延迟请求时间，使用原来的20秒逻辑
+          config.nextRequestTime = null
+        }
         
         console.log(`配置 ${config.id} - 订单薄数据:`, {
           先挂方: priceInfo.firstSide,
           先挂价格: priceInfo.price1,
           后挂价格: priceInfo.price2,
-          价差: priceInfo.diff
+          价差: priceInfo.diff,
+          不满足原因: orderbookReason
         })
         
         // 只有在可以开始新对冲时才判断是否执行对冲
-        if (canStartNewHedge) {
+        if (canStartNewHedge && !orderbookReason) {
           // 检查是否满足对冲条件
           if (checkOrderbookHedgeCondition(priceInfo)) {
             console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
             // 清空无法对冲时间和标记
             config.noHedgeSince = null
-            config.needsReplacement = false  // 清除需要替换的标记
-            
-            // 记录订单薄符合条件的时间（用于自动替换机制）
-            config.lastValidOrderbookTime = Date.now()
             
             // 执行对冲
             await executeHedgeFromOrderbook(config, priceInfo)
@@ -9732,26 +10073,36 @@ const executeAutoHedgeTasks = async () => {
               }
             }
             
-            // 检查是否超过10分钟都没有符合条件的订单薄（用于自动替换）
-            if (config.lastValidOrderbookTime) {
-              const noValidElapsed = (Date.now() - config.lastValidOrderbookTime) / 1000 / 60
-              if (noValidElapsed >= 10) {
-                config.needsReplacement = true
-                console.warn(`配置 ${config.id} - 已连续 ${Math.floor(noValidElapsed)} 分钟没有符合条件的订单薄，标记为需要替换`)
-              }
-            } else {
-              // 如果没有记录过符合条件的时间，且当前不符合条件，记录当前时间作为起始时间
-              // 但只有在自动对冲运行时才记录
-              if (autoHedgeRunning.value) {
-                config.lastValidOrderbookTime = Date.now()
-              }
-            }
           }
         }
         
       } catch (error) {
         console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
         config.retryCount++
+        
+        // 获取失败，清除延迟请求时间，使用原来的逻辑
+        config.nextRequestTime = null
+        
+        // 提取错误消息
+        let errorMessage = '获取深度失败'
+        if (error.response?.data?.message) {
+          errorMessage = error.response.data.message
+        } else if (error.message) {
+          errorMessage = error.message
+        }
+        
+        // 即使请求失败，也保存轮询时间和错误信息
+        config.orderbookData = {
+          pollTime: pollTime,
+          updateTime: null,  // 请求失败，没有更新时间
+          reason: errorMessage,
+          firstSide: null,
+          price1: null,
+          price2: null,
+          depth1: null,
+          depth2: null,
+          diff: null
+        }
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
@@ -9915,6 +10266,92 @@ const formatTime = (timeStr) => {
     minute: '2-digit',
     second: '2-digit'
   })
+}
+
+/**
+ * 计算相对时间（X分钟前），用于实时更新
+ */
+const currentTime = ref(Date.now())
+let timeInterval = null
+
+// 定时更新当前时间，用于实时显示相对时间
+onMounted(() => {
+  timeInterval = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 1000) // 每秒更新一次
+})
+
+onUnmounted(() => {
+  if (timeInterval) {
+    clearInterval(timeInterval)
+    timeInterval = null
+  }
+})
+
+/**
+ * 格式化相对时间（X分钟前）
+ */
+const formatRelativeTime = (timestamp) => {
+  if (!timestamp) return '-'
+  const now = currentTime.value
+  const diff = now - timestamp
+  const minutes = Math.floor(diff / 60000)
+  
+  if (minutes < 1) {
+    return '刚刚'
+  } else if (minutes < 60) {
+    return `${minutes}分钟前`
+  } else {
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) {
+      return `${hours}小时前`
+    } else {
+      const days = Math.floor(hours / 24)
+      return `${days}天前`
+    }
+  }
+}
+
+/**
+ * 判断是否符合订单薄条件
+ */
+const isOrderbookConditionMet = (orderbookData) => {
+  if (!orderbookData) {
+    return false
+  }
+  
+  // 如果请求成功（有updateTime）且没有reason，说明符合条件
+  if (orderbookData.updateTime && !orderbookData.reason) {
+    return true
+  }
+  
+  // 其他情况都不符合条件
+  return false
+}
+
+/**
+ * 获取订单薄状态文本
+ */
+const getOrderbookStatusText = (orderbookData) => {
+  if (!orderbookData || !orderbookData.pollTime) {
+    return ''
+  }
+  
+  const relativeTime = formatRelativeTime(orderbookData.pollTime)
+  
+  // 如果请求失败（没有updateTime但有pollTime）
+  if (!orderbookData.updateTime) {
+    const errorReason = orderbookData.reason || '获取深度失败'
+    return `${relativeTime}轮询，${errorReason}`
+  }
+  
+  // 如果请求成功但不符合条件
+  if (orderbookData.reason) {
+    return `${relativeTime}轮询，${orderbookData.reason}`
+  }
+  
+  // 如果请求成功且符合条件
+  return `${relativeTime}轮询，订单薄符合条件`
 }
 
 /**
@@ -10603,6 +11040,14 @@ onUnmounted(() => {
   margin-left: auto;
 }
 
+.task-time-success {
+  color: #4ade80 !important;
+}
+
+.task-time-error {
+  color: #ef4444 !important;
+}
+
 .task-msg {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.9);
@@ -10915,6 +11360,38 @@ onUnmounted(() => {
 .btn-close-task:hover {
   background: rgba(255, 59, 48, 0.8);
   transform: scale(1.05);
+}
+
+.btn-test {
+  padding: 0.3rem 0.6rem;
+  background: rgba(52, 152, 219, 0.6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.btn-test:hover:not(:disabled) {
+  background: rgba(52, 152, 219, 0.8);
+  transform: scale(1.05);
+}
+
+.btn-test:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.position-info {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+}
+
+.position-info-green {
+  color: #4ade80 !important;
 }
 
 .error-badge {

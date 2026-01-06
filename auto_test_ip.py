@@ -177,6 +177,24 @@ SPECIFIC_BROWSER_PASSWORDS = {
     "998": "cx142359.",
     "999": "cx142359.",
     "1000": "cx142359.",
+    "206":"cx142359.",
+    "207":"cx142359.",
+    "208":"cx142359.",
+    "209":"cx142359.",
+    "210":"cx142359.",
+    "211":"cx142359.",
+    "212":"cx142359.",
+    "213":"cx142359.",
+    "214":"cx142359.",
+    "215":"cx142359.",
+    "216":"cx142359.",
+    "217":"cx142359.",
+    "218":"cx142359.",
+    "219":"cx142359.",
+    "220":"cx142359.",
+    "221":"cx142359.",
+    "222":"cx142359.",
+    "223":"cx142359.",
     
 }
 
@@ -3842,8 +3860,8 @@ def create_selenium_driver(browser_data):
     driver = webdriver.Chrome(service=service, options=options)
     
     # 设置页面加载超时时间为60秒，防止页面加载卡死导致线程无法释放
-    driver.set_page_load_timeout(60)
-    driver.set_script_timeout(60)
+    driver.set_page_load_timeout(75)
+    driver.set_script_timeout(75)
     
     return driver
 
@@ -5433,35 +5451,89 @@ def process_ip_internal(ip_info):
                 except:
                     pass
         
-        # HTTP模式处理
-        http_result = process_ip_with_mode(ip_info, "http", 50100, browser_id, serial_number, log_prefix)
+        # 获取端口字段
+        http_port = ip_info.get("port")
+        socks5_port = ip_info.get("socketPort")
         
-        # 记录HTTP模式结果
-        if http_result["success"]:
-            http_success += 1
-            http_failure_reason = "1"  # HTTP成功记为1
-            log_print(f"{log_prefix} ✓ HTTP模式成功")
-        else:
+        # 检查HTTP端口
+        http_port_valid = http_port is not None and str(http_port).strip() != ""
+        if not http_port_valid:
+            log_print(f"{log_prefix} ⚠ HTTP端口字段(port)不存在或为空，跳过HTTP测试，直接判定失败")
+            http_result = {
+                "success": False,
+                "failure_reason": "0",  # 端口缺失
+                "delay1": -1,
+                "delay2": -1
+            }
             http_fail += 1
-            http_failure_reason = http_result.get("failure_reason", "0")
-            log_print(f"{log_prefix} ✗ HTTP模式失败: {http_failure_reason}")
+            http_failure_reason = "0"
+        else:
+            # HTTP模式处理
+            http_port_int = int(http_port) if isinstance(http_port, (int, str)) and str(http_port).strip() else None
+            if http_port_int is None:
+                log_print(f"{log_prefix} ⚠ HTTP端口字段(port)无效，跳过HTTP测试，直接判定失败")
+                http_result = {
+                    "success": False,
+                    "failure_reason": "0",  # 端口无效
+                    "delay1": -1,
+                    "delay2": -1
+                }
+                http_fail += 1
+                http_failure_reason = "0"
+            else:
+                http_result = process_ip_with_mode(ip_info, "http", http_port_int, browser_id, serial_number, log_prefix)
+                
+                # 记录HTTP模式结果
+                if http_result["success"]:
+                    http_success += 1
+                    http_failure_reason = "1"  # HTTP成功记为1
+                    log_print(f"{log_prefix} ✓ HTTP模式成功")
+                else:
+                    http_fail += 1
+                    http_failure_reason = http_result.get("failure_reason", "0")
+                    log_print(f"{log_prefix} ✗ HTTP模式失败: {http_failure_reason}")
         
         # 关闭浏览器，准备切换到socks5模式
         log_print(f"{log_prefix} 关闭浏览器，准备切换到socks5模式...")
         close_adspower_browser(serial_number)
         
-        # Socks5模式处理（无论HTTP是否成功，都要执行）
-        socks5_result = process_ip_with_mode(ip_info, "socks5", 50101, browser_id, serial_number, log_prefix)
-        
-        # 记录Socks5模式结果
-        if socks5_result["success"]:
-            socks5_success += 1
-            socks5_failure_reason = "1"  # Socks5成功记为1
-            log_print(f"{log_prefix} ✓ Socks5模式成功")
-        else:
+        # 检查Socks5端口
+        socks5_port_valid = socks5_port is not None and str(socks5_port).strip() != ""
+        if not socks5_port_valid:
+            log_print(f"{log_prefix} ⚠ Socks5端口字段(socketPort)不存在或为空，跳过Socks5测试，直接判定失败")
+            socks5_result = {
+                "success": False,
+                "failure_reason": "0",  # 端口缺失
+                "delay1": -1,
+                "delay2": -1
+            }
             socks5_fail += 1
-            socks5_failure_reason = socks5_result.get("failure_reason", "0")
-            log_print(f"{log_prefix} ✗ Socks5模式失败: {socks5_failure_reason}")
+            socks5_failure_reason = "0"
+        else:
+            # Socks5模式处理（无论HTTP是否成功，都要执行）
+            socks5_port_int = int(socks5_port) if isinstance(socks5_port, (int, str)) and str(socks5_port).strip() else None
+            if socks5_port_int is None:
+                log_print(f"{log_prefix} ⚠ Socks5端口字段(socketPort)无效，跳过Socks5测试，直接判定失败")
+                socks5_result = {
+                    "success": False,
+                    "failure_reason": "0",  # 端口无效
+                    "delay1": -1,
+                    "delay2": -1
+                }
+                socks5_fail += 1
+                socks5_failure_reason = "0"
+            else:
+                socks5_result = process_ip_with_mode(ip_info, "socks5", socks5_port_int, browser_id, serial_number, log_prefix)
+                
+                # 记录Socks5模式结果
+                if socks5_result["success"]:
+                    socks5_success += 1
+                    socks5_failure_reason = "1"  # Socks5成功记为1
+                    log_print(f"{log_prefix} ✓ Socks5模式成功")
+                else:
+                    socks5_fail += 1
+                    socks5_failure_reason = socks5_result.get("failure_reason", "0")
+                    log_print(f"{log_prefix} ✗ Socks5模式失败: {socks5_failure_reason}")
         
         # 统一处理两种模式的结果并上传
         result_data["a"] = int(time.time())
