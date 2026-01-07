@@ -810,6 +810,16 @@
                     >
                       {{ isTestingConfig(config) ? '测试中...' : '测试' }}
                     </button>
+                    <label style="font-size: 12px; margin-left: 8px; color: rgba(255, 255, 255, 0.8);">同时任务:</label>
+                    <input 
+                      type="number" 
+                      v-model.number="config.tasksPerTopic" 
+                      min="1" 
+                      max="10"
+                      placeholder="默认"
+                      style="width: 60px; padding: 2px 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; margin-left: 4px;"
+                      title="留空使用全局设置，填写则使用此值"
+                    />
                     <span v-if="config.errorMessage" class="error-badge">
                       {{ config.errorMessage }}
                     </span>
@@ -3192,6 +3202,21 @@ const isTestingConfig = (config) => {
     return false
   }
   return testingConfigIds.value.has(String(config.id))
+}
+
+/**
+ * 获取指定主题的任务数量（优先使用主题单独设置，否则使用全局设置）
+ */
+const getTasksPerTopic = (config) => {
+  if (!config) {
+    return Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+  }
+  // 如果主题有单独设置且不为空，使用单独设置
+  if (config.tasksPerTopic !== undefined && config.tasksPerTopic !== null && config.tasksPerTopic !== '') {
+    return Math.max(1, Math.floor(config.tasksPerTopic) || 2)
+  }
+  // 否则使用全局设置
+  return Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
 }
 
 /**
@@ -6771,7 +6796,7 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         
         // 检查是否还有运行中的任务，如果有且未达到最大任务数，可以继续
         const remainingRunning = (config.currentHedges || []).filter(h => h.finalStatus === 'running').length
-        const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+        const maxTasks = getTasksPerTopic(config)
         
         if (remainingRunning >= maxTasks) {
           console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
@@ -7931,8 +7956,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     const trendingIds = activeConfigs.value.map(c => c.id).join(',')
     console.log(`当前打开显示的主题: ${trendingIds}`)
     
-    // 获取需要执行的任务数量
-    const taskCount = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+    // 获取需要执行的任务数量（优先使用主题单独设置）
+    const taskCount = getTasksPerTopic(config)
     
     // 检查当前正在执行的对冲任务数量
     const currentHedges = config.currentHedges || []
@@ -10339,7 +10364,7 @@ const executeAutoHedgeTasks = async () => {
         
         // 检查是否还有运行中的任务，如果有且未达到最大任务数，可以继续
         const remainingRunning = (config.currentHedges || []).filter(h => h.finalStatus === 'running').length
-        const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+        const maxTasks = getTasksPerTopic(config)
         
         if (remainingRunning >= maxTasks) {
           console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)

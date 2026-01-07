@@ -4181,7 +4181,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     if hava_order or position_changed:
         # 在10分钟内，每隔30秒检测一次任务一的状态
         log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务状态）...")
-        phase2_timeout = 90  # 10分钟
+        phase2_timeout = 240
         phase2_check_interval = 20  # 30秒
         phase2_start_time = time.time()
         
@@ -7033,6 +7033,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             if success:
                 add_bro_log_entry(bro_log_list, browser_id, "任务成功，保持浏览器打开以收集数据")
                 log_print(f"[{browser_id}] 任务成功，保持浏览器打开以收集数据...")
+            else:
+                add_bro_log_entry(bro_log_list, browser_id, f"任务执行失败，返回结果到上层处理: {failure_reason}")
+                log_print(f"[{browser_id}] 任务执行失败，返回结果到上层处理: {failure_reason}")
             return success, failure_reason, driver, browser_id, exchange_name, available_balance
         else:
             if success:
@@ -15152,25 +15155,8 @@ def check_and_submit_completed_missions():
                 # Type 3任务的结果在单浏览器处理时已提交
                 log_print(f"[系统] ✓ Type 3 任务 {mission_id} 已完成")
             elif task_type == 5 or task_type == 1 or task_type == 6:
-                # Type 1/5任务特殊处理：直接使用详细的msg
-                success_count = sum(1 for r in results.values() if r['success'])
-                failed_count = sum(1 for r in results.values() if not r['success'])
-                
-                # 获取详细msg（Type 1/5任务总是使用 'msg' 字段，优先使用第一个非空的msg）
-                detailed_msg = None
-                for browser_id, result in results.items():
-                    # Type 1/5 任务使用 'msg' 字段（而不是 'reason'）
-                    msg_value = result.get('msg', '')
-                    if msg_value:  # 非空字符串
-                        detailed_msg = msg_value
-                        break
-                    elif detailed_msg is None:  # 保存第一个msg（即使是空字符串），作为备选
-                        detailed_msg = msg_value
-                
-                # 总是使用msg字段（即使为空字符串）
-                status = 2 if success_count > 0 else 3
-                log_print(f"\n[系统] Type {task_type} 任务提交详细结果...")
-                submit_mission_result(mission_id, success_count, failed_count, {}, status, custom_msg=detailed_msg or '')
+                # Type 1/5/6任务的结果已在单浏览器处理时直接上传，这里只做清理
+                log_print(f"[系统] ✓ Type {task_type} 任务 {mission_id} 已完成（结果已直接上传）")
             else:
                 # 其他类型任务
                 # 统计成功和失败数
@@ -15302,8 +15288,13 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 task_exchange_name = None
                 available_balance = None
             
-            # 立即记录任务结果（不等待数据收集）
-            log_print(f"[{browser_id}] Type {mission_type} 任务{'成功' if success else '失败'}，立即记录结果...")
+            # 立即上传任务结果（不等待数据收集）
+            log_print(f"[{browser_id}] Type {mission_type} 任务{'成功' if success else '失败'}，立即上传结果...")
+            status = 2 if success else 3
+            save_mission_result(mission_id, status, failure_reason or '')
+            log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已上传")
+            
+            # 记录任务结果到内存（用于统计，但不再用于最终提交）
             with active_tasks_lock:
                 if mission_id in active_tasks:
                     active_tasks[mission_id]['results'][browser_id] = {
@@ -15312,7 +15303,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                         'msg': failure_reason  # 保存完整的 msg（成功或失败都保存）
                     }
                     active_tasks[mission_id]['completed'] += 1
-            log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已记录")
+            log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已记录到内存")
             
             # Type 5任务特殊处理：任务二失败时通知任务一
             if mission_type == 5 and not success:
@@ -15330,7 +15321,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     if original_msg:
                         combined_msg = f"{original_msg}"
                     else:
-                        combined_msg = f"任务二失败导致失败: {failure_reason}"
+                        combined_msg = f"本任务正常，但任务二已失败"
                     
                     save_mission_result(tp1, 3, combined_msg)
             
