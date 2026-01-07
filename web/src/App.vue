@@ -8326,7 +8326,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             await executeHedgeTask(config, {
               ...hedgeData,
               currentPrice: orderPrice,
-              firstSide: priceInfo.firstSide
+              firstSide: priceInfo.firstSide,
+              missionId: missionId,  // 传递组任务id
+              priceInfo: priceInfo   // 传递订单薄数据，用于构建 depthStr
             })
           }
           
@@ -9887,6 +9889,9 @@ const executeHedgeTask = async (config, hedgeData) => {
   const calculatedShare = hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100)
   const roundedShare = floorToTwoDecimals(calculatedShare)
   
+  const missionId = hedgeData.missionId  // 组任务的任务id
+  const priceInfo = hedgeData.priceInfo  // 订单薄数据
+  
   const hedgeRecord = {
     id: Date.now(),
     trendingId: config.id,
@@ -9910,7 +9915,12 @@ const executeHedgeTask = async (config, hedgeData) => {
     endTime: null,
     duration: null,
     secondTaskSubmitted: false,
-    finalStatus: 'running'  // running, success, failed
+    finalStatus: 'running',  // running, success, failed
+    missionId: missionId,  // 组任务的任务id
+    priceInfo: priceInfo,  // 订单薄数据
+    // 用于收集所有子任务的映射：{number: misId}
+    subTaskMap: {},  // {浏览器编号: 子任务id}
+    wasCounted: true  // 标记此任务已被计入 runningHedgeGroupsCount
   }
   
   // 初始化 currentHedges 数组（如果不存在）
@@ -9996,9 +10006,75 @@ const executeHedgeTask = async (config, hedgeData) => {
       if (firstSide === 'YES') {
         hedgeRecord.yesTaskId = taskId
         hedgeRecord.yesStatus = 9
+        // 保存子任务映射：浏览器编号 -> 子任务id
+        hedgeRecord.subTaskMap[hedgeRecord.yesNumber] = taskId
       } else {
         hedgeRecord.noTaskId = taskId
         hedgeRecord.noStatus = 9
+        // 保存子任务映射：浏览器编号 -> 子任务id
+        hedgeRecord.subTaskMap[hedgeRecord.noNumber] = taskId
+      }
+      
+      // 调用更新接口的函数（模式1）
+      const updateHedgeMissionStatus = async (hedgeRecord) => {
+        // 如果没有 missionId，则不调用更新接口
+        if (!hedgeRecord.missionId) {
+          console.log('模式1 - 没有 missionId，跳过更新接口调用')
+          return
+        }
+        
+        // 如果没有订单薄数据，则不调用更新接口
+        if (!hedgeRecord.priceInfo) {
+          console.log('模式1 - 没有订单薄数据，跳过更新接口调用')
+          return
+        }
+        
+        try {
+          // 构建 depthStr：买一深度,买一价；卖一价，卖一深度
+          const depth1 = hedgeRecord.priceInfo.depth1 || 0  // 买一深度
+          const price1 = hedgeRecord.priceInfo.price1 || 0  // 买一价
+          const price2 = hedgeRecord.priceInfo.price2 || 0  // 卖一价
+          const depth2 = hedgeRecord.priceInfo.depth2 || 0  // 卖一深度
+          const depthStr = `${depth1},${price1}；${price2},${depth2}`
+          
+          // 构建请求数据列表
+          const list = []
+          for (const [number, misId] of Object.entries(hedgeRecord.subTaskMap)) {
+            list.push({
+              missionId: hedgeRecord.missionId,
+              number: parseInt(number),
+              misId: parseInt(misId),
+              depthStr: depthStr
+            })
+          }
+          
+          // 如果没有子任务，则不调用更新接口
+          if (list.length === 0) {
+            console.log('模式1 - 没有子任务，跳过更新接口调用')
+            return
+          }
+          
+          const requestData = { list: list }
+          console.log('模式1 - 调用更新接口:', requestData)
+          
+          const response = await axios.post(
+            'https://sg.bicoin.com.cn/99l/hedge/updateHedgeMissionStatus',
+            requestData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          )
+          
+          if (response.data) {
+            console.log('模式1 - 更新接口调用成功:', response.data)
+          } else {
+            console.warn('模式1 - 更新接口调用返回异常:', response.data)
+          }
+        } catch (error) {
+          console.error('模式1 - 更新接口调用失败:', error)
+        }
       }
       
       // 根据事件间隔类型决定何时提交第二个任务
@@ -10009,9 +10085,16 @@ const executeHedgeTask = async (config, hedgeData) => {
           if (hedgeRecord.finalStatus === 'running' && !hedgeRecord.secondTaskSubmitted) {
             console.log(`[延时模式] 延时结束，提交第二个任务`)
             hedgeRecord.secondTaskSubmitted = true
-            await submitSecondHedgeTask(config, hedgeRecord)
+            await submitSecondHedgeTask(config, hedgeRecord, updateHedgeMissionStatus)
+            // submitSecondHedgeTask 内部会调用 updateHedgeMissionStatus
           }
         }, hedgeMode.intervalDelay)
+      } else {
+        // 挂单成功模式：如果只有第一个任务（没有第二个任务），也需要调用更新接口
+        // 注意：模式1通常有两个任务，但为了保险起见，这里也处理
+        // 实际上，挂单成功模式下，第二个任务会在 monitorHedgeStatus 中提交
+        // 但第一个任务提交后，应该先调用一次更新接口（如果只有第一个任务的话）
+        // 由于模式1通常有两个任务，这里暂时不调用，等第二个任务提交后再调用
       }
       
       monitorHedgeStatus(config, hedgeRecord)
@@ -10244,10 +10327,17 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       if (secondSide === 'YES') {
         hedgeRecord.yesTaskId = taskId
         hedgeRecord.yesStatus = 9
+        // 保存子任务映射：浏览器编号 -> 子任务id
+        hedgeRecord.subTaskMap[hedgeRecord.yesNumber] = taskId
       } else {
         hedgeRecord.noTaskId = taskId
         hedgeRecord.noStatus = 9
+        // 保存子任务映射：浏览器编号 -> 子任务id
+        hedgeRecord.subTaskMap[hedgeRecord.noNumber] = taskId
       }
+      
+      // 所有子任务提交完成后，调用更新接口
+      await updateHedgeMissionStatus(hedgeRecord)
     } else {
       console.error('提交第二个对冲任务失败: 无任务ID返回')
       hedgeRecord.finalStatus = 'failed'
@@ -10257,6 +10347,70 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     console.error('提交第二个对冲任务失败:', error)
     hedgeRecord.finalStatus = 'failed'
     finishHedge(config, hedgeRecord)
+  }
+}
+
+/**
+ * 调用更新接口的函数（模式1）
+ */
+const updateHedgeMissionStatus = async (hedgeRecord) => {
+  // 如果没有 missionId，则不调用更新接口
+  if (!hedgeRecord.missionId) {
+    console.log('模式1 - 没有 missionId，跳过更新接口调用')
+    return
+  }
+  
+  // 如果没有订单薄数据，则不调用更新接口
+  if (!hedgeRecord.priceInfo) {
+    console.log('模式1 - 没有订单薄数据，跳过更新接口调用')
+    return
+  }
+  
+  try {
+    // 构建 depthStr：买一深度,买一价；卖一价，卖一深度
+    const depth1 = hedgeRecord.priceInfo.depth1 || 0  // 买一深度
+    const price1 = hedgeRecord.priceInfo.price1 || 0  // 买一价
+    const price2 = hedgeRecord.priceInfo.price2 || 0  // 卖一价
+    const depth2 = hedgeRecord.priceInfo.depth2 || 0  // 卖一深度
+    const depthStr = `${depth1},${price1}；${price2},${depth2}`
+    
+    // 构建请求数据列表
+    const list = []
+    for (const [number, misId] of Object.entries(hedgeRecord.subTaskMap)) {
+      list.push({
+        missionId: hedgeRecord.missionId,
+        number: parseInt(number),
+        misId: parseInt(misId),
+        depthStr: depthStr
+      })
+    }
+    
+    // 如果没有子任务，则不调用更新接口
+    if (list.length === 0) {
+      console.log('模式1 - 没有子任务，跳过更新接口调用')
+      return
+    }
+    
+    const requestData = { list: list }
+    console.log('模式1 - 调用更新接口:', requestData)
+    
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/updateHedgeMissionStatus',
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data) {
+      console.log('模式1 - 更新接口调用成功:', response.data)
+    } else {
+      console.warn('模式1 - 更新接口调用返回异常:', response.data)
+    }
+  } catch (error) {
+    console.error('模式1 - 更新接口调用失败:', error)
   }
 }
 
@@ -10294,7 +10448,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     missionId: missionId,  // 组任务的任务id
     priceInfo: priceInfo,  // 订单薄数据
     // 用于收集所有子任务的映射：{number: misId}
-    subTaskMap: {}  // {浏览器编号: 子任务id}
+    subTaskMap: {},  // {浏览器编号: 子任务id}
+    wasCounted: true  // 标记此任务已被计入 runningHedgeGroupsCount
   }
   
   // 初始化 currentHedges 数组（如果不存在）
@@ -10427,7 +10582,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     
     console.log(`模式2 - 先挂方任务提交完成，成功: ${firstSideSuccessCount}/${firstSideList.length}`)
     
-    // 调用更新接口的函数
+    // 先挂方任务提交完成后，先调用一次更新接口（包含先挂方的所有子任务）
+    // 如果后挂方没有任务，则只调用这一次；如果有后挂方任务，后挂方任务提交完成后会再次调用
     const updateHedgeMissionStatus = async (hedgeRecord) => {
       // 如果没有 missionId，则不调用更新接口
       if (!hedgeRecord.missionId) {
@@ -10608,20 +10764,18 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
       // 延时模式下不需要回调
       submitSecondSideTasksCallback = null
       
-      // 延时模式下，先挂方任务提交完成后也需要调用更新接口（如果后挂方没有任务）
-      if (secondSideList.length === 0) {
-        updateHedgeMissionStatus(hedgeRecord)
-      }
+      // 延时模式下，先挂方任务提交完成后先调用一次更新接口
+      // 如果后挂方没有任务，则只调用这一次；如果有后挂方任务，后挂方任务提交完成后会再次调用
+      await updateHedgeMissionStatus(hedgeRecord)
     } else {
       // 挂单成功模式：先提交先挂方任务，等第一个任务成功后提交后挂方任务
       console.log(`[模式2-挂单成功模式] 等待先挂方任务成功后提交后挂方任务`)
       // 监控先挂方任务状态，当第一个任务成功时提交后挂方任务
       submitSecondSideTasksCallback = submitSecondSideTasks
       
-      // 如果后挂方没有任务，先挂方任务提交完成后也需要调用更新接口
-      if (secondSideList.length === 0) {
-        updateHedgeMissionStatus(hedgeRecord)
-      }
+      // 挂单成功模式下，先挂方任务提交完成后先调用一次更新接口
+      // 如果后挂方没有任务，则只调用这一次；如果有后挂方任务，后挂方任务提交完成后会再次调用
+      await updateHedgeMissionStatus(hedgeRecord)
     }
     
     // 开始监控所有任务状态
@@ -10777,13 +10931,15 @@ const finishHedge = (config, hedgeRecord) => {
   if (config.currentHedges) {
     const index = config.currentHedges.findIndex(h => h.id === hedgeRecord.id)
     if (index !== -1) {
-      // 在移除前检查任务状态，只有状态为 'running' 的任务才会计入统计
+      // 在移除前检查任务是否被计入了统计
       const hedgeToRemove = config.currentHedges[index]
-      const wasRunning = hedgeToRemove.finalStatus === 'running'
+      // 检查任务是否有 wasCounted 标记（只有初始状态为 running 的任务才会有此标记）
+      const wasCounted = hedgeToRemove.wasCounted === true
       config.currentHedges.splice(index, 1)
-      // 减少正在运行的任务组数（只有曾经是 running 状态的任务才减少）
-      if (wasRunning && runningHedgeGroupsCount.value > 0) {
+      // 减少正在运行的任务组数（只有被计入统计的任务才减少）
+      if (wasCounted && runningHedgeGroupsCount.value > 0) {
         runningHedgeGroupsCount.value--
+        console.log(`减少正在运行的任务组数，当前: ${runningHedgeGroupsCount.value}`)
       }
     }
     
@@ -10804,9 +10960,10 @@ const finishHedge = (config, hedgeRecord) => {
     // 兼容旧代码
     config.currentHedge = null
     pausedType3Tasks.value.delete(config.id)
-    // 减少正在运行的任务组数
-    if (runningHedgeGroupsCount.value > 0) {
+    // 减少正在运行的任务组数（检查 wasCounted 标记，如果没有标记则假设被计入了，以兼容旧数据）
+    if ((hedgeRecord.wasCounted === true || hedgeRecord.wasCounted === undefined) && runningHedgeGroupsCount.value > 0) {
       runningHedgeGroupsCount.value--
+      console.log(`减少正在运行的任务组数（兼容旧代码），当前: ${runningHedgeGroupsCount.value}`)
     }
   }
 }

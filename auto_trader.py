@@ -3050,7 +3050,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         time.sleep(10)
                                     
                                     # 点击确认按钮
-                                    log_msg = f"[9] 任务一: 点击OKX确认按钮..."
+                                    log_msg = f"[11] 任务一: 点击OKX确认按钮..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     buttons[1].click()
@@ -3256,7 +3256,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     
                                     # 点击确认按钮
-                                    log_msg = f"[9] 任务二: 点击OKX确认按钮..."
+                                    log_msg = f"[11] 任务二: 点击OKX确认按钮..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     buttons[1].click()
@@ -6953,9 +6953,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             available_balance = None  # Polymarket 暂不支持
         
         if success:
-            add_bro_log_entry(bro_log_list, browser_id, f"[8]交易流程处理成功")
+            add_bro_log_entry(bro_log_list, browser_id, f"[11]交易流程处理成功")
         else:
-            add_bro_log_entry(bro_log_list, browser_id, f"[8]交易流程处理失败: {failure_reason}")
+            add_bro_log_entry(bro_log_list, browser_id, f"[根据上一条]交易流程处理失败: {failure_reason}")
         
         # 处理 available_balance 并更新 p 字段
         if available_balance is not None:
@@ -9055,7 +9055,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     continue
                 
                 # 如果所有步骤都成功，跳出循环
-                add_bro_log_entry(bro_log_list, browser_id, "[9]步骤7-12执行成功")
+                add_bro_log_entry(bro_log_list, browser_id, "[11]步骤7-12执行成功")
                 log_print(f"[{browser_id}] ✓ 步骤7-12执行成功")
                 break
                 
@@ -9151,7 +9151,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     final_available_balance = None
                     if initial_available_balance is not None:
                         try:
-                            add_bro_log_entry(bro_log_list, browser_id, "开始监控可用余额变化")
+                            add_bro_log_entry(bro_log_list, browser_id, "[11]开始监控可用余额变化")
                             log_print(f"[{browser_id}] 开始监控可用余额变化...")
                             # 重新获取 trade_box
                             trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
@@ -9160,7 +9160,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                 final_available_balance = monitor_available_balance_change(
                                     driver, browser_id, initial_available_balance, current_trade_box, max_wait_time=180
                                 )
-                                add_bro_log_entry(bro_log_list, browser_id, f"余额监控完成，最终可用余额: {final_available_balance}")
+                                add_bro_log_entry(bro_log_list, browser_id, f"[11]余额监控完成，最终可用余额: {final_available_balance}")
                                 log_print(f"[{browser_id}] ✓ 余额监控完成，最终可用余额: {final_available_balance}")
                             else:
                                 add_bro_log_entry(bro_log_list, browser_id, "未找到 trade-box，无法监控余额变化")
