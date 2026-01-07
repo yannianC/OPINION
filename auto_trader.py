@@ -3735,7 +3735,7 @@ def get_position_from_api(serial_number, trending, option_type):
     return None
 
 
-def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None, initial_open_orders_count=0, initial_closed_orders_time=""):
+def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None, initial_open_orders_count=0, initial_closed_orders_time="", bro_log_list=None):
     """
     Type 5 任务专用：等待订单成功并收集数据
     
@@ -3755,6 +3755,12 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     Returns:
         tuple: (success, msg)
     """
+    
+        # 初始化日志列表（如果未提供）
+    if bro_log_list is None:
+        bro_log_list = []
+        
+    
     mission = task_data.get('mission', {})
     mission_id = mission.get('id')
     tp1 = mission.get('tp1')  # 如果是任务二，这里有任务一的ID
@@ -3769,6 +3775,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     log_print(f"[{serial_number}] [{task_label}] 初始 Position 数量: {initial_position_count}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Open Orders 数量: {initial_open_orders_count}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Closed Orders 最新时间: {initial_closed_orders_time}")
+    
     
     # 切换回主页面
     try:
@@ -3787,7 +3794,10 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     if trade_type == "Buy":
         log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
     else:
-        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
+        log_print(f"[[]{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
+    
+    add_bro_log_entry(bro_log_list, serial_number, f"[12][{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
+    
     
     phase1_timeout = 600  # 15分钟
     check_interval = 20  # Sell每20秒检查，Buy每60秒检查
@@ -3844,6 +3854,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     # 本地数据需要大于 initial + 1 才算变化
                     if current_position_count_local > initial_position_count + 1:
                         log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 本地数据检测到持仓数量增加！")
+                        
+                        add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}] 本地数据检测到持仓数量增加！=")
                         local_detected = True
                         position_changed_detected = True
                 
@@ -3853,6 +3865,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     # 链上数据需要大于 initial + 1 才算变化（因为链上数据小数位数较多）
                     if current_position_count_api > initial_position_count_api + 1:
                         log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 链上数据检测到持仓数量增加！")
+                        add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}] 链上数据检测到持仓数量增!")
                         api_detected = True
                         position_changed_detected = True
                 
@@ -3884,9 +3897,11 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一状态为{current_status}，更改为14...")
                                 elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                     else:
                                 # 任务二检测到变化
@@ -3894,9 +3909,11 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一状态为{current_status}，更改为14...")
                                 elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 13)
                     
                     break
@@ -3915,6 +3932,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     # 检查Open Orders数量是否有变化
                     if current_open_orders_count > initial_open_orders_count:
                         log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
+                        
+                        add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 检测到Open Orders数量变化！")
                         
                         # 更新任务一的状态
                         current_status = get_mission_status(target_mission_id)
@@ -3957,7 +3976,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         # 检查Closed Orders时间是否有变化
                         if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
                             log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
-                            
+                            add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 检测到Closed Orders时间变化！")
                             # 更新任务一的状态
                             current_status = get_mission_status(target_mission_id)
                             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
@@ -4016,6 +4035,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             # 链上数据需要大于1才算变化
                             if abs(current_filled_amount_float - float(initial_position_count)) > 1:
                                 log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 本地数据检测到已成交数量变化！")
+                                add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 本地数据检测到已成交数量变化！")
                                 local_detected = True
                                 position_changed_detected = True
                             else:
@@ -4033,6 +4053,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     # 链上数据需要大于1才算变化
                     if abs(current_filled_amount_api - float(initial_position_count)) > 1:
                         log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 链上数据检测到已成交数量变化！")
+                        add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 链上数据检测到已成交数量变化！！")
                         api_detected = True
                         position_changed_detected = True
                 
@@ -4064,20 +4085,24 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一状态已经是11，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务一状态为{current_status}，更改为14..")
                                 elif current_status is not None:
                                     # 任务一检测到变化，改为8
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务一检测到变化，更改状态为12...")
                     else:
                                 # 任务二检测到变化
                                 if current_status == 12 or current_status == 14:
                                     # 任务一状态已经是8，改为10
                                     log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
                                     save_mission_result(target_mission_id, 14)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务一检测到变化，更改状态为12...")
                                 elif current_status is not None:
                                     # 任务二检测到变化，改为9
                                     log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
                                     save_mission_result(target_mission_id, 13)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务二检测到变化，更改任务一状态为13...")
                     
                     break
                 
@@ -4095,7 +4120,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     # 检查Open Orders数量是否有变化
                     if current_open_orders_count > initial_open_orders_count:
                         log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
-                        
+                        add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  检测到Open Orders数量变化！")
                         # 更新任务一的状态
                         current_status = get_mission_status(target_mission_id)
                         log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
@@ -4138,7 +4163,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         # 检查Closed Orders时间是否有变化
                         if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
                             log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
-                            
+                            add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  检测到Closed Orders时间变化！")
                             # 更新任务一的状态
                             current_status = get_mission_status(target_mission_id)
                             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
@@ -4178,7 +4203,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     both_hava_order = False
      
     if not hava_order and not position_changed:
-        return False, "[12]检测仓位变化超时，且无挂单无ClosedOrder"
+        add_bro_log_entry(bro_log_list, serial_number, f"[15][{serial_number}]  检测仓位变化超时，且无挂单无ClosedOrder！")
+        return False, "[15]检测仓位变化超时，且无挂单无ClosedOrder"
     if hava_order or position_changed:
         # 在10分钟内，每隔30秒检测一次任务一的状态
         log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务状态）...")
@@ -4255,22 +4281,23 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     break
             
             if not open_orders_div:
+                add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交")
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
-                return False, "[13]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
+                return False, "[16]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             # 获取 tbody 和 tr
             try:
                 tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
                 tr_list = tbody.find_elements(By.TAG_NAME, "tr")
             except:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
-                return False, "[13]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
+                add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交")
+                return False, "[16]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             
             if not tr_list or len(tr_list) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
-                return False, "[13]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
+                add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交")
+                return False, "[16]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             
-            # 有挂单，检查任务一状态，判断另一个任务是否已经变化
-            log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，检查任务一状态，判断另一个任务是否已变化...")
             current_status = get_mission_status(target_mission_id)
             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
             
@@ -4279,14 +4306,16 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             tds = first_tr.find_elements(By.TAG_NAME, "td")
             if len(tds) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
-                return False, "[13]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
+                add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交")
+                return False, "[16]检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             
             last_td = tds[-1]  # 最后一个td
             svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
             
             if not svg_elements or len(svg_elements) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
-                return False, "[13]检测对方挂单超时或失败,尝试取消自己挂单，挂单取消失败,可能已成交"
+                add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,挂单取消失败,可能已成交")
+                return False, "[16]检测对方挂单超时或失败,尝试取消自己挂单，挂单取消失败,可能已成交"
             
             log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
             svg_elements[0].click()
@@ -4318,7 +4347,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not confirm_found:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
-                return False, "[13]检测对方挂单超时或失败,尝试取消自己挂单，挂单取消失败,可能已成交"
+                add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,挂单取消失败,可能已成交")
+                return False, "[16]检测对方挂单超时或失败,尝试取消自己挂单，挂单取消失败,可能已成交"
             
             # 等待10秒
             log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
@@ -4335,7 +4365,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not open_orders_div:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 重新获取时未找到Open Orders div")
-                return False, "[14]检测对方挂单超时或失败，有挂单，已成功取消挂单"
+                add_bro_log_entry(bro_log_list, serial_number, f"[17][{serial_number}]  检测对方挂单超时或失败，有挂单，已成功取消挂单")
+                return False, "[17]检测对方挂单超时或失败，有挂单，已成功取消挂单"
             
             # 重新获取tbody和tr
             try:
@@ -4344,21 +4375,25 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             except:
                 # 没有tbody或tr，说明挂单已取消
                 log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tbody/tr）")
-                return False, "[14]检测对方挂单超时或失败，有挂单，已成功取消挂单"
+                add_bro_log_entry(bro_log_list, serial_number, f"[17][{serial_number}]  检测对方挂单超时或失败，有挂单，已成功取消挂单")
+                return False, "[17]检测对方挂单超时或失败，有挂单，已成功取消挂单"
             
             if not tr_list or len(tr_list) == 0:
                 # 没有tr，说明挂单已取消
                 log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tr）")
-                return False, "[14]检测对方挂单超时或失败，有挂单，已成功取消挂单"
+                add_bro_log_entry(bro_log_list, serial_number, f"[17][{serial_number}]  检测对方挂单超时或失败，有挂单，已成功取消挂单")
+                return False, "[17]检测对方挂单超时或失败，有挂单，已成功取消挂单"
             else:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
-                return False, "[14]检测对方挂单超时或失败,尝试取消自己挂单,但取消挂单失败"
+                add_bro_log_entry(bro_log_list, serial_number, f"[18][{serial_number}]  检测对方挂单超时或失败,尝试取消自己挂单,但取消挂单失败")
+                return False, "[18]检测对方挂单超时或失败,尝试取消自己挂单,但取消挂单失败"
                 
         except Exception as e:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
             import traceback
             log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-            return False, "[14]检测对方挂单超时或失败,尝试取消自己挂单,且取消挂单出错"
+            add_bro_log_entry(bro_log_list, serial_number, f"[18][{serial_number}]  [18]检测对方挂单超时或失败,尝试取消自己挂单,且取消挂单出错")
+            return False, "[18]检测对方挂单超时或失败,尝试取消自己挂单,且取消挂单出错"
     
         
     # 第三阶段：获取Position和Open Orders的详细数据
@@ -9003,19 +9038,19 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] 步骤12: 提交订单...")
                 submit_success, should_retry = submit_opinion_order(driver, tabs_content, trade_type, option_type, browser_id, browser_id, task_data, bro_log_list, trendingId)
                 if not submit_success:
-                    add_bro_log_entry(bro_log_list, browser_id, "[8]提交订单失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[9]提交订单失败")
                     log_print(f"[{browser_id}] ✗ 提交订单失败")
                     if not should_retry:
                         # type=5点击取消按钮，不应重试
-                        add_bro_log_entry(bro_log_list, browser_id, "[8]Type 5 任务已取消，不进行重试")
+                        add_bro_log_entry(bro_log_list, browser_id, "[9]Type 5 任务已取消，不进行重试")
                         log_print(f"[{browser_id}] ✗ Type 5 任务已取消，不进行重试")
-                        return False, "[8]另一个任务已失败", None
+                        return False, "[9]另一个任务已失败", None
                     elif isinstance(should_retry, str):
                         # should_retry是字符串，表示具体的失败原因
-                        add_bro_log_entry(bro_log_list, browser_id, f"[8]Type 5 任务失败: {should_retry}")
+                        add_bro_log_entry(bro_log_list, browser_id, f"[9]Type 5 任务失败: {should_retry}")
                         log_print(f"[{browser_id}] ✗ Type 5 任务失败: {should_retry}")
                         return False, should_retry, None
-                    last_failure_step = "[8]提交订单失败"
+                    last_failure_step = "[9]提交订单失败"
                     retry_count += 1
                     continue
                 
@@ -9027,7 +9062,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             except Exception as e:
                 add_bro_log_entry(bro_log_list, browser_id, f"[9]步骤7-12执行异常: {str(e)}")
                 log_print(f"[{browser_id}] ✗ 步骤7-12执行异常: {str(e)}")
-                last_failure_step = f"[7]执行异常: {str(e)}"
+                last_failure_step = f"[9]执行异常: {str(e)}"
                 retry_count += 1
                 if retry_count > max_retry_attempts:
                     return False, last_failure_step, None
