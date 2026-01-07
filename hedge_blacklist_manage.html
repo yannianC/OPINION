@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面13-浏览器黑名单管理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 30px;
+        }
+
+        .block {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            border: 2px solid #e9ecef;
+        }
+
+        .block-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .block-title.blacklist {
+            color: #dc3545;
+            border-bottom-color: #dc3545;
+        }
+
+        .block-title.only-close {
+            color: #ffc107;
+            border-bottom-color: #ffc107;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .input-group input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .add-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+            white-space: nowrap;
+        }
+
+        .add-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.6);
+        }
+
+        .add-btn:active {
+            transform: translateY(0);
+        }
+
+        .add-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .list-container {
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .list-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+            transition: background-color 0.2s ease;
+        }
+
+        .list-item:last-child {
+            border-bottom: none;
+        }
+
+        .list-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .list-item-number {
+            font-weight: 600;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        .remove-btn {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+        }
+
+        .remove-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5);
+        }
+
+        .remove-btn:active {
+            transform: translateY(0);
+        }
+
+        .remove-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .empty-list {
+            text-align: center;
+            padding: 40px 20px;
+            color: #6c757d;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px 20px;
+            color: #6c757d;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 500px;
+            animation: slideIn 0.3s ease-out;
+            font-size: 14px;
+        }
+
+        .toast.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .toast.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-message {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+
+        .toast.hide {
+            animation: slideOut 0.3s ease-out forwards;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            margin-bottom: 15px;
+            width: 100%;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>页面13-浏览器黑名单管理</h1>
+        </div>
+        
+        <div class="content">
+            <!-- 完全拉黑块 -->
+            <div class="block">
+                <div class="block-title blacklist">完全拉黑（临时黑名单）</div>
+                <button class="refresh-btn" id="refreshBlacklistBtn" onclick="loadBlacklist()">
+                    🔄 刷新列表
+                </button>
+                <div class="input-group">
+                    <input type="text" id="blacklistInput" placeholder="输入浏览器号">
+                    <button class="add-btn" id="addBlacklistBtn" onclick="addToBlacklist()">
+                        ➕ 添加到黑名单
+                    </button>
+                </div>
+                <div class="list-container" id="blacklistContainer">
+                    <div class="loading">正在加载...</div>
+                </div>
+            </div>
+
+            <!-- 只平不开块 -->
+            <div class="block">
+                <div class="block-title only-close">只平不开</div>
+                <button class="refresh-btn" id="refreshOnlyCloseBtn" onclick="loadOnlyCloseList()">
+                    🔄 刷新列表
+                </button>
+                <div class="input-group">
+                    <input type="text" id="onlyCloseInput" placeholder="输入浏览器号">
+                    <button class="add-btn" id="addOnlyCloseBtn" onclick="addToOnlyClose()">
+                        ➕ 添加到只平
+                    </button>
+                </div>
+                <div class="list-container" id="onlyCloseContainer">
+                    <div class="loading">正在加载...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://sg.bicoin.com.cn/99l/hedge';
+
+        // 显示提示消息
+        function showToast(message, type = 'success') {
+            const existingToast = document.querySelector('.toast');
+            if (existingToast) {
+                existingToast.remove();
+            }
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'success' ? '✅' : '❌';
+            toast.innerHTML = `
+                <span class="toast-icon">${icon}</span>
+                <span class="toast-message">${message}</span>
+            `;
+
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        // 加载临时黑名单列表
+        async function loadBlacklist() {
+            const refreshBtn = document.getElementById('refreshBlacklistBtn');
+            const container = document.getElementById('blacklistContainer');
+            
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '🔄 加载中...';
+            container.innerHTML = '<div class="loading">正在加载...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/tempBlackList`);
+                const result = await response.json();
+
+                if (result.code === 0 && result.data && Array.isArray(result.data.list)) {
+                    const list = result.data.list.map(item => String(item.number || item));
+                    displayBlacklist(list);
+                } else {
+                    throw new Error(result.msg || '加载失败');
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="empty-list">加载失败: ${error.message}</div>`;
+                showToast('加载临时黑名单失败: ' + error.message, 'error');
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 刷新列表';
+            }
+        }
+
+        // 显示临时黑名单列表
+        function displayBlacklist(list) {
+            const container = document.getElementById('blacklistContainer');
+            
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div class="empty-list">暂无数据</div>';
+                return;
+            }
+
+            let html = '';
+            list.forEach(number => {
+                const escapedNumber = String(number).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                html += `
+                    <div class="list-item">
+                        <span class="list-item-number">${number}</span>
+                        <button class="remove-btn" onclick="removeFromBlacklist('${escapedNumber}')">
+                            取消拉黑
+                        </button>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // 创建黑名单列表项HTML
+        function createBlacklistItem(number) {
+            const escapedNumber = String(number).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+                <span class="list-item-number">${number}</span>
+                <button class="remove-btn" onclick="removeFromBlacklist('${escapedNumber}')">
+                    取消拉黑
+                </button>
+            `;
+            return div;
+        }
+
+        // 添加到临时黑名单
+        async function addToBlacklist() {
+            const input = document.getElementById('blacklistInput');
+            const addBtn = document.getElementById('addBlacklistBtn');
+            const container = document.getElementById('blacklistContainer');
+            const number = input.value.trim();
+
+            if (!number) {
+                showToast('请输入浏览器号', 'error');
+                return;
+            }
+
+            // 检查是否已存在
+            const existingItems = container.querySelectorAll('.list-item');
+            for (let item of existingItems) {
+                const itemNumber = item.querySelector('.list-item-number').textContent.trim();
+                if (itemNumber === number) {
+                    showToast('该浏览器号已在列表中', 'error');
+                    return;
+                }
+            }
+
+            addBtn.disabled = true;
+            addBtn.textContent = '⏳ 添加中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/addTempBlack`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ number: number })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('添加成功', 'success');
+                    input.value = '';
+                    
+                    // 增量添加：直接添加DOM元素
+                    if (container.querySelector('.empty-list')) {
+                        container.innerHTML = '';
+                    }
+                    const newItem = createBlacklistItem(number);
+                    container.appendChild(newItem);
+                } else {
+                    throw new Error(result.msg || '添加失败');
+                }
+            } catch (error) {
+                showToast('添加失败: ' + error.message, 'error');
+            } finally {
+                addBtn.disabled = false;
+                addBtn.textContent = '➕ 添加到黑名单';
+            }
+        }
+
+        // 从临时黑名单移除
+        async function removeFromBlacklist(number) {
+            if (!number) {
+                showToast('浏览器号不能为空', 'error');
+                return;
+            }
+
+            const container = document.getElementById('blacklistContainer');
+            
+            // 找到对应的列表项
+            const items = container.querySelectorAll('.list-item');
+            let targetItem = null;
+            let targetButton = null;
+            
+            items.forEach(item => {
+                const itemNumber = item.querySelector('.list-item-number').textContent.trim();
+                if (itemNumber === number) {
+                    targetItem = item;
+                    targetButton = item.querySelector('.remove-btn');
+                }
+            });
+
+            if (targetButton) {
+                targetButton.disabled = true;
+                targetButton.textContent = '处理中...';
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/removeTempBlack`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ number: number })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('取消拉黑成功', 'success');
+                    
+                    // 增量删除：直接移除DOM元素
+                    if (targetItem) {
+                        targetItem.remove();
+                        // 如果列表为空，显示空状态
+                        if (container.querySelectorAll('.list-item').length === 0) {
+                            container.innerHTML = '<div class="empty-list">暂无数据</div>';
+                        }
+                    }
+                } else {
+                    throw new Error(result.msg || '操作失败');
+                }
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+                if (targetButton) {
+                    targetButton.disabled = false;
+                    targetButton.textContent = '取消拉黑';
+                }
+            }
+        }
+
+        // 加载只平列表
+        async function loadOnlyCloseList() {
+            const refreshBtn = document.getElementById('refreshOnlyCloseBtn');
+            const container = document.getElementById('onlyCloseContainer');
+            
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '🔄 加载中...';
+            container.innerHTML = '<div class="loading">正在加载...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/onlyCloseList`);
+                const result = await response.json();
+
+                if (result.code === 0 && result.data) {
+                    // 处理返回的数据格式，可能是数组或包含list的对象
+                    let list = [];
+                    if (Array.isArray(result.data)) {
+                        list = result.data.map(item => String(item.number || item));
+                    } else if (result.data.list && Array.isArray(result.data.list)) {
+                        list = result.data.list.map(item => String(item.number || item));
+                    } else if (result.data.number) {
+                        list = [String(result.data.number)];
+                    }
+                    displayOnlyCloseList(list);
+                } else {
+                    throw new Error(result.msg || '加载失败');
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="empty-list">加载失败: ${error.message}</div>`;
+                showToast('加载只平列表失败: ' + error.message, 'error');
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 刷新列表';
+            }
+        }
+
+        // 显示只平列表
+        function displayOnlyCloseList(list) {
+            const container = document.getElementById('onlyCloseContainer');
+            
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div class="empty-list">暂无数据</div>';
+                return;
+            }
+
+            let html = '';
+            list.forEach(number => {
+                const escapedNumber = String(number).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                html += `
+                    <div class="list-item">
+                        <span class="list-item-number">${number}</span>
+                        <button class="remove-btn" onclick="removeFromOnlyClose('${escapedNumber}')">
+                            取消只平
+                        </button>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // 创建只平列表项HTML
+        function createOnlyCloseItem(number) {
+            const escapedNumber = String(number).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+                <span class="list-item-number">${number}</span>
+                <button class="remove-btn" onclick="removeFromOnlyClose('${escapedNumber}')">
+                    取消只平
+                </button>
+            `;
+            return div;
+        }
+
+        // 添加到只平列表
+        async function addToOnlyClose() {
+            const input = document.getElementById('onlyCloseInput');
+            const addBtn = document.getElementById('addOnlyCloseBtn');
+            const container = document.getElementById('onlyCloseContainer');
+            const number = input.value.trim();
+
+            if (!number) {
+                showToast('请输入浏览器号', 'error');
+                return;
+            }
+
+            // 检查是否已存在
+            const existingItems = container.querySelectorAll('.list-item');
+            for (let item of existingItems) {
+                const itemNumber = item.querySelector('.list-item-number').textContent.trim();
+                if (itemNumber === number) {
+                    showToast('该浏览器号已在列表中', 'error');
+                    return;
+                }
+            }
+
+            addBtn.disabled = true;
+            addBtn.textContent = '⏳ 添加中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/addOnlyClose`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ number: number })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('添加成功', 'success');
+                    input.value = '';
+                    
+                    // 增量添加：直接添加DOM元素
+                    if (container.querySelector('.empty-list')) {
+                        container.innerHTML = '';
+                    }
+                    const newItem = createOnlyCloseItem(number);
+                    container.appendChild(newItem);
+                } else {
+                    throw new Error(result.msg || '添加失败');
+                }
+            } catch (error) {
+                showToast('添加失败: ' + error.message, 'error');
+            } finally {
+                addBtn.disabled = false;
+                addBtn.textContent = '➕ 添加到只平';
+            }
+        }
+
+        // 从只平列表移除
+        async function removeFromOnlyClose(number) {
+            if (!number) {
+                showToast('浏览器号不能为空', 'error');
+                return;
+            }
+
+            const container = document.getElementById('onlyCloseContainer');
+            
+            // 找到对应的列表项
+            const items = container.querySelectorAll('.list-item');
+            let targetItem = null;
+            let targetButton = null;
+            
+            items.forEach(item => {
+                const itemNumber = item.querySelector('.list-item-number').textContent.trim();
+                if (itemNumber === number) {
+                    targetItem = item;
+                    targetButton = item.querySelector('.remove-btn');
+                }
+            });
+
+            if (targetButton) {
+                targetButton.disabled = true;
+                targetButton.textContent = '处理中...';
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/removeOnlyClose`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ number: number })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showToast('取消只平成功', 'success');
+                    
+                    // 增量删除：直接移除DOM元素
+                    if (targetItem) {
+                        targetItem.remove();
+                        // 如果列表为空，显示空状态
+                        if (container.querySelectorAll('.list-item').length === 0) {
+                            container.innerHTML = '<div class="empty-list">暂无数据</div>';
+                        }
+                    }
+                } else {
+                    throw new Error(result.msg || '操作失败');
+                }
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+                if (targetButton) {
+                    targetButton.disabled = false;
+                    targetButton.textContent = '取消只平';
+                }
+            }
+        }
+
+        // 支持回车键添加
+        document.getElementById('blacklistInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addToBlacklist();
+            }
+        });
+
+        document.getElementById('onlyCloseInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addToOnlyClose();
+            }
+        });
+
+        // 页面加载时自动加载数据
+        window.addEventListener('DOMContentLoaded', () => {
+            loadBlacklist();
+            loadOnlyCloseList();
+        });
+    </script>
+</body>
+</html>
+

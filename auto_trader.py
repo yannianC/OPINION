@@ -3789,7 +3789,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     else:
         log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
     
-    phase1_timeout = 900  # 15分钟
+    phase1_timeout = 600  # 15分钟
     check_interval = 20  # Sell每20秒检查，Buy每60秒检查
     refresh_interval = 120  # 每2分钟刷新一次
     
@@ -4177,12 +4177,13 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     
     both_hava_order = False
      
-        
+    if not hava_order and not position_changed:
+        return False, "检测仓位变化超时，且无挂单无ClosedOrder"
     if hava_order or position_changed:
         # 在10分钟内，每隔30秒检测一次任务一的状态
         log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务状态）...")
-        phase2_timeout = 240
-        phase2_check_interval = 20  # 30秒
+        phase2_timeout = 600
+        phase2_check_interval = 30  # 30秒
         phase2_start_time = time.time()
         
         while time.time() - phase2_start_time < phase2_timeout:
@@ -4202,6 +4203,9 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     elif current_status == 11:
                         both_hava_order = True
                         break;
+                    elif current_status == 3:
+                        break;
+                       
                 else:
                     if current_status == 14:
                         both_hava_order = True
@@ -4213,6 +4217,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         break;
                     elif current_status == 8:
                         both_hava_order = True
+                        break;
+                    elif current_status == 3:
                         break;
                 
                 # 等待30秒后继续下一次检测
@@ -4250,19 +4256,18 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not open_orders_div:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
-                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
-            
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             # 获取 tbody 和 tr
             try:
                 tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
                 tr_list = tbody.find_elements(By.TAG_NAME, "tr")
             except:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
-                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             
             if not tr_list or len(tr_list) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
-                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             
             # 有挂单，检查任务一状态，判断另一个任务是否已经变化
             log_print(f"[{serial_number}] [{task_label}] 检测到有挂单，检查任务一状态，判断另一个任务是否已变化...")
@@ -4274,14 +4279,14 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             tds = first_tr.find_elements(By.TAG_NAME, "td")
             if len(tds) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
-                return False, "未检测到都拥有单子,尝试取消挂单,未找到挂单"
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单,未找到挂单,可能已成交"
             
             last_td = tds[-1]  # 最后一个td
             svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
             
             if not svg_elements or len(svg_elements) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
-                return False, "未检测到都拥有单子,尝试取消挂单，挂单取消失败"
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单，挂单取消失败,可能已成交"
             
             log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
             svg_elements[0].click()
@@ -4313,7 +4318,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not confirm_found:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
-                return False, "未检测到都拥有单子,尝试取消挂单，挂单取消失败"
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单，挂单取消失败,可能已成交"
             
             # 等待10秒
             log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
@@ -4330,7 +4335,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             
             if not open_orders_div:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 重新获取时未找到Open Orders div")
-                return False, "吃单失败，有挂单，已取消挂单"
+                return False, "检测对方挂单超时或失败，有挂单，已成功取消挂单"
             
             # 重新获取tbody和tr
             try:
@@ -4339,21 +4344,21 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             except:
                 # 没有tbody或tr，说明挂单已取消
                 log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tbody/tr）")
-                return False, "吃单失败，有挂单，已取消挂单"
+                return False, "检测对方挂单超时或失败，有挂单，已成功取消挂单"
             
             if not tr_list or len(tr_list) == 0:
                 # 没有tr，说明挂单已取消
                 log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tr）")
-                return False, "吃单失败，有挂单，已取消挂单"
+                return False, "检测对方挂单超时或失败，有挂单，已成功取消挂单"
             else:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
-                return False, "未检测到都拥有单子,尝试取消挂单,且取消挂单失败"
+                return False, "检测对方挂单超时或失败,尝试取消自己挂单,但取消挂单失败"
                 
         except Exception as e:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
             import traceback
             log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-            return False, "未检测到都拥有单子,尝试取消挂单,且取消挂单出错"
+            return False, "检测对方挂单超时或失败,尝试取消自己挂单,且取消挂单出错"
     
         
     # 第三阶段：获取Position和Open Orders的详细数据
