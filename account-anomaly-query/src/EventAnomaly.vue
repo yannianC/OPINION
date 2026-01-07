@@ -148,6 +148,22 @@
       <el-button type="info" @click="snapAllPos" style="margin-left: 10px;">
         快照
       </el-button>
+      <el-select 
+        v-model="selectedSnapRecordId" 
+        style="width: 150px; margin-left: 10px;"
+        placeholder="选择快照记录"
+        @focus="loadSnapPosTime"
+      >
+        <el-option 
+          v-for="record in snapRecordList" 
+          :key="record.recordId" 
+          :label="formatSnapTime(record.recordTime)" 
+          :value="record.recordId" 
+        />
+      </el-select>
+      <el-button type="primary" @click="querySnapRecord" :disabled="!selectedSnapRecordId" style="margin-left: 10px;">
+        查询快照
+      </el-button>
       <el-button type="primary" @click="updateOrderbook" :loading="updatingOrderbook" style="margin-left: 10px;">
         更新订单薄
       </el-button>
@@ -489,6 +505,8 @@ const statisticsCollapseActive = ref([]) // 统计表折叠状态，默认为空
 const timeStatisticsCollapseActive = ref([]) // 时间统计表折叠状态，默认为空数组（折叠）
 const dataUpdateTime = ref('') // 数据更新时间（格式化字符串，用于显示）
 const dataUpdateTimestamp = ref(0) // 数据更新时间戳（用于计算）
+const snapRecordList = ref([]) // 快照记录列表
+const selectedSnapRecordId = ref(null) // 选中的快照记录ID
 const copiedContent = ref({
   eventNames: '', // 导出勾选主题并复制的内容
   allBrowsers: '', // 导出所有浏览器编号的内容
@@ -2415,12 +2433,369 @@ const snapAllPos = async () => {
     const response = await axios.post(`${API_BASE_URL}/boost/snapAllPos`, {})
     if (response.data && response.data.code === 0) {
       ElMessage.success('快照执行成功')
+      // 执行成功后刷新快照记录列表
+      await loadSnapPosTime()
     } else {
       ElMessage.error('快照执行失败')
     }
   } catch (error) {
     console.error('[事件异常] 执行快照失败:', error)
     ElMessage.error('执行快照失败: ' + (error.message || '未知错误'))
+  }
+}
+
+/**
+ * 格式化快照时间（月-日格式）
+ */
+const formatSnapTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${month}-${day}`
+}
+
+/**
+ * 加载快照时间列表
+ */
+const loadSnapPosTime = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/boost/getSnapPosTime`)
+    if (response.data && response.data.code === 0 && response.data.data && response.data.data.list) {
+      snapRecordList.value = response.data.data.list
+      console.log('[事件异常] 快照记录列表加载完成，共', snapRecordList.value.length, '条记录')
+    } else {
+      console.warn('[事件异常] 未获取到快照记录列表')
+      snapRecordList.value = []
+    }
+  } catch (error) {
+    console.error('[事件异常] 加载快照记录列表失败:', error)
+    ElMessage.error('加载快照记录列表失败: ' + (error.message || '未知错误'))
+    snapRecordList.value = []
+  }
+}
+
+/**
+ * 查询快照记录并更新页面数据
+ */
+const querySnapRecord = async () => {
+  if (!selectedSnapRecordId.value) {
+    ElMessage.warning('请先选择快照记录')
+    return
+  }
+  
+  loading.value = true
+  
+  try {
+    console.log('[事件异常] 开始查询快照记录，recordId:', selectedSnapRecordId.value)
+    
+    // 获取快照记录数据
+    const response = await axios.get(`${API_BASE_URL}/boost/getSnapPosRecord`, {
+      params: {
+        recordId: selectedSnapRecordId.value
+      }
+    })
+    
+    if (response.data && response.data.code === 0 && response.data.data) {
+      const snapData = response.data.data
+      
+      // 如果返回的是列表格式，使用列表；否则尝试其他格式
+      let dataList = []
+      if (Array.isArray(snapData)) {
+        dataList = snapData
+      } else if (snapData.list && Array.isArray(snapData.list)) {
+        dataList = snapData.list
+      } else {
+        ElMessage.warning('快照记录数据格式不正确')
+        return
+      }
+      
+      console.log(`[事件异常] 获取到快照记录 ${dataList.length} 条数据，开始更新页面...`)
+      
+      // 过滤掉 amt < 1 的数据
+      const filteredData = dataList.filter(row => {
+        const amt = parseFloat(row.amt) || 0
+        return amt >= 1
+      })
+      console.log(`[事件异常] 过滤后剩余 ${filteredData.length} 条数据`)
+      
+      // 更新 accountDataCache
+      accountDataCache.value = filteredData
+      
+      // 先加载 exchangeConfig 配置（需要用于 id -> trending 映射）
+      await loadExchangeConfig()
+      
+      // 记录数据更新时间（当前时间）
+      const now = new Date()
+      dataUpdateTimestamp.value = now.getTime()
+      dataUpdateTime.value = now.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      })
+      
+      // 使用 Map 存储每个事件的统计数据
+      const eventMap = new Map()
+      
+      // 处理每条数据
+      for (const row of filteredData) {
+        // 从 trendingKey 中提取 id（格式：id::方向）
+        if (!row.trendingKey) {
+          continue
+        }
+        
+        const parts = row.trendingKey.split('::')
+        if (parts.length < 2) {
+          continue
+        }
+        
+        const configId = parts[0].trim()
+        const direction = parts[1].trim()
+        
+        // 通过 id 查找对应的 trending（事件名）
+        const eventName = idToTrendingMap.value.get(configId)
+        if (!eventName) {
+          console.warn(`[事件异常] 未找到 id=${configId} 对应的 trending`)
+          continue
+        }
+        
+        // 初始化事件数据
+        if (!eventMap.has(eventName)) {
+          eventMap.set(eventName, {
+            eventName: eventName,
+            yesPosition: 0,
+            noPosition: 0,
+            actualDiff: 0,
+            orderYes: 0,
+            orderNo: 0,
+            orderDiff: 0,
+            finalDiff: 0,
+            chainYesPosition: 0,
+            chainNoPosition: 0,
+            chainActualDiff: 0,
+            chainFinalDiff: 0,
+            yesBidPrice: null,
+            yesBidDepth: null,
+            yesAskPrice: null,
+            yesAskDepth: null,
+            noBidPrice: null,
+            noBidDepth: null,
+            noAskPrice: null,
+            noAskDepth: null,
+            trendingPart1: null,
+            trendingPart2: null,
+            opUrl: null,
+            updatingOrderbook: false,
+            avgUpdateTime: null,
+            latestUpdateTime: null,
+            yesAccountCount: 0,
+            noAccountCount: 0,
+            _positions: [],
+            _yesAccounts: new Set(),
+            _noAccounts: new Set()
+          })
+        }
+        
+        const event = eventMap.get(eventName)
+        const amount = Math.abs(parseFloat(row.amt) || 0)
+        
+        // 根据 outCome 判断方向（YES/NO）
+        const outComeUpper = (row.outCome || direction).toUpperCase()
+        if (outComeUpper === 'YES') {
+          event.yesPosition += amount
+          if (row.number) {
+            event._yesAccounts.add(String(row.number))
+          }
+        } else if (outComeUpper === 'NO') {
+          event.noPosition += amount
+          if (row.number) {
+            event._noAccounts.add(String(row.number))
+          }
+        }
+        
+        // 保存仓位数据用于计算平均更新时间
+        if (row.utime) {
+          const utime = typeof row.utime === 'string' ? parseInt(row.utime) : row.utime
+          if (!isNaN(utime)) {
+            event._positions.push({
+              utime: utime,
+              amount: amount
+            })
+          }
+        }
+      }
+      
+      // 计算差额
+      const updateTimestamp = dataUpdateTimestamp.value || Date.now()
+      for (const event of eventMap.values()) {
+        event.actualDiff = event.yesPosition - event.noPosition
+        event.orderDiff = event.orderYes - event.orderNo
+        event.finalDiff = event.actualDiff + event.orderDiff
+        event.chainActualDiff = event.chainYesPosition - event.chainNoPosition
+        event.chainFinalDiff = event.chainActualDiff + event.orderDiff
+        
+        event.yesAccountCount = event._yesAccounts.size
+        event.noAccountCount = event._noAccounts.size
+        
+        // 计算仓位最新一次更新时间
+        if (event._positions.length > 0) {
+          const maxUtime = Math.max(...event._positions.map(p => p.utime))
+          event.latestUpdateTime = maxUtime
+        } else {
+          event.latestUpdateTime = null
+        }
+        
+        // 计算仓位平均更新时间
+        if (event._positions.length > 0) {
+          let totalWeightedMinutes = 0
+          let totalAmount = 0
+          
+          for (const pos of event._positions) {
+            const timeDiff = updateTimestamp - pos.utime
+            if (timeDiff < 0) {
+              continue
+            }
+            const minutesAgo = timeDiff / (1000 * 60)
+            totalWeightedMinutes += minutesAgo * pos.amount
+            totalAmount += pos.amount
+          }
+          
+          if (totalAmount > 0) {
+            event.avgUpdateTime = totalWeightedMinutes / totalAmount
+          } else {
+            event.avgUpdateTime = null
+          }
+        } else {
+          event.avgUpdateTime = null
+        }
+        
+        // 清理临时数据
+        delete event._positions
+        delete event._yesAccounts
+        delete event._noAccounts
+      }
+      
+      // 转换为数组并排序
+      let allEvents = Array.from(eventMap.values()).sort((a, b) => {
+        return Math.abs(b.finalDiff) - Math.abs(a.finalDiff)
+      })
+      
+      // 初始化选中状态，并匹配 exchangeConfig 配置
+      allEvents.forEach(event => {
+        const eventName = event.eventName.trim()
+        const matchedConfig = configMap.value.get(eventName)
+        
+        if (matchedConfig) {
+          event.ignoreDiff = matchedConfig.a !== null && matchedConfig.a !== undefined 
+            ? parseFloat(matchedConfig.a) || 0 
+            : 0
+          event.configId = matchedConfig.id
+          event.blacklistStatus = matchedConfig.a !== null && matchedConfig.a !== undefined ? matchedConfig.a : null
+          event.isBlacklisted = matchedConfig.b === 1 || matchedConfig.b === '1'
+          event.originalB = matchedConfig.b !== null && matchedConfig.b !== undefined ? matchedConfig.b : 0
+          event.selected = matchedConfig.b === 1 || matchedConfig.b === '1'
+          event.trendingPart1 = matchedConfig.trendingPart1 || null
+          event.trendingPart2 = matchedConfig.trendingPart2 || null
+          event.opUrl = matchedConfig.opUrl || null
+          event.opTopicId = matchedConfig.opTopicId || null
+        } else {
+          event.ignoreDiff = 0
+          event.configId = null
+          event.blacklistStatus = null
+          event.isBlacklisted = false
+          event.originalB = 0
+          event.selected = false
+          event.trendingPart1 = null
+          event.trendingPart2 = null
+          event.opUrl = null
+          event.opTopicId = null
+        }
+        
+        event.updatingOrderbook = false
+        event.finalDiffAfterIgnore = event.finalDiff - event.ignoreDiff
+      })
+      
+      // 根据选择的分组进行过滤
+      if (selectedGroup.value !== 'all' && groupConfigList.value.length > 0) {
+        const eventNameSet = new Set(groupConfigList.value.map(name => name.trim()))
+        const normalizedEventNameSet = new Set(
+          groupConfigList.value.map(name => {
+            return name.trim().split('###')[0].trim()
+          })
+        )
+        
+        allEvents = allEvents.filter(event => {
+          const eventName = event.eventName.trim()
+          const eventNameBase = eventName.split('###')[0].trim()
+          
+          if (eventNameSet.has(eventName)) return true
+          if (normalizedEventNameSet.has(eventNameBase)) return true
+          
+          for (const configName of groupConfigList.value) {
+            const configNameTrimmed = configName.trim()
+            const configNameBase = configNameTrimmed.split('###')[0].trim()
+            
+            if (eventName === configNameTrimmed || eventNameBase === configNameBase) {
+              return true
+            }
+            
+            if (eventName.includes(configNameTrimmed) || configNameTrimmed.includes(eventName)) {
+              return true
+            }
+            if (eventNameBase && configNameBase && 
+                (eventNameBase.includes(configNameBase) || configNameBase.includes(eventNameBase))) {
+              return true
+            }
+          }
+          
+          return false
+        })
+        
+        console.log(`[事件异常] 分组${selectedGroup.value}过滤后，共 ${allEvents.length} 个事件`)
+      }
+      
+      eventTableData.value = allEvents
+      
+      loadSelectionState()
+      
+      console.log('[事件异常] 快照记录数据更新完成，开始异步加载链上数据...')
+      ElMessage.success(`快照记录数据加载完成，共 ${eventTableData.value.length} 个事件`)
+      
+      // 异步加载链上数据和订单薄数据
+      Promise.all([
+        loadChainStats().then(chainDataMap => {
+          console.log('[事件异常] 链上数据加载完成，开始匹配并更新...')
+          matchAndUpdateChainData(chainDataMap)
+          console.log('[事件异常] 链上数据匹配完成')
+          return chainDataMap
+        }).catch(error => {
+          console.error('[事件异常] 加载链上数据失败:', error)
+          return null
+        }),
+        loadAllOrderbooks().then(orderbooks => {
+          console.log('[事件异常] 订单薄数据加载完成，开始匹配并更新...')
+          matchAndUpdateOrderbookData(orderbooks)
+          console.log('[事件异常] 订单薄数据匹配完成')
+          return orderbooks
+        }).catch(error => {
+          console.error('[事件异常] 加载订单薄数据失败:', error)
+          return []
+        })
+      ]).then(() => {
+        ElMessage.success('链上数据和订单薄数据已更新')
+      })
+    } else {
+      ElMessage.warning('未获取到快照记录数据')
+    }
+  } catch (error) {
+    console.error('[事件异常] 查询快照记录失败:', error)
+    ElMessage.error('查询快照记录失败: ' + (error.message || '未知错误'))
+  } finally {
+    loading.value = false
   }
 }
 
