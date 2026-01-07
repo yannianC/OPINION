@@ -2105,6 +2105,14 @@
               <div class="compact-log-main">
                 <span class="compact-log-id">#{{ allHedgeLogs.length - ((allHedgeLogsCurrentPage - 1) * allHedgeLogsPageSize + index) }}</span>
                 <span class="compact-log-trending">{{ log.trendingName }}</span>
+                <button 
+                  class="btn-fetch-server-data" 
+                  @click="fetchServerData(log)"
+                  :disabled="isFetchingServerData(log)"
+                  style="margin-left: 8px; padding: 2px 8px; font-size: 12px;"
+                >
+                  {{ isFetchingServerData(log) ? '获取中...' : '获取服务器数据' }}
+                </button>
                 <span 
                   class="compact-status-badge"
                   :class="getHedgeLogStatusClass(log)"
@@ -2154,6 +2162,55 @@
                       </span>
                     </span>
                   </div>
+                  <!-- YES服务器数据 -->
+                  <div v-if="log.yesServerData" class="server-data-section">
+                    <div v-if="(!log.yesServerData.openOrderList || log.yesServerData.openOrderList.length === 0) && (!log.yesServerData.closedOrderList || log.yesServerData.closedOrderList.length === 0)" class="server-data-empty">
+                      暂无服务器数据
+                    </div>
+                    <div v-else>
+                      <!-- 挂单数据 -->
+                      <div v-if="log.yesServerData.openOrderList && log.yesServerData.openOrderList.length > 0" class="server-data-group">
+                        <div class="server-data-title">挂单数据:</div>
+                        <div v-for="(order, idx) in log.yesServerData.openOrderList" :key="idx" class="server-data-item">
+                          <span>
+                            创建时间: {{ timestampToBeijingTime(order.ctime) }} | 
+                            方向: {{ formatSide(order.side) }} | 
+                            结果: {{ order.outCome }} | 
+                            价格: {{ order.price }} | 
+                            进度: {{ ((order.amt - order.restAmt) / order.amt * 100).toFixed(2) }}% ({{ (order.amt - order.restAmt).toFixed(2) }}/{{ order.amt }})
+                          </span>
+                          <button 
+                            class="btn-save-success" 
+                            @click="saveTaskAsSuccess(log, log.yesTaskId, formatOpenOrderMsg(order), 'yes')"
+                            :disabled="log.yesStatus === 2"
+                          >
+                            保存为成功
+                          </button>
+                        </div>
+                      </div>
+                      <!-- 已成交数据 -->
+                      <div v-if="log.yesServerData.closedOrderList && log.yesServerData.closedOrderList.length > 0" class="server-data-group">
+                        <div class="server-data-title">已成交数据:</div>
+                        <div v-for="(order, idx) in log.yesServerData.closedOrderList" :key="idx" class="server-data-item">
+                          <span>
+                            时间: {{ order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true) }}{{ !order.convertTime ? ' (不同时区)' : '' }} | 
+                            方向: {{ formatSide(order.side) }} | 
+                            结果: {{ order.outCome }} | 
+                            价格: {{ order.price }} | 
+                            进度: {{ ((order.fillAmt / order.amt) * 100).toFixed(2) }}% ({{ order.fillAmt }}/{{ order.amt }}) | 
+                            状态: {{ order.status }}
+                          </span>
+                          <button 
+                            class="btn-save-success" 
+                            @click="saveTaskAsSuccess(log, log.yesTaskId, formatClosedOrderMsg(order), 'yes')"
+                            :disabled="log.yesStatus === 2"
+                          >
+                            保存为成功
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <div class="compact-task-row">
                     <span class="task-label">NO:</span>
                     <span class="task-info">
@@ -2178,6 +2235,55 @@
                         </button>
                       </span>
                     </span>
+                  </div>
+                  <!-- NO服务器数据 -->
+                  <div v-if="log.noServerData" class="server-data-section">
+                    <div v-if="(!log.noServerData.openOrderList || log.noServerData.openOrderList.length === 0) && (!log.noServerData.closedOrderList || log.noServerData.closedOrderList.length === 0)" class="server-data-empty">
+                      暂无服务器数据
+                    </div>
+                    <div v-else>
+                      <!-- 挂单数据 -->
+                      <div v-if="log.noServerData.openOrderList && log.noServerData.openOrderList.length > 0" class="server-data-group">
+                        <div class="server-data-title">挂单数据:</div>
+                        <div v-for="(order, idx) in log.noServerData.openOrderList" :key="idx" class="server-data-item">
+                          <span>
+                            创建时间: {{ timestampToBeijingTime(order.ctime) }} | 
+                            方向: {{ formatSide(order.side) }} | 
+                            结果: {{ order.outCome }} | 
+                            价格: {{ order.price }} | 
+                            进度: {{ ((order.amt - order.restAmt) / order.amt * 100).toFixed(2) }}% ({{ (order.amt - order.restAmt).toFixed(2) }}/{{ order.amt }})
+                          </span>
+                          <button 
+                            class="btn-save-success" 
+                            @click="saveTaskAsSuccess(log, log.noTaskId, formatOpenOrderMsg(order), 'no')"
+                            :disabled="log.noStatus === 2"
+                          >
+                            保存为成功
+                          </button>
+                        </div>
+                      </div>
+                      <!-- 已成交数据 -->
+                      <div v-if="log.noServerData.closedOrderList && log.noServerData.closedOrderList.length > 0" class="server-data-group">
+                        <div class="server-data-title">已成交数据:</div>
+                        <div v-for="(order, idx) in log.noServerData.closedOrderList" :key="idx" class="server-data-item">
+                          <span>
+                            时间: {{ order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true) }}{{ !order.convertTime ? ' (不同时区)' : '' }} | 
+                            方向: {{ formatSide(order.side) }} | 
+                            结果: {{ order.outCome }} | 
+                            价格: {{ order.price }} | 
+                            进度: {{ ((order.fillAmt / order.amt) * 100).toFixed(2) }}% ({{ order.fillAmt }}/{{ order.amt }}) | 
+                            状态: {{ order.status }}
+                          </span>
+                          <button 
+                            class="btn-save-success" 
+                            @click="saveTaskAsSuccess(log, log.noTaskId, formatClosedOrderMsg(order), 'no')"
+                            :disabled="log.noStatus === 2"
+                          >
+                            保存为成功
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </template>
                 
@@ -2211,6 +2317,58 @@
                       </template>
                     </span>
                   </div>
+                  <!-- YES任务服务器数据 -->
+                  <template v-if="log.yesTasks && log.yesTasks.length > 0">
+                    <div v-for="(task, taskIndex) in log.yesTasks" :key="`yes-server-${taskIndex}`" v-if="task.serverData" class="server-data-section">
+                      <div class="server-data-task-label">浏览器{{ task.number }} 服务器数据:</div>
+                      <div v-if="(!task.serverData.openOrderList || task.serverData.openOrderList.length === 0) && (!task.serverData.closedOrderList || task.serverData.closedOrderList.length === 0)" class="server-data-empty">
+                        暂无服务器数据
+                      </div>
+                      <div v-else>
+                        <!-- 挂单数据 -->
+                        <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
+                          <div class="server-data-title">挂单数据:</div>
+                          <div v-for="(order, idx) in task.serverData.openOrderList" :key="idx" class="server-data-item">
+                            <span>
+                              创建时间: {{ timestampToBeijingTime(order.ctime) }} | 
+                              方向: {{ formatSide(order.side) }} | 
+                              结果: {{ order.outCome }} | 
+                              价格: {{ order.price }} | 
+                              进度: {{ ((order.amt - order.restAmt) / order.amt * 100).toFixed(2) }}% ({{ (order.amt - order.restAmt).toFixed(2) }}/{{ order.amt }})
+                            </span>
+                            <button 
+                              class="btn-save-success" 
+                              @click="saveTaskAsSuccess(log, task.taskId, formatOpenOrderMsg(order), 'mode2')"
+                              :disabled="task.status === 2"
+                            >
+                              保存为成功
+                            </button>
+                          </div>
+                        </div>
+                        <!-- 已成交数据 -->
+                        <div v-if="task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0" class="server-data-group">
+                          <div class="server-data-title">已成交数据:</div>
+                          <div v-for="(order, idx) in task.serverData.closedOrderList" :key="idx" class="server-data-item">
+                            <span>
+                              时间: {{ order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true) }}{{ !order.convertTime ? ' (不同时区)' : '' }} | 
+                              方向: {{ formatSide(order.side) }} | 
+                              结果: {{ order.outCome }} | 
+                              价格: {{ order.price }} | 
+                              进度: {{ ((order.fillAmt / order.amt) * 100).toFixed(2) }}% ({{ order.fillAmt }}/{{ order.amt }}) | 
+                              状态: {{ order.status }}
+                            </span>
+                            <button 
+                              class="btn-save-success" 
+                              @click="saveTaskAsSuccess(log, task.taskId, formatClosedOrderMsg(order), 'mode2')"
+                              :disabled="task.status === 2"
+                            >
+                              保存为成功
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                   <!-- NO任务：优先显示已提交的任务，如果没有则显示计划任务 -->
                   <div v-if="(log.noTasks && log.noTasks.length > 0) || (log.noList && log.noList.length > 0)" class="compact-task-row">
                     <span class="task-label">NO ({{ (log.noTasks && log.noTasks.length > 0) ? log.noTasks.length : (log.noList ? log.noList.length : 0) }}个):</span>
@@ -2239,6 +2397,58 @@
                       </template>
                     </span>
                   </div>
+                  <!-- NO任务服务器数据 -->
+                  <template v-if="log.noTasks && log.noTasks.length > 0">
+                    <div v-for="(task, taskIndex) in log.noTasks" :key="`no-server-${taskIndex}`" v-if="task.serverData" class="server-data-section">
+                      <div class="server-data-task-label">浏览器{{ task.number }} 服务器数据:</div>
+                      <div v-if="(!task.serverData.openOrderList || task.serverData.openOrderList.length === 0) && (!task.serverData.closedOrderList || task.serverData.closedOrderList.length === 0)" class="server-data-empty">
+                        暂无服务器数据
+                      </div>
+                      <div v-else>
+                        <!-- 挂单数据 -->
+                        <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
+                          <div class="server-data-title">挂单数据:</div>
+                          <div v-for="(order, idx) in task.serverData.openOrderList" :key="idx" class="server-data-item">
+                            <span>
+                              创建时间: {{ timestampToBeijingTime(order.ctime) }} | 
+                              方向: {{ formatSide(order.side) }} | 
+                              结果: {{ order.outCome }} | 
+                              价格: {{ order.price }} | 
+                              进度: {{ ((order.amt - order.restAmt) / order.amt * 100).toFixed(2) }}% ({{ (order.amt - order.restAmt).toFixed(2) }}/{{ order.amt }})
+                            </span>
+                            <button 
+                              class="btn-save-success" 
+                              @click="saveTaskAsSuccess(log, task.taskId, formatOpenOrderMsg(order), 'mode2')"
+                              :disabled="task.status === 2"
+                            >
+                              保存为成功
+                            </button>
+                          </div>
+                        </div>
+                        <!-- 已成交数据 -->
+                        <div v-if="task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0" class="server-data-group">
+                          <div class="server-data-title">已成交数据:</div>
+                          <div v-for="(order, idx) in task.serverData.closedOrderList" :key="idx" class="server-data-item">
+                            <span>
+                              时间: {{ order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true) }}{{ !order.convertTime ? ' (不同时区)' : '' }} | 
+                              方向: {{ formatSide(order.side) }} | 
+                              结果: {{ order.outCome }} | 
+                              价格: {{ order.price }} | 
+                              进度: {{ ((order.fillAmt / order.amt) * 100).toFixed(2) }}% ({{ order.fillAmt }}/{{ order.amt }}) | 
+                              状态: {{ order.status }}
+                            </span>
+                            <button 
+                              class="btn-save-success" 
+                              @click="saveTaskAsSuccess(log, task.taskId, formatClosedOrderMsg(order), 'mode2')"
+                              :disabled="task.status === 2"
+                            >
+                              保存为成功
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                   <div v-if="log.allTaskIds && log.allTaskIds.length > 0" class="compact-task-row">
                     <span class="task-label">任务ID组:</span>
                     <span class="task-info">{{ log.allTaskIds.join(', ') }}</span>
@@ -2635,6 +2845,7 @@ const showAllHedgeLogsDialog = ref(false)  // 总日志弹窗
 const allHedgeLogs = ref([])  // 所有对冲日志
 const allHedgeLogsCurrentPage = ref(1)  // 总日志当前页
 const allHedgeLogsPageSize = ref(10)  // 总日志每页显示数量
+const fetchingServerDataLogs = ref(new Set())  // 正在获取服务器数据的日志ID集合
 
 // 交易费详情弹窗
 const showFeeDetailDialog = ref(false)
@@ -8655,6 +8866,342 @@ const clearAllHedgeLogs = () => {
 }
 
 /**
+ * 检查是否正在获取服务器数据
+ */
+const isFetchingServerData = (log) => {
+  return fetchingServerDataLogs.value.has(log.id)
+}
+
+/**
+ * 获取服务器数据
+ */
+const fetchServerData = async (log) => {
+  console.log('fetchServerData', log)
+  if (isFetchingServerData(log)) {
+    return
+  }
+  
+  // 确定先挂方和后挂方的number参数
+  let firstSideNumber = null  // 先挂方的number
+  let secondSideNumber = null  // 后挂方的number
+  
+  if (!log.isMode2) {
+    // 模式1：根据firstSide确定先挂方和后挂方
+    if (log.firstSide === 'YES') {
+      firstSideNumber = log.yesNumber
+      secondSideNumber = log.noNumber
+    } else if (log.firstSide === 'NO') {
+      firstSideNumber = log.noNumber
+      secondSideNumber = log.yesNumber
+    } else {
+      // 如果无法确定，使用可用的number
+      firstSideNumber = log.yesNumber || log.noNumber
+      secondSideNumber = log.yesNumber && log.noNumber ? 
+        (firstSideNumber === log.yesNumber ? log.noNumber : log.yesNumber) : null
+    }
+  } else {
+    // 模式2：使用第一个任务的number
+    if (log.firstSide === 'YES') {
+      if (log.yesTasks && log.yesTasks.length > 0) {
+        firstSideNumber = log.yesTasks[0].number
+      } else if (log.yesList && log.yesList.length > 0) {
+        firstSideNumber = log.yesList[0].number
+      }
+      if (log.noTasks && log.noTasks.length > 0) {
+        secondSideNumber = log.noTasks[0].number
+      } else if (log.noList && log.noList.length > 0) {
+        secondSideNumber = log.noList[0].number
+      }
+    } else if (log.firstSide === 'NO') {
+      if (log.noTasks && log.noTasks.length > 0) {
+        firstSideNumber = log.noTasks[0].number
+      } else if (log.noList && log.noList.length > 0) {
+        firstSideNumber = log.noList[0].number
+      }
+      if (log.yesTasks && log.yesTasks.length > 0) {
+        secondSideNumber = log.yesTasks[0].number
+      } else if (log.yesList && log.yesList.length > 0) {
+        secondSideNumber = log.yesList[0].number
+      }
+    }
+  }
+  
+  if (!firstSideNumber) {
+    showToast('无法获取先挂方浏览器编号', 'error')
+    return
+  }
+  
+  // 确定side参数：1=开仓（买入），2=平仓（卖出）
+  const side = log.side || (log.isClose ? 2 : 1)
+  
+  // 确定价格：先挂方使用log.price，后挂方使用100-log.price，保留两位小数并四舍五入
+  const firstSidePrice = Math.round(parseFloat(log.price) * 100) / 100
+  const secondSidePrice = Math.round((100 - parseFloat(log.price)) * 100) / 100
+  
+  // 标记为正在获取
+  fetchingServerDataLogs.value.add(log.id)
+  
+  try {
+    // 构建先挂方请求数据
+    const firstSideRequestData = {
+      number: firstSideNumber,
+      trending: log.trendingName,
+      side: side == 1 ? "buy":"sell",
+      price: firstSidePrice,
+      amt: log.share
+    }
+    
+    // 发送先挂方请求
+    const firstSidePromise = axios.post(
+      'https://sg.bicoin.com.cn/99l/hedge/filterOrder',
+      firstSideRequestData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    // 构建请求数组
+    const requests = [firstSidePromise]
+    
+    // 如果有后挂方，也发送请求
+    if (secondSideNumber) {
+      const secondSideRequestData = {
+        number: secondSideNumber,
+        trending: log.trendingName,
+        side: side == 1 ? "buy":"sell",
+        price: secondSidePrice,
+        amt: log.share
+      }
+      
+      const secondSidePromise = axios.post(
+        'https://sg.bicoin.com.cn/99l/hedge/filterOrder',
+        secondSideRequestData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      requests.push(secondSidePromise)
+    }
+    
+    // 并行发送所有请求
+    const responses = await Promise.all(requests)
+    
+    console.log('获取服务器数据成功:', responses)
+    showToast(`获取服务器数据成功（${responses.length}个请求）`, 'success')
+    
+    // 处理返回的数据并存储到log对象中
+    responses.forEach((response, index) => {
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const requestNumber = index === 0 ? firstSideNumber : secondSideNumber
+        const serverData = response.data.data.hist || {}
+        
+        if (!log.isMode2) {
+          // 模式1：根据number匹配到YES或NO
+          if (requestNumber === log.yesNumber) {
+            log.yesServerData = serverData
+          } else if (requestNumber === log.noNumber) {
+            log.noServerData = serverData
+          }
+        } else {
+          // 模式2：根据number匹配到对应的任务
+          // 查找YES任务
+          if (log.yesTasks && log.yesTasks.length > 0) {
+            const yesTask = log.yesTasks.find(task => task.number === requestNumber)
+            if (yesTask) {
+              yesTask.serverData = serverData
+            }
+          }
+          // 查找NO任务
+          if (log.noTasks && log.noTasks.length > 0) {
+            const noTask = log.noTasks.find(task => task.number === requestNumber)
+            if (noTask) {
+              noTask.serverData = serverData
+            }
+          }
+        }
+        
+        // 保存到localStorage
+        saveHedgeLogToStorage(log)
+      }
+    })
+  } catch (error) {
+    console.error('获取服务器数据失败:', error)
+    showToast('获取服务器数据失败: ' + (error.response?.data?.message || error.message), 'error')
+  } finally {
+    // 移除标记
+    fetchingServerDataLogs.value.delete(log.id)
+  }
+}
+
+/**
+ * 将时间戳或时间字符串转换为北京时间
+ */
+const timestampToBeijingTime = (timestamp, isDifferentTimezone = false) => {
+  if (!timestamp) return '-'
+  try {
+    let date
+    if (typeof timestamp === 'string') {
+      // 尝试解析字符串时间（如 "Jan 07, 2026 09:46:17"）
+      date = new Date(timestamp)
+    } else {
+      // 如果是数字时间戳
+      date = new Date(timestamp)
+    }
+    
+    // 如果标记为不同时区，需要转换（假设原时间是UTC或其他时区）
+    // 否则直接使用本地时间
+    const beijingTime = isDifferentTimezone ? new Date(date.getTime() + 8 * 60 * 60 * 1000) : date
+    
+    const year = beijingTime.getFullYear()
+    const month = String(beijingTime.getMonth() + 1).padStart(2, '0')
+    const day = String(beijingTime.getDate()).padStart(2, '0')
+    const hours = String(beijingTime.getHours()).padStart(2, '0')
+    const minutes = String(beijingTime.getMinutes()).padStart(2, '0')
+    const seconds = String(beijingTime.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch (e) {
+    console.error('时间转换失败:', e)
+    return '-'
+  }
+}
+
+/**
+ * 格式化side值（1=买，2=卖）
+ */
+const formatSide = (side) => {
+  if (side === 1 || side === '1') return '买'
+  if (side === 2 || side === '2') return '卖'
+  if (side === 'BUY' || side === 'buy') return '买'
+  if (side === 'SELL' || side === 'sell') return '卖'
+  return side
+}
+
+/**
+ * 格式化挂单数据为字符串
+ */
+const formatOpenOrderMsg = (order) => {
+  const time = timestampToBeijingTime(order.ctime)
+  const side = formatSide(order.side)
+  const progress = ((order.amt - order.restAmt) / order.amt * 100).toFixed(2)
+  return `创建时间: ${time} | 方向: ${side} | 结果: ${order.outCome} | 价格: ${order.price} | 进度: ${progress}% (${(order.amt - order.restAmt).toFixed(2)}/${order.amt})`
+}
+
+/**
+ * 格式化已成交数据为字符串
+ */
+const formatClosedOrderMsg = (order) => {
+  const time = order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true)
+  const timezoneNote = !order.convertTime ? ' (不同时区)' : ''
+  const side = formatSide(order.side)
+  const progress = ((order.fillAmt / order.amt) * 100).toFixed(2)
+  return `时间: ${time}${timezoneNote} | 方向: ${side} | 结果: ${order.outCome} | 价格: ${order.price} | 进度: ${progress}% (${order.fillAmt}/${order.amt}) | 状态: ${order.status}`
+}
+
+/**
+ * 保存任务状态为成功
+ */
+const saveTaskAsSuccess = async (log, taskId, msg, taskType = 'single') => {
+  if (!taskId) {
+    showToast('任务ID不存在', 'error')
+    return
+  }
+  
+  try {
+    // 调用API保存任务状态
+    const response = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/saveResult',
+      {
+        id: taskId,
+        status: 2,
+        msg: msg
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (response.data && response.data.code === 0) {
+      // 更新本地记录
+      if (!log.isMode2) {
+        // 模式1：更新对应的任务状态
+        if (taskType === 'yes') {
+          log.yesStatus = 2
+          log.yesTaskMsg = msg
+        } else if (taskType === 'no') {
+          log.noStatus = 2
+          log.noTaskMsg = msg
+        }
+        
+        // 检查是否两个任务都成功
+        if (log.yesStatus === 2 && log.noStatus === 2) {
+          log.finalStatus = 'success'
+        }
+      } else {
+        // 模式2：更新对应任务的状态
+        let taskUpdated = false
+        
+        // 更新YES任务
+        if (log.yesTasks && log.yesTasks.length > 0) {
+          const yesTask = log.yesTasks.find(t => String(t.taskId) === String(taskId))
+          if (yesTask) {
+            yesTask.status = 2
+            taskUpdated = true
+          }
+        }
+        
+        // 更新NO任务
+        if (log.noTasks && log.noTasks.length > 0) {
+          const noTask = log.noTasks.find(t => String(t.taskId) === String(taskId))
+          if (noTask) {
+            noTask.status = 2
+            taskUpdated = true
+          }
+        }
+        
+        // 检查所有任务是否都成功
+        if (taskUpdated) {
+          const yesTasks = log.yesTasks || []
+          const noTasks = log.noTasks || []
+          const allTasks = [...yesTasks, ...noTasks]
+          
+          // 检查是否所有任务都成功（状态为2）
+          if (allTasks.length > 0) {
+            const allSuccess = allTasks.every(t => t.status === 2)
+            if (allSuccess) {
+              log.finalStatus = 'success'
+            }
+          }
+        }
+      }
+      
+      // 保存到localStorage
+      saveHedgeLogToStorage(log)
+      
+      // 更新allHedgeLogs中的记录
+      const index = allHedgeLogs.value.findIndex(l => l.id === log.id)
+      if (index !== -1) {
+        // 使用深拷贝确保响应式更新
+        allHedgeLogs.value[index] = JSON.parse(JSON.stringify(log))
+      }
+      
+      showToast('任务状态已保存为成功', 'success')
+    } else {
+      showToast('保存任务状态失败: ' + (response.data?.msg || '未知错误'), 'error')
+    }
+  } catch (error) {
+    console.error('保存任务状态失败:', error)
+    showToast('保存任务状态失败: ' + (error.response?.data?.message || error.message), 'error')
+  }
+}
+
+/**
  * 格式化时间（紧凑版）
  */
 const formatCompactTime = (timeStr) => {
@@ -10001,6 +10548,22 @@ const saveHedgeLog = (hedgeRecord) => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(logs))
   } catch (e) {
     console.error('保存对冲日志失败:', e)
+  }
+}
+
+/**
+ * 更新已存在的对冲记录到本地存储
+ */
+const saveHedgeLogToStorage = (hedgeRecord) => {
+  try {
+    const logs = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]')
+    const index = logs.findIndex(log => log.id === hedgeRecord.id)
+    if (index !== -1) {
+      logs[index] = hedgeRecord
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(logs))
+    }
+  } catch (e) {
+    console.error('更新对冲日志失败:', e)
   }
 }
 
@@ -12486,6 +13049,82 @@ onUnmounted(() => {
   border-left: 2px solid #dee2e6;
 }
 
+/* 服务器数据样式 */
+.server-data-section {
+  margin-top: 0.5rem;
+  margin-left: 1rem;
+  padding: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 6px;
+  border-left: 3px solid rgba(100, 200, 255, 0.8);
+  font-size: 0.75rem;
+}
+
+.server-data-empty {
+  color: #666;
+  font-style: italic;
+  padding: 0.25rem 0;
+}
+
+.server-data-group {
+  margin-top: 0.5rem;
+}
+
+.server-data-group:first-child {
+  margin-top: 0;
+}
+
+.server-data-title {
+  font-weight: 600;
+  color: #000;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.server-data-item {
+  padding: 0.4rem;
+  margin-bottom: 0.3rem;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 4px;
+  color: #000;
+  word-break: break-all;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.server-data-task-label {
+  font-weight: 600;
+  color: #000;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.btn-save-success {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.btn-save-success:hover {
+  background: #218838;
+}
+
+.btn-save-success:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .compact-task-row {
   display: flex;
   gap: 0.5rem;
@@ -12563,6 +13202,25 @@ onUnmounted(() => {
 
 .btn-view-log:hover {
   background: #5568d3;
+}
+
+.btn-fetch-server-data {
+  background: #17a2b8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-fetch-server-data:hover:not(:disabled) {
+  background: #138496;
+}
+
+.btn-fetch-server-data:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 /* 浏览器日志弹窗样式 */
