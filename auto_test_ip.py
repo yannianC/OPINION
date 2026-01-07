@@ -271,7 +271,7 @@ TARGET_URL_2 = "https://app.opinion.trade/profile"
 MAX_RETRIES = 3
 
 # 线程数
-THREAD_COUNT = 10
+THREAD_COUNT = 15
 
 # API接口
 API_BASE_URL = "https://sg.bicoin.com.cn/99l"
@@ -5044,64 +5044,6 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                     if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
                         log_print(f"[{serial_number}] [OP] ✓ 已切换到 OKX 页面")
                         
-                        # 解锁
-                        unlock_okx_wallet(driver, serial_number, browser_id)
-                        
-                        # 如果之前点击了 Confirm，需要先点击两次第二个按钮（带检查逻辑）
-                        if confirm_clicked:
-                            log_print(f"[{serial_number}] [OP] 检测到已点击 Confirm，执行特殊按钮点击逻辑...")
-                            click_count = 0
-                            max_clicks = 2
-                            start_time_okx = time.time()
-                            
-                            while click_count < max_clicks and time.time() - start_time_okx < 10:
-                                try:
-                                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
-                                    
-                                    if len(buttons) >= 2:
-                                        # 检查是否需要跳过点击
-                                        should_skip = False
-                                        try:
-                                            # 查找内容为 "primaryType" 的 div
-                                            all_divs = driver.find_elements(By.TAG_NAME, "div")
-                                            primary_type_div = None
-                                            for div in all_divs:
-                                                if div.text.strip() == "primaryType":
-                                                    primary_type_div = div
-                                                    break
-                                            
-                                            if primary_type_div:
-                                                # 找到父节点
-                                                parent = primary_type_div.find_element(By.XPATH, "..")
-                                                # 找到父节点下的所有子 div
-                                                child_divs = parent.find_elements(By.TAG_NAME, "div")
-                                                
-                                                if len(child_divs) >= 2:
-                                                    second_child = child_divs[1]
-                                                    if second_child.text.strip() == "Order":
-                                                        should_skip = True
-                                                        log_print(f"[{serial_number}] [OP] ✓ 检测到 Order，跳过点击")
-                                        except Exception as e:
-                                            log_print(f"[{serial_number}] [OP] ⚠ 检查 Order 时出现异常: {str(e)}，继续点击")
-                                        
-                                        if not should_skip:
-                                            confirm_button = buttons[1]
-                                            log_print(f"[{serial_number}] [OP] 点击第 {click_count + 1} 次第二个按钮...")
-                                            confirm_button.click()
-                                            click_count += 1
-                                            log_print(f"[{serial_number}] [OP] ✓ 已点击第 {click_count} 次")
-                                        
-                                        # 等待1秒后继续
-                                        time.sleep(1)
-                                    else:
-                                        time.sleep(0.5)
-                                except Exception as e:
-                                    log_print(f"[{serial_number}] [OP] ⚠ 点击按钮时出现异常: {str(e)}")
-                                    time.sleep(0.5)
-                                    continue
-                            
-                            log_print(f"[{serial_number}] [OP] ✓ 特殊按钮点击逻辑完成，共点击 {click_count} 次")
-                        
                         # 点击确认按钮
                         log_print(f"[{serial_number}] [OP] 查找确认按钮...")
                         time.sleep(3)
@@ -5111,7 +5053,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             # 检查第二个按钮（确认按钮）是否被禁用
                             
                             # 普通任务（Type 1），直接点击确认
-                            buttons[1].click()
+                            buttons[0].click()
                             log_print(f"[{serial_number}] [OP] ✓ 已点击 OKX 确认按钮")
                             
                             # 切回主页面

@@ -1757,21 +1757,82 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
                 if beijing_time_window:
                     driver.switch_to.window(beijing_time_window)
                     
-                    # 等待页面加载完成
+                    # 等待页面加载完成并获取时区信息
                     try:
-                        WebDriverWait(driver, 10).until(
+                        # 首先等待页面 DOM 加载完成
+                        WebDriverWait(driver, 15).until(
                             lambda d: d.execute_script("return document.readyState") == "complete"
                         )
-                        # 额外等待一下，确保 JavaScript 执行完成
-                        time.sleep(2)
+                        log_print(f"[{serial_number}] → 页面 DOM 加载完成，等待 JavaScript 初始化...")
                         
-                        # 执行 JavaScript 获取时区信息
-                        timezone_info = driver.execute_script("""
-                            if (window.beijingTimePageInfo && window.beijingTimePageInfo.ready) {
-                                // 优先使用IP时区，如果没有则使用浏览器时区
-                                return window.beijingTimePageInfo.ipTimezone || window.beijingTimePageInfo.browserTimezone;
+                        # 等待 window.beijingTimePageInfo 对象存在（最多等待 20 秒）
+                        def check_beijing_time_info_ready(driver):
+                            try:
+                                result = driver.execute_script("""
+                                    if (typeof window.beijingTimePageInfo !== 'undefined') {
+                                        return {
+                                            exists: true,
+                                            ready: window.beijingTimePageInfo.ready || false,
+                                            hasBrowserTz: !!window.beijingTimePageInfo.browserTimezone,
+                                            hasIpTz: !!window.beijingTimePageInfo.ipTimezone
+                                        };
+                                    }
+                                    return { exists: false, ready: false };
+                                """)
+                                return result and result.get('exists', False)
+                            except:
+                                return False
+                        
+                        try:
+                            WebDriverWait(driver, 20).until(check_beijing_time_info_ready)
+                            log_print(f"[{serial_number}] → beijingTimePageInfo 对象已创建")
+                        except Exception as wait_error:
+                            log_print(f"[{serial_number}] ⚠ 等待 beijingTimePageInfo 对象超时: {str(wait_error)}")
+                        
+                        # 等待 ready 标志为 true（最多等待 15 秒，因为 IP 时区是异步获取的）
+                        def check_ready_flag(driver):
+                            try:
+                                result = driver.execute_script("""
+                                    return window.beijingTimePageInfo && window.beijingTimePageInfo.ready === true;
+                                """)
+                                return result is True
+                            except:
+                                return False
+                        
+                        try:
+                            WebDriverWait(driver, 15).until(check_ready_flag)
+                            log_print(f"[{serial_number}] → beijingTimePageInfo.ready 已为 true")
+                        except Exception as wait_error:
+                            log_print(f"[{serial_number}] ⚠ 等待 ready 标志超时，尝试直接获取时区信息...")
+                        
+                        # 执行 JavaScript 获取时区信息（带详细日志）
+                        debug_info = driver.execute_script("""
+                            if (typeof window.beijingTimePageInfo === 'undefined') {
+                                return { error: 'beijingTimePageInfo 对象不存在' };
                             }
-                            // 如果还没准备好，等待一下再试
+                            return {
+                                exists: true,
+                                ready: window.beijingTimePageInfo.ready,
+                                browserTimezone: window.beijingTimePageInfo.browserTimezone,
+                                ipTimezone: window.beijingTimePageInfo.ipTimezone,
+                                browserTimezoneFull: window.beijingTimePageInfo.browserTimezoneFull
+                            };
+                        """)
+                        
+                        if debug_info and not debug_info.get('error'):
+                            log_print(f"[{serial_number}] → 调试信息: ready={debug_info.get('ready')}, browserTz={debug_info.get('browserTimezone')}, ipTz={debug_info.get('ipTimezone')}")
+                        
+                        # 获取时区信息（优先使用IP时区，如果没有则使用浏览器时区）
+                        timezone_info = driver.execute_script("""
+                            if (window.beijingTimePageInfo) {
+                                // 即使 ready 为 false，也尝试获取浏览器时区（它应该是立即可用的）
+                                if (window.beijingTimePageInfo.ipTimezone) {
+                                    return window.beijingTimePageInfo.ipTimezone;
+                                }
+                                if (window.beijingTimePageInfo.browserTimezone) {
+                                    return window.beijingTimePageInfo.browserTimezone;
+                                }
+                            }
                             return null;
                         """)
                         
@@ -1779,21 +1840,49 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
                             BEIJING_TIME_PAGE_TIMEZONE[serial_number] = timezone_info
                             log_print(f"[{serial_number}] ✓ 从 beijing_time.html 页面获取到时区: {timezone_info}")
                         else:
-                            # 再等待一下，可能是异步获取IP时区还没完成
+                            # 如果还是获取不到，再等待一下并重试
+                            log_print(f"[{serial_number}] → 时区信息尚未准备好，等待 3 秒后重试...")
                             time.sleep(3)
+                            
                             timezone_info = driver.execute_script("""
-                                if (window.beijingTimePageInfo && window.beijingTimePageInfo.ready) {
-                                    return window.beijingTimePageInfo.ipTimezone || window.beijingTimePageInfo.browserTimezone;
+                                if (window.beijingTimePageInfo) {
+                                    if (window.beijingTimePageInfo.ipTimezone) {
+                                        return window.beijingTimePageInfo.ipTimezone;
+                                    }
+                                    if (window.beijingTimePageInfo.browserTimezone) {
+                                        return window.beijingTimePageInfo.browserTimezone;
+                                    }
                                 }
                                 return null;
                             """)
+                            
                             if timezone_info:
                                 BEIJING_TIME_PAGE_TIMEZONE[serial_number] = timezone_info
-                                log_print(f"[{serial_number}] ✓ 从 beijing_time.html 页面获取到时区: {timezone_info}")
+                                log_print(f"[{serial_number}] ✓ 从 beijing_time.html 页面获取到时区（重试成功）: {timezone_info}")
                             else:
-                                log_print(f"[{serial_number}] ⚠ 无法从 beijing_time.html 页面获取时区，将使用IP查询方式")
+                                # 最后尝试：即使 ready 为 false，也尝试获取浏览器时区
+                                fallback_tz = driver.execute_script("""
+                                    try {
+                                        if (window.beijingTimePageInfo && window.beijingTimePageInfo.browserTimezone) {
+                                            return window.beijingTimePageInfo.browserTimezone;
+                                        }
+                                        // 如果还是不行，直接从浏览器获取
+                                        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                                        return tz || null;
+                                    } catch(e) {
+                                        return null;
+                                    }
+                                """)
+                                
+                                if fallback_tz:
+                                    BEIJING_TIME_PAGE_TIMEZONE[serial_number] = fallback_tz
+                                    log_print(f"[{serial_number}] ✓ 使用备用方法获取到时区: {fallback_tz}")
+                                else:
+                                    log_print(f"[{serial_number}] ⚠ 无法从 beijing_time.html 页面获取时区，将使用IP查询方式")
                     except Exception as e:
                         log_print(f"[{serial_number}] ⚠ 获取页面时区信息失败: {str(e)}，将使用IP查询方式")
+                        import traceback
+                        log_print(f"[{serial_number}] 详细错误: {traceback.format_exc()}")
                     
                     # 切换回主窗口
                     driver.switch_to.window(main_window)
@@ -2975,7 +3064,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 time.sleep(10)
                                 log_print(f"[{serial_number}] 发送飞书消息: {message_text}")
                            
-                                
+                                buttons[0].click()  # 点击取消按钮
                                 return False, "[9]okx确认交易按钮不能点击,检查okx是否正常"
                             
                             # Type 5 任务需要同步机制
@@ -3799,8 +3888,8 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     add_bro_log_entry(bro_log_list, serial_number, f"[12][{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
     
     
-    phase1_timeout = 600  # 15分钟
-    check_interval = 20  # Sell每20秒检查，Buy每60秒检查
+    phase1_timeout = 600  # 10分钟
+    check_interval = 20  # 每20秒检查
     refresh_interval = 120  # 每2分钟刷新一次
     
     phase1_start_time = time.time()
@@ -3826,7 +3915,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             if time.time() - last_refresh_time >= refresh_interval:
                 log_print(f"[{serial_number}] [{task_label}] 2分钟无变化，刷新页面...")
                 refresh_page_with_opinion_check(driver, serial_number)
-                time.sleep(5)
+                time.sleep(30)
                 last_refresh_time = time.time()
             
             if trade_type == "Buy":
@@ -4254,7 +4343,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 检测任务一状态时出错: {str(e)}")
                 time.sleep(phase2_check_interval)
     
-    log_print(f"[{serial_number}] [{task_label}] 90s定期检测结束")
+    log_print(f"[{serial_number}] [{task_label}] 600s定期检测结束")
     
     if  not both_hava_order: 
   
@@ -15615,13 +15704,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                         original_msg = tp1_info.get('msg')
                         log_print(f"[{browser_id}] 获取到任务一原msg: {original_msg}")
                     
-                    # 合并原msg和新的失败原因
-                    if original_msg:
-                        combined_msg = f"{original_msg}"
-                    else:
-                        combined_msg = f"本任务正常，但任务二已失败"
-                    
-                    save_mission_result(tp1, 3, combined_msg)
+                    save_mission_result(tp1, 3, original_msg)
             
             # # Type 5任务完成后发送 fingerprint 监控请求
             # if mission_type == 5 and task_browser_id:
