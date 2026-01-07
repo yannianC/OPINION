@@ -929,14 +929,14 @@ def try_update_ip_before_start(browser_id, bro_log_list=None):
             if update_success:
                 log_print(f"[{browser_id}] ✓ 代理配置更新成功")
                 if bro_log_list is not None:
-                    add_bro_log_entry(bro_log_list, browser_id, f"初始IP更新成功: IP={current_ip}, Delay={current_delay}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[0]初始IP更新成功: IP={current_ip}, Delay={current_delay}")
                 return True, current_ip, current_delay
             else:
                 log_print(f"[{browser_id}] ⚠ 代理配置更新失败，但仍保存获取到的代理配置信息")
                 # 即使更新失败，也保存获取到的代理配置，以便后续使用
                 LAST_PROXY_CONFIG[str(browser_id)] = proxy_config.copy()
                 if bro_log_list is not None:
-                    add_bro_log_entry(bro_log_list, browser_id, f"代理配置更新失败，但已保存配置: IP={current_ip}, Delay={current_delay}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[0]代理配置更新失败，但已保存配置: IP={current_ip}, Delay={current_delay}")
                 return False, current_ip, current_delay
         else:
             log_print(f"[{browser_id}] 8秒内未获取到新代理配置")
@@ -947,10 +947,10 @@ def try_update_ip_before_start(browser_id, bro_log_list=None):
                 current_delay = last_config.get("delay")
                 log_print(f"[{browser_id}] 使用上次的代理配置: IP={current_ip}, Delay={current_delay}")
                 if bro_log_list is not None:
-                    add_bro_log_entry(bro_log_list, browser_id, f"初始IP（使用上次配置）: IP={current_ip}, Delay={current_delay}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[0]初始IP（使用上次配置）: IP={current_ip}, Delay={current_delay}")
                 return False, current_ip, current_delay
             if bro_log_list is not None:
-                add_bro_log_entry(bro_log_list, browser_id, "未获取到代理配置，IP信息未知")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]未获取到代理配置，IP信息未知")
             return False, None, None
             
     except Exception as e:
@@ -963,12 +963,12 @@ def try_update_ip_before_start(browser_id, bro_log_list=None):
                 current_delay = last_config.get("delay")
                 log_print(f"[{browser_id}] 异常时使用上次的代理配置: IP={current_ip}, Delay={current_delay}")
                 if bro_log_list is not None:
-                    add_bro_log_entry(bro_log_list, browser_id, f"初始IP（异常时使用上次配置）: IP={current_ip}, Delay={current_delay}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[0]初始IP（异常时使用上次配置）: IP={current_ip}, Delay={current_delay}")
                 return False, current_ip, current_delay
         except:
             pass
         if bro_log_list is not None:
-            add_bro_log_entry(bro_log_list, browser_id, f"获取初始IP时发生异常: {str(e)}")
+            add_bro_log_entry(bro_log_list, browser_id, f"[0]获取初始IP时发生异常: {str(e)}")
         return False, None, None
 
 
@@ -2754,7 +2754,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         bro_log_list = []
     
     try:
-        log_msg = f"[OP] 查找提交订单按钮..."
+        log_msg = f"[8] 查找提交订单按钮..."
         log_print(f"[{serial_number}] {log_msg}")
         add_bro_log_entry(bro_log_list, browser_id, log_msg)
         
@@ -2763,18 +2763,18 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         for p in p_tags:
             text = p.text.strip()
             if trade_type in text:
-                log_msg = f"[OP] ✓ 找到提交按钮，文本: {text}"
+                log_msg = f"[8] ✓ 找到提交按钮，文本: {text}"
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 
                 parent = p.find_element(By.XPATH, "..")
                 parent.click()
-                log_msg = f"[OP] ✓ 已点击提交订单按钮"
+                log_msg = f"[8] ✓ 已点击提交订单按钮"
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 
                 # 在3秒内检查是否有"Unusual Limit Price"提示
-                log_msg = f"[OP] 检查限价提示..."
+                log_msg = f"[8] 检查限价提示..."
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 start_time = time.time()
@@ -2788,7 +2788,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             h2_text = h2.text.strip()
                             if "Unusual Limit Price" in h2_text:
                                 unusual_limit_found = True
-                                log_msg = f"[OP] ✗ 检测到限价提示: {h2_text}"
+                                log_msg = f"[8] ✗ 检测到限价提示: {h2_text}"
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 break
@@ -2801,17 +2801,17 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         continue
                 
                 if unusual_limit_found:
-                    log_msg = f"[OP] ✗ 限价距离市价差距过大"
+                    log_msg = f"[8] ✗ 限价距离市价差距过大"
                     log_print(f"[{serial_number}] {log_msg}")
                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                     return False, "[7]限价距离市价差距过大"
                 
-                log_msg = f"[OP] ✓ 未检测到限价提示，继续执行..."
+                log_msg = f"[8] ✓ 未检测到限价提示，继续执行..."
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 
                 # 检查是否需要点击 Confirm 按钮
-                log_msg = f"[OP] 检查是否需要点击 Confirm 按钮..."
+                log_msg = f"[8] 检查是否需要点击 Confirm 按钮..."
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 confirm_clicked = False
@@ -2830,7 +2830,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             element_text = element.text.strip()
                             if "Securely trade on opinion.trade on" in element_text:
                                 found_secure_trade = True
-                                log_msg = f"[OP] ✓ 检测到安全交易提示"
+                                log_msg = f"[OP8] ✓ 检测到安全交易提示"
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 break
@@ -2840,12 +2840,12 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             all_buttons = driver.find_elements(By.TAG_NAME, "button")
                             for button in all_buttons:
                                 if button.text.strip() == "Confirm":
-                                    log_msg = f"[OP] ✓ 找到 Confirm 按钮，点击..."
+                                    log_msg = f"[8] ✓ 找到 Confirm 按钮，点击..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     button.click()
                                     confirm_clicked = True
-                                    log_msg = f"[OP] ✓ 已点击 Confirm 按钮"
+                                    log_msg = f"[8] ✓ 已点击 Confirm 按钮"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     break
@@ -2855,19 +2855,19 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         
                         time.sleep(0.2)
                     except Exception as e:
-                        log_msg = f"[OP] ⚠ 检查 Confirm 按钮时出现异常: {str(e)}"
+                        log_msg = f"[8] ⚠ 检查 Confirm 按钮时出现异常: {str(e)}"
                         log_print(f"[{serial_number}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         time.sleep(0.2)
                         continue
                 
                 if not confirm_clicked:
-                    log_msg = f"[OP] ✓ 未检测到需要点击 Confirm 的情况"
+                    log_msg = f"[8] ✓ 未检测到需要点击 Confirm 的情况"
                     log_print(f"[{serial_number}] {log_msg}")
                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 
                 # 切换到OKX页面
-                log_msg = f"[OP] 切换到 OKX 钱包页面..."
+                log_msg = f"[9] 切换到 OKX 钱包页面..."
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 all_windows = driver.window_handles
@@ -2876,7 +2876,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                     driver.switch_to.window(window)
                     current_url = driver.current_url
                     if "chrome-extension://" in current_url and "mcohilncbfahbmgdjkbpemcciiolgcge" in current_url:
-                        log_msg = f"[OP] ✓ 已切换到 OKX 页面"
+                        log_msg = f"[9] ✓ 已切换到 OKX 页面"
                         log_print(f"[{serial_number}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         
@@ -2885,7 +2885,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         
                         # 如果之前点击了 Confirm，需要先点击两次第二个按钮（带检查逻辑）
                         if confirm_clicked:
-                            log_msg = f"[OP] 检测到已点击 Confirm，执行特殊按钮点击逻辑..."
+                            log_msg = f"[9] 检测到已点击 Confirm，执行特殊按钮点击逻辑..."
                             log_print(f"[{serial_number}] {log_msg}")
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             click_count = 0
@@ -2918,22 +2918,22 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                                     second_child = child_divs[1]
                                                     if second_child.text.strip() == "Order":
                                                         should_skip = True
-                                                        log_msg = f"[OP] ✓ 检测到 Order，跳过点击"
+                                                        log_msg = f"[9] ✓ 检测到 Order，跳过点击"
                                                         log_print(f"[{serial_number}] {log_msg}")
                                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         except Exception as e:
-                                            log_msg = f"[OP] ⚠ 检查 Order 时出现异常: {str(e)}，继续点击"
+                                            log_msg = f"[9] ⚠ 检查 Order 时出现异常: {str(e)}，继续点击"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         
                                         if not should_skip:
                                             confirm_button = buttons[1]
-                                            log_msg = f"[OP] 点击第 {click_count + 1} 次第二个按钮..."
+                                            log_msg = f"[9] 点击第 {click_count + 1} 次第二个按钮..."
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             confirm_button.click()
                                             click_count += 1
-                                            log_msg = f"[OP] ✓ 已点击第 {click_count} 次"
+                                            log_msg = f"[9] ✓ 已点击第 {click_count} 次"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         
@@ -2942,18 +2942,18 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     else:
                                         time.sleep(0.5)
                                 except Exception as e:
-                                    log_msg = f"[OP] ⚠ 点击按钮时出现异常: {str(e)}"
+                                    log_msg = f"[9] ⚠ 点击按钮时出现异常: {str(e)}"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     time.sleep(0.5)
                                     continue
                             
-                            log_msg = f"[OP] ✓ 特殊按钮点击逻辑完成，共点击 {click_count} 次"
+                            log_msg = f"[9] ✓ 特殊按钮点击逻辑完成，共点击 {click_count} 次"
                             log_print(f"[{serial_number}] {log_msg}")
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         
                         # 点击确认按钮
-                        log_msg = f"[OP] 查找确认按钮..."
+                        log_msg = f"[9] 查找确认按钮..."
                         log_print(f"[{serial_number}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         time.sleep(3)
@@ -2964,7 +2964,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             confirm_button = buttons[1]
                             button_class = confirm_button.get_attribute("class") or ""
                             if "btn-disabled" in button_class:
-                                log_msg = f"[OP] ✗ OKX确认按钮被禁用，class: {button_class}"
+                                log_msg = f"[9] ✗ OKX确认按钮被禁用，class: {button_class}"
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 
@@ -2976,17 +2976,17 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 log_print(f"[{serial_number}] 发送飞书消息: {message_text}")
                            
                                 
-                                return False, "[8]okx确认交易按钮不能点击,检查okx是否正常"
+                                return False, "[9]okx确认交易按钮不能点击,检查okx是否正常"
                             
                             # Type 5 任务需要同步机制
                             mission = task_data.get('mission', {}) if task_data else {}
                             mission_type = mission.get('type')
-                            log_msg = f"[OP] 检测到任务类型: {mission_type}"
+                            log_msg = f"[9] 检测到任务类型: {mission_type}"
                             log_print(f"[{serial_number}] {log_msg}")
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             
                             if task_data and mission_type == 5:
-                                log_msg = f"[OP] Type 5 任务，启动同步机制..."
+                                log_msg = f"[9] Type 5 任务，启动同步机制..."
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 
@@ -2995,31 +2995,31 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 
                                 if not tp1:
                                     # 任务一：先检查自己的状态，如果是3则直接取消
-                                    log_msg = f"[OP] 任务一: 检查自己的状态..."
+                                    log_msg = f"[9] 任务一: 检查自己的状态..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     current_status = get_mission_status(mission_id)
                                     if current_status == 3:
-                                        log_msg = f"[OP] ✗ 本任务正常，但任务二已失败"
+                                        log_msg = f"[9] ✗ 本任务正常，但任务二已失败"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         buttons[0].click()  # 点击取消按钮
-                                        return False, "[8]本任务正常，但任务二已失败"
+                                        return False, "[9]本任务正常，但任务二已失败"
                                     
                                     # 任务一：先通知准备就绪，等待任务二准备就绪
-                                    log_msg = f"[OP] 任务一: 设置状态为5（准备就绪）..."
+                                    log_msg = f"[9] 任务一: 设置状态为5（准备就绪）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     save_result_success = save_mission_result(mission_id, 5)
                                     if not save_result_success:
                                         save_result_success = save_mission_result(mission_id, 5)
                                         if not save_result_success:
-                                            log_msg = f"[OP] ✗ 任务一设置状态5失败"
+                                            log_msg = f"[9] ✗ 任务一设置状态5失败"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             return False, True  # 失败，可重试
                                     
-                                    log_msg = f"[OP] 任务一: 等待任务二准备就绪（状态6）..."
+                                    log_msg = f"[9] 任务一: 等待任务二准备就绪（状态6）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     # 轮询等待状态变为6
@@ -3027,39 +3027,39 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     start_time = time.time()
                                     while True:
                                         if time.time() - start_time > max_wait_time:
-                                            log_msg = f"[OP] ✗ 本任务等待任务二超时，点击取消按钮"
+                                            log_msg = f"[9] ✗ 本任务等待任务二超时，点击取消按钮"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, "[8]本任务等待任务二超时"
+                                            return False, "[9]本任务等待任务二超时"
                                         
                                         status = get_mission_status(mission_id)
                                         if status == 6:
-                                            log_msg = f"[OP] ✓ 任务二已准备就绪（状态6）"
+                                            log_msg = f"[9] ✓ 任务二已准备就绪（状态6）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
                                         elif status == 3:
-                                            log_msg = f"[OP] 本任务正常，但任务二已失败"
+                                            log_msg = f"[9] 本任务正常，但任务二已失败"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, "[8]本任务正常，但任务二已失败"
+                                            return False, "[9]本任务正常，但任务二已失败"
                                         elif  status == 9:
                                             save_mission_result(mission_id, 5)
                                         time.sleep(10)
                                     
                                     # 点击确认按钮
-                                    log_msg = f"[OP] 任务一: 点击OKX确认按钮..."
+                                    log_msg = f"[9] 任务一: 点击OKX确认按钮..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     buttons[1].click()
-                                    log_msg = f"[OP] ✓ 任务一已点击 OKX 确认按钮"
+                                    log_msg = f"[11] ✓ 任务一已点击 OKX 确认按钮"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     update_browser_timestamp_q(browser_id, trendingId)
                                     # 更改状态为7（任务一已确认）
-                                    log_msg = f"[OP] 任务一: 设置状态为7（已确认）..."
+                                    log_msg = f"[11] 任务一: 设置状态为7（已确认）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     save_result_success = save_mission_result(mission_id, 7)
@@ -3070,13 +3070,13 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             time.sleep(5)
                                             save_result_success = save_mission_result(mission_id, 7)
                                             if not save_result_success:
-                                                log_msg = f"[OP] 连续10次设置任务状态失败，但已点击确认，请检查网络"
+                                                log_msg = f"[9] 连续10次设置任务状态失败，但已点击确认，请检查网络"
                                                 send_feishu_custom_message(browser_id, log_msg)
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                                 
                                     # 轮询检查任务1状态，确保状态保持为7
-                                    log_msg = f"[OP] 任务一: 等待20秒后开始轮询检查状态..."
+                                    log_msg = f"[11] 任务一: 等待20秒后开始轮询检查状态..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     time.sleep(20)  # 先等待20秒
@@ -3089,17 +3089,17 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     while time.time() - start_poll_time < max_poll_time:
                                         poll_count += 1
                                         status = get_mission_status(mission_id)
-                                        log_msg = f"[OP] 任务一: 第{poll_count}次轮询，当前状态: {status}"
+                                        log_msg = f"[9] 任务一: 第{poll_count}次轮询，当前状态: {status}"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         
                                         if status == 7:
-                                            log_msg = f"[OP] ✓ 任务一状态为7，退出轮询"
+                                            log_msg = f"[9] ✓ 任务一状态为7，退出轮询"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
                                         elif status == 6:
-                                            log_msg = f"[OP] 任务一状态变为6，重新设置为7..."
+                                            log_msg = f"[9] 任务一状态变为6，重新设置为7..."
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             save_result_success = save_mission_result(mission_id, 7)
@@ -3107,7 +3107,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                                 time.sleep(2)
                                                 save_result_success = save_mission_result(mission_id, 7)
                                             if save_result_success:
-                                                log_msg = f"[OP] ✓ 任务一状态已重新设置为7"
+                                                log_msg = f"[9] ✓ 任务一状态已重新设置为7"
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             
@@ -3116,12 +3116,12 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             
                                             # 再次检查状态
                                             status = get_mission_status(mission_id)
-                                            log_msg = f"[OP] 任务一: 重新设置后检查状态: {status}"
+                                            log_msg = f"[9] 任务一: 重新设置后检查状态: {status}"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             
                                             if status == 7:
-                                                log_msg = f"[OP] ✓ 任务一状态为7，退出轮询"
+                                                log_msg = f"[9] ✓ 任务一状态为7，退出轮询"
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                                 break
@@ -3130,18 +3130,18 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             time.sleep(poll_interval)
                                     
                                     if time.time() - start_poll_time >= max_poll_time:
-                                        log_msg = f"[OP] 任务一: 轮询超时（1分钟），退出轮询"
+                                        log_msg = f"[11] 任务一: 轮询超时（1分钟），退出轮询"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     
-                                    log_msg = f"[OP] ✓ 任务一提交订单成功"
+                                    log_msg = f"[11] ✓ 任务一提交订单成功"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     return True, True  # 成功
                                     
                                 else:
                                     # 任务二：等待任务一准备就绪，然后通知任务一可以执行
-                                    log_msg = f"[OP] 任务二: 等待任务一准备就绪（状态5）..."
+                                    log_msg = f"[9] 任务二: 等待任务一准备就绪（状态5）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     # 轮询等待任务一状态为5
@@ -3149,30 +3149,30 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     start_time = time.time()
                                     while True:
                                         if time.time() - start_time > max_wait_time:
-                                            log_msg = f"[OP] ✗ 本任务正常，等待任务一超时"
+                                            log_msg = f"[9] ✗ 本任务正常，等待任务一超时"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click() 
-                                            return False, "[8]本任务正常，等待任务一超时"
+                                            return False, "[9]本任务正常，等待任务一超时"
                                         
                                         tp1_status = get_mission_status(tp1)
                                         if tp1_status == 5:
-                                            log_msg = f"[OP] ✓ 任务一已准备就绪（状态5）"
+                                            log_msg = f"[9] ✓ 任务一已准备就绪（状态5）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
                                         elif tp1_status == 3:
-                                            log_msg = f"[OP] ✗ 本任务正常，任务一已失败"
+                                            log_msg = f"[9] ✗ 本任务正常，任务一已失败"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click() 
-                                            return False, "[8]本任务正常，任务一已失败"
+                                            return False, "[9]本任务正常，任务一已失败"
                                         
                                         
                                         time.sleep(10)
                                     
                                     # 更改任务一状态为6（任务二也准备就绪）
-                                    log_msg = f"[OP] 任务二: 设置任务一状态为6（任务二就绪）..."
+                                    log_msg = f"[9] 任务二: 设置任务一状态为6（任务二就绪）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     save_result_success = save_mission_result(tp1, 6)
@@ -3183,40 +3183,40 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             time.sleep(5)
                                             save_result_success = save_mission_result(tp1, 6)
                                             if not save_result_success:
-                                                log_msg = f"[OP] ✗ 连续10次设置任务状态失败"
+                                                log_msg = f"[9] ✗ 连续10次设置任务状态失败"
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                                log_msg = f"[OP] 连续10次设置任务状态失败，但已点击确认，请检查网络"
+                                                log_msg = f"[9] 连续10次设置任务状态失败，但已点击确认，请检查网络"
                                                 send_feishu_custom_message(browser_id, log_msg)
                                                 return False, True  # 失败，可重试
                                     
                                     # 等待任务一点击确认（状态7）
-                                    log_msg = f"[OP] 任务二: 等待任务一点击确认（状态7）..."
+                                    log_msg = f"[9] 任务二: 等待任务一点击确认（状态7）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     start_time = time.time()
                                     while True:
                                         if time.time() - start_time > max_wait_time:
-                                            log_msg = f"[OP] ✗ 本任务正常，等待任务一确认超时"
+                                            log_msg = f"[9] ✗ 本任务正常，等待任务一确认超时"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, "[8]本任务正常，等待任务一确认超时"
+                                            return False, "[9]本任务正常，等待任务一确认超时"
                                         
                                         tp1_status = get_mission_status(tp1)
                                         if tp1_status == 7 or tp1_status == 2 or tp1_status == 8 or tp1_status == 12:
                                             time.sleep(5)
                                             
-                                            log_msg = f"[OP] ✓ 任务一已点击确认（状态7）"
+                                            log_msg = f"[9] ✓ 任务一已点击确认（状态7）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
                                         elif tp1_status == 3:
-                                            log_msg = f"[OP] 本任务正常，任务一确认失败，点击取消"
+                                            log_msg = f"[9] 本任务正常，任务一确认失败，点击取消"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click()  # 点击取消按钮
-                                            return False, "[8]本任务正常，任务一确认失败"
+                                            return False, "[9]本任务正常，任务一确认失败"
                                         
                                         time.sleep(10)
                                     
@@ -3256,46 +3256,46 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     
                                     # 点击确认按钮
-                                    log_msg = f"[OP] 任务二: 点击OKX确认按钮..."
+                                    log_msg = f"[9] 任务二: 点击OKX确认按钮..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     buttons[1].click()
-                                    log_msg = f"[OP] ✓ 任务二已点击 OKX 确认按钮"
+                                    log_msg = f"[11] ✓ 任务二已点击 OKX 确认按钮"
                                     update_browser_timestamp_q(browser_id, trendingId)
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    log_msg = f"[OP] ✓ 任务二提交订单成功"
+                                    log_msg = f"[11] ✓ 任务二提交订单成功"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     return True, True  # 成功
                             else:
                                 # 普通任务（Type 1），直接点击确认
                                 buttons[1].click()
-                                log_msg = f"[OP] ✓ 已点击 OKX 确认按钮"
+                                log_msg = f"[11] ✓ 已点击 OKX 确认按钮"
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                log_msg = f"[OP] ✓ 提交订单成功"
+                                log_msg = f"[11] ✓ 提交订单成功"
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 return True, True  # 成功
                         else:
-                            log_msg = f"[OP] ⚠ OKX 按钮数量不足: {len(buttons)}"
+                            log_msg = f"[9] ⚠ OKX 按钮数量不足: {len(buttons)}"
                             log_print(f"[{serial_number}] {log_msg}")
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             return False, True  # 失败，可重试
                 
-                log_msg = f"[OP] ⚠ 未找到 OKX 页面"
+                log_msg = f"[9] ⚠ 未找到 OKX 页面"
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 return False, True  # 失败，可重试
         
-        log_msg = f"[OP] ✗ 未找到提交订单按钮"
+        log_msg = f"[9] ✗ 未找到提交订单按钮"
         log_print(f"[{serial_number}] {log_msg}")
         add_bro_log_entry(bro_log_list, browser_id, log_msg)
         return False, True  # 失败，可重试
         
     except Exception as e:
-        log_msg = f"[OP] ✗ 提交订单失败: {str(e)}"
+        log_msg = f"[9] ✗ 提交订单失败: {str(e)}"
         log_print(f"[{serial_number}] {log_msg}")
         add_bro_log_entry(bro_log_list, browser_id, log_msg)
         import traceback
@@ -6583,7 +6583,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         exchange_type = "POLY"
     
     # 记录开始日志
-    start_log_message = f"开始处理交易任务{exchange_type}，任务ID: {mission_id} 交易所: {exchange_name} 买卖类型: {trade_type} 价格类型: {price_type} 种类: {option_type}页面URL: {target_url} 价格: {price if price else '市价'} 数量: {amount}"
+    start_log_message = f"[0]开始处理交易任务{exchange_type}，任务ID: {mission_id} 交易所: {exchange_name} 买卖类型: {trade_type} 价格类型: {price_type} 种类: {option_type}页面URL: {target_url} 价格: {price if price else '市价'} 数量: {amount}"
     add_bro_log_entry(bro_log_list, browser_id, start_log_message)
     
     log_print(f"\n[{browser_id}] ========== 开始处理交易任务 ({exchange_type}) ==========")
@@ -6605,12 +6605,12 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         # 1. 检查IP并更新代理（仅在第一次进入且需要启动浏览器时更新，重试时跳过因为已经在重试流程中更新过了）
         if retry_count == 0:
             # 第一次进入，检查浏览器是否已经运行
-            add_bro_log_entry(bro_log_list, browser_id, "步骤1: 启动浏览器")
+            add_bro_log_entry(bro_log_list, browser_id, "[0]步骤1: 启动浏览器")
             log_print(f"[{browser_id}] 步骤1: 检查浏览器状态...")
             is_active, browser_data = check_browser_active(browser_id)
             
             if is_active and browser_data:
-                add_bro_log_entry(bro_log_list, browser_id, "浏览器已在运行，直接使用")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]浏览器已在运行，直接使用")
                 log_print(f"[{browser_id}] ✓ 浏览器已在运行，直接使用")
                 is_new_browser = False
                 # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
@@ -6618,27 +6618,27 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 if last_config:
                     current_ip = last_config.get("ip")
                     current_delay = last_config.get("delay")
-                    add_bro_log_entry(bro_log_list, browser_id, f"使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[0]使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                     log_print(f"[{browser_id}] 使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                 else:
                     log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
                     _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
                     if current_ip:
-                        add_bro_log_entry(bro_log_list, browser_id, f"更新IP完成: IP={current_ip}, Delay={current_delay}")
+                        add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             else:
                 # 浏览器未运行，需要更新IP并启动浏览器
-                add_bro_log_entry(bro_log_list, browser_id, "步骤2: 检查IP并更新代理")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]步骤2: 检查IP并更新代理")
                 log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
                 _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
     
                 
                 # 3. 启动浏览器
-                add_bro_log_entry(bro_log_list, browser_id, "步骤3: 启动浏览器")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]步骤3: 启动浏览器")
                 log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
                 browser_data = start_adspower_browser(browser_id)
                 
                 if not browser_data:
-                    add_bro_log_entry(bro_log_list, browser_id, "浏览器启动失败，任务终止")
+                    add_bro_log_entry(bro_log_list, browser_id, "[0]浏览器启动失败，任务终止")
                     log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
                     if keep_browser_open:
                         return False, "[1]浏览器启动失败", None, None, None, None
@@ -6646,7 +6646,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                         return False, "[1]浏览器启动失败"
                 
                 is_new_browser = True
-                add_bro_log_entry(bro_log_list, browser_id, "浏览器已新启动")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]浏览器已新启动")
                 log_print(f"[{browser_id}] ✓ 浏览器已新启动")
         else:
             log_print(f"[{browser_id}] 步骤1: 跳过IP更新（重试中，IP已在重试流程中更新）...")
@@ -6655,31 +6655,31 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             if last_config:
                 current_ip = last_config.get("ip")
                 current_delay = last_config.get("delay")
-                add_bro_log_entry(bro_log_list, browser_id, f"使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[0]使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
                 _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
                 if current_ip:
-                    add_bro_log_entry(bro_log_list, browser_id, f"更新IP完成: IP={current_ip}, Delay={current_delay}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             
             # 检查浏览器状态（重试时浏览器应该已关闭，需要重新启动）
-            add_bro_log_entry(bro_log_list, browser_id, "步骤2: 检查浏览器状态")
+            add_bro_log_entry(bro_log_list, browser_id, "[0]步骤2: 检查浏览器状态")
             log_print(f"[{browser_id}] 步骤2: 检查浏览器状态...")
             is_active, browser_data = check_browser_active(browser_id)
             
             if is_active and browser_data:
-                add_bro_log_entry(bro_log_list, browser_id, "浏览器已在运行，直接使用")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]浏览器已在运行，直接使用")
                 log_print(f"[{browser_id}] ✓ 浏览器已在运行，直接使用")
                 is_new_browser = False
             else:
                 # 启动浏览器
-                add_bro_log_entry(bro_log_list, browser_id, "步骤3: 启动浏览器")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]步骤3: 启动浏览器")
                 log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
                 browser_data = start_adspower_browser(browser_id)
                 
                 if not browser_data:
-                    add_bro_log_entry(bro_log_list, browser_id, "浏览器启动失败，任务终止")
+                    add_bro_log_entry(bro_log_list, browser_id, "[0]浏览器启动失败，任务终止")
                     log_print(f"[{browser_id}] ✗ 浏览器启动失败，任务终止")
                     if keep_browser_open:
                         return False, "[1]浏览器启动失败", None, None, None, None
@@ -6687,7 +6687,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                         return False, "[1]浏览器启动失败"
                 
                 is_new_browser = True
-                add_bro_log_entry(bro_log_list, browser_id, "浏览器已新启动")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]浏览器已新启动")
                 log_print(f"[{browser_id}] ✓ 浏览器已新启动")
         
         # 确保 current_ip 和 current_delay 已初始化（用于后续代码使用）
@@ -6699,7 +6699,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 current_delay = last_config.get("delay")
         
         # 4. 创建Selenium驱动
-        add_bro_log_entry(bro_log_list, browser_id, "步骤4: 创建Selenium驱动")
+        add_bro_log_entry(bro_log_list, browser_id, "[0]步骤4: 创建Selenium驱动")
         log_print(f"[{browser_id}] 步骤4: 创建Selenium驱动...")
         driver = None
         driver_created = False
@@ -6709,12 +6709,12 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         try:
             driver = create_selenium_driver(browser_data)
             driver_created = True
-            add_bro_log_entry(bro_log_list, browser_id, "Selenium驱动创建成功")
+            add_bro_log_entry(bro_log_list, browser_id, "[0]Selenium驱动创建成功")
             log_print(f"[{browser_id}] ✓ Selenium驱动创建成功")
         except Exception as e:
             last_driver_error = e
             error_msg = str(e)
-            add_bro_log_entry(bro_log_list, browser_id, f"创建Selenium驱动失败: {error_msg}")
+            add_bro_log_entry(bro_log_list, browser_id, f"[0]创建Selenium驱动失败: {error_msg}")
             log_print(f"[{browser_id}] ✗ 创建Selenium驱动失败: {error_msg}")
             log_print(f"[{browser_id}] 等待3秒后重试...")
             time.sleep(3)
@@ -6723,12 +6723,12 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             try:
                 driver = create_selenium_driver(browser_data)
                 driver_created = True
-                add_bro_log_entry(bro_log_list, browser_id, "Selenium驱动创建成功（重试）")
+                add_bro_log_entry(bro_log_list, browser_id, "[0]Selenium驱动创建成功（重试）")
                 log_print(f"[{browser_id}] ✓ Selenium驱动创建成功（重试）")
             except Exception as e2:
                 last_driver_error = e2
                 error_msg2 = str(e2)
-                add_bro_log_entry(bro_log_list, browser_id, f"创建Selenium驱动重试失败: {error_msg2}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[0]创建Selenium驱动重试失败: {error_msg2}")
                 log_print(f"[{browser_id}] ✗ 创建Selenium驱动重试失败: {error_msg2}")
         
         # 如果两次都失败，返回错误
@@ -6742,12 +6742,12 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 return False, error_message
         
         # 4.5 等待4秒后再进入目标页面
-        add_bro_log_entry(bro_log_list, browser_id, "等待15秒后进入目标页面")
+        add_bro_log_entry(bro_log_list, browser_id, "[1]等待15秒后进入目标页面")
         log_print(f"[{browser_id}] 等待4秒...")
         time.sleep(15)
         
         # 5. 打开目标页面（带重试机制）
-        add_bro_log_entry(bro_log_list, browser_id, f"步骤5: 打开目标页面 {target_url}")
+        add_bro_log_entry(bro_log_list, browser_id, f"[1] 打开目标页面 {target_url}")
         log_print(f"[{browser_id}] 步骤5: 打开目标页面")
         page_load_success = False
         last_error = None
@@ -6756,18 +6756,18 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         for page_retry in range(1, max_page_retries + 1):
             try:
                 if page_retry > 1:
-                    add_bro_log_entry(bro_log_list, browser_id, f"重试打开页面 (第 {page_retry}/{max_page_retries} 次)")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[1]重试打开页面 (第 {page_retry}/{max_page_retries} 次)")
                     log_print(f"[{browser_id}] 重试打开页面 (第 {page_retry}/{max_page_retries} 次)...")
                     time.sleep(2)  # 重试前等待2秒
                 driver.get(target_url)
                 page_load_success = True
-                add_bro_log_entry(bro_log_list, browser_id, "页面加载成功")
+                add_bro_log_entry(bro_log_list, browser_id, "[1]页面加载成功")
                 log_print(f"[{browser_id}] ✓ 页面加载成功")
                 break
             except (WebDriverException, TimeoutException) as e:
                 last_error = e
                 error_msg = str(e)
-                add_bro_log_entry(bro_log_list, browser_id, f"打开页面失败 (第 {page_retry}/{max_page_retries} 次): {error_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[1]打开页面失败 (第 {page_retry}/{max_page_retries} 次): {error_msg}")
                 log_print(f"[{browser_id}] ✗ 打开页面失败 (第 {page_retry}/{max_page_retries} 次): {error_msg}")
                 
                 # 如果还有重试机会，继续循环
@@ -6775,21 +6775,21 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     continue
                 else:
                     # 3次都失败了，记录最后错误并跳出循环
-                    add_bro_log_entry(bro_log_list, browser_id, f"页面加载失败，已重试 {max_page_retries} 次")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[1]页面加载失败，已重试 {max_page_retries} 次")
                     log_print(f"[{browser_id}] ✗ 页面加载失败，已重试 {max_page_retries} 次")
         
         # 如果页面加载失败（3次重试都失败），执行换IP重试（仅type=5任务且未重试过）
         if not page_load_success:
                 error_msg = str(last_error) if last_error else "未知错误"
-                add_bro_log_entry(bro_log_list, browser_id, f"检测到页面加载错误（代理或超时）: {error_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[1]检测到页面加载错误（代理或超时）: {error_msg}")
                 log_print(f"[{browser_id}] ✗ 检测到页面加载错误（代理或超时）: {error_msg}")
                 mission_type = mission.get("type")
                 if mission_type == 5 and retry_count < 2:
-                    add_bro_log_entry(bro_log_list, browser_id, f"Type=5 任务页面加载失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[1]Type=5 任务页面加载失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程")
                     log_print(f"[{browser_id}] Type=5 任务页面加载失败，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                     
                     # 1. 关闭浏览器
-                    add_bro_log_entry(bro_log_list, browser_id, "步骤1: 关闭浏览器")
+                    add_bro_log_entry(bro_log_list, browser_id, "[1]步骤1: 关闭浏览器")
                     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
                     try:
                         if driver:
@@ -6797,43 +6797,43 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     except:
                         pass
                     close_adspower_browser(browser_id)
-                    add_bro_log_entry(bro_log_list, browser_id, "Type=5 任务换IP：关闭浏览器后等待1分钟")
+                    add_bro_log_entry(bro_log_list, browser_id, "[1]Type=5 任务换IP：关闭浏览器后等待1分钟")
                     log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待1分钟...")
                     time.sleep(60)  # Type=5任务等待2分钟
                     
                     # 2. 根据重试次数获取IP
-                    add_bro_log_entry(bro_log_list, browser_id, f"步骤2: 更换IP（第{retry_count+1}次）")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[1]步骤2: 更换IP（第{retry_count+1}次）")
                     log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
                     proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                     
                     if not proxy_config:
-                        add_bro_log_entry(bro_log_list, browser_id, "获取新IP失败")
+                        add_bro_log_entry(bro_log_list, browser_id, "[1]获取新IP失败")
                         log_print(f"[{browser_id}] ✗ 获取新IP失败")
                         if keep_browser_open:
                             return False, "[2]换IP失败", None, None, None, None
                         else:
                             return False, "[2]换IP失败"
                     
-                    add_bro_log_entry(bro_log_list, browser_id, f"获取新IP: {proxy_config['ip']}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[1]获取新IP: {proxy_config['ip']}")
                     log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
                     
                     # 3. 更新代理配置
-                    add_bro_log_entry(bro_log_list, browser_id, "步骤3: 更新代理配置")
+                    add_bro_log_entry(bro_log_list, browser_id, "[1]步骤3: 更新代理配置")
                     log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
                     if not update_adspower_proxy(browser_id, proxy_config):
-                        add_bro_log_entry(bro_log_list, browser_id, "更新代理失败")
+                        add_bro_log_entry(bro_log_list, browser_id, "[1]更新代理失败")
                         log_print(f"[{browser_id}] ✗ 更新代理失败")
                         if keep_browser_open:
                             return False, "[2]更新代理失败", None, None, None, None
                         else:
                             return False, "[2]更新代理失败"
                     
-                    add_bro_log_entry(bro_log_list, browser_id, "代理配置已更新")
+                    add_bro_log_entry(bro_log_list, browser_id, "[1]代理配置已更新")
                     log_print(f"[{browser_id}] ✓ 代理配置已更新")
                     time.sleep(10)
                     
                     # 4. 递归重试任务（retry_count+1）
-                    add_bro_log_entry(bro_log_list, browser_id, f"步骤4: 重新执行任务（重试次数: {retry_count+1}）")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[1]步骤4: 重新执行任务（重试次数: {retry_count+1}）")
                     log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
                     return process_trading_mission(task_data, keep_browser_open, retry_count=retry_count+1)
                 else:
@@ -6841,13 +6841,13 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     raise last_error
         
         # 5.5 检查并点击 "I Understand and Agree" p标签（如果存在）
-        add_bro_log_entry(bro_log_list, browser_id, "步骤5.5: 检查是否存在 'I Understand and Agree' p标签")
+        add_bro_log_entry(bro_log_list, browser_id, "[2]步骤5.5: 检查是否存在 'I Understand and Agree' p标签")
         log_print(f"[{browser_id}] 步骤5.5: 检查是否存在 'I Understand and Agree' p标签...")
         if check_and_click_understand_agree(driver, browser_id, timeout=5):
             # 如果存在并点击了，需要换IP重试（仅type=5任务且重试次数小于2）
             mission_type = mission.get("type")
             if mission_type == 5 and retry_count < 2:
-                add_bro_log_entry(bro_log_list, browser_id, f"交易任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程")
+                add_bro_log_entry(bro_log_list, browser_id, f"[2]交易任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程")
                 log_print(f"[{browser_id}] Type=5 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                 
                 # 获取 current_ip（如果未定义，从 LAST_PROXY_CONFIG 获取）
@@ -6861,7 +6861,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 call_change_ip_to_err(browser_id, ip_to_report)
                 
                 # 1. 关闭浏览器
-                add_bro_log_entry(bro_log_list, browser_id, "步骤1: 关闭浏览器")
+                add_bro_log_entry(bro_log_list, browser_id, "[2]步骤1: 关闭浏览器")
                 log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
                 try:
                     if driver:
@@ -6869,48 +6869,48 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 except:
                     pass
                 close_adspower_browser(browser_id)
-                add_bro_log_entry(bro_log_list, browser_id, "Type=5 任务换IP：关闭浏览器后等待1分钟")
+                add_bro_log_entry(bro_log_list, browser_id, "[2]Type=5 任务换IP：关闭浏览器后等待1分钟")
                 log_print(f"[{browser_id}] Type=5 任务换IP：关闭浏览器后等待1分钟...")
                 time.sleep(60)  # Type=5任务等待2分钟
                 
                 # 2. 根据重试次数获取IP
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤2: 更换IP（第{retry_count+1}次）")
+                add_bro_log_entry(bro_log_list, browser_id, f"[2]步骤2: 更换IP（第{retry_count+1}次）")
                 log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
                 proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                 
                 if not proxy_config:
-                    add_bro_log_entry(bro_log_list, browser_id, "获取新IP失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[2]获取新IP失败")
                     log_print(f"[{browser_id}] ✗ 获取新IP失败")
                     if keep_browser_open:
                         return False, "[2]换IP失败", None, None, None, None
                     else:
                         return False, "[2]换IP失败"
                 
-                add_bro_log_entry(bro_log_list, browser_id, f"获取新IP: {proxy_config['ip']}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[2]获取新IP: {proxy_config['ip']}")
                 log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
                 
                 # 3. 更新代理配置
-                add_bro_log_entry(bro_log_list, browser_id, "步骤3: 更新代理配置")
+                add_bro_log_entry(bro_log_list, browser_id, "[2]步骤3: 更新代理配置")
                 log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
                 if not update_adspower_proxy(browser_id, proxy_config):
-                    add_bro_log_entry(bro_log_list, browser_id, "更新代理失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[2]更新代理失败")
                     log_print(f"[{browser_id}] ✗ 更新代理失败")
                     if keep_browser_open:
                         return False, "[2]更新代理失败", None, None, None, None
                     else:
                         return False, "[2]更新代理失败"
                 
-                add_bro_log_entry(bro_log_list, browser_id, "代理配置已更新")
+                add_bro_log_entry(bro_log_list, browser_id, "[2]代理配置已更新")
                 log_print(f"[{browser_id}] ✓ 代理配置已更新")
                 time.sleep(10)
                 
                 # 4. 递归重试任务（retry_count+1）
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤4: 重新执行任务（重试次数: {retry_count+1}）")
+                add_bro_log_entry(bro_log_list, browser_id, f"[2]步骤4: 重新执行任务（重试次数: {retry_count+1}）")
                 log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
                 return process_trading_mission(task_data, keep_browser_open, retry_count=retry_count+1)
         
         # 根据交易所类型选择不同的处理流程
-        add_bro_log_entry(bro_log_list, browser_id, f"步骤6: 开始处理{exchange_type}交易流程")
+        add_bro_log_entry(bro_log_list, browser_id, f"[3]步骤6: 开始处理{exchange_type}交易流程")
         if exchange_type == "OP":
             success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url, current_ip, current_delay, bro_log_list, trendingId)
         else:
@@ -6918,9 +6918,9 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
             available_balance = None  # Polymarket 暂不支持
         
         if success:
-            add_bro_log_entry(bro_log_list, browser_id, f"交易流程处理成功")
+            add_bro_log_entry(bro_log_list, browser_id, f"[8]交易流程处理成功")
         else:
-            add_bro_log_entry(bro_log_list, browser_id, f"交易流程处理失败: {failure_reason}")
+            add_bro_log_entry(bro_log_list, browser_id, f"[8]交易流程处理失败: {failure_reason}")
         
         # 处理 available_balance 并更新 p 字段
         if available_balance is not None:
@@ -6983,11 +6983,11 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         if not success and failure_reason == "NEED_IP_RETRY" and retry_count < 2:
             mission_type = mission.get("type")
             if mission_type == 5 or mission_type == 1:
-                add_bro_log_entry(bro_log_list, browser_id, f"Type={mission_type} 任务需要换IP重试（第{retry_count+1}次），开始执行重试流程")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]Type={mission_type} 任务需要换IP重试（第{retry_count+1}次），开始执行重试流程")
                 log_print(f"[{browser_id}] Type={mission_type} 任务需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                 
                 # 1. 关闭浏览器
-                add_bro_log_entry(bro_log_list, browser_id, "步骤1: 关闭浏览器")
+                add_bro_log_entry(bro_log_list, browser_id, "[8]步骤1: 关闭浏览器")
                 log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
                 try:
                     if driver:
@@ -6998,45 +6998,45 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 time.sleep(15)
                 
                 # 2. 根据重试次数获取IP
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤2: 更换IP（第{retry_count+1}次）")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤2: 更换IP（第{retry_count+1}次）")
                 log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
                 proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
                 
                 if not proxy_config:
-                    add_bro_log_entry(bro_log_list, browser_id, "获取新IP失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]获取新IP失败")
                     log_print(f"[{browser_id}] ✗ 获取新IP失败")
                     if keep_browser_open:
                         return False, "[2]换IP失败", None, None, None, None
                     else:
                         return False, "[2]换IP失败"
                 
-                add_bro_log_entry(bro_log_list, browser_id, f"获取新IP: {proxy_config['ip']}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]获取新IP: {proxy_config['ip']}")
                 log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
                 
                 # 3. 更新代理配置
-                add_bro_log_entry(bro_log_list, browser_id, "步骤3: 更新代理配置")
+                add_bro_log_entry(bro_log_list, browser_id, "[8]步骤3: 更新代理配置")
                 log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
                 if not update_adspower_proxy(browser_id, proxy_config):
-                    add_bro_log_entry(bro_log_list, browser_id, "更新代理失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]更新代理失败")
                     log_print(f"[{browser_id}] ✗ 更新代理失败")
                     if keep_browser_open:
                         return False, "[2]更新代理失败", None, None, None, None
                     else:
                         return False, "[2]更新代理失败"
                 
-                add_bro_log_entry(bro_log_list, browser_id, "代理配置已更新")
+                add_bro_log_entry(bro_log_list, browser_id, "[8]代理配置已更新")
                 log_print(f"[{browser_id}] ✓ 代理配置已更新")
                 time.sleep(10)
                 
                 # 4. 递归重试任务（retry_count+1）
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤4: 重新执行任务（重试次数: {retry_count+1}）")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤4: 重新执行任务（重试次数: {retry_count+1}）")
                 log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
                 return process_trading_mission(task_data, keep_browser_open, retry_count=retry_count+1)
         
         # 根据 keep_browser_open 返回不同的格式
         if keep_browser_open:
             if success:
-                add_bro_log_entry(bro_log_list, browser_id, "任务成功，保持浏览器打开以收集数据")
+                add_bro_log_entry(bro_log_list, browser_id, "[15]任务成功，保持浏览器打开以收集数据")
                 log_print(f"[{browser_id}] 任务成功，保持浏览器打开以收集数据...")
             else:
                 add_bro_log_entry(bro_log_list, browser_id, f"任务执行失败，返回结果到上层处理: {failure_reason}")
@@ -8533,16 +8533,16 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
     
     try:
         # 5. 等待页面加载
-        add_bro_log_entry(bro_log_list, browser_id, "步骤5: 等待交易页面加载")
+        add_bro_log_entry(bro_log_list, browser_id, "[4]步骤5: 等待交易页面加载")
         log_print(f"[{browser_id}] 步骤5: 等待页面加载...")
         trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
         
         if not trade_box:
-            add_bro_log_entry(bro_log_list, browser_id, "交易页面加载失败，需要换IP重试")
+            add_bro_log_entry(bro_log_list, browser_id, "[4]交易页面加载失败，需要换IP重试")
             return False, "NEED_IP_RETRY", None
         
         # 5.5 检查地区限制（Trading is not available）
-        add_bro_log_entry(bro_log_list, browser_id, "步骤5.5: 检查地区限制（Trading is not available）")
+        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤5.5: 检查地区限制（Trading is not available）")
         log_print(f"[{browser_id}] 步骤5.5: 检查地区限制（Trading is not available）...")
         try:
             start_time = time.time()
@@ -8566,27 +8566,27 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     continue
             
             if trading_restricted:
-                add_bro_log_entry(bro_log_list, browser_id, "检测到地区限制，需要换IP")
+                add_bro_log_entry(bro_log_list, browser_id, "[5]检测到地区限制，需要换IP")
                 log_print(f"[{browser_id}] ✗ 检测到地区限制，需要换IP")
                 return False, "NEED_IP_RETRY", None
             else:
-                add_bro_log_entry(bro_log_list, browser_id, "未检测到地区限制")
+                add_bro_log_entry(bro_log_list, browser_id, "[5]未检测到地区限制")
                 log_print(f"[{browser_id}] ✓ 未检测到地区限制")
         except Exception as e:
-            add_bro_log_entry(bro_log_list, browser_id, f"检查地区限制时出现异常: {str(e)}，继续执行")
+            add_bro_log_entry(bro_log_list, browser_id, f"[5]检查地区限制时出现异常: {str(e)}，继续执行")
             log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
         
         # 6. 预打开OKX钱包并连接（仅在新启动的浏览器时执行）
         if is_new_browser:
-            add_bro_log_entry(bro_log_list, browser_id, "步骤6: 预打开OKX钱包（浏览器新启动）")
+            add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 预打开OKX钱包（浏览器新启动）")
             log_print(f"[{browser_id}] 步骤6: 预打开OKX钱包（浏览器新启动）...")
             preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
         else:
-            add_bro_log_entry(bro_log_list, browser_id, "步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
+            add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
             log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
         
         # 6.1 检查并连接钱包
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.1: 检查并连接钱包")
+        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1: 检查并连接钱包")
         log_print(f"[{browser_id}] 步骤6.1: 检查并连接钱包...")
         connect_wallet_if_needed(driver, browser_id)
         
@@ -8628,7 +8628,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             log_print(f"[{browser_id}] ⚠ 检查并切换标签页时出现异常: {str(e)}，继续执行...")
         
         # 6.1.2 检查地区限制
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.1.2: 检查地区限制")
+        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1.2: 检查地区限制")
         log_print(f"[{browser_id}] 步骤6.1.2: 检查地区限制...")
         try:
             start_time = time.time()
@@ -8652,20 +8652,20 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     continue
             
             if region_restricted:
-                add_bro_log_entry(bro_log_list, browser_id, "IP通畅，但地区不符合，需要换IP")
+                add_bro_log_entry(bro_log_list, browser_id, "[5]IP通畅，但地区不符合，需要换IP")
                 log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
                 # 调用 changeIpToErr 接口
                 call_change_ip_to_err(browser_id, current_ip)
                 return False, "NEED_IP_RETRY", None
             else:
-                add_bro_log_entry(bro_log_list, browser_id, "未检测到地区限制")
+                add_bro_log_entry(bro_log_list, browser_id, "[5]未检测到地区限制")
                 log_print(f"[{browser_id}] ✓ 未检测到地区限制")
         except Exception as e:
-            add_bro_log_entry(bro_log_list, browser_id, f"检查地区限制时出现异常: {str(e)}，继续执行")
+            add_bro_log_entry(bro_log_list, browser_id, f"[5]检查地区限制时出现异常: {str(e)}，继续执行")
             log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
         
         # 6.1.5 等待Position按钮出现（带重试机制）
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.1.5: 等待Position按钮出现")
+        add_bro_log_entry(bro_log_list, browser_id, "[6]步骤6.1.5: 等待Position按钮出现")
         log_print(f"[{browser_id}] 步骤6.1.5: 等待Position按钮出现...")
         if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
             # 检查是否是 type=5 任务且重试次数小于2
@@ -8673,11 +8673,11 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             mission_type = mission.get('type')
             
             if mission_type == 5 and retry_count < 2:
-                add_bro_log_entry(bro_log_list, browser_id, f"Type=5 任务Position按钮未出现，需要换IP重试（第{retry_count+1}次）")
+                add_bro_log_entry(bro_log_list, browser_id, f"[6]Type=5 任务Position按钮未出现，需要换IP重试（第{retry_count+1}次）")
                 log_print(f"[{browser_id}] Type=5 任务Position按钮未出现，需要换IP重试（第{retry_count+1}次）...")
                 return False, "NEED_IP_RETRY", None
             else:
-                add_bro_log_entry(bro_log_list, browser_id, "Position按钮未出现，页面加载可能失败")
+                add_bro_log_entry(bro_log_list, browser_id, "[6]Position按钮未出现，页面加载可能失败")
                 log_print(f"[{browser_id}] ✗ Position按钮未出现，页面加载可能失败")
                 
                 time.sleep(10)
@@ -8689,36 +8689,36 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
         time.sleep(10)
         # 6.1.3 再次检查钱包是否已连接
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.1.5.1: 再次检查钱包是否已连接")
+        add_bro_log_entry(bro_log_list, browser_id, "[6]步骤6.1.5.1: 再次检查钱包是否已连接")
         log_print(f"[{browser_id}] 步骤6.1.3: 再次检查钱包是否已连接...")
         try:
             wallet_connected = check_wallet_connected(driver, browser_id)
             if wallet_connected:
-                add_bro_log_entry(bro_log_list, browser_id, "钱包已连接")
+                add_bro_log_entry(bro_log_list, browser_id, "[6]钱包已连接")
                 log_print(f"[{browser_id}] ✓ 钱包已连接")
             else:
-                add_bro_log_entry(bro_log_list, browser_id, "钱包未连接，再次尝试连接钱包")
+                add_bro_log_entry(bro_log_list, browser_id, "[6]钱包未连接，再次尝试连接钱包")
                 log_print(f"[{browser_id}] ✗ 钱包未连接，需要重新连接")
                 # 可以在这里选择是否重新连接钱包
                 connect_wallet_if_needed(driver, browser_id)
                 time.sleep(20)
                 wallet_connected = check_wallet_connected(driver, browser_id)
                 if wallet_connected:
-                    add_bro_log_entry(bro_log_list, browser_id, "钱包已连接")
+                    add_bro_log_entry(bro_log_list, browser_id, "[6]钱包已连接")
                     log_print(f"[{browser_id}] ✓ 钱包已连接")
                     time.sleep(30)
                 else:
-                    add_bro_log_entry(bro_log_list, browser_id, "钱包未连接，再次尝试连接钱包")
+                    add_bro_log_entry(bro_log_list, browser_id, "[6]钱包未连接，再次尝试连接钱包")
                     return False, "[5]钱包多次连接未成功", None
         except Exception as e:
-            add_bro_log_entry(bro_log_list, browser_id, f"检查钱包连接状态时出现异常: {str(e)}，继续执行")
+            add_bro_log_entry(bro_log_list, browser_id, f"[6]检查钱包连接状态时出现异常: {str(e)}，继续执行")
             log_print(f"[{browser_id}] ⚠ 检查钱包连接状态时出现异常: {str(e)}，继续执行...")
         
         
         
         # 6.1.6 如果有 trendingPart1，点击子主题
         if trending_part1:
-            add_bro_log_entry(bro_log_list, browser_id, f"步骤6.1.6: 检查并点击子主题 {trending_part1}")
+            add_bro_log_entry(bro_log_list, browser_id, f"[7]步骤6.1.6: 检查并点击子主题 {trending_part1}")
             log_print(f"[{browser_id}] 步骤6.1.6: 检查并点击子主题 {trending_part1}...")
             success, error_type = click_trending_part1_if_needed(driver, browser_id, trending_part1)
             if not success:
@@ -8733,14 +8733,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                         if not success:
                             # 根据错误类型返回不同的错误信息
                             if error_type == "NO_ACCORDION":
-                                error_msg = "[4]加载子主题内容超时"
+                                error_msg = "[7]加载子主题内容超时"
                             else:
-                                error_msg = "[4]点击子主题失败！查看配置是否正确"
+                                error_msg = "[7]点击子主题失败！查看配置是否正确"
                             add_bro_log_entry(bro_log_list, browser_id, error_msg)
                             return False, error_msg, None
             
         # 6.2 检查仓位和挂单，记录初始数量
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.2: 检查并记录初始仓位和挂单数量")
+        add_bro_log_entry(bro_log_list, browser_id, "[7]步骤6.2: 检查并记录初始仓位和挂单数量")
         log_print(f"[{browser_id}] 步骤6.2: 检查并记录初始仓位和挂单数量...")
         
         # 检查 Position 数量
@@ -8750,7 +8750,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
         # Buy类型：如果返回-2，表示已有对向仓位且数量>=10，不能继续执行
         if trade_type == "Buy" and initial_position_count == -2:
-            add_bro_log_entry(bro_log_list, browser_id, f"{browser_id}已有对向仓位且数量>=10")
+            add_bro_log_entry(bro_log_list, browser_id, f"[7]{browser_id}已有对向仓位且数量>=10")
             return False, f"[5]{browser_id}已有对向仓位且数量>=10", None
         
         if initial_position_count < 0:
@@ -8762,17 +8762,17 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         else:
             log_print(f"[{browser_id}] 初始持仓数量: {initial_position_count}")
         
-        add_bro_log_entry(bro_log_list, browser_id, f"初始持仓数量: {initial_position_count}")
+        add_bro_log_entry(bro_log_list, browser_id, f"[7]初始持仓数量: {initial_position_count}")
         
         # Buy 类型：允许有同向仓位，可以继续执行后面的逻辑
         
         # Sell 类型：如果没有仓位则不能下单
         if trade_type == "Sell" and initial_position_count == 0:
-            add_bro_log_entry(bro_log_list, browser_id, f"{browser_id}无仓位可平")
-            return False, f"[5]{browser_id}无仓位可平", None
+            add_bro_log_entry(bro_log_list, browser_id, f"[7]{browser_id}无仓位可平")
+            return False, f"[7]{browser_id}无仓位可平", None
         
         # 检查 Open Orders 数量
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.3: 检查 Open Orders")
+        add_bro_log_entry(bro_log_list, browser_id, "[7]步骤6.3: 检查 Open Orders")
         log_print(f"[{browser_id}] 步骤6.3: 检查 Open Orders...")
         initial_open_orders_count = get_opinion_table_row_count(driver, browser_id, need_click_open_orders=True, trending_part1=trending_part1)
         
@@ -8781,10 +8781,10 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             initial_open_orders_count = 0
         
         log_print(f"[{browser_id}] 初始 Open Orders 数量: {initial_open_orders_count}")
-        add_bro_log_entry(bro_log_list, browser_id, f"初始 Open Orders 数量: {initial_open_orders_count}")
+        add_bro_log_entry(bro_log_list, browser_id, f"[7]初始 Open Orders 数量: {initial_open_orders_count}")
         
         # 获取 Closed Orders 的最新时间
-        add_bro_log_entry(bro_log_list, browser_id, "步骤6.4: 检查 Closed Orders")
+        add_bro_log_entry(bro_log_list, browser_id, "[7]步骤6.4: 检查 Closed Orders")
         log_print(f"[{browser_id}] 步骤6.4: 检查 Closed Orders...")
         initial_closed_orders_time = get_closed_orders_latest_time(driver, browser_id)
         
@@ -8793,18 +8793,18 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             initial_closed_orders_time = ""
         
         log_print(f"[{browser_id}] 初始 Closed Orders 最新时间: {initial_closed_orders_time}")
-        add_bro_log_entry(bro_log_list, browser_id, f"初始 Closed Orders 最新时间: {initial_closed_orders_time}")
+        add_bro_log_entry(bro_log_list, browser_id, f"[7]初始 Closed Orders 最新时间: {initial_closed_orders_time}")
         
         # Buy 和 Sell 类型：如果已有挂单则不能下单
         if initial_open_orders_count > 0:
             add_bro_log_entry(bro_log_list, browser_id, f"{browser_id}已有挂单")
-            return False, f"[5]{browser_id}已有挂单", None
+            return False, f"[7]{browser_id}已有挂单", None
         
         if trade_type == "Buy":
-            add_bro_log_entry(bro_log_list, browser_id, "Buy 类型检查通过：无仓位，无挂单")
+            add_bro_log_entry(bro_log_list, browser_id, "[7]Buy 类型检查通过：无仓位，无挂单")
             log_print(f"[{browser_id}] ✓ Buy 类型检查通过：无仓位，无挂单")
         else:
-            add_bro_log_entry(bro_log_list, browser_id, "Sell 类型检查通过：有仓位，无挂单")
+            add_bro_log_entry(bro_log_list, browser_id, "[7]Sell 类型检查通过：有仓位，无挂单")
             log_print(f"[{browser_id}] ✓ Sell 类型检查通过：有仓位，无挂单")
         
         # 重试机制：第7-12步最多重试2次（总共3次尝试）
@@ -8849,22 +8849,22 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     log_print(f"[{browser_id}] 等待页面重新加载...")
                     trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
                     if not trade_box:
-                        add_bro_log_entry(bro_log_list, browser_id, "页面重新加载失败")
+                        add_bro_log_entry(bro_log_list, browser_id, "[8]页面重新加载失败")
                         log_print(f"[{browser_id}] ✗ 页面重新加载失败")
-                        last_failure_step = "页面重新加载失败"
+                        last_failure_step = "[8]页面重新加载失败"
                         retry_count += 1
                         continue
                     
                     # 重新检查并连接钱包
-                    add_bro_log_entry(bro_log_list, browser_id, "重新检查并连接钱包")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]重新检查并连接钱包")
                     log_print(f"[{browser_id}] 重新检查并连接钱包...")
                     connect_wallet_if_needed(driver, browser_id)
                     
                     # 重新等待Position按钮出现
-                    add_bro_log_entry(bro_log_list, browser_id, "重新等待Position按钮")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]重新等待Position按钮")
                     log_print(f"[{browser_id}] 重新等待Position按钮...")
                     if not wait_for_position_button_with_retry(driver, browser_id, max_retries=2):
-                        add_bro_log_entry(bro_log_list, browser_id, "Position按钮未出现")
+                        add_bro_log_entry(bro_log_list, browser_id, "[8]Position按钮未出现")
                         log_print(f"[{browser_id}] ✗ Position按钮未出现")
                         last_failure_step = "Position按钮未出现"
                         retry_count += 1
@@ -8872,23 +8872,23 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     
                     # 如果有 trendingPart1，重新点击子主题
                     if trending_part1:
-                        add_bro_log_entry(bro_log_list, browser_id, f"重新点击子主题 {trending_part1}")
+                        add_bro_log_entry(bro_log_list, browser_id, f"[8]重新点击子主题 {trending_part1}")
                         log_print(f"[{browser_id}] 重新点击子主题 {trending_part1}...")
                         success, error_type = click_trending_part1_if_needed(driver, browser_id, trending_part1)
                         if not success:
-                            add_bro_log_entry(bro_log_list, browser_id, "点击子主题失败，继续执行")
+                            add_bro_log_entry(bro_log_list, browser_id, "[8]点击子主题失败，继续执行")
                             log_print(f"[{browser_id}] ⚠ 点击子主题失败，继续执行...")
                             retry_count += 1
                             continue
                 
                 
                 
-                add_bro_log_entry(bro_log_list, browser_id, "步骤7.1: 选择买卖类型 Buy")
+                add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.1: 选择买卖类型 Buy")
                 log_print(f"[{browser_id}] 步骤7.1: 选择买卖类型 Buy...")
                 if not click_opinion_trade_type_button(trade_box, "Buy", browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, f"未找到{trade_type}按钮")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]未找到{trade_type}按钮")
                     log_print(f"[{browser_id}] ✗ 未找到{trade_type}按钮")
-                    last_failure_step = f"选择买卖类型{trade_type}失败"
+                    last_failure_step = f"[8]选择买卖类型{trade_type}失败"
                     retry_count += 1
                     continue
                 
@@ -8897,7 +8897,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 if not trade_box_divs:
                     add_bro_log_entry(bro_log_list, browser_id, "未找到 trade-box div")
                     log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
-                    return False, "[6]未找到 trade-box div", None
+                    return False, "[8]未找到 trade-box div", None
                 
                 trade_box1 = trade_box_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 trade-box div")
@@ -8908,9 +8908,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     'div[data-scope="tabs"][data-part="content"][data-state="open"]')
                 
                 if not tabs_content_divs:
-                    add_bro_log_entry(bro_log_list, browser_id, "未找到 tabs content div")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]未找到 tabs content div")
                     log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
-                    return False, "[6]未找到 tabs content div", None
+                    return False, "[8]未找到 tabs content div", None
                 
                 tabs_content = tabs_content_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 tabs content div")
@@ -8918,30 +8918,30 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 # 获取初始可用余额
                 initial_available_balance = get_available_balance_from_tabs_content(tabs_content, browser_id)
                 if initial_available_balance:
-                    add_bro_log_entry(bro_log_list, browser_id, f"获取到初始可用余额: {initial_available_balance}")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]获取到初始可用余额: {initial_available_balance}")
                     log_print(f"[{browser_id}] ✓ 获取到初始可用余额: {initial_available_balance}")
                 else:
-                    add_bro_log_entry(bro_log_list, browser_id, "未能获取初始可用余额，将使用 None")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]未能获取初始可用余额，将使用 None")
                     log_print(f"[{browser_id}] ⚠ 未能获取初始可用余额，将使用 None")
                     initial_available_balance = None
                 
                 # 7. 点击买卖类型按钮
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤7: 选择买卖类型 {trade_type}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤7: 选择买卖类型 {trade_type}")
                 log_print(f"[{browser_id}] 步骤7: 选择买卖类型 {trade_type}...")
                 if not click_opinion_trade_type_button(trade_box, trade_type, browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, f"未找到{trade_type}按钮")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]未找到{trade_type}按钮")
                     log_print(f"[{browser_id}] ✗ 未找到{trade_type}按钮")
-                    last_failure_step = f"[6]选择买卖类型{trade_type}失败"
+                    last_failure_step = f"[8]选择买卖类型{trade_type}失败"
                     retry_count += 1
                     continue
                 
                 # 8. 选择价格类型
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤8: 选择价格类型 {price_type}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤8: 选择价格类型 {price_type}")
                 log_print(f"[{browser_id}] 步骤8: 选择价格类型 {price_type}...")
                 if not select_opinion_price_type(trade_box, price_type, browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, f"选择价格类型{price_type}失败")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]选择价格类型{price_type}失败")
                     log_print(f"[{browser_id}] ✗ 选择价格类型{price_type}失败")
-                    last_failure_step = f"[6]选择价格类型{price_type}失败"
+                    last_failure_step = f"[8]选择价格类型{price_type}失败"
                     retry_count += 1
                     continue
                 
@@ -8950,7 +8950,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
                 if not trade_box_divs:
                     log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
-                    return False, "[6]未找到 trade-box div", None
+                    return False, "[8]未找到 trade-box div", None
                 
                 trade_box1 = trade_box_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 trade-box div")
@@ -8962,19 +8962,19 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 
                 if not tabs_content_divs:
                     log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
-                    return False, "未找到 tabs content div", None
+                    return False, "[8]未找到 tabs content div", None
                 
                 tabs_content = tabs_content_divs[0]
                 log_print(f"[{browser_id}] ✓ 找到 tabs content div")
                 
                 
                 # 9. 选择种类
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤9: 选择种类 {option_type}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤9: 选择种类 {option_type}")
                 log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
                 if not select_opinion_option_type(tabs_content, option_type, browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, f"选择种类{option_type}失败")
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]选择种类{option_type}失败")
                     log_print(f"[{browser_id}] ✗ 选择种类{option_type}失败")
-                    last_failure_step = f"[6]选择种类{option_type}失败"
+                    last_failure_step = f"[8]选择种类{option_type}失败"
                     retry_count += 1
                     continue
                 
@@ -8982,50 +8982,50 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         
         
                 # 10. 点击 Amount 标签
-                add_bro_log_entry(bro_log_list, browser_id, "步骤10: 点击 Amount 标签")
+                add_bro_log_entry(bro_log_list, browser_id, "[8]步骤10: 点击 Amount 标签")
                 log_print(f"[{browser_id}] 步骤10: 点击 Amount 标签...")
                 click_opinion_amount_tab(tabs_content, browser_id)
                 
                 # 11. 填入价格和数量
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤11: 填入价格和数量（模式：{price_type}）")
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤11: 填入价格和数量（模式：{price_type}）")
                 log_print(f"[{browser_id}] 步骤11: 填入价格和数量（模式：{price_type}）...")
                 # Market模式传None，Limit模式传price
                 fill_price = None if price_type == "Market" else price
                 if not fill_opinion_price_and_amount(tabs_content, fill_price, amount, browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, "填入价格/数量失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]填入价格/数量失败")
                     log_print(f"[{browser_id}] ✗ 填入价格/数量失败")
-                    last_failure_step = "[6]填入价格/数量失败"
+                    last_failure_step = "[8]填入价格/数量失败"
                     retry_count += 1
                     continue
                 
                 # 12. 提交订单
-                add_bro_log_entry(bro_log_list, browser_id, "步骤12: 提交订单")
+                add_bro_log_entry(bro_log_list, browser_id, "[8]步骤12: 提交订单")
                 log_print(f"[{browser_id}] 步骤12: 提交订单...")
                 submit_success, should_retry = submit_opinion_order(driver, tabs_content, trade_type, option_type, browser_id, browser_id, task_data, bro_log_list, trendingId)
                 if not submit_success:
-                    add_bro_log_entry(bro_log_list, browser_id, "提交订单失败")
+                    add_bro_log_entry(bro_log_list, browser_id, "[8]提交订单失败")
                     log_print(f"[{browser_id}] ✗ 提交订单失败")
                     if not should_retry:
                         # type=5点击取消按钮，不应重试
-                        add_bro_log_entry(bro_log_list, browser_id, "Type 5 任务已取消，不进行重试")
+                        add_bro_log_entry(bro_log_list, browser_id, "[8]Type 5 任务已取消，不进行重试")
                         log_print(f"[{browser_id}] ✗ Type 5 任务已取消，不进行重试")
-                        return False, "[6]另一个任务已失败", None
+                        return False, "[8]另一个任务已失败", None
                     elif isinstance(should_retry, str):
                         # should_retry是字符串，表示具体的失败原因
-                        add_bro_log_entry(bro_log_list, browser_id, f"Type 5 任务失败: {should_retry}")
+                        add_bro_log_entry(bro_log_list, browser_id, f"[8]Type 5 任务失败: {should_retry}")
                         log_print(f"[{browser_id}] ✗ Type 5 任务失败: {should_retry}")
                         return False, should_retry, None
-                    last_failure_step = "[7]提交订单失败"
+                    last_failure_step = "[8]提交订单失败"
                     retry_count += 1
                     continue
                 
                 # 如果所有步骤都成功，跳出循环
-                add_bro_log_entry(bro_log_list, browser_id, "步骤7-12执行成功")
+                add_bro_log_entry(bro_log_list, browser_id, "[9]步骤7-12执行成功")
                 log_print(f"[{browser_id}] ✓ 步骤7-12执行成功")
                 break
                 
             except Exception as e:
-                add_bro_log_entry(bro_log_list, browser_id, f"步骤7-12执行异常: {str(e)}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[9]步骤7-12执行异常: {str(e)}")
                 log_print(f"[{browser_id}] ✗ 步骤7-12执行异常: {str(e)}")
                 last_failure_step = f"[7]执行异常: {str(e)}"
                 retry_count += 1
@@ -9036,10 +9036,10 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         # 检查是否所有重试都失败了
         if retry_count > max_retry_attempts:
             if last_failure_step:
-                add_bro_log_entry(bro_log_list, browser_id, f"执行步骤7-12失败: {last_failure_step}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[9]执行步骤7-12失败: {last_failure_step}")
                 return False, f"{last_failure_step}", None
             else:
-                add_bro_log_entry(bro_log_list, browser_id, "执行步骤7-12失败")
+                add_bro_log_entry(bro_log_list, browser_id, "[9]执行步骤7-12失败")
                 return False, f"[7]执行步骤7-12失败", None
         
         # 13. 等待订单成功
@@ -9087,7 +9087,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             return False, tp2_msg, None
 
-                add_bro_log_entry(bro_log_list, browser_id, "步骤13: Type 5 任务 - 等待订单确认并收集数据")
+                add_bro_log_entry(bro_log_list, browser_id, "[11]步骤13: Type 5 任务 - 等待订单确认并收集数据")
                 log_print(f"[{browser_id}] 步骤13: Type 5 任务 - 等待订单确认并收集数据...")
                 success, msg = wait_for_type5_order_and_collect_data(
                 driver, 

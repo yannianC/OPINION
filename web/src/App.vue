@@ -796,6 +796,15 @@
                     <button class="btn-log btn-sm" @click="showHedgeLog(config)">
                       📋 日志
                     </button>
+                    <button 
+                      class="btn-log btn-sm" 
+                      @click="updateOrderbookForConfig(config)"
+                      :disabled="isUpdatingOrderbook(config)"
+                      style="margin-left: 4px;"
+                      title="手动更新订单薄"
+                    >
+                      {{ isUpdatingOrderbook(config) ? '更新中...' : '更新订单薄' }}
+                    </button>
                     <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
                       ❌ 关闭任务
                     </button>
@@ -2751,6 +2760,7 @@ const batchSize = ref(10)  // 每一批的个数
 const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据，key为事件名(trending)，value为{yesPosition, noPosition}
 const idToTrendingMap = ref(new Map())  // 存储 id -> trending 的映射
 const testingConfigIds = ref(new Set())  // 正在测试的配置ID集合
+const updatingOrderbookConfigIds = ref(new Set())  // 正在更新订单薄的配置ID集合
 const batchExecutionTime = ref(1)  // 每一批的执行时间（分钟），默认1分钟
 const currentBatchIndex = ref(0)  // 当前执行批次索引
 const batchTimer = ref(null)  // 批次定时器
@@ -8298,13 +8308,18 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           const hedgeData = response.data.data
           console.log(`配置 ${config.id} - 获取对冲双方成功 (任务 ${i + 1}/${availableSlots}):`, hedgeData)
           
+          // 获取 missionId（组任务的任务id）
+          const missionId = hedgeData.missionId
+          
           // 根据模式执行不同的对冲任务
           if (currentMode === 2 || currentMode === 3) {
             // 模式2和模式3：使用新的多任务逻辑
             await executeHedgeTaskV2(config, {
               ...hedgeData,
               currentPrice: orderPrice,
-              firstSide: priceInfo.firstSide
+              firstSide: priceInfo.firstSide,
+              missionId: missionId,  // 传递组任务id
+              priceInfo: priceInfo   // 传递订单薄数据，用于构建 depthStr
             })
           } else {
             // 模式1：使用原有逻辑
@@ -8380,6 +8395,183 @@ const showHedgeLog = (config) => {
   currentLogConfig.value = config
   hedgeLogs.value = loadHedgeLogs(config.id)
   showHedgeLogDialog.value = true
+}
+
+/**
+ * 检查配置是否正在更新订单薄
+ */
+const isUpdatingOrderbook = (config) => {
+  if (!config || !config.id) {
+    return false
+  }
+  return updatingOrderbookConfigIds.value.has(String(config.id))
+}
+
+/**
+ * 手动更新指定配置的订单薄
+ */
+const updateOrderbookForConfig = async (config) => {
+  if (!config || !config.id) {
+    showToast('配置不存在', 'warning')
+    return
+  }
+  
+  const configId = String(config.id)
+  
+  // 如果正在更新，直接返回
+  if (updatingOrderbookConfigIds.value.has(configId)) {
+    return
+  }
+  
+  // 标记为正在更新
+  updatingOrderbookConfigIds.value.add(configId)
+  
+  const pollTime = Date.now()
+  let priceInfo = null
+  let orderbookReason = null
+  
+  try {
+    showToast(`正在更新 ${config.trending} 的订单薄...`, 'info')
+    
+    // 尝试使用parseOrderbookData进行完整检查
+    try {
+      priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+      
+      if (priceInfo) {
+        // 检查是否满足对冲条件
+        const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+        
+        if (!meetsCondition) {
+          // 不满足条件，获取不满足的原因
+          if (priceInfo.diff <= 0.15) {
+            if (!hedgeMode.isClose) {
+              // 开仓模式：检查买一深度
+              if (priceInfo.depth1 >= hedgeMode.maxDepth) {
+                orderbookReason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+              } else {
+                orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+              }
+            } else {
+              // 平仓模式：检查卖一深度
+              if (priceInfo.depth2 >= hedgeMode.maxDepth) {
+                orderbookReason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+              } else {
+                orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+              }
+            }
+          } else {
+            orderbookReason = '不符合对冲条件'
+          }
+        }
+        
+        // 记录更新时间（成功获取订单薄的时间）
+        priceInfo.updateTime = Date.now()
+        priceInfo.pollTime = pollTime
+        priceInfo.reason = orderbookReason
+      }
+    } catch (error) {
+      // parseOrderbookData失败，尝试获取基本订单薄数据
+      console.warn(`配置 ${config.id} - 完整订单薄检查失败，尝试获取基本数据:`, error.message)
+      
+      try {
+        const basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+        
+        if (basicInfo) {
+          // 使用基本数据
+          priceInfo = {
+            ...basicInfo,
+            updateTime: Date.now(),  // 记录更新时间
+            pollTime: pollTime,      // 记录轮询时间
+            reason: error.message || '订单薄数据不满足条件'  // 记录不满足原因
+          }
+          orderbookReason = priceInfo.reason
+        } else {
+          throw new Error('获取基本订单薄数据失败')
+        }
+      } catch (basicError) {
+        // 基本数据也获取失败
+        console.error(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+        throw error  // 抛出原始错误
+      }
+    }
+    
+    if (priceInfo) {
+      // 保存订单薄数据到config.orderbookData（与自动分配时保存的位置一致）
+      config.orderbookData = priceInfo
+      
+      // 同时更新orderbookInfo（用于配置列表显示）
+      const meetsCondition = !orderbookReason
+      
+      // 获取basicInfo用于计算评分和显示统计信息
+      const basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+      if (basicInfo) {
+        config.orderbookInfo = {
+          firstSide: basicInfo.firstSide,
+          price1: basicInfo.price1,
+          price2: basicInfo.price2,
+          depth1: basicInfo.depth1,
+          depth2: basicInfo.depth2,
+          diff: basicInfo.diff,
+          meetsCondition: meetsCondition,
+          yesBidsCount: basicInfo.yesBidsCount,
+          yesAsksCount: basicInfo.yesAsksCount,
+          noBidsCount: basicInfo.noBidsCount,
+          noAsksCount: basicInfo.noAsksCount
+        }
+        
+        // 计算自动评分
+        const rating = calculateRating(basicInfo)
+        if (rating !== null) {
+          config.rating = rating
+          saveConfigRating(config)
+        }
+      } else {
+        // 如果获取basicInfo失败，至少使用priceInfo的基本信息
+        config.orderbookInfo = {
+          firstSide: priceInfo.firstSide,
+          price1: priceInfo.price1,
+          price2: priceInfo.price2,
+          depth1: priceInfo.depth1,
+          depth2: priceInfo.depth2,
+          diff: priceInfo.diff,
+          meetsCondition: meetsCondition
+        }
+      }
+      
+      showToast(`${config.trending} 订单薄更新成功`, 'success')
+      console.log(`✅ ${config.trending}: 订单薄更新成功`, {
+        先挂方: priceInfo.firstSide,
+        先挂价格: priceInfo.price1,
+        后挂价格: priceInfo.price2,
+        价差: priceInfo.diff,
+        不满足原因: orderbookReason
+      })
+    } else {
+      config.orderbookData = null
+      showToast(`${config.trending} 订单薄更新失败：数据不足`, 'error')
+      console.log(`❌ ${config.trending}: 订单薄更新失败`)
+    }
+  } catch (error) {
+    // 即使请求失败，也保存轮询时间和错误信息
+    const errorMessage = error.response?.data?.message || error.message || '获取深度失败'
+    config.orderbookData = {
+      pollTime: pollTime,
+      updateTime: null,  // 请求失败，没有更新时间
+      reason: errorMessage,
+      firstSide: null,
+      price1: null,
+      price2: null,
+      depth1: null,
+      depth2: null,
+      diff: null
+    }
+    
+    showToast(`${config.trending} 订单薄更新失败: ${errorMessage}`, 'error')
+    console.error(`更新 ${config.trending} 订单薄失败:`, error)
+  } finally {
+    // 移除更新标记
+    updatingOrderbookConfigIds.value.delete(configId)
+  }
 }
 
 /**
@@ -10075,6 +10267,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
   const firstSide = hedgeData.firstSide
   const yesList = hedgeData.yesList || []
   const noList = hedgeData.noList || []
+  const missionId = hedgeData.missionId  // 组任务的任务id
+  const priceInfo = hedgeData.priceInfo  // 订单薄数据
   
   // 创建对冲记录
   const hedgeRecord = {
@@ -10096,7 +10290,11 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     allTaskIds: [],  // 所有任务ID的数组
     // 保存原始数据，用于显示所有计划任务（包括未提交的）
     yesList: yesList,  // 原始YES任务列表
-    noList: noList     // 原始NO任务列表
+    noList: noList,    // 原始NO任务列表
+    missionId: missionId,  // 组任务的任务id
+    priceInfo: priceInfo,  // 订单薄数据
+    // 用于收集所有子任务的映射：{number: misId}
+    subTaskMap: {}  // {浏览器编号: 子任务id}
   }
   
   // 初始化 currentHedges 数组（如果不存在）
@@ -10207,6 +10405,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           }
           
           hedgeRecord.allTaskIds.push(taskId)
+          // 保存子任务映射：浏览器编号 -> 子任务id
+          hedgeRecord.subTaskMap[browserNo] = taskId
           firstSideSuccessCount++
         } else if (response.data && response.data.msg) {
           console.error(`模式2 - 提交先挂方任务失败（浏览器: ${browserNo}）:`, response.data.msg)
@@ -10226,6 +10426,68 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
     }
     
     console.log(`模式2 - 先挂方任务提交完成，成功: ${firstSideSuccessCount}/${firstSideList.length}`)
+    
+    // 调用更新接口的函数
+    const updateHedgeMissionStatus = async (hedgeRecord) => {
+      // 如果没有 missionId，则不调用更新接口
+      if (!hedgeRecord.missionId) {
+        console.log('模式2 - 没有 missionId，跳过更新接口调用')
+        return
+      }
+      
+      // 如果没有订单薄数据，则不调用更新接口
+      if (!hedgeRecord.priceInfo) {
+        console.log('模式2 - 没有订单薄数据，跳过更新接口调用')
+        return
+      }
+      
+      try {
+        // 构建 depthStr：买一深度,买一价；卖一价，卖一深度
+        const depth1 = hedgeRecord.priceInfo.depth1 || 0  // 买一深度
+        const price1 = hedgeRecord.priceInfo.price1 || 0  // 买一价
+        const price2 = hedgeRecord.priceInfo.price2 || 0  // 卖一价
+        const depth2 = hedgeRecord.priceInfo.depth2 || 0  // 卖一深度
+        const depthStr = `${depth1},${price1}；${price2},${depth2}`
+        
+        // 构建请求数据列表
+        const list = []
+        for (const [number, misId] of Object.entries(hedgeRecord.subTaskMap)) {
+          list.push({
+            missionId: hedgeRecord.missionId,
+            number: parseInt(number),
+            misId: parseInt(misId),
+            depthStr: depthStr
+          })
+        }
+        
+        // 如果没有子任务，则不调用更新接口
+        if (list.length === 0) {
+          console.log('模式2 - 没有子任务，跳过更新接口调用')
+          return
+        }
+        
+        const requestData = { list: list }
+        console.log('模式2 - 调用更新接口:', requestData)
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/hedge/updateHedgeMissionStatus',
+          requestData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data) {
+          console.log('模式2 - 更新接口调用成功:', response.data)
+        } else {
+          console.warn('模式2 - 更新接口调用返回异常:', response.data)
+        }
+      } catch (error) {
+        console.error('模式2 - 更新接口调用失败:', error)
+      }
+    }
     
     // 根据延时，再为后挂方添加type=1的任务
     const secondSide = firstSide === 'YES' ? 'NO' : 'YES'
@@ -10313,11 +10575,16 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
             }
             
             hedgeRecord.allTaskIds.push(taskId)
+            // 保存子任务映射：浏览器编号 -> 子任务id
+            hedgeRecord.subTaskMap[browserNo] = taskId
           }
         } catch (error) {
           console.error(`模式2 - 提交后挂方任务失败（浏览器: ${item.number}）:`, error)
         }
       }
+      
+      // 所有子任务提交完成后，调用更新接口
+      await updateHedgeMissionStatus(hedgeRecord)
     }
     
     // 初始化回调函数变量
@@ -10331,6 +10598,7 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           console.log(`[模式2-延时模式] 延时结束，提交后挂方任务`)
           try {
             await submitSecondSideTasks()
+            // submitSecondSideTasks 内部会调用 updateHedgeMissionStatus
           } catch (error) {
             console.error(`[模式2-延时模式] 提交后挂方任务失败:`, error)
             // 不因为后挂方任务提交失败而立即结束对冲，继续监控
@@ -10339,11 +10607,21 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
       }, hedgeMode.intervalDelay)
       // 延时模式下不需要回调
       submitSecondSideTasksCallback = null
+      
+      // 延时模式下，先挂方任务提交完成后也需要调用更新接口（如果后挂方没有任务）
+      if (secondSideList.length === 0) {
+        updateHedgeMissionStatus(hedgeRecord)
+      }
     } else {
       // 挂单成功模式：先提交先挂方任务，等第一个任务成功后提交后挂方任务
       console.log(`[模式2-挂单成功模式] 等待先挂方任务成功后提交后挂方任务`)
       // 监控先挂方任务状态，当第一个任务成功时提交后挂方任务
       submitSecondSideTasksCallback = submitSecondSideTasks
+      
+      // 如果后挂方没有任务，先挂方任务提交完成后也需要调用更新接口
+      if (secondSideList.length === 0) {
+        updateHedgeMissionStatus(hedgeRecord)
+      }
     }
     
     // 开始监控所有任务状态
