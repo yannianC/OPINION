@@ -9014,8 +9014,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     mission = task_data.get('mission', {})
                     exchange_config = task_data.get('exchangeConfig', {})
                     mission_type = mission.get('type')
+                    tp2 = mission.get('tp2')
                     
-                    if mission_type == 5:
+                    if mission_type == 5 and tp2:
                         add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.5: Type 5 任务 - 订单薄检查和价格调整")
                         log_print(f"[{browser_id}] 步骤7.5: Type 5 任务 - 订单薄检查和价格调整...")
                         

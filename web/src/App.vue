@@ -300,6 +300,18 @@
           <!-- 深度差相关设置 -->
           <div class="depth-diff-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
             <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">深度差相关设置</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; margin-bottom: 15px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.enableDepthDiffParams"
+                  :disabled="autoHedgeRunning"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                  @change="saveHedgeSettings"
+                />
+                <span style="color: #000; cursor: pointer;">在mission/add请求中传递tp2和tp4参数</span>
+              </label>
+            </div>
             <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
               <div class="trending-filter">
                 <label style="color: #000;">深度差15以上挂单后延时检测时间(秒):</label>
@@ -307,7 +319,7 @@
                   v-model="hedgeMode.delayTimeGt15" 
                   type="text" 
                   class="filter-input" 
-                  placeholder="300-600"
+                  placeholder="300,600"
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
                   style="width: 120px;"
@@ -319,7 +331,7 @@
                   v-model="hedgeMode.delayTime2To15" 
                   type="text" 
                   class="filter-input" 
-                  placeholder="30-60"
+                  placeholder="30,60"
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
                   style="width: 120px;"
@@ -331,7 +343,7 @@
                   v-model="hedgeMode.delayTime02To2" 
                   type="text" 
                   class="filter-input" 
-                  placeholder="0.5-0.5"
+                  placeholder="0.5,0.5"
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
                   style="width: 120px;"
@@ -2905,9 +2917,10 @@ const hedgeMode = reactive({
   posPriorityArea: '0.02,250',  // 优先开仓区间
   maxPosLimit: 3000,  // 开仓最大仓位限制
   // 深度差相关设置
-  delayTimeGt15: '300-600',  // 深度差15以上挂单后延时检测时间（秒）
-  delayTime2To15: '30-60',  // 深度差2-15挂单后延时检测时间（秒）
-  delayTime02To2: '0.5-0.5',  // 深度差0.2-2挂单后延时检测时间（秒）
+  enableDepthDiffParams: false,  // 是否在mission/add请求中传递tp2和tp4参数（默认关闭）
+  delayTimeGt15: '300,600',  // 深度差15以上挂单后延时检测时间（秒）
+  delayTime2To15: '30,60',  // 深度差2-15挂单后延时检测时间（秒）
+  delayTime02To2: '0.5,0.5',  // 深度差0.2-2挂单后延时检测时间（秒）
   maxEatValue01: 20,  // 深度差0.1时，最大多吃价值（U）
   maxPriceVolatility: 10  // 先挂方价格最大波动（买卖深度差的百分比）
 })
@@ -8239,7 +8252,7 @@ const parseOrderbookData = async (config, isClose) => {
     
     // 辅助函数：从范围字符串中获取随机值（秒）
     const getRandomFromRange = (rangeStr) => {
-      const [min, max] = rangeStr.split('-').map(v => parseFloat(v.trim()))
+      const [min, max] = rangeStr.split(',').map(v => parseFloat(v.trim()))
       return Math.random() * (max - min) + min
     }
     
@@ -8356,11 +8369,10 @@ const parseOrderbookData = async (config, isClose) => {
         }
       }
       
-      // 深度差0.1时，tp2 为深度差0.2-2挂单后延时检测时间的随机值（秒）
-      const delayRange = hedgeMode.delayTime02To2
-      tp2 = getRandomFromRange(delayRange)
+      // 深度差0.1时，不设置tp2（不传延迟检测时间）
+      tp2 = null
       
-      console.log(`深度差 0.1 - 最终价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
+      console.log(`深度差 0.1 - 最终价格: ${finalPrice.toFixed(2)}, tp2: null（不传）`)
       
     } else {
       // 其他深度差范围，使用原来的逻辑
@@ -10071,6 +10083,13 @@ const saveHedgeSettings = () => {
       // 模式一开仓专属设置
       posPriorityArea: hedgeMode.posPriorityArea,
       maxPosLimit: hedgeMode.maxPosLimit,
+      // 深度差相关设置
+      enableDepthDiffParams: hedgeMode.enableDepthDiffParams,
+      delayTimeGt15: hedgeMode.delayTimeGt15,
+      delayTime2To15: hedgeMode.delayTime2To15,
+      delayTime02To2: hedgeMode.delayTime02To2,
+      maxEatValue01: hedgeMode.maxEatValue01,
+      maxPriceVolatility: hedgeMode.maxPriceVolatility,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -10217,6 +10236,26 @@ const loadHedgeSettings = () => {
     }
     if (settings.maxPosLimit !== undefined) {
       hedgeMode.maxPosLimit = settings.maxPosLimit
+    }
+    
+    // 深度差相关设置
+    if (settings.enableDepthDiffParams !== undefined) {
+      hedgeMode.enableDepthDiffParams = settings.enableDepthDiffParams
+    }
+    if (settings.delayTimeGt15 !== undefined) {
+      hedgeMode.delayTimeGt15 = settings.delayTimeGt15
+    }
+    if (settings.delayTime2To15 !== undefined) {
+      hedgeMode.delayTime2To15 = settings.delayTime2To15
+    }
+    if (settings.delayTime02To2 !== undefined) {
+      hedgeMode.delayTime02To2 = settings.delayTime02To2
+    }
+    if (settings.maxEatValue01 !== undefined) {
+      hedgeMode.maxEatValue01 = settings.maxEatValue01
+    }
+    if (settings.maxPriceVolatility !== undefined) {
+      hedgeMode.maxPriceVolatility = settings.maxPriceVolatility
     }
     
     // yes数量大于、模式选择、账户选择
@@ -10595,14 +10634,18 @@ const executeHedgeTask = async (config, hedgeData) => {
       psSide: firstPsSide,
       amt: roundedShare,  // 保留2位小数向下取整
       price: hedgeData.currentPrice,
-      tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
-      tp4: getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
+      tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
     }
     
-    // 如果tp2有值，添加到任务数据中
-    if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-      taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
-      console.log(`添加tp2字段: ${taskData.tp2}秒`)
+    // 如果开关打开，才传递tp2和tp4
+    if (hedgeMode.enableDepthDiffParams) {
+      // 如果tp2有值，添加到任务数据中
+      if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+        taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
+        console.log(`添加tp2字段: ${taskData.tp2}秒`)
+      }
+      // 添加tp4字段（最大允许深度）
+      taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
     }
     
     const response = await axios.post(
@@ -10923,8 +10966,13 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       amt: floorToTwoDecimals(hedgeRecord.share),  // 保留2位小数向下取整
       price: parseFloat(secondPrice),
       tp1: firstTaskId,  // 任务二需要传递任务一的ID
-      tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
-      tp4: getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
+      tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
+    }
+    
+    // 如果开关打开，才传递tp2和tp4
+    if (hedgeMode.enableDepthDiffParams) {
+      // 添加tp4字段（最大允许深度）
+      taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
     }
     
     const response = await axios.post(
@@ -11159,13 +11207,17 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           psSide: firstPsSide,
           amt: share,
           price: taskPrice,
-          tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
-          tp4: getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
+          tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
         }
         
-        // 如果tp2有值，添加到任务数据中
-        if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-          taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
+        // 如果开关打开，才传递tp2和tp4
+        if (hedgeMode.enableDepthDiffParams) {
+          // 如果tp2有值，添加到任务数据中
+          if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+            taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
+          }
+          // 添加tp4字段（最大允许深度）
+          taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
         }
         
         const response = await axios.post(
@@ -11335,14 +11387,18 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
             psSide: secondPsSide,
             amt: share,
             price: taskPrice,
-            tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
-            tp4: getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
+            tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
             // 不再需要tp1
           }
           
-          // 如果tp2有值，添加到任务数据中
-          if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-            taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
+          // 如果开关打开，才传递tp2和tp4
+          if (hedgeMode.enableDepthDiffParams) {
+            // 如果tp2有值，添加到任务数据中
+            if (hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+              taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
+            }
+            // 添加tp4字段（最大允许深度）
+            taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
           }
           
           const response = await axios.post(
