@@ -3957,17 +3957,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         add_bro_log_entry(bro_log_list, serial_number, f"[16][{serial_number}] 链上数据检测到持仓数量增!")
                         api_detected = True
                         position_changed_detected = True
-                
-                # 如果链上数据先检测到变化，延长等待时间至20分钟，等待本地变化
-                if api_detected and not local_detected:
-                    if not api_detected_first:
-                        api_detected_first = True
-                        use_api_data = True
-                        phase1_timeout = 1200  # 延长到20分钟
-                        log_print(f"[{serial_number}] [{task_label}] 链上数据先检测到变化，延长等待时间至20分钟，等待本地变化...")
-                    # 继续等待，不执行后续步骤
-                    time.sleep(check_interval)
-                    continue
+   
                 
                 # 只有当本地也检测到变化时，才执行后续步骤
                 if position_changed_detected and (local_detected or (api_detected and local_detected)):
