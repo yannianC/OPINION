@@ -297,6 +297,48 @@ def get_mission_info(mission_id):
         return None
 
 
+def update_mission_tp(mission_id, tp5=None, tp8=None, price=None):
+    """
+    更新任务数据（tp5, tp8, price）
+    
+    Args:
+        mission_id: 任务ID
+        tp5: tp5字段值（可选）
+        tp8: tp8字段值（可选）
+        price: price字段值（可选）
+        
+    Returns:
+        bool: 成功返回True，失败返回False
+    """
+    try:
+        url = f"{SERVER_BASE_URL}/mission/updateMissionTp"
+        payload = {"id": mission_id}
+        
+        if tp5 is not None:
+            payload["tp5"] = tp5
+        if tp8 is not None:
+            payload["tp8"] = tp8
+        if price is not None:
+            payload["price"] = price
+        
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('code') == 0:
+                log_print(f"[系统] ✓ 更新任务{mission_id}数据成功")
+                return True
+            else:
+                log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败: {data.get('msg', '未知错误')}")
+                return False
+        else:
+            log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败，状态码: {response.status_code}")
+            return False
+    except Exception as e:
+        log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败: {str(e)}")
+        return False
+
+
 def send_fingerprint_monitor_request(browser_id):
     """
     发送 fingerprint 监控请求
@@ -364,19 +406,19 @@ def save_mission_result(mission_id, status, msg=""):
             
             if response.status_code == 200:
                 if attempt > 0:
-                    log_print(f"[系统] ✓ 保存任务结果成功（第 {attempt + 1} 次尝试）")
+                    log_print(f"[系统] ✓ 保存任务{mission_id}结果成功 （第 {attempt + 1} 次尝试）")
                 return True
             else:
-                log_print(f"[系统] ⚠ 保存任务结果失败，状态码: {response.status_code}")
+                log_print(f"[系统] ⚠ 保存任务{mission_id}结果失败，状态码: {response.status_code}")
                 
         except Exception as e:
-            log_print(f"[系统] ⚠ 保存任务结果失败: {str(e)}")
+            log_print(f"[系统] ⚠ 保存任务{mission_id}结果失败: {str(e)}")
         
         # 如果不是最后一次尝试，继续重试
         if attempt < max_retries:
             continue
         else:
-            log_print(f"[系统] ✗✗✗ 保存任务结果失败，已重试 {max_retries} 次")
+            log_print(f"[系统] ✗✗✗ 保存任务{mission_id}结果失败，已重试 {max_retries} 次")
     
     return False
 
@@ -2852,6 +2894,42 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         for p in p_tags:
             text = p.text.strip()
             if trade_type in text:
+                
+                # 在3秒内检查是否有"Insufficient balance"提示
+                log_msg = f"[8] 检查余额提示..."
+                log_print(f"[{serial_number}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                start_time_balance = time.time()
+                insufficient_balance_found = False
+                
+                while time.time() - start_time_balance < 3:
+                    try:
+                        # 查找所有div标签
+                        div_tags = driver.find_elements(By.TAG_NAME, "div")
+                        for div in div_tags:
+                            div_text = div.text.strip()
+                            if "Insufficient balance" in div_text:
+                                insufficient_balance_found = True
+                                log_msg = f"[8] ✗ 检测到余额不足提示: {div_text}"
+                                log_print(f"[{serial_number}] {log_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                break
+                        if insufficient_balance_found:
+                            break
+                        time.sleep(0.2)  # 短暂等待后重试
+                    except Exception as e:
+                        # 查找过程中出现异常，继续尝试
+                        time.sleep(0.2)
+                        continue
+                
+                if insufficient_balance_found:
+                    log_msg = f"[8] ✗ 余额不足"
+                    log_print(f"[{serial_number}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    return False, "[8]余额不足"
+                
+                
+                
                 log_msg = f"[8] ✓ 找到提交按钮，文本: {text}"
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -2896,6 +2974,12 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                     return False, "[7]限价距离市价差距过大"
                 
                 log_msg = f"[8] ✓ 未检测到限价提示，继续执行..."
+                log_print(f"[{serial_number}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                
+
+                
+                log_msg = f"[8] ✓ 未检测到余额不足提示，继续执行..."
                 log_print(f"[{serial_number}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 
@@ -3312,13 +3396,13 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     # 检查 tp2 是否有值，如果有则等待
                                     tp2 = mission.get('tp2')
                                     if tp2:
-                                        wait_time = tp2 + 30  # tp2的值+30秒
+                                        wait_time = tp2 + 120  # tp2的值+60秒
                                         log_msg = f"[OP] 任务二: 检测到tp2={tp2}，需要等待{wait_time}秒..."
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         
                                         start_wait_time = time.time()
-                                        check_interval = 30  # 每30秒检查一次
+                                        check_interval = 20  # 每30秒检查一次
                                         last_check_time = start_wait_time
                                         
                                         while time.time() - start_wait_time < wait_time:
@@ -3335,6 +3419,11 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                                     buttons[0].click()  # 点击取消按钮
                                                     return False, "[8]本任务正常，任务一确认失败"
+                                                elif tp1_status == 22:
+                                                    log_msg = f"[9]任务一在规定时间内，仍是买一或卖一"
+                                                    log_print(f"[{serial_number}] {log_msg}")
+                                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                    break
                                                 
                                                 last_check_time = time.time()
                                             
@@ -3888,7 +3977,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     add_bro_log_entry(bro_log_list, serial_number, f"[12][{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
     
     
-    phase1_timeout = 600  # 10分钟
+    phase1_timeout = 480  # 8分钟
     check_interval = 20  # 每20秒检查
     refresh_interval = 120  # 每2分钟刷新一次
     
@@ -4136,16 +4225,6 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         api_detected = True
                         position_changed_detected = True
                 
-                # 如果链上数据先检测到变化，延长等待时间至20分钟，等待本地变化
-                if api_detected and not local_detected:
-                    if not api_detected_first:
-                        api_detected_first = True
-                        use_api_data = True
-                        phase1_timeout = 1200  # 延长到20分钟
-                        log_print(f"[{serial_number}] [{task_label}] 链上数据先检测到变化，延长等待时间至20分钟，等待本地变化...")
-                    # 继续等待，不执行后续步骤
-                    time.sleep(check_interval)
-                    continue
                 
                 # 只有当本地也检测到变化时，才执行后续步骤
                 if position_changed_detected and (local_detected or (api_detected and local_detected)):
@@ -4287,7 +4366,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
     if hava_order or position_changed:
         # 在10分钟内，每隔30秒检测一次任务一的状态
         log_print(f"[{serial_number}] [{task_label}] 开始10分钟内的定期检测（每隔30秒检测一次任务状态）...")
-        phase2_timeout = 600
+        phase2_timeout = 480
         phase2_check_interval = 30  # 30秒
         phase2_start_time = time.time()
         
@@ -7680,20 +7759,28 @@ def save_exchange_config_blacklist(exchange_config_id, trending, trending_part1,
         return False
 
 
-def cancel_opinion_open_orders_simple(driver, browser_id):
+def cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list=None):
     """
     简单取消Open Orders中的第一个挂单（用于tp2检查场景）
     
     Args:
         driver: Selenium WebDriver对象
         browser_id: 浏览器ID
+        bro_log_list: 日志列表（可选）
         
     Returns:
-        bool: 是否有挂单（True=有挂单，False=没有挂单）
+        str: 取消订单的详细结果
+            - "未找到挂单"：没有挂单
+            - "有挂单，已取消挂单"：有挂单并成功取消
+            - "有挂单，取消挂单失败"：有挂单但取消失败
     """
     try:
         # 点击Open Orders按钮
-        log_print(f"[{browser_id}] 点击Open Orders按钮...")
+        log_msg = f"[{browser_id}] 点击Open Orders按钮..."
+        log_print(log_msg)
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+        
         open_orders_clicked = False
         start_time = time.time()
         while time.time() - start_time < 10:
@@ -7702,7 +7789,10 @@ def cancel_opinion_open_orders_simple(driver, browser_id):
                 for button in buttons:
                     if button.text.strip() == "Open Orders":
                         button.click()
-                        log_print(f"[{browser_id}] ✓ 已点击 Open Orders 按钮")
+                        log_msg = f"[{browser_id}] ✓ 已点击 Open Orders 按钮"
+                        log_print(log_msg)
+                        if bro_log_list is not None:
+                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         open_orders_clicked = True
                         break
                 if open_orders_clicked:
@@ -7712,10 +7802,13 @@ def cancel_opinion_open_orders_simple(driver, browser_id):
                 time.sleep(0.5)
         
         if not open_orders_clicked:
-            log_print(f"[{browser_id}] ⚠ 10秒内未找到 Open Orders 按钮")
-            return False
+            log_msg = f"[{browser_id}] ⚠ 10秒内未找到 Open Orders 按钮"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "未找到挂单"
         
-        time.sleep(5)
+        time.sleep(7)
         
         # 查找 Open Orders div
         tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
@@ -7727,45 +7820,69 @@ def cancel_opinion_open_orders_simple(driver, browser_id):
                 break
         
         if not open_orders_div:
-            log_print(f"[{browser_id}] ⚠ 未找到Open Orders div")
-            return False  # 无法判断，返回False
+            log_msg = f"[{browser_id}] ⚠ 未找到Open Orders div"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "未找到挂单"
         
         # 检查是否有 "No data yet"
         all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
         for p in all_p_tags_in_div:
             if "No data yet" in p.text:
-                log_print(f"[{browser_id}] ✓ 没有挂单")
-                return False  # 返回False表示没有挂单
+                log_msg = f"[{browser_id}] ✓ 没有挂单"
+                log_print(log_msg)
+                if bro_log_list is not None:
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                return "没有挂单"
         
         # 获取 tbody 和 tr 列表
         try:
             tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
             tr_list = tbody.find_elements(By.TAG_NAME, "tr")
         except:
-            log_print(f"[{browser_id}] ⚠ 未找到 tbody 或 tr 列表")
-            return False  # 无法判断，返回False
+            log_msg = f"[{browser_id}] ⚠ 未找到 tbody 或 tr 列表"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "未找到挂单"
         
         if not tr_list or len(tr_list) == 0:
-            log_print(f"[{browser_id}] ✓ 没有挂单")
-            return False  # 返回False表示没有挂单
+            log_msg = f"[{browser_id}] ✓ 没有挂单"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "未找到挂单"
         
         # 有挂单，继续取消流程
-        log_print(f"[{browser_id}] 检测到有挂单，开始取消...")
+        log_msg = f"[{browser_id}] 检测到有挂单，开始取消..."
+        log_print(log_msg)
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
         
         # 取消第一个挂单
         first_tr = tr_list[0]
         tds = first_tr.find_elements(By.TAG_NAME, "td")
         if len(tds) == 0:
-            log_print(f"[{browser_id}] ⚠ 未找到td")
-            return False
+            log_msg = f"[{browser_id}] ⚠ 未找到td"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "未找到挂单"
         
         last_td = tds[-1]
         svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
         if not svg_elements or len(svg_elements) == 0:
-            log_print(f"[{browser_id}] ⚠ 未找到svg元素")
-            return False
+            log_msg = f"[{browser_id}] ⚠ 未找到svg元素"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "有挂单，取消挂单失败"
         
-        log_print(f"[{browser_id}] 点击svg取消按钮...")
+        log_msg = f"[{browser_id}] 点击svg取消按钮..."
+        log_print(log_msg)
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
         svg_elements[0].click()
         time.sleep(2)
         
@@ -7778,7 +7895,10 @@ def cancel_opinion_open_orders_simple(driver, browser_id):
                 all_buttons = driver.find_elements(By.TAG_NAME, "button")
                 for btn in all_buttons:
                     if btn.text.strip() == "Confirm":
-                        log_print(f"[{browser_id}] ✓ 找到Confirm按钮，点击...")
+                        log_msg = f"[{browser_id}] ✓ 找到Confirm按钮，点击..."
+                        log_print(log_msg)
+                        if bro_log_list is not None:
+                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         btn.click()
                         confirm_found = True
                         break
@@ -7786,34 +7906,91 @@ def cancel_opinion_open_orders_simple(driver, browser_id):
                     break
                 time.sleep(0.5)
             except Exception as e:
-                log_print(f"[{browser_id}] ⚠ 查找Confirm按钮时出错: {str(e)}")
+                log_msg = f"[{browser_id}] ⚠ 查找Confirm按钮时出错: {str(e)}"
+                log_print(log_msg)
+                if bro_log_list is not None:
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 time.sleep(0.5)
         
         if not confirm_found:
-            log_print(f"[{browser_id}] ⚠ 未找到Confirm按钮")
-            return True  # 有挂单但取消失败，仍然返回True表示有挂单
+            log_msg = f"[{browser_id}] ⚠ 未找到Confirm按钮"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "有挂单，取消挂单失败"
         
-        log_print(f"[{browser_id}] ✓ 挂单已取消")
-        return True  # 有挂单并已取消，返回True表示有挂单
+        # 等待10秒后重新检查挂单
+        log_msg = f"[{browser_id}] 等待10秒后重新检查挂单..."
+        log_print(log_msg)
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+        time.sleep(10)
+        
+        # 重新获取open_orders_div
+        tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+        open_orders_div = None
+        for div in tabs_divs:
+            div_id = div.get_attribute('id')
+            if div_id and 'openorders' in div_id.lower():
+                open_orders_div = div
+                break
+        
+        if not open_orders_div:
+            # 未找到Open Orders div，说明挂单已取消
+            log_msg = f"[{browser_id}] ✓ 挂单已取消（未找到Open Orders div）"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "有挂单，已取消挂单"
+        
+        # 重新获取tbody和tr
+        try:
+            tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+            tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+        except:
+            # 没有tbody或tr，说明挂单已取消
+            log_msg = f"[{browser_id}] ✓ 挂单已取消（无tbody/tr）"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "有挂单，已取消挂单"
+        
+        if not tr_list or len(tr_list) == 0:
+            # 没有tr，说明挂单已取消
+            log_msg = f"[{browser_id}] ✓ 挂单已取消（无tr）"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "有挂单，已取消挂单"
+        else:
+            # 挂单仍然存在，取消失败
+            log_msg = f"[{browser_id}] ⚠ 挂单仍然存在，取消失败"
+            log_print(log_msg)
+            if bro_log_list is not None:
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return "有挂单，取消挂单失败，可能已成交"
         
     except Exception as e:
-        log_print(f"[{browser_id}] ⚠ 取消挂单时出错: {str(e)}")
-        return False
+        log_msg = f"[{browser_id}] ⚠ 取消挂单时出错: {str(e)}"
+        log_print(log_msg)
+        if bro_log_list is not None:
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+        return "有挂单，取消挂单失败，可能已成交"
 
 
 def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_position_count, trade_type, option_type, trending_part1, amount, bro_log_list):
     """
-    在tp2时间段内检查仓位和订单薄
+    在tp2时间段内检查订单薄，判断自己是否仍然是买一价或卖一价
     
     Args:
         driver: Selenium WebDriver对象
         browser_id: 浏览器ID
         task_data: 任务数据
-        initial_position_count: 初始仓位数量
+        initial_position_count: 初始仓位数量（不再使用）
         trade_type: Buy 或 Sell
         option_type: YES 或 NO
-        trending_part1: 子标题
-        amount: 下单数量
+        trending_part1: 子标题（不再使用）
+        amount: 下单数量（不再使用）
         bro_log_list: 日志列表
         
     Returns:
@@ -7834,14 +8011,117 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
     log_print(f"[{browser_id}] {log_msg}")
     add_bro_log_entry(bro_log_list, browser_id, log_msg)
     
-    # 第一次检查在15秒后
-    first_check_delay = 15
-    check_interval = 120  # 每2分钟检查一次
-    page_load_wait = 60  # 页面加载完成后等待60秒
+    # 根据YES/NO方向选择token_id
+    if option_type == "YES":
+        token_id = exchange_config.get('trendingPart1', '')
+    else:
+        token_id = exchange_config.get('trendingPart2', '')
     
+    if not token_id:
+        log_msg = f"[OP] 任务一: ⚠ 无法获取token_id"
+        log_print(f"[{browser_id}] {log_msg}")
+        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+        return True, ""  # 无法获取token_id，继续流程
+    
+    mission_price = float(mission.get('price', 0))
+    mission_side = mission.get('side', 0)  # 1=买，2=卖
+    is_buy = (trade_type == "Buy" or mission_side == 1)
+    
+    check_interval = 30  # 每30秒检查一次
     start_time = time.time()
-    next_check_time = start_time + first_check_delay  # 第一次检查在15秒后
     check_count = 0
+    max_orderbook_retries = 5
+    
+    time.sleep(10);
+    
+    # 立即先运行一次
+    check_count += 1
+    log_msg = f"[OP] 任务一: 第{check_count}次检查（立即执行）..."
+    log_print(f"[{browser_id}] {log_msg}")
+    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+    
+    # 获取订单薄数据（最多重试5次）
+    orderbook_data = None
+    orderbook_retry_count = 0
+    
+    while orderbook_data is None and orderbook_retry_count < max_orderbook_retries:
+        orderbook_data = fetch_orderbook_data(token_id)
+        if orderbook_data is None:
+            orderbook_retry_count += 1
+            if orderbook_retry_count < max_orderbook_retries:
+                log_msg = f"[OP] 任务一: 订单薄数据获取失败，重试中... ({orderbook_retry_count}/{max_orderbook_retries})"
+                log_print(f"[{browser_id}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                time.sleep(2)
+    
+    if orderbook_data is None:
+        log_msg = f"[OP] 任务一: ⚠ 订单薄数据获取失败，继续流程"
+        log_print(f"[{browser_id}] {log_msg}")
+        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+        # 获取失败，继续流程
+    else:
+        # 检查价格
+        if is_buy:
+            # 买入（开仓）：检查是否是买一价
+            if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
+                # API返回的价格是小数，需要乘以100转换为百分比
+                best_bid_price = float(orderbook_data['bids'][0].get('price', 0)) * 100
+                is_best_bid = abs(best_bid_price - mission_price) < 0.01
+                
+                log_msg = f"[OP] 任务一: 买一价: {best_bid_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_bid}"
+                log_print(f"[{browser_id}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                
+                if not is_best_bid:
+                    # 不是买一价，取消订单并返回失败
+                    log_msg = f"[OP] 任务一: ✗ 已不是买一价，取消订单"
+                    log_print(f"[{browser_id}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    
+                    cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                    fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                    return False, fail_msg
+            else:
+                # 没有买盘数据，取消订单并返回失败
+                log_msg = f"[OP] 任务一: ✗ 没有买盘数据，取消订单"
+                log_print(f"[{browser_id}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                
+                cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                return False, fail_msg
+        else:
+            # 卖出（平仓）：检查是否是卖一价
+            if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
+                # API返回的价格是小数，需要乘以100转换为百分比
+                best_ask_price = float(orderbook_data['asks'][0].get('price', 0)) * 100
+                is_best_ask = abs(best_ask_price - mission_price) < 0.01
+                
+                log_msg = f"[OP] 任务一: 卖一价: {best_ask_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_ask}"
+                log_print(f"[{browser_id}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                
+                if not is_best_ask:
+                    # 不是卖一价，取消订单并返回失败
+                    log_msg = f"[OP] 任务一: ✗ 已不是卖一价，取消订单"
+                    log_print(f"[{browser_id}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    
+                    cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                    fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                    return False, fail_msg
+            else:
+                # 没有卖盘数据，取消订单并返回失败
+                log_msg = f"[OP] 任务一: ✗ 没有卖盘数据，取消订单"
+                log_print(f"[{browser_id}] {log_msg}")
+                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                
+                cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                return False, fail_msg
+    
+    # 在tp2时间内，每隔30s检查一次
+    next_check_time = start_time + check_interval
     
     while time.time() - start_time < tp2_time:
         current_time = time.time()
@@ -7849,218 +8129,89 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
         # 检查是否到了检查时间
         if current_time >= next_check_time:
             check_count += 1
-            next_check_time = current_time + check_interval  # 下次检查在2分钟后
+            next_check_time = current_time + check_interval
             
-            # 刷新页面
-            log_msg = f"[OP] 任务一: 第{check_count}次检查 - 刷新页面..."
-            log_print(f"[{browser_id}] {log_msg}")
-            add_bro_log_entry(bro_log_list, browser_id, log_msg)
-            refresh_page_with_opinion_check(driver, browser_id)
-            
-            # 等待页面加载完成
-            log_msg = f"[OP] 任务一: 等待页面加载完成（{page_load_wait}秒）..."
-            log_print(f"[{browser_id}] {log_msg}")
-            add_bro_log_entry(bro_log_list, browser_id, log_msg)
-            time.sleep(page_load_wait)
-            
-            # 检查仓位变化
-            log_msg = f"[OP] 任务一: 检查仓位变化..."
+            log_msg = f"[OP] 任务一: 第{check_count}次检查..."
             log_print(f"[{browser_id}] {log_msg}")
             add_bro_log_entry(bro_log_list, browser_id, log_msg)
             
-            current_position_count = check_position_count(driver, browser_id, trending_part1, trade_type, option_type)
-            position_change = 0  # 默认值
+            # 获取订单薄数据（最多重试5次）
+            orderbook_data = None
+            orderbook_retry_count = 0
             
-            if current_position_count < 0:
-                log_msg = f"[OP] 任务一: ⚠ 无法获取当前仓位数量"
-                log_print(f"[{browser_id}] {log_msg}")
-                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-            else:
-                # 计算仓位变化量
-                position_change = current_position_count - initial_position_count
-                log_msg = f"[OP] 任务一: 当前仓位: {current_position_count}, 初始仓位: {initial_position_count}, 变化量: {position_change}"
-                log_print(f"[{browser_id}] {log_msg}")
-                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                # 检查变化量是否超过10%
-                if amount and amount > 0 and position_change > 0:
-                    change_percent = (position_change / amount) * 100
-                    log_msg = f"[OP] 任务一: 仓位变化百分比: {change_percent:.2f}%"
-                    log_print(f"[{browser_id}] {log_msg}")
-                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                    
-                    if change_percent > 10:
-                        # 变化量超过10%，检查并取消挂单
-                        log_msg = f"[OP] 任务一: ✗ 仓位变化超过10%，检查挂单..."
-                        log_print(f"[{browser_id}] {log_msg}")
-                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                        
-                        has_open_orders = cancel_opinion_open_orders_simple(driver, browser_id)
-                         # 拉黑事件
-                        exchange_config_id = exchange_config.get('id')
-                        if exchange_config_id:
-                            save_exchange_config_blacklist(
-                                    exchange_config_id,
-                                    exchange_config.get('trending', ''),
-                                    exchange_config.get('trendingPart1'),
-                                    exchange_config.get('trendingPart2'),
-                                    exchange_config.get('trendingPart3'),
-                                    exchange_config.get('opUrl', ''),
-                                    exchange_config.get('polyUrl', ''),
-                                    exchange_config.get('opTopicId', ''),
-                                    exchange_config.get('weight', 0),
-                                    exchange_config.get('isOpen', 1)
-                            )
-                        
-                        # 更改任务状态为3
-                        mission_id = mission.get('id')
-                        save_mission_result(mission_id, 3)
-                        
-                        if has_open_orders:
-                            return False, "先挂方单子被吃，已超过10%，有挂单取消挂单"
-                        else:
-                            return False, "先挂方单子被吃，已超过10%，已无挂单"
-            
-            # 如果仓位没有变化或变化不足10%，检查订单薄
-            if not amount or amount <= 0 or position_change <= amount * 0.1:
-                log_msg = f"[OP] 任务一: 仓位未变化或变化不足10%，检查订单薄..."
-                log_print(f"[{browser_id}] {log_msg}")
-                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                # 根据YES/NO方向选择token_id
-                if option_type == "YES":
-                    token_id = exchange_config.get('trendingPart1', '')
-                else:
-                    token_id = exchange_config.get('trendingPart2', '')
-                
-                if not token_id:
-                    log_msg = f"[OP] 任务一: ⚠ 无法获取token_id"
-                    log_print(f"[{browser_id}] {log_msg}")
-                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                    continue
-                
-                # 请求订单薄数据（一直重试直到成功）
-                orderbook_data = None
-                while orderbook_data is None:
-                    orderbook_data = fetch_orderbook_data(token_id)
-                    if orderbook_data is None:
-                        log_msg = f"[OP] 任务一: 订单薄数据获取失败，重试中..."
+            while orderbook_data is None and orderbook_retry_count < max_orderbook_retries:
+                orderbook_data = fetch_orderbook_data(token_id)
+                if orderbook_data is None:
+                    orderbook_retry_count += 1
+                    if orderbook_retry_count < max_orderbook_retries:
+                        log_msg = f"[OP] 任务一: 订单薄数据获取失败，重试中... ({orderbook_retry_count}/{max_orderbook_retries})"
                         log_print(f"[{browser_id}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         time.sleep(2)
-                
-                log_msg = f"[OP] 任务一: ✓ 获取到订单薄数据"
+            
+            if orderbook_data is None:
+                log_msg = f"[OP] 任务一: ⚠ 订单薄数据获取失败，继续等待..."
                 log_print(f"[{browser_id}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                # 检查买一价/卖一价和深度
-                mission_price = mission.get('price', 0)
-                mission_side = mission.get('side', 0)  # 1=买，2=卖
-                
-                if trade_type == "Buy" or mission_side == 1:
-                    # 买：检查买一价和买一价深度
-                    if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
-                        best_bid_price = float(orderbook_data['bids'][0].get('price', 0))
-                        best_bid_amount = float(orderbook_data['bids'][0].get('amount', 0))
-                        
-                        # 计算买一价总深度
-                        total_bid_depth = sum(float(bid.get('amount', 0)) for bid in orderbook_data['bids'])
-                        
-                        log_msg = f"[OP] 任务一: 买一价: {best_bid_price}, 我的价格: {mission_price}, 买一价深度: {best_bid_amount}, 总深度: {total_bid_depth}, 我的下单量: {amount}"
+                continue
+            
+            # 检查价格
+            if is_buy:
+                # 买入（开仓）：检查是否是买一价
+                if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
+                    best_bid_price = float(orderbook_data['bids'][0].get('price', 0)) * 100
+                    is_best_bid = abs(best_bid_price - mission_price) < 0.01
+                    
+                    log_msg = f"[OP] 任务一: 买一价: {best_bid_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_bid}"
+                    log_print(f"[{browser_id}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    
+                    if not is_best_bid:
+                        # 不是买一价，取消订单并返回失败
+                        log_msg = f"[OP] 任务一: ✗ 已不是买一价，取消订单"
                         log_print(f"[{browser_id}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         
-                        # 检查是否是买一价
-                        is_best_bid = abs(best_bid_price - mission_price) < 0.01
-                        
-                        # 检查深度是否占90%以上
-                        depth_percent = (best_bid_amount / total_bid_depth * 100) if total_bid_depth > 0 else 0
-                        my_depth_percent = (amount / total_bid_depth * 100) if total_bid_depth > 0 else 0
-                        
-                        if not is_best_bid or depth_percent < 90 or my_depth_percent < 90:
-                            # 不符合条件，取消订单并拉黑
-                            log_msg = f"[OP] 任务一: ✗ 不符合条件，取消订单并拉黑事件"
-                            log_print(f"[{browser_id}] {log_msg}")
-                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                            
-                            cancel_opinion_open_orders_simple(driver, browser_id)
-                            
-                            # 拉黑事件
-                            exchange_config_id = exchange_config.get('id')
-                            if exchange_config_id:
-                                save_exchange_config_blacklist(
-                                    exchange_config_id,
-                                    exchange_config.get('trending', ''),
-                                    exchange_config.get('trendingPart1'),
-                                    exchange_config.get('trendingPart2'),
-                                    exchange_config.get('trendingPart3'),
-                                    exchange_config.get('opUrl', ''),
-                                    exchange_config.get('polyUrl', ''),
-                                    exchange_config.get('opTopicId', ''),
-                                    exchange_config.get('weight', 0),
-                                    exchange_config.get('isOpen', 1)
-                                )
-                            
-                            # 更改任务状态为3
-                            mission_id = mission.get('id')
-                            save_mission_result(mission_id, 3)
-                            
-                            if not is_best_bid:
-                                return False, "不是买一价，已取消订单"
-                            else:
-                                return False, f"深度不足90%（当前{depth_percent:.2f}%，我的{my_depth_percent:.2f}%），已取消订单"
+                        cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                        fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                        return False, fail_msg
                 else:
-                    # 卖：检查卖一价和卖一价深度
-                    if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
-                        best_ask_price = float(orderbook_data['asks'][0].get('price', 0))
-                        best_ask_amount = float(orderbook_data['asks'][0].get('amount', 0))
-                        
-                        # 计算卖一价总深度
-                        total_ask_depth = sum(float(ask.get('amount', 0)) for ask in orderbook_data['asks'])
-                        
-                        log_msg = f"[OP] 任务一: 卖一价: {best_ask_price}, 我的价格: {mission_price}, 卖一价深度: {best_ask_amount}, 总深度: {total_ask_depth}, 我的下单量: {amount}"
+                    # 没有买盘数据，取消订单并返回失败
+                    log_msg = f"[OP] 任务一: ✗ 没有买盘数据，取消订单"
+                    log_print(f"[{browser_id}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    
+                    cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                    fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                    return False, fail_msg
+            else:
+                # 卖出（平仓）：检查是否是卖一价
+                if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
+                    best_ask_price = float(orderbook_data['asks'][0].get('price', 0)) * 100
+                    is_best_ask = abs(best_ask_price - mission_price) < 0.01
+                    
+                    log_msg = f"[OP] 任务一: 卖一价: {best_ask_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_ask}"
+                    log_print(f"[{browser_id}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    
+                    if not is_best_ask:
+                        # 不是卖一价，取消订单并返回失败
+                        log_msg = f"[OP] 任务一: ✗ 已不是卖一价，取消订单"
                         log_print(f"[{browser_id}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                         
-                        # 检查是否是卖一价
-                        is_best_ask = abs(best_ask_price - mission_price) < 0.01
-                        
-                        # 检查深度是否占90%以上
-                        depth_percent = (best_ask_amount / total_ask_depth * 100) if total_ask_depth > 0 else 0
-                        my_depth_percent = (amount / total_ask_depth * 100) if total_ask_depth > 0 else 0
-                        
-                        if not is_best_ask or depth_percent < 90 or my_depth_percent < 90:
-                            # 不符合条件，取消订单并拉黑
-                            log_msg = f"[OP] 任务一: ✗ 不符合条件，取消订单并拉黑事件"
-                            log_print(f"[{browser_id}] {log_msg}")
-                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                            
-                            cancel_opinion_open_orders_simple(driver, browser_id)
-                            
-                            # 拉黑事件
-                            exchange_config_id = exchange_config.get('id')
-                            if exchange_config_id:
-                                save_exchange_config_blacklist(
-                                    exchange_config_id,
-                                    exchange_config.get('trending', ''),
-                                    exchange_config.get('trendingPart1'),
-                                    exchange_config.get('trendingPart2'),
-                                    exchange_config.get('trendingPart3'),
-                                    exchange_config.get('opUrl', ''),
-                                    exchange_config.get('polyUrl', ''),
-                                    exchange_config.get('opTopicId', ''),
-                                    exchange_config.get('weight', 0),
-                                    exchange_config.get('isOpen', 1)
-                                )
-                            
-                            # 更改任务状态为3
-                            mission_id = mission.get('id')
-                            save_mission_result(mission_id, 3)
-                            
-                            if not is_best_ask:
-                                return False, "不是卖一价，已取消订单"
-                            else:
-                                return False, f"深度不足90%（当前{depth_percent:.2f}%，我的{my_depth_percent:.2f}%），已取消订单"
+                        cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                        fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                        return False, fail_msg
+                else:
+                    # 没有卖盘数据，取消订单并返回失败
+                    log_msg = f"[OP] 任务一: ✗ 没有卖盘数据，取消订单"
+                    log_print(f"[{browser_id}] {log_msg}")
+                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                    
+                    cancel_result = cancel_opinion_open_orders_simple(driver, browser_id, bro_log_list)
+                    fail_msg = f"[11]先挂方已不是买一或卖一，取消挂单，{cancel_result}"
+                    return False, fail_msg
         
         time.sleep(1)  # 每秒检查一次是否到了检查时间
     
@@ -8069,267 +8220,73 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
     log_print(f"[{browser_id}] {log_msg}")
     add_bro_log_entry(bro_log_list, browser_id, log_msg)
     
-    # 最后一次检查仓位和订单薄
-    current_position_count = check_position_count(driver, browser_id, trending_part1, trade_type, option_type)
-    position_change = 0  # 默认值
+    # 最后一次获取订单薄数据
+    orderbook_data = None
+    orderbook_retry_count = 0
     
-    if current_position_count < 0:
-        log_msg = f"[OP] 任务一: ⚠ 无法获取当前仓位数量"
-        log_print(f"[{browser_id}] {log_msg}")
-        add_bro_log_entry(bro_log_list, browser_id, log_msg)
-    else:
-        position_change = current_position_count - initial_position_count
-        log_msg = f"[OP] 任务一: 当前仓位: {current_position_count}, 初始仓位: {initial_position_count}, 变化量: {position_change}"
-        log_print(f"[{browser_id}] {log_msg}")
-        add_bro_log_entry(bro_log_list, browser_id, log_msg)
-        
-        # 检查变化量是否超过10%
-        if amount and amount > 0 and position_change > 0:
-            change_percent = (position_change / amount) * 100
-            log_msg = f"[OP] 任务一: 仓位变化百分比: {change_percent:.2f}%"
-            log_print(f"[{browser_id}] {log_msg}")
-            add_bro_log_entry(bro_log_list, browser_id, log_msg)
-            
-            if change_percent > 10:
-                # 变化量超过10%，检查并取消挂单
-                log_msg = f"[OP] 任务一: ✗ tp2时间结束，仓位变化超过10%，取消订单并拉黑事件"
-                log_print(f"[{browser_id}] {log_msg}")
-                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                has_open_orders = cancel_opinion_open_orders_simple(driver, browser_id)
-                
-                # 拉黑事件
-                exchange_config_id = exchange_config.get('id')
-                if exchange_config_id:
-                    save_exchange_config_blacklist(
-                        exchange_config_id,
-                        exchange_config.get('trending', ''),
-                        exchange_config.get('trendingPart1'),
-                        exchange_config.get('trendingPart2'),
-                        exchange_config.get('trendingPart3'),
-                        exchange_config.get('opUrl', ''),
-                        exchange_config.get('polyUrl', ''),
-                        exchange_config.get('opTopicId', ''),
-                        exchange_config.get('weight', 0),
-                        exchange_config.get('isOpen', 1)
-                    )
-                
-                # 更改任务状态为3
-                mission_id = mission.get('id')
-                save_mission_result(mission_id, 3)
-                
-                if has_open_orders:
-                    return False, "tp2时间结束，先挂方单子被吃，已超过10%，有挂单取消挂单"
-                else:
-                    return False, "tp2时间结束，先挂方单子被吃，已超过10%，已无挂单"
-    
-    # 如果仓位没变化或变化不足10%，检查订单薄
-    if not amount or amount <= 0 or position_change <= amount * 0.1:
-        # 根据YES/NO方向选择token_id
-        if option_type == "YES":
-            token_id = exchange_config.get('trendingPart1', '')
-        else:
-            token_id = exchange_config.get('trendingPart2', '')
-        
-        if not token_id:
-            log_msg = f"[OP] 任务一: ⚠ 无法获取token_id"
-            log_print(f"[{browser_id}] {log_msg}")
-            add_bro_log_entry(bro_log_list, browser_id, log_msg)
-            # 无法获取token_id，取消订单并返回False
-            cancel_opinion_open_orders_simple(driver, browser_id)
-            exchange_config_id = exchange_config.get('id')
-            if exchange_config_id:
-                save_exchange_config_blacklist(
-                    exchange_config_id,
-                    exchange_config.get('trending', ''),
-                    exchange_config.get('trendingPart1'),
-                    exchange_config.get('trendingPart2'),
-                    exchange_config.get('trendingPart3'),
-                    exchange_config.get('opUrl', ''),
-                    exchange_config.get('polyUrl', ''),
-                    exchange_config.get('opTopicId', ''),
-                    exchange_config.get('weight', 0),
-                    exchange_config.get('isOpen', 1)
-                )
-            mission_id = mission.get('id')
-            save_mission_result(mission_id, 3)
-            return False, "tp2时间结束，无法获取token_id"
-        
-        # 请求订单薄数据（一直重试直到成功）
-        orderbook_data = None
-        while orderbook_data is None:
-            orderbook_data = fetch_orderbook_data(token_id)
-            if orderbook_data is None:
-                log_msg = f"[OP] 任务一: 订单薄数据获取失败，重试中..."
+    while orderbook_data is None and orderbook_retry_count < max_orderbook_retries:
+        orderbook_data = fetch_orderbook_data(token_id)
+        if orderbook_data is None:
+            orderbook_retry_count += 1
+            if orderbook_retry_count < max_orderbook_retries:
+                log_msg = f"[OP] 任务一: 订单薄数据获取失败，重试中... ({orderbook_retry_count}/{max_orderbook_retries})"
                 log_print(f"[{browser_id}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                 time.sleep(2)
-        
-        log_msg = f"[OP] 任务一: ✓ 获取到订单薄数据"
+    
+    if orderbook_data is None:
+        log_msg = f"[OP] 任务一: ⚠ tp2时间结束，订单薄数据获取失败，继续流程"
         log_print(f"[{browser_id}] {log_msg}")
         add_bro_log_entry(bro_log_list, browser_id, log_msg)
-        
-        mission_price = mission.get('price', 0)
-        mission_side = mission.get('side', 0)
-        
-        if trade_type == "Buy" or mission_side == 1:
-            # 买：检查买一价和深度
-            if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
-                best_bid_price = float(orderbook_data['bids'][0].get('price', 0))
-                best_bid_amount = float(orderbook_data['bids'][0].get('amount', 0))
-                total_bid_depth = sum(float(bid.get('amount', 0)) for bid in orderbook_data['bids'])
-                
-                log_msg = f"[OP] 任务一: 买一价: {best_bid_price}, 我的价格: {mission_price}, 买一价深度: {best_bid_amount}, 总深度: {total_bid_depth}, 我的下单量: {amount}"
+        return True, ""
+    
+    # 检查最终状态
+    if is_buy:
+        # 买入（开仓）：检查是否仍然是买一价
+        if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
+            best_bid_price = float(orderbook_data['bids'][0].get('price', 0)) * 100
+            is_best_bid = abs(best_bid_price - mission_price) < 0.01
+            
+            log_msg = f"[OP] 任务一: tp2时间结束，买一价: {best_bid_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_bid}"
+            log_print(f"[{browser_id}] {log_msg}")
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            
+            if is_best_bid:
+                # 仍然是买一价，保存状态22并继续流程
+                log_msg = "任务一延迟时间结束后，仍然是买一或卖一"
                 log_print(f"[{browser_id}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                is_best_bid = abs(best_bid_price - mission_price) < 0.01
-                depth_percent = (best_bid_amount / total_bid_depth * 100) if total_bid_depth > 0 else 0
-                my_depth_percent = (amount / total_bid_depth * 100) if total_bid_depth > 0 else 0
-                
-                if is_best_bid and depth_percent >= 90 and my_depth_percent >= 90:
-                    # 符合条件，继续流程
-                    log_msg = f"[OP] 任务一: ✓ tp2时间结束，条件符合，继续流程"
-                    log_print(f"[{browser_id}] {log_msg}")
-                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                    return True, ""
-                else:
-                    # 不符合条件，取消订单并拉黑
-                    log_msg = f"[OP] 任务一: ✗ tp2时间结束，不符合条件，取消订单并拉黑事件"
-                    log_print(f"[{browser_id}] {log_msg}")
-                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                    
-                    cancel_opinion_open_orders_simple(driver, browser_id)
-                    
-                    # 拉黑事件
-                    exchange_config_id = exchange_config.get('id')
-                    if exchange_config_id:
-                        save_exchange_config_blacklist(
-                            exchange_config_id,
-                            exchange_config.get('trending', ''),
-                            exchange_config.get('trendingPart1'),
-                            exchange_config.get('trendingPart2'),
-                            exchange_config.get('trendingPart3'),
-                            exchange_config.get('opUrl', ''),
-                            exchange_config.get('polyUrl', ''),
-                            exchange_config.get('opTopicId', ''),
-                            exchange_config.get('weight', 0),
-                            exchange_config.get('isOpen', 1)
-                        )
-                    
-                    # 更改任务状态为3
-                    mission_id = mission.get('id')
-                    save_mission_result(mission_id, 3)
-                    
-                    if not is_best_bid:
-                        return False, "tp2时间结束，不是买一价，已取消订单"
-                    else:
-                        return False, f"tp2时间结束，深度不足90%（当前{depth_percent:.2f}%，我的{my_depth_percent:.2f}%），已取消订单"
-            else:
-                # 没有买盘数据，取消订单并返回False
-                log_msg = f"[OP] 任务一: ✗ tp2时间结束，没有买盘数据，取消订单并拉黑事件"
-                log_print(f"[{browser_id}] {log_msg}")
-                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                cancel_opinion_open_orders_simple(driver, browser_id)
-                
-                exchange_config_id = exchange_config.get('id')
-                if exchange_config_id:
-                    save_exchange_config_blacklist(
-                        exchange_config_id,
-                        exchange_config.get('trending', ''),
-                        exchange_config.get('trendingPart1'),
-                        exchange_config.get('trendingPart2'),
-                        exchange_config.get('trendingPart3'),
-                        exchange_config.get('opUrl', ''),
-                        exchange_config.get('polyUrl', ''),
-                        exchange_config.get('opTopicId', ''),
-                        exchange_config.get('weight', 0),
-                        exchange_config.get('isOpen', 1)
-                    )
-                
-                mission_id = mission.get('id')
-                save_mission_result(mission_id, 3)
-                return False, "tp2时间结束，没有买盘数据，已取消订单"
+                save_mission_result(mission.get('id'), 22, log_msg)
+                return True, ""
         else:
-            # 卖：检查卖一价和深度
-            if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
-                best_ask_price = float(orderbook_data['asks'][0].get('price', 0))
-                best_ask_amount = float(orderbook_data['asks'][0].get('amount', 0))
-                total_ask_depth = sum(float(ask.get('amount', 0)) for ask in orderbook_data['asks'])
-                
-                log_msg = f"[OP] 任务一: 卖一价: {best_ask_price}, 我的价格: {mission_price}, 卖一价深度: {best_ask_amount}, 总深度: {total_ask_depth}, 我的下单量: {amount}"
+            # 没有买盘数据，继续流程
+            log_msg = f"[OP] 任务一: tp2时间结束，没有买盘数据，继续流程"
+            log_print(f"[{browser_id}] {log_msg}")
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return True, ""
+    else:
+        # 卖出（平仓）：检查是否仍然是卖一价
+        if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
+            best_ask_price = float(orderbook_data['asks'][0].get('price', 0)) * 100
+            is_best_ask = abs(best_ask_price - mission_price) < 0.01
+            
+            log_msg = f"[OP] 任务一: tp2时间结束，卖一价: {best_ask_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_ask}"
+            log_print(f"[{browser_id}] {log_msg}")
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            
+            if is_best_ask:
+                # 仍然是卖一价，保存状态22并继续流程
+                log_msg = "任务一延迟时间结束后，仍然是买一或卖一"
                 log_print(f"[{browser_id}] {log_msg}")
                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                is_best_ask = abs(best_ask_price - mission_price) < 0.01
-                depth_percent = (best_ask_amount / total_ask_depth * 100) if total_ask_depth > 0 else 0
-                my_depth_percent = (amount / total_ask_depth * 100) if total_ask_depth > 0 else 0
-                
-                if is_best_ask and depth_percent >= 90 and my_depth_percent >= 90:
-                    # 符合条件，继续流程
-                    log_msg = f"[OP] 任务一: ✓ tp2时间结束，条件符合，继续流程"
-                    log_print(f"[{browser_id}] {log_msg}")
-                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                    return True, ""
-                else:
-                    # 不符合条件，取消订单并拉黑
-                    log_msg = f"[OP] 任务一: ✗ tp2时间结束，不符合条件，取消订单并拉黑事件"
-                    log_print(f"[{browser_id}] {log_msg}")
-                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                    
-                    cancel_opinion_open_orders_simple(driver, browser_id)
-                    
-                    # 拉黑事件
-                    exchange_config_id = exchange_config.get('id')
-                    if exchange_config_id:
-                        save_exchange_config_blacklist(
-                            exchange_config_id,
-                            exchange_config.get('trending', ''),
-                            exchange_config.get('trendingPart1'),
-                            exchange_config.get('trendingPart2'),
-                            exchange_config.get('trendingPart3'),
-                            exchange_config.get('opUrl', ''),
-                            exchange_config.get('polyUrl', ''),
-                            exchange_config.get('opTopicId', ''),
-                            exchange_config.get('weight', 0),
-                            exchange_config.get('isOpen', 1)
-                        )
-                    
-                    # 更改任务状态为3
-                    mission_id = mission.get('id')
-                    save_mission_result(mission_id, 3)
-                    
-                    if not is_best_ask:
-                        return False, "tp2时间结束，不是卖一价，已取消订单"
-                    else:
-                        return False, f"tp2时间结束，深度不足90%（当前{depth_percent:.2f}%，我的{my_depth_percent:.2f}%），已取消订单"
-            else:
-                # 没有卖盘数据，取消订单并返回False
-                log_msg = f"[OP] 任务一: ✗ tp2时间结束，没有卖盘数据，取消订单并拉黑事件"
-                log_print(f"[{browser_id}] {log_msg}")
-                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                
-                cancel_opinion_open_orders_simple(driver, browser_id)
-                
-                exchange_config_id = exchange_config.get('id')
-                if exchange_config_id:
-                    save_exchange_config_blacklist(
-                        exchange_config_id,
-                        exchange_config.get('trending', ''),
-                        exchange_config.get('trendingPart1'),
-                        exchange_config.get('trendingPart2'),
-                        exchange_config.get('trendingPart3'),
-                        exchange_config.get('opUrl', ''),
-                        exchange_config.get('polyUrl', ''),
-                        exchange_config.get('opTopicId', ''),
-                        exchange_config.get('weight', 0),
-                        exchange_config.get('isOpen', 1)
-                    )
-                
-                mission_id = mission.get('id')
-                save_mission_result(mission_id, 3)
-                return False, "tp2时间结束，没有卖盘数据，已取消订单"
+                save_mission_result(mission.get('id'), 22, log_msg)
+                return True, ""
+        else:
+            # 没有卖盘数据，继续流程
+            log_msg = f"[OP] 任务一: tp2时间结束，没有卖盘数据，继续流程"
+            log_print(f"[{browser_id}] {log_msg}")
+            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+            return True, ""
     
     # 如果到这里，说明条件符合，继续流程
     log_msg = f"[OP] 任务一: ✓ tp2时间结束，继续流程"
@@ -9039,6 +8996,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     log_print(f"[{browser_id}] ⚠ 未能获取初始可用余额，将使用 None")
                     initial_available_balance = None
                 
+                
+                
+                
                 # 7. 点击买卖类型按钮
                 add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤7: 选择买卖类型 {trade_type}")
                 log_print(f"[{browser_id}] 步骤7: 选择买卖类型 {trade_type}...")
@@ -9048,6 +9008,310 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     last_failure_step = f"[8]选择买卖类型{trade_type}失败"
                     retry_count += 1
                     continue
+                
+                # 7.5 Type 5 任务特殊处理：订单薄检查和价格调整
+                if task_data:
+                    mission = task_data.get('mission', {})
+                    exchange_config = task_data.get('exchangeConfig', {})
+                    mission_type = mission.get('type')
+                    
+                    if mission_type == 5:
+                        add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.5: Type 5 任务 - 订单薄检查和价格调整")
+                        log_print(f"[{browser_id}] 步骤7.5: Type 5 任务 - 订单薄检查和价格调整...")
+                        
+                        tp1 = mission.get('tp1')
+                        is_task1 = not tp1  # 如果tp1为空，则是任务一
+                        
+                        if is_task1:
+                            # 【1】任务一的逻辑
+                            log_print(f"[{browser_id}] [任务一] 开始订单薄检查...")
+                            add_bro_log_entry(bro_log_list, browser_id, "[8][任务一] 开始订单薄检查")
+                            
+                            # 判断交易方向（YES/NO）
+                            ps_side = mission.get('psSide', 1)  # 1=YES, 2=NO
+                            if ps_side == 1:
+                                # YES方向，获取trendingPart1
+                                token_id = exchange_config.get('trendingPart1', '')
+                            else:
+                                # NO方向，获取trendingPart2
+                                token_id = exchange_config.get('trendingPart2', '')
+                            
+                            if not token_id:
+                                log_msg = f"[5]订单薄获取失败"
+                                log_print(f"[{browser_id}] ✗ {log_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                save_mission_result(mission.get('id'), 21, log_msg)
+                                # 继续后面的步骤
+                            else:
+                                # 获取订单薄数据（最多重试5次）
+                                orderbook_data = None
+                                max_orderbook_retries = 5
+                                orderbook_retry_count = 0
+                                
+                                while orderbook_data is None and orderbook_retry_count < max_orderbook_retries:
+                                    orderbook_data = fetch_orderbook_data(token_id)
+                                    if orderbook_data is None:
+                                        orderbook_retry_count += 1
+                                        if orderbook_retry_count < max_orderbook_retries:
+                                            log_msg = f"[5]订单薄数据获取失败，重试中... ({orderbook_retry_count}/{max_orderbook_retries})"
+                                            log_print(f"[{browser_id}] {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                            time.sleep(2)
+                                
+                                if orderbook_data is None:
+                                    # 5次都失败，保存状态并继续
+                                    log_msg = "[5]订单薄获取失败"
+                                    log_print(f"[{browser_id}] ✗ {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                    save_mission_result(mission.get('id'), 21, log_msg)
+                                    # 继续后面的步骤
+                                else:
+                                    # 解析订单薄数据
+                                    bids = orderbook_data.get('bids', [])
+                                    asks = orderbook_data.get('asks', [])
+                                    
+                                    if len(bids) == 0 or len(asks) == 0:
+                                        log_msg = "[5]订单薄获取失败"
+                                        log_print(f"[{browser_id}] ✗ {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                        save_mission_result(mission.get('id'), 21, log_msg)
+                                        # 继续后面的步骤
+                                    else:
+                                        # 获取买一价和卖一价（API返回的是小数，需要乘以100转换为百分比）
+                                        best_bid_price = float(bids[0].get('price', 0)) * 100
+                                        best_bid_depth = float(bids[0].get('amount', 0))
+                                        best_ask_price = float(asks[0].get('price', 0)) * 100
+                                        best_ask_depth = float(asks[0].get('amount', 0))
+                                        
+                                        # 计算深度差（卖一价减去买一价的绝对值）
+                                        depth_diff = abs(best_ask_price - best_bid_price)
+                                        
+                                        current_price = float(mission.get('price', 0))
+                                        price_changed = False
+                                        new_price = current_price
+                                        
+                                        log_msg = f"[5]订单薄数据: 买一价={best_bid_price:.1f}, 买一深度={best_bid_depth:.2f}, 卖一价={best_ask_price:.1f}, 卖一深度={best_ask_depth:.2f}, 深度差={depth_diff:.2f}, 当前价格={current_price:.1f}"
+                                        log_print(f"[{browser_id}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                        
+                                        if depth_diff > 0.15:
+                                            # 【1.1】深度差大于0.15
+                                            # 判断价格是否在买一价和卖一价之间（不包含等于）
+                                            if best_bid_price < current_price < best_ask_price:
+                                                # 【1.1.1】价格在中间，成功
+                                                log_msg = "[5]订单薄符合条件"
+                                                log_print(f"[{browser_id}] ✓ {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                                save_mission_result(mission.get('id'), 21, log_msg)
+                                            else:
+                                                # 【1.1.2】价格不在中间，需要调整
+                                                if trade_type == "Buy":
+                                                    # 开仓（买），改为买一价+0.1
+                                                    new_price = best_bid_price + 0.1
+                                                else:
+                                                    # 平仓（卖），改为卖一价-0.1
+                                                    new_price = best_ask_price - 0.1
+                                                
+                                                # 四舍五入，保留1位小数
+                                                new_price = round(new_price, 1)
+                                                price_changed = True
+                                                
+                                                log_msg = f"[5]价格需要调整: {current_price:.1f} -> {new_price:.1f}"
+                                                log_print(f"[{browser_id}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                        else:
+                                            # 【1.2】深度差小于等于0.15
+                                            # 获取tp4，如果不存在默认为100
+                                            tp4 = float(mission.get('tp4', 100))
+                                            
+                                            if trade_type == "Buy":
+                                                # 【1.2.1】开仓（买）
+                                                is_best_bid = abs(current_price - best_bid_price) < 0.01
+                                                
+                                                if is_best_bid:
+                                                    # 【1.2.1.1】是买一价
+                                                    if best_bid_depth > tp4:
+                                                        # 深度大于tp4，返回失败
+                                                        fail_msg = f"[5]订单薄不符合条件{{买一价{best_bid_price:.1f}，买一价深度{best_bid_depth:.2f};卖一价{best_ask_price:.1f}，卖一价深度{best_ask_depth:.2f}}}"
+                                                        log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{fail_msg}")
+                                                        return False, fail_msg, None
+                                                    else:
+                                                        # 深度小于等于tp4，成功
+                                                        log_msg = "[5]订单薄符合条件"
+                                                        log_print(f"[{browser_id}] ✓ {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                                        save_mission_result(mission.get('id'), 21, log_msg)
+                                                else:
+                                                    # 【1.2.1.2】不是买一价
+                                                    if best_bid_depth > tp4:
+                                                        # 深度大于tp4，返回失败
+                                                        fail_msg = f"[5]订单薄不符合条件{{买一价{best_bid_price:.1f}，买一价深度{best_bid_depth:.2f};卖一价{best_ask_price:.1f}，卖一价深度{best_ask_depth:.2f}}}"
+                                                        log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{fail_msg}")
+                                                        return False, fail_msg, None
+                                                    else:
+                                                        # 深度小于等于tp4，改为买一价
+                                                        new_price = round(best_bid_price, 1)
+                                                        price_changed = True
+                                                        
+                                                        log_msg = f"[5]价格需要调整为买一价: {current_price:.1f} -> {new_price:.1f}"
+                                                        log_print(f"[{browser_id}] {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                            else:
+                                                # 【1.2.2】平仓（卖）
+                                                is_best_ask = abs(current_price - best_ask_price) < 0.01
+                                                
+                                                if is_best_ask:
+                                                    # 【1.2.2.1】是卖一价
+                                                    if best_ask_depth > tp4:
+                                                        # 深度大于tp4，返回失败
+                                                        fail_msg = f"[5]订单薄不符合条件{{买一价{best_bid_price:.1f}，买一价深度{best_bid_depth:.2f};卖一价{best_ask_price:.1f}，卖一价深度{best_ask_depth:.2f}}}"
+                                                        log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{fail_msg}")
+                                                        return False, fail_msg, None
+                                                    else:
+                                                        # 深度小于等于tp4，成功
+                                                        log_msg = "[5]订单薄符合条件"
+                                                        log_print(f"[{browser_id}] ✓ {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                                        save_mission_result(mission.get('id'), 21, log_msg)
+                                                else:
+                                                    # 【1.2.2.2】不是卖一价
+                                                    if best_ask_depth > tp4:
+                                                        # 深度大于tp4，返回失败
+                                                        fail_msg = f"[5]订单薄不符合条件{{买一价{best_bid_price:.1f}，买一价深度{best_bid_depth:.2f};卖一价{best_ask_price:.1f}，卖一价深度{best_ask_depth:.2f}}}"
+                                                        log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{fail_msg}")
+                                                        return False, fail_msg, None
+                                                    else:
+                                                        # 深度小于等于tp4，改为卖一价
+                                                        new_price = round(best_ask_price, 1)
+                                                        price_changed = True
+                                                        
+                                                        log_msg = f"[5]价格需要调整为卖一价: {current_price:.1f} -> {new_price:.1f}"
+                                                        log_print(f"[{browser_id}] {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                        
+                                        # 如果价格需要更改，调用updateMissionTp更新价格
+                                        if price_changed:
+                                            mission_id = mission.get('id')
+                                            update_success = update_mission_tp(mission_id, price=new_price)
+                                            
+                                            if update_success:
+                                                # 等待3秒后验证价格是否已更新
+                                                time.sleep(3)
+                                                
+                                                # 最多重试3次验证价格
+                                                max_verify_retries = 3
+                                                verify_retry_count = 0
+                                                price_verified = False
+                                                
+                                                while verify_retry_count < max_verify_retries:
+                                                    updated_mission = get_mission_info(mission_id)
+                                                    if updated_mission:
+                                                        updated_price = float(updated_mission.get('price', 0))
+                                                        if abs(updated_price - new_price) < 0.01:
+                                                            price_verified = True
+                                                            break
+                                                    
+                                                    verify_retry_count += 1
+                                                    if verify_retry_count < max_verify_retries:
+                                                        log_msg = f"[5]价格验证失败，重试中... ({verify_retry_count}/{max_verify_retries})"
+                                                        log_print(f"[{browser_id}] {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                                        time.sleep(3)
+                                                
+                                                if price_verified:
+                                                    log_msg = "[5]已更改价格"
+                                                    log_print(f"[{browser_id}] ✓ {log_msg}")
+                                                    add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                                    save_mission_result(mission_id, 21, log_msg)
+                                                    # 更新price变量，用于后续步骤
+                                                    price = new_price
+                                                else:
+                                                    log_msg = f"[5]价格更新后验证失败，但继续执行"
+                                                    log_print(f"[{browser_id}] ⚠ {log_msg}")
+                                                    add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                            else:
+                                                log_msg = f"[5]价格更新接口调用失败，但继续执行"
+                                                log_print(f"[{browser_id}] ⚠ {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                        else:
+                            # 【2】任务二的逻辑
+                            log_print(f"[{browser_id}] [任务二] 开始等待任务一确认订单薄...")
+                            add_bro_log_entry(bro_log_list, browser_id, "[8][任务二] 开始等待任务一确认订单薄")
+                            
+                            task1_id = tp1
+                            start_time = time.time()
+                            timeout = 600  # 10分钟 = 600秒
+                            check_interval = 20  # 每20秒检查一次
+                            
+                            task1_price_updated = False
+                            
+                            while time.time() - start_time < timeout:
+                                # 获取任务1的状态
+                                task1_info = get_mission_info(task1_id)
+                                
+                                if not task1_info:
+                                    log_msg = f"[5]无法获取任务一信息，继续等待..."
+                                    log_print(f"[{browser_id}] {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                    time.sleep(check_interval)
+                                    continue
+                                
+                                task1_status = task1_info.get('status')
+                                
+                                if task1_status == 21 or task1_status == 5:
+                                    # 任务1状态是21或5，获取任务1的price
+                                    task1_price = float(task1_info.get('price', 0))
+                                    
+                                    # 计算自己的price：100 - 任务1的price（四舍五入保留1位小数）
+                                    calculated_price = round(100 - task1_price, 1)
+                                    
+                                    # 获取自己任务的当前price
+                                    current_price = float(mission.get('price', 0))
+                                    
+                                    # 判断price是否已变化（考虑精度误差）
+                                    if abs(calculated_price - current_price) >= 0.01:
+                                        # price已变化，调用updateMissionTp更新
+                                        mission_id = mission.get('id')
+                                        update_success = update_mission_tp(mission_id, price=calculated_price)
+                                        
+                                        if update_success:
+                                            log_msg = f"[5]价格已更新: {current_price:.1f} -> {calculated_price:.1f} (任务一价格: {task1_price:.1f})"
+                                            log_print(f"[{browser_id}] ✓ {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                            price = calculated_price  # 更新price变量
+                                            task1_price_updated = True
+                                        else:
+                                            log_msg = f"[5]价格更新失败，但继续执行"
+                                            log_print(f"[{browser_id}] ⚠ {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                    
+                                    # 继续后面的步骤
+                                    break
+                                elif task1_status == 3:
+                                    # 任务1状态变为3，返回失败
+                                    fail_msg = "[5]等待任务一确认订单薄，任务一失败"
+                                    log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, f"[8]{fail_msg}")
+                                    return False, fail_msg, None
+                                
+                                # 等待20秒后再次检查
+                                time.sleep(check_interval)
+                            
+                            # 检查是否超时
+                            if time.time() - start_time >= timeout:
+                                fail_msg = "[5]等待任务一确认订单超时"
+                                log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, f"[8]{fail_msg}")
+                                return False, fail_msg, None
+                            
+                            if not task1_price_updated:
+                                log_msg = f"[5]价格无变化，继续执行"
+                                log_print(f"[{browser_id}] {log_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
                 
                 # 8. 选择价格类型
                 add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤8: 选择价格类型 {price_type}")
@@ -10266,6 +10530,22 @@ def click_opinion_position_and_get_data(driver, serial_number):
             log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Position 按钮")
             return "", True, False
         
+        # 查找并点击 checkbox（如果未选中）
+        try:
+            log_print(f"[{serial_number}] [OP] 查找 data-scope='checkbox' 的 label 组件...")
+            checkbox_label = driver.find_element(By.CSS_SELECTOR, "label[data-scope='checkbox']")
+            data_state = checkbox_label.get_attribute("data-state")
+            log_print(f"[{serial_number}] [OP] 找到 checkbox，当前 data-state: {data_state}")
+            
+            if data_state != "checked":
+                log_print(f"[{serial_number}] [OP] checkbox 未选中，点击它...")
+                checkbox_label.click()
+                log_print(f"[{serial_number}] [OP] ✓ 已点击 checkbox")
+            else:
+                log_print(f"[{serial_number}] [OP] checkbox 已选中，无需点击")
+        except Exception as e:
+            log_print(f"[{serial_number}] [OP] ⚠ 查找或点击 checkbox 时出错: {str(e)}")
+        
         time.sleep(3)
         
         try:
@@ -10345,7 +10625,7 @@ def click_opinion_position_and_get_data(driver, serial_number):
                                 # 点击下一页按钮
                                 next_page_button.click()
                                 log_print(f"[{serial_number}] [OP] 已点击下一页按钮（重试次数: {next_page_retry_count}/{max_next_page_retries}）")
-                                time.sleep(3)  # 等待页面加载
+                                time.sleep(10)  # 等待页面加载
                                 
                                 # 重新获取position_div并解析下一页数据
                                 try:
@@ -13965,6 +14245,18 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
     """
     collected_data = {}
     
+    # 初始化 current_ip，从 LAST_PROXY_CONFIG 获取
+    current_ip = None
+    last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+    if last_config:
+        current_ip = last_config.get("ip")
+        if current_ip:
+            log_print(f"[{browser_id}] ✓ 从 LAST_PROXY_CONFIG 获取到IP: {current_ip}")
+        else:
+            log_print(f"[{browser_id}] ⚠ LAST_PROXY_CONFIG 中的IP为空")
+    else:
+        log_print(f"[{browser_id}] ⚠ LAST_PROXY_CONFIG 中没有该浏览器的配置")
+    
     try:
         log_print(f"\n[{browser_id}] ========== 额外收集持仓数据 ==========")
         
@@ -14648,8 +14940,13 @@ def process_type2_mission(task_data, retry_count=0):
                 if retry_count < 2:
                     log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                     
-                    # 调用 changeIpToErr 接口
-                    call_change_ip_to_err(browser_id, current_ip)
+                    # 调用 changeIpToErr 接口（确保 current_ip 不为 None）
+                    ip_to_report = current_ip
+                    if not ip_to_report:
+                        last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                        if last_config:
+                            ip_to_report = last_config.get("ip")
+                    call_change_ip_to_err(browser_id, ip_to_report)
                     
                     # 1. 关闭浏览器
                     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
@@ -15690,11 +15987,11 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                     log_print(f"[{browser_id}] Type 5 任务二失败，获取任务一信息...")
                     tp1_info = get_mission_info(tp1)
                     original_msg = ""
-                    if tp1_info and tp1_info.get('msg'):
-                        original_msg = tp1_info.get('msg')
-                        log_print(f"[{browser_id}] 获取到任务一原msg: {original_msg}")
-                    
-                    save_mission_result(tp1, 3, original_msg)
+                    if tp1_info and tp1_info.get('status') != 2:
+                        if tp1_info.get('msg'):
+                            original_msg = tp1_info.get('msg')
+                            log_print(f"[{browser_id}] 获取到任务一原msg: {original_msg}")
+                            save_mission_result(tp1, 3, original_msg)
             
             # # Type 5任务完成后发送 fingerprint 监控请求
             # if mission_type == 5 and task_browser_id:

@@ -315,6 +315,27 @@
               :key="item.groupKey"
               :class="['task-group-card', `group-color-${item.colorIndex}`]"
             >
+              <!-- 组头部：总状态和获取服务器数据按钮 -->
+              <div class="mode1-group-header">
+                <div class="mode1-group-status">
+                  <span class="group-status-label">总状态:</span>
+                  <span 
+                    class="group-status-badge"
+                    :class="getGroupStatusClass(item.group.finalStatus)"
+                  >
+                    {{ getGroupStatusText(item.group.finalStatus) }}
+                  </span>
+                </div>
+                <button 
+                  class="btn-fetch-server-data" 
+                  @click="fetchServerDataForGroup(item.group)"
+                  :disabled="isFetchingServerDataForGroup(item.groupKey)"
+                  style="margin-left: 8px; padding: 4px 12px; font-size: 12px;"
+                >
+                  {{ isFetchingServerDataForGroup(item.groupKey) ? '获取中...' : '获取服务器数据' }}
+                </button>
+              </div>
+              
               <div class="tasks-list">
                 <div 
                   v-for="(task, taskIndex) in item.group.tasks" 
@@ -384,6 +405,34 @@
                     >
                       查看
                     </a>
+                  </div>
+                  
+                  <!-- 显示tp7和tp8（openorder和closeorder） -->
+                  <div v-if="task.tp7 || task.tp8" class="task-order-info">
+                    <div v-if="task.tp7" class="order-info-item">
+                      <span class="order-label">挂单数据:</span>
+                      <span class="order-content">{{ task.tp7 }}</span>
+                    </div>
+                    <div v-if="task.tp8" class="order-info-item">
+                      <span class="order-label">已成交数据:</span>
+                      <span class="order-content">{{ task.tp8 }}</span>
+                    </div>
+                  </div>
+                  
+                  <!-- 显示服务器数据（如果已获取） -->
+                  <div v-if="task.serverData" class="task-server-data">
+                    <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
+                      <div class="server-data-title">挂单数据:</div>
+                      <div v-for="(order, idx) in task.serverData.openOrderList" :key="idx" class="server-data-item">
+                        <span>{{ formatOpenOrderMsg(order) }}</span>
+                      </div>
+                    </div>
+                    <div v-if="task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0" class="server-data-group">
+                      <div class="server-data-title">已成交数据:</div>
+                      <div v-for="(order, idx) in task.serverData.closedOrderList" :key="idx" class="server-data-item">
+                        <span>{{ formatClosedOrderMsg(order) }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -847,7 +896,9 @@ export default {
       showBroLogDialog: false,  // 浏览器日志弹窗
       broLogs: [],  // 浏览器日志列表
       currentBroNumber: null,  // 当前查看的浏览器ID
-      isLoadingBroLogs: false  // 是否正在加载日志
+      isLoadingBroLogs: false,  // 是否正在加载日志
+      // 获取服务器数据
+      fetchingServerDataGroups: new Set()  // 正在获取服务器数据的组key集合
     }
   },
   mounted() {
@@ -1648,225 +1699,198 @@ export default {
       this.resetStatistics()
       
       // 处理数据：先收集所有任务，建立任务1和任务2的映射关系
-          const allTasksMap = new Map() // id -> task (所有任务，包括成功的)
-          const task2ToTask1Map = new Map() // task2Id -> task1Id (任务2的id -> 任务1的id)
-          const task1ToTask2Map = new Map() // task1Id -> task2Id (任务1的id -> 任务2的id)
-          const now = new Date().getTime()
-          const twentyMinutes = 20 * 60 * 1000 // 20分钟的毫秒数
+      const allTasksMap = new Map() // id -> task (所有任务，包括成功的)
+      const task2ToTask1Map = new Map() // task2Id -> task1Id (任务2的id -> 任务1的id)
+      const task1ToTask2Map = new Map() // task1Id -> task2Id (任务1的id -> 任务2的id)
+      
+      // 第一步：收集所有任务，建立任务1和任务2的映射关系
+      // 统一将id和tp1转换为字符串，避免类型不一致导致查找失败
+      missions.forEach(item => {
+        const mission = item.mission
+        const exchangeConfig = item.exchangeConfig
+        
+        const browserId = mission.numberList
+        const groupNo = mission.groupNo
+        
+        // 统一转换为字符串
+        const taskId = String(mission.id)
+        const tp1Id = mission.tp1 ? String(mission.tp1) : null
+        
+        const task = {
+          id: taskId,
+          tp1: tp1Id,
+          msg: mission.msg,
+          browserId: browserId,
+          groupNo: groupNo,
+          trending: exchangeConfig.trending,
+          opUrl: exchangeConfig.opUrl,
+          side: mission.side,
+          amt: mission.amt,
+          price: mission.price,
+          psSide: mission.psSide,
+          createTime: mission.createTime,
+          updateTime: mission.updateTime,
+          status: mission.status, // 保存状态，用于判断是否失败
+          tp7: mission.tp7 || null, // 保存tp7（openorder字符串）
+          tp8: mission.tp8 || null // 保存tp8（closeorder字符串）
+        }
+        
+        // 记录所有任务（使用字符串作为key）
+        allTasksMap.set(taskId, task)
+        
+        // 建立任务2到任务1的映射（如果任务的tp1存在，说明它是任务2，tp1是任务1的id）
+        if (tp1Id) {
+          task2ToTask1Map.set(taskId, tp1Id)
+          task1ToTask2Map.set(tp1Id, taskId)
+        }
+      })
+      
+      // 第二步：对所有任务进行分组（不再只显示失败的）
+      // 先建立任务组关系：每个任务组包含任务1和任务2
+      const taskGroupMap = new Map() // taskId -> groupId
+      const groupMap = new Map() // groupId -> { tasks: [], groupId: string, task1CreateTime: number }
+      const processedGroups = new Set() // 已处理的组（用任务1的id标识）
+      let groupCounter = 0
+      
+      // 辅助函数：获取任务的创建时间戳
+      const getCreateTime = (task) => {
+        if (!task.createTime) return 0
+        return new Date(task.createTime).getTime()
+      }
+      
+      // 遍历所有任务，为每个任务找到它的组
+      allTasksMap.forEach((task, taskId) => {
+        // 如果是分组模式，检查主题是否在分组配置中
+        if (this.selectedGroup !== 'default' && !this.isTopicInGroupConfig(task.trending)) {
+          return
+        }
+        
+        // 确定这个任务属于哪个组（任务1的id）
+        let task1Id = null
+        
+        // 如果任务有tp1，说明它是任务2，tp1就是任务1的id
+        if (task.tp1) {
+          task1Id = task.tp1
+        } else {
+          // 如果任务没有tp1，说明它是任务1
+          task1Id = task.id
+        }
+        
+        // 如果这个组已经处理过，跳过
+        if (processedGroups.has(task1Id)) {
+          return
+        }
+        
+        // 标记这个组已处理
+        processedGroups.add(task1Id)
+        
+        // 获取任务1和任务2
+        const task1 = allTasksMap.get(task1Id)
+        if (!task1) {
+          // 如果任务1不存在，跳过（不应该发生，但做保护性检查）
+          return
+        }
+        
+        const task2Id = task1ToTask2Map.get(task1Id)
+        const task2 = task2Id ? allTasksMap.get(task2Id) : null
+        
+        // 创建新组
+        const groupId = `group-${groupCounter++}`
+        const group = {
+          groupId: groupId,
+          tasks: [],
+          task1CreateTime: getCreateTime(task1)
+        }
+        groupMap.set(groupId, group)
+        
+        // 将任务1加入组（无论是否失败）
+        group.tasks.push(task1)
+        taskGroupMap.set(task1.id, groupId)
+        
+        // 将任务2加入组（如果存在，无论是否失败）
+        if (task2) {
+          group.tasks.push(task2)
+          taskGroupMap.set(task2.id, groupId)
+        }
+      })
+      
+      // 第三步：为每个任务计算同组任务ID，并转换为对象格式用于显示
+      // 先转换为数组，然后根据分组模式决定排序方式
+      const groupsArray = []
+      groupMap.forEach((group, internalGroupId) => {
+        // 为组内每个任务计算同组任务ID
+        const tasksWithGroupId = group.tasks.map(task => {
+          let groupTaskId = null
           
-          // 第一步：收集所有任务，建立任务1和任务2的映射关系
-          // 统一将id和tp1转换为字符串，避免类型不一致导致查找失败
-          missions.forEach(item => {
-            const mission = item.mission
-            const exchangeConfig = item.exchangeConfig
-            
-            const browserId = mission.numberList
-            const groupNo = mission.groupNo
-            
-            // 统一转换为字符串
-            const taskId = String(mission.id)
-            const tp1Id = mission.tp1 ? String(mission.tp1) : null
-            
-            const task = {
-              id: taskId,
-              tp1: tp1Id,
-              msg: mission.msg,
-              browserId: browserId,
-              groupNo: groupNo,
-              trending: exchangeConfig.trending,
-              opUrl: exchangeConfig.opUrl,
-              side: mission.side,
-              amt: mission.amt,
-              price: mission.price,
-              psSide: mission.psSide,
-              createTime: mission.createTime,
-              updateTime: mission.updateTime,
-              status: mission.status // 保存状态，用于判断是否失败
-            }
-            
-            // 记录所有任务（使用字符串作为key）
-            allTasksMap.set(taskId, task)
-            
-            // 建立任务2到任务1的映射（如果任务的tp1存在，说明它是任务2，tp1是任务1的id）
-            if (tp1Id) {
-              task2ToTask1Map.set(taskId, tp1Id)
-              task1ToTask2Map.set(tp1Id, taskId)
-            }
-          })
-          
-          // 第二步：过滤出失败的任务
-          // 过滤规则：
-          // 1. status === 2：跳过（成功任务）
-          // 2. status === 3：直接显示（失败任务）
-          // 3. status !== 2 && status !== 3：检查 createTime，如果距离现在超过20分钟才显示
-          // 4. 如果是分组模式，只显示分组配置中的主题
-          const failedTasks = []
-          allTasksMap.forEach((task, taskId) => {
-            // 跳过状态为2（成功）的任务
-            if (task.status === 2) {
-              return
-            }
-            
-            // 如果是分组模式，检查主题是否在分组配置中
-            if (this.selectedGroup !== 'default' && !this.isTopicInGroupConfig(task.trending)) {
-              return
-            }
-            
-            // 如果 status !== 3，需要检查创建时间是否超过20分钟
-            if (task.status !== 3) {
-              if (task.createTime) {
-                const createTime = new Date(task.createTime).getTime()
-                const timeDiff = now - createTime
-                
-                // 如果创建时间距离现在不超过20分钟，跳过（可能是正在执行的任务）
-                if (timeDiff <= twentyMinutes) {
-                  return
-                }
-              } else {
-                // 如果没有创建时间，也跳过
-                return
-              }
-            }
-            
-            failedTasks.push(task)
-          })
-          
-          // 第三步：对失败任务进行分组
-          // 先建立任务组关系：每个任务组包含任务1和任务2
-          const taskGroupMap = new Map() // taskId -> groupId
-          const groupMap = new Map() // groupId -> { tasks: [], groupId: string, task1CreateTime: number }
-          const processedGroups = new Set() // 已处理的组（用任务1的id标识）
-          let groupCounter = 0
-          
-          // 辅助函数：获取任务的创建时间戳
-          const getCreateTime = (task) => {
-            if (!task.createTime) return 0
-            return new Date(task.createTime).getTime()
-          }
-          
-          // 遍历失败任务，为每个失败任务找到它的组
-          failedTasks.forEach(failedTask => {
-            // 确定这个失败任务属于哪个组（任务1的id）
-            let task1Id = null
-            
-            // 如果失败任务有tp1，说明它是任务2，tp1就是任务1的id
-            if (failedTask.tp1) {
-              task1Id = failedTask.tp1
-            } else {
-              // 如果失败任务没有tp1，说明它是任务1
-              task1Id = failedTask.id
-            }
-            
-            // 如果这个组已经处理过，跳过
-            if (processedGroups.has(task1Id)) {
-              return
-            }
-            
-            // 标记这个组已处理
-            processedGroups.add(task1Id)
-            
-            // 获取任务1和任务2
-            const task1 = allTasksMap.get(task1Id)
-            if (!task1) {
-              // 如果任务1不存在，跳过（不应该发生，但做保护性检查）
-              return
-            }
-            
-            const task2Id = task1ToTask2Map.get(task1Id)
-            const task2 = task2Id ? allTasksMap.get(task2Id) : null
-            
-            // 创建新组
-            const groupId = `group-${groupCounter++}`
-            const group = {
-              groupId: groupId,
-              tasks: [],
-              task1CreateTime: getCreateTime(task1)
-            }
-            groupMap.set(groupId, group)
-            
-            // 将任务1加入组（无论是否失败）
-            group.tasks.push(task1)
-            taskGroupMap.set(task1.id, groupId)
-            
-            // 将任务2加入组（如果存在，无论是否失败）
-            if (task2) {
-              group.tasks.push(task2)
-              taskGroupMap.set(task2.id, groupId)
-            }
-          })
-          
-          // 第四步：为每个任务计算同组任务ID，并转换为对象格式用于显示
-          // 先转换为数组，然后根据分组模式决定排序方式
-          const groupsArray = []
-          groupMap.forEach((group, internalGroupId) => {
-            // 为组内每个任务计算同组任务ID
-            const tasksWithGroupId = group.tasks.map(task => {
-              let groupTaskId = null
-              
-              // 如果任务有tp1，说明它是任务2，同组任务ID就是tp1（任务1的id）
-              if (task.tp1) {
-                groupTaskId = task.tp1
-              } else {
-                // 如果任务没有tp1，说明它是任务1，查找任务2的id
-                const task2Id = task1ToTask2Map.get(task.id)
-                if (task2Id) {
-                  groupTaskId = task2Id
-                } else {
-                  // 如果没有找到，说明这个任务没有同组任务，显示自己的ID
-                  groupTaskId = task.id
-                }
-              }
-              
-              return {
-                ...task,
-                groupTaskId: groupTaskId
-              }
-            })
-            
-            // 确定任务1用于显示标识（任务1是没有tp1的那个）
-            const task1 = tasksWithGroupId.find(t => !t.tp1)
-            const displayKey = task1 ? task1.id : group.tasks[0].id
-            
-            // 获取主题（trending）用于分组排序
-            const trending = task1 ? task1.trending : group.tasks[0].trending
-            
-            groupsArray.push({
-              groupId: displayKey, // 用于显示
-              internalGroupId: internalGroupId, // 用于颜色计算，确保同组任务使用相同颜色
-              tasks: tasksWithGroupId,
-              task1CreateTime: group.task1CreateTime,
-              trending: trending // 添加trending用于分组排序
-            })
-          })
-          
-          // 排序：如果是分组模式，按事件（trending）分组；否则按时间排序
-          if (this.selectedGroup !== 'default') {
-            // 分组模式：按trending分组，相同trending的放在一起
-            groupsArray.sort((a, b) => {
-              // 先按trending排序
-              if (a.trending < b.trending) return -1
-              if (a.trending > b.trending) return 1
-              // 相同trending的，按时间排序
-              return a.task1CreateTime - b.task1CreateTime
-            })
+          // 如果任务有tp1，说明它是任务2，同组任务ID就是tp1（任务1的id）
+          if (task.tp1) {
+            groupTaskId = task.tp1
           } else {
-            // 默认模式：按时间排序
-            groupsArray.sort((a, b) => {
-              return a.task1CreateTime - b.task1CreateTime
-            })
+            // 如果任务没有tp1，说明它是任务1，查找任务2的id
+            const task2Id = task1ToTask2Map.get(task.id)
+            if (task2Id) {
+              groupTaskId = task2Id
+            } else {
+              // 如果没有找到，说明这个任务没有同组任务，显示自己的ID
+              groupTaskId = task.id
+            }
           }
           
-          // 转换为对象格式，使用排序后的顺序
-          const sortedGroups = {}
-          groupsArray.forEach((group, index) => {
-            // 使用排序后的索引作为key，确保顺序稳定
-            sortedGroups[`group-${index}`] = {
-              groupId: group.groupId,
-              internalGroupId: group.internalGroupId,
-              tasks: group.tasks
-            }
-          })
-          
+          return {
+            ...task,
+            groupTaskId: groupTaskId
+          }
+        })
+        
+        // 确定任务1用于显示标识（任务1是没有tp1的那个）
+        const task1 = tasksWithGroupId.find(t => !t.tp1)
+        const displayKey = task1 ? task1.id : group.tasks[0].id
+        
+        // 获取主题（trending）用于分组排序
+        const trending = task1 ? task1.trending : group.tasks[0].trending
+        
+        // 计算总状态
+        const finalStatus = this.calculateGroupStatus(tasksWithGroupId)
+        
+        groupsArray.push({
+          groupId: displayKey, // 用于显示
+          internalGroupId: internalGroupId, // 用于颜色计算，确保同组任务使用相同颜色
+          tasks: tasksWithGroupId,
+          task1CreateTime: group.task1CreateTime,
+          trending: trending, // 添加trending用于分组排序
+          finalStatus: finalStatus // 总状态
+        })
+      })
+      
+      // 排序：如果是分组模式，按事件（trending）分组；否则按时间排序
+      if (this.selectedGroup !== 'default') {
+        // 分组模式：按trending分组，相同trending的放在一起
+        groupsArray.sort((a, b) => {
+          // 先按trending排序
+          if (a.trending < b.trending) return -1
+          if (a.trending > b.trending) return 1
+          // 相同trending的，按时间排序
+          return a.task1CreateTime - b.task1CreateTime
+        })
+      } else {
+        // 默认模式：按时间排序
+        groupsArray.sort((a, b) => {
+          return a.task1CreateTime - b.task1CreateTime
+        })
+      }
+      
+      // 转换为对象格式，使用排序后的顺序
+      const sortedGroups = {}
+      groupsArray.forEach((group, index) => {
+        // 使用排序后的索引作为key，确保顺序稳定
+        sortedGroups[`group-${index}`] = {
+          groupId: group.groupId,
+          internalGroupId: group.internalGroupId,
+          tasks: group.tasks,
+          finalStatus: group.finalStatus
+        }
+      })
+      
       // 统计所有任务（包括成功和失败的任务）
       allTasksMap.forEach((task) => {
         // 如果是分组模式，检查主题是否在分组配置中
@@ -2253,6 +2277,392 @@ export default {
       } catch (error) {
         console.error('执行快照失败:', error)
         this.showToast('执行快照失败: ' + (error.message || '未知错误'), 'error')
+      }
+    },
+    
+    /**
+     * 判断任务是否成功（根据 status 和 msg）
+     */
+    isTaskSuccess(status, msg) {
+      // 如果 status === 2，直接返回成功
+      if (status === 2) {
+        return true
+      }
+      
+      // 如果 status !== 2，需要判断 msg
+      if (!msg) {
+        return false
+      }
+      
+      // 尝试解析 msg 是否为 JSON 格式
+      let msgObj = null
+      try {
+        // 如果 msg 是 JSON 字符串，尝试解析
+        if (typeof msg === 'string' && msg.trim().startsWith('{')) {
+          msgObj = JSON.parse(msg)
+        }
+      } catch (e) {
+        // 解析失败，说明不是 JSON 格式，继续使用字符串匹配逻辑
+        msgObj = null
+      }
+      
+      // 如果是 JSON 格式
+      if (msgObj && typeof msgObj === 'object') {
+        // 检查 type 字段
+        if (msgObj.type === 'TYPE1_SUCCESS' || msgObj.type === 'TYPE5_SUCCESS') {
+          // 全部成交
+          return true
+        } else if (msgObj.type === 'TYPE1_PARTIAL' || msgObj.type === 'TYPE5_PARTIAL') {
+          // 部分成交，需要检查进度是否大于80%
+          if (msgObj.progress) {
+            try {
+              // 解析 progress 字段，格式如："551.41 / 552.86 shares" 或 "$306.06 / $312.98"
+              const progressMatch = msgObj.progress.match(/\$?([\d,]+\.?\d*)\s*\/\s*\$?([\d,]+\.?\d*)/)
+              if (progressMatch) {
+                const filled = parseFloat(progressMatch[1].replace(/,/g, ''))
+                const total = parseFloat(progressMatch[2].replace(/,/g, ''))
+                
+                if (total > 0 && filled / total > 0.8) {
+                  return true
+                }
+              }
+            } catch (e) {
+              console.error('解析JSON中的进度失败:', e)
+            }
+          }
+          return false
+        }
+      }
+      
+      // 如果不是 JSON 格式，使用原有的字符串匹配逻辑
+      // 检查是否是"全部成交"
+      if (msg.includes('全部成交') || msg.includes('✅ 全部成交') || msg.includes('SUCCESS')) {
+        return true
+      }
+      
+      // 检查是否是"部分成交"，需要判断进度是否大于80%
+      if (msg.includes('部分成交') || msg.includes('⚠️ 部分成交') || msg.includes('PARTIAL')) {
+        // 尝试从 msg 中提取进度信息
+        const progressMatch = msg.match(/进度[:\s]*\$?([\d,]+\.?\d*)\s*\/\s*\$?([\d,]+\.?\d*)/i)
+        if (progressMatch) {
+          try {
+            const filled = parseFloat(progressMatch[1].replace(/,/g, ''))
+            const total = parseFloat(progressMatch[2].replace(/,/g, ''))
+            
+            if (total > 0 && filled / total > 0.8) {
+              return true
+            }
+          } catch (e) {
+            console.error('解析进度失败:', e)
+          }
+        }
+      }
+      
+      return false
+    },
+    
+    /**
+     * 计算组的总状态
+     */
+    calculateGroupStatus(tasks) {
+      if (!tasks || tasks.length === 0) {
+        return 'unknown'
+      }
+      
+      // 检查所有任务是否都成功
+      const allSuccess = tasks.every(task => this.isTaskSuccess(task.status, task.msg))
+      if (allSuccess) {
+        return 'success'
+      }
+      
+      // 检查是否有任务失败（status === 3）
+      const hasFailed = tasks.some(task => task.status === 3)
+      if (hasFailed) {
+        return 'failed'
+      }
+      
+      // 检查是否有任务正在进行中（status === 9）
+      const hasRunning = tasks.some(task => task.status === 9 || task.status === 0 || task.status === 1)
+      if (hasRunning) {
+        return 'running'
+      }
+      
+      return 'unknown'
+    },
+    
+    /**
+     * 获取组状态文本
+     */
+    getGroupStatusText(finalStatus) {
+      const statusMap = {
+        'success': '全部成功',
+        'failed': '失败',
+        'running': '进行中',
+        'unknown': '未知'
+      }
+      return statusMap[finalStatus] || '未知'
+    },
+    
+    /**
+     * 获取组状态样式类
+     */
+    getGroupStatusClass(finalStatus) {
+      const classMap = {
+        'success': 'status-success',
+        'failed': 'status-failed',
+        'running': 'status-running',
+        'unknown': 'status-unknown'
+      }
+      return classMap[finalStatus] || 'status-unknown'
+    },
+    
+    /**
+     * 检查是否正在获取服务器数据
+     */
+    isFetchingServerDataForGroup(groupKey) {
+      return this.fetchingServerDataGroups.has(groupKey)
+    },
+    
+    /**
+     * 获取服务器数据（针对组）
+     */
+    async fetchServerDataForGroup(group) {
+      if (!group || !group.tasks || group.tasks.length === 0) {
+        this.showToast('任务组数据不完整', 'warning')
+        return
+      }
+      
+      const groupKey = group.groupId || `group-${Date.now()}`
+      
+      // 检查是否正在获取
+      if (this.isFetchingServerDataForGroup(groupKey)) {
+        return
+      }
+      
+      // 标记为正在获取
+      this.fetchingServerDataGroups.add(groupKey)
+      
+      try {
+        // 为组内每个任务获取服务器数据
+        const tasks = group.tasks
+        const requests = []
+        
+        for (const task of tasks) {
+          if (!task.browserId || !task.trending) {
+            continue
+          }
+          
+          // 确定side参数：1=开仓（买入），2=平仓（卖出）
+          const side = task.side === 1 ? 'buy' : 'sell'
+          
+          // 获取updateTime并转换为时间戳
+          let time = null
+          if (task.updateTime) {
+            time = new Date(task.updateTime).getTime()
+          }
+          
+          // 构建请求数据
+          const requestData = {
+            number: task.browserId,
+            trending: task.trending,
+            side: side,
+            price: task.price,
+            amt: task.amt
+          }
+          
+          // 如果有time，添加到请求数据中
+          if (time) {
+            requestData.time = time
+          }
+          
+          // 发送请求
+          const promise = axios.post(
+            'https://sg.bicoin.com.cn/99l/hedge/filterOrder',
+            requestData,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          ).then(response => {
+            return { task, response }
+          }).catch(error => {
+            console.error(`获取任务 ${task.id} 服务器数据失败:`, error)
+            return { task, error }
+          })
+          
+          requests.push(promise)
+        }
+        
+        // 并行发送所有请求
+        const results = await Promise.all(requests)
+        
+        // 处理返回的数据
+        for (const result of results) {
+          if (result.error) {
+            continue
+          }
+          
+          const { task, response } = result
+          if (response.data && response.data.code === 0 && response.data.data) {
+            const serverData = response.data.data.hist || {}
+            
+            // 更新任务的服务器数据（使用$set确保响应式）
+            this.$set(task, 'serverData', serverData)
+            
+            // 处理openorder和closeorder
+            let openOrderStr = null
+            let closeOrderStr = null
+            
+            // 处理挂单数据（openOrderList）
+            if (serverData.openOrderList && serverData.openOrderList.length > 0) {
+              // 如果有多个，取时间最新的（按ctime排序）
+              const sortedOpenOrders = [...serverData.openOrderList].sort((a, b) => {
+                const timeA = a.ctime || 0
+                const timeB = b.ctime || 0
+                return timeB - timeA
+              })
+              openOrderStr = this.formatOpenOrderMsg(sortedOpenOrders[0])
+            }
+            
+            // 处理已成交数据（closedOrderList）
+            if (serverData.closedOrderList && serverData.closedOrderList.length > 0) {
+              // 如果有多个，取时间最新的（按time或convertTime排序）
+              const sortedClosedOrders = [...serverData.closedOrderList].sort((a, b) => {
+                const timeA = a.convertTime || a.time || 0
+                const timeB = b.convertTime || b.time || 0
+                return timeB - timeA
+              })
+              closeOrderStr = this.formatClosedOrderMsg(sortedClosedOrders[0])
+            }
+            
+            // 如果有openorder或closeorder，保存到tp7和tp8
+            if (openOrderStr || closeOrderStr) {
+              await this.updateMissionTp(task.id, openOrderStr, closeOrderStr)
+              
+              // 更新任务的tp7和tp8（使用$set确保响应式）
+              if (openOrderStr) {
+                this.$set(task, 'tp7', openOrderStr)
+              }
+              if (closeOrderStr) {
+                this.$set(task, 'tp8', closeOrderStr)
+              }
+            }
+          }
+        }
+        
+        this.showToast('获取服务器数据成功', 'success')
+      } catch (error) {
+        console.error('获取服务器数据失败:', error)
+        this.showToast('获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        // 移除标记
+        this.fetchingServerDataGroups.delete(groupKey)
+      }
+    },
+    
+    /**
+     * 格式化挂单数据为字符串
+     */
+    formatOpenOrderMsg(order) {
+      if (!order) return ''
+      const time = this.timestampToBeijingTime(order.ctime)
+      const side = this.formatSide(order.side)
+      const progress = ((order.amt - order.restAmt) / order.amt * 100).toFixed(2)
+      return `创建时间: ${time} | 方向: ${side} | 结果: ${order.outCome} | 价格: ${order.price} | 进度: ${progress}% (${(order.amt - order.restAmt).toFixed(2)}/${order.amt})`
+    },
+    
+    /**
+     * 格式化已成交数据为字符串
+     */
+    formatClosedOrderMsg(order) {
+      if (!order) return ''
+      const time = order.convertTime ? this.timestampToBeijingTime(order.convertTime) : this.timestampToBeijingTime(order.time, true)
+      const timezoneNote = !order.convertTime ? ' (不同时区)' : ''
+      const side = this.formatSide(order.side)
+      const progress = ((order.fillAmt / order.amt) * 100).toFixed(2)
+      return `时间: ${time}${timezoneNote} | 方向: ${side} | 结果: ${order.outCome} | 价格: ${order.price} | 进度: ${progress}% (${order.fillAmt}/${order.amt}) | 状态: ${order.status}`
+    },
+    
+    /**
+     * 格式化side值（1=买，2=卖）
+     */
+    formatSide(side) {
+      if (side === 1 || side === '1') return '买'
+      if (side === 2 || side === '2') return '卖'
+      if (side === 'BUY' || side === 'buy') return '买'
+      if (side === 'SELL' || side === 'sell') return '卖'
+      return side
+    },
+    
+    /**
+     * 将时间戳或时间字符串转换为北京时间
+     */
+    timestampToBeijingTime(timestamp, isDifferentTimezone = false) {
+      if (!timestamp) return '-'
+      try {
+        let date
+        if (typeof timestamp === 'string') {
+          // 尝试解析字符串时间
+          date = new Date(timestamp)
+        } else {
+          // 如果是数字时间戳
+          date = new Date(timestamp)
+        }
+        
+        // 如果标记为不同时区，需要转换（假设原时间是UTC或其他时区）
+        const beijingTime = isDifferentTimezone ? new Date(date.getTime() + 8 * 60 * 60 * 1000) : date
+        
+        const year = beijingTime.getFullYear()
+        const month = String(beijingTime.getMonth() + 1).padStart(2, '0')
+        const day = String(beijingTime.getDate()).padStart(2, '0')
+        const hours = String(beijingTime.getHours()).padStart(2, '0')
+        const minutes = String(beijingTime.getMinutes()).padStart(2, '0')
+        const seconds = String(beijingTime.getSeconds()).padStart(2, '0')
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+      } catch (e) {
+        console.error('时间转换失败:', e)
+        return '-'
+      }
+    },
+    
+    /**
+     * 更新任务的tp7和tp8
+     */
+    async updateMissionTp(taskId, tp7, tp8) {
+      if (!taskId) {
+        return
+      }
+      
+      try {
+        const requestData = {
+          id: parseInt(taskId)
+        }
+        
+        if (tp7) {
+          requestData.tp7 = tp7
+        }
+        if (tp8) {
+          requestData.tp8 = tp8
+        }
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/updateMissionTp',
+          requestData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data && response.data.code === 0) {
+          console.log(`任务 ${taskId} 的tp7和tp8保存成功`)
+        } else {
+          console.error(`任务 ${taskId} 的tp7和tp8保存失败:`, response.data)
+        }
+      } catch (error) {
+        console.error(`更新任务 ${taskId} 的tp7和tp8失败:`, error)
       }
     }
   }
@@ -3193,6 +3603,138 @@ export default {
   text-align: center;
   padding: 20px;
   color: #999;
+}
+
+/* 模式1组头部样式 */
+.mode1-group-header {
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mode1-group-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-status-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.group-status-badge {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.group-status-badge.status-success {
+  background: rgba(39, 174, 96, 0.3);
+  color: #27ae60;
+}
+
+.group-status-badge.status-failed {
+  background: rgba(231, 76, 60, 0.3);
+  color: #e74c3c;
+}
+
+.group-status-badge.status-running {
+  background: rgba(241, 196, 15, 0.3);
+  color: #f1c40f;
+}
+
+.group-status-badge.status-unknown {
+  background: rgba(149, 165, 166, 0.3);
+  color: #95a5a6;
+}
+
+.btn-fetch-server-data {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.btn-fetch-server-data:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-fetch-server-data:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 订单信息样式 */
+.task-order-info {
+  padding: 8px 20px;
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+  font-size: 13px;
+}
+
+.order-info-item {
+  margin-bottom: 6px;
+}
+
+.order-info-item:last-child {
+  margin-bottom: 0;
+}
+
+.order-label {
+  font-weight: 600;
+  color: #555;
+  margin-right: 8px;
+}
+
+.order-content {
+  color: #333;
+  word-break: break-word;
+}
+
+/* 服务器数据样式 */
+.task-server-data {
+  padding: 8px 20px;
+  background: #f0f7ff;
+  border-top: 1px solid #e0e0e0;
+}
+
+.server-data-group {
+  margin-bottom: 12px;
+}
+
+.server-data-group:last-child {
+  margin-bottom: 0;
+}
+
+.server-data-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #667eea;
+  margin-bottom: 6px;
+}
+
+.server-data-item {
+  padding: 6px 10px;
+  background: white;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #333;
+  word-break: break-word;
+}
+
+.server-data-item:last-child {
+  margin-bottom: 0;
 }
 
 /* 模式2样式 */
