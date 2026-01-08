@@ -1376,11 +1376,11 @@
             <div class="section-header">
               <div class="hedge-title-wrapper">
                 <div v-if="hedgeTaskStatus.yesTaskId || hedgeTaskStatus.noTaskId" class="hedge-status-display">
-                  <span v-if="hedgeTaskStatus.yesTaskId" class="hedge-task-status" :class="getStatusClass(hedgeTaskStatus.yesStatus)">
-                    Yes任务#{{ hedgeTaskStatus.yesTaskId }}: {{ getStatusText(hedgeTaskStatus.yesStatus) }}
+                  <span v-if="hedgeTaskStatus.yesTaskId" class="hedge-task-status" :class="getStatusClass(hedgeTaskStatus.yesStatus, hedgeTaskStatus.yesTaskMsg)">
+                    Yes任务#{{ hedgeTaskStatus.yesTaskId }}: {{ getStatusText(hedgeTaskStatus.yesStatus, hedgeTaskStatus.yesTaskMsg) }}
                   </span>
-                  <span v-if="hedgeTaskStatus.noTaskId" class="hedge-task-status" :class="getStatusClass(hedgeTaskStatus.noStatus)">
-                    No任务#{{ hedgeTaskStatus.noTaskId }}: {{ getStatusText(hedgeTaskStatus.noStatus) }}
+                  <span v-if="hedgeTaskStatus.noTaskId" class="hedge-task-status" :class="getStatusClass(hedgeTaskStatus.noStatus, hedgeTaskStatus.noTaskMsg)">
+                    No任务#{{ hedgeTaskStatus.noTaskId }}: {{ getStatusText(hedgeTaskStatus.noStatus, hedgeTaskStatus.noTaskMsg) }}
                   </span>
                 </div>
                 <h2>对冲</h2>
@@ -2041,11 +2041,11 @@
                   </div>
                   <div class="log-row">
                     <span class="log-label">YES浏览器:</span>
-                    <span>{{ log.yesNumber }} - {{ getStatusText(log.yesStatus) }}</span>
+                    <span>{{ log.yesNumber }} - {{ getStatusText(log.yesStatus, log.yesTaskMsg) }}</span>
                   </div>
                   <div class="log-row">
                     <span class="log-label">NO浏览器:</span>
-                    <span>{{ log.noNumber }} - {{ getStatusText(log.noStatus) }}</span>
+                    <span>{{ log.noNumber }} - {{ getStatusText(log.noStatus, log.noTaskMsg) }}</span>
                   </div>
                 </template>
                 
@@ -2059,7 +2059,7 @@
                     <span class="log-label">YES任务 ({{ log.yesTasks.length }}个):</span>
                     <div class="log-task-list">
                       <div v-for="(task, taskIndex) in log.yesTasks" :key="taskIndex" class="log-task-item">
-                        浏览器{{ task.number }} | 任务{{ task.taskId || '-' }} | 数量{{ task.share }} | {{ getStatusText(task.status) }}
+                        浏览器{{ task.number }} | 任务{{ task.taskId || '-' }} | 数量{{ task.share }} | {{ getStatusText(task.status, task.msg) }}
                       </div>
                     </div>
                   </div>
@@ -2067,7 +2067,7 @@
                     <span class="log-label">NO任务 ({{ log.noTasks.length }}个):</span>
                     <div class="log-task-list">
                       <div v-for="(task, taskIndex) in log.noTasks" :key="taskIndex" class="log-task-item">
-                        浏览器{{ task.number }} | 任务{{ task.taskId || '-' }} | 数量{{ task.share }} | {{ getStatusText(task.status) }}
+                        浏览器{{ task.number }} | 任务{{ task.taskId || '-' }} | 数量{{ task.share }} | {{ getStatusText(task.status, task.msg) }}
                       </div>
                     </div>
                   </div>
@@ -2152,7 +2152,7 @@
                       <span class="task-group">组{{ log.yesGroupNo || '-' }}</span> | 
                       浏览器{{ log.yesNumber }} | 
                       任务{{ log.yesTaskId || '-' }} | 
-                      <span :class="getTaskStatusClass(log.yesStatus)">{{ getStatusText(log.yesStatus) }}</span>
+                      <span :class="getTaskStatusClass(log.yesStatus, log.yesTaskMsg)">{{ getStatusText(log.yesStatus, log.yesTaskMsg) }}</span>
                       <span v-if="log.yesTaskMsg" class="task-msg">| {{ formatTaskMsg(log.yesTaskMsg) }}</span>
                       <span v-if="log.yesNumber && log.trendingName" class="on-chain-balance">
                         | 链上余额:
@@ -2226,7 +2226,7 @@
                       <span class="task-group">组{{ log.noGroupNo || '-' }}</span> | 
                       浏览器{{ log.noNumber }} | 
                       任务{{ log.noTaskId || '-' }} | 
-                      <span :class="getTaskStatusClass(log.noStatus)">{{ getStatusText(log.noStatus) }}</span>
+                      <span :class="getTaskStatusClass(log.noStatus, log.noTaskMsg)">{{ getStatusText(log.noStatus, log.noTaskMsg) }}</span>
                       <span v-if="log.noTaskMsg" class="task-msg">| {{ formatTaskMsg(log.noTaskMsg) }}</span>
                       <span v-if="log.noNumber && log.trendingName" class="on-chain-balance">
                         | 链上余额:
@@ -2309,7 +2309,8 @@
                           浏览器{{ task.number }} | 
                           任务{{ task.taskId || '-' }} | 
                           数量{{ task.share }} | 
-                          <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
+                          <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
+                          <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
                           <span v-if="taskIndex < log.yesTasks.length - 1">; </span>
                         </template>
                       </template>
@@ -2389,7 +2390,8 @@
                           浏览器{{ task.number }} | 
                           任务{{ task.taskId || '-' }} | 
                           数量{{ task.share }} | 
-                          <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
+                          <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
+                          <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
                           <span v-if="taskIndex < log.noTasks.length - 1">; </span>
                         </template>
                       </template>
@@ -8983,6 +8985,61 @@ const loadCurrentPageTaskStatus = async () => {
       }
     }
     
+    // 模式2：获取所有任务的详情
+    if (log.isMode2) {
+      // 更新YES任务
+      if (log.yesTasks && log.yesTasks.length > 0) {
+        for (let i = 0; i < log.yesTasks.length; i++) {
+          const task = log.yesTasks[i]
+          if (task.taskId) {
+            try {
+              const taskData = await fetchMissionStatus(task.taskId)
+              if (taskData) {
+                allHedgeLogs.value[actualIndex].yesTasks[i].status = taskData.status
+                allHedgeLogs.value[actualIndex].yesTasks[i].msg = taskData.msg || ''
+              }
+            } catch (e) {
+              console.error(`获取YES任务 ${task.taskId} 详情失败:`, e)
+            }
+          }
+        }
+      }
+      
+      // 更新NO任务
+      if (log.noTasks && log.noTasks.length > 0) {
+        for (let i = 0; i < log.noTasks.length; i++) {
+          const task = log.noTasks[i]
+          if (task.taskId) {
+            try {
+              const taskData = await fetchMissionStatus(task.taskId)
+              if (taskData) {
+                allHedgeLogs.value[actualIndex].noTasks[i].status = taskData.status
+                allHedgeLogs.value[actualIndex].noTasks[i].msg = taskData.msg || ''
+              }
+            } catch (e) {
+              console.error(`获取NO任务 ${task.taskId} 详情失败:`, e)
+            }
+          }
+        }
+      }
+      
+      // 重新判断整组任务是否成功（使用新的判断逻辑）
+      const allTasks = [...(allHedgeLogs.value[actualIndex].yesTasks || []), ...(allHedgeLogs.value[actualIndex].noTasks || [])]
+      if (allTasks.length > 0) {
+        const allSuccess = allTasks.every(t => isTaskSuccess(t.status, t.msg))
+        if (allSuccess) {
+          allHedgeLogs.value[actualIndex].finalStatus = 'success'
+        }
+      }
+    } else {
+      // 模式1：重新判断整组任务是否成功（使用新的判断逻辑）
+      const yesSuccess = allHedgeLogs.value[actualIndex].yesStatus === 2 || isTaskSuccess(allHedgeLogs.value[actualIndex].yesStatus, allHedgeLogs.value[actualIndex].yesTaskMsg)
+      const noSuccess = allHedgeLogs.value[actualIndex].noStatus === 2 || isTaskSuccess(allHedgeLogs.value[actualIndex].noStatus, allHedgeLogs.value[actualIndex].noTaskMsg)
+      if (yesSuccess && noSuccess) {
+        allHedgeLogs.value[actualIndex].finalStatus = 'success'
+      }
+    }
+    
     // 获取YES任务的链上余额
     if (log.yesNumber && log.trendingName) {
       try {
@@ -9333,8 +9390,10 @@ const saveTaskAsSuccess = async (log, taskId, msg, taskType = 'single') => {
           log.noTaskMsg = msg
         }
         
-        // 检查是否两个任务都成功
-        if (log.yesStatus === 2 && log.noStatus === 2) {
+        // 检查是否两个任务都成功（使用新的判断逻辑）
+        const yesSuccess = log.yesStatus === 2 || isTaskSuccess(log.yesStatus, log.yesTaskMsg)
+        const noSuccess = log.noStatus === 2 || isTaskSuccess(log.noStatus, log.noTaskMsg)
+        if (yesSuccess && noSuccess) {
           log.finalStatus = 'success'
         }
       } else {
@@ -9346,6 +9405,7 @@ const saveTaskAsSuccess = async (log, taskId, msg, taskType = 'single') => {
           const yesTask = log.yesTasks.find(t => String(t.taskId) === String(taskId))
           if (yesTask) {
             yesTask.status = 2
+            yesTask.msg = msg
             taskUpdated = true
           }
         }
@@ -9355,19 +9415,20 @@ const saveTaskAsSuccess = async (log, taskId, msg, taskType = 'single') => {
           const noTask = log.noTasks.find(t => String(t.taskId) === String(taskId))
           if (noTask) {
             noTask.status = 2
+            noTask.msg = msg
             taskUpdated = true
           }
         }
         
-        // 检查所有任务是否都成功
+        // 检查所有任务是否都成功（使用新的判断逻辑）
         if (taskUpdated) {
           const yesTasks = log.yesTasks || []
           const noTasks = log.noTasks || []
           const allTasks = [...yesTasks, ...noTasks]
           
-          // 检查是否所有任务都成功（状态为2）
+          // 检查是否所有任务都成功（使用新的判断逻辑）
           if (allTasks.length > 0) {
-            const allSuccess = allTasks.every(t => t.status === 2)
+            const allSuccess = allTasks.every(t => isTaskSuccess(t.status, t.msg))
             if (allSuccess) {
               log.finalStatus = 'success'
             }
@@ -9785,17 +9846,48 @@ const loadConfigVisibleStatus = (configList) => {
  */
 const getHedgeStatusText = (hedge) => {
   if (!hedge) return ''
+  
+  // 检查是否有 [x] 开头的 msg，如果 x < 10，显示"失败不用管"
+  if (hedge.isMode2) {
+    // 模式2：检查所有任务的 msg
+    const allTasks = [...(hedge.yesTasks || []), ...(hedge.noTasks || [])]
+    for (const task of allTasks) {
+      if (task.msg) {
+        const bracketNum = extractBracketNumber(task.msg)
+        if (bracketNum !== null) {
+          return '失败不用管'
+        }
+      }
+    }
+  } else {
+    // 模式1：检查 yesTaskMsg 和 noTaskMsg
+    if (hedge.yesTaskMsg) {
+      const bracketNum = extractBracketNumber(hedge.yesTaskMsg)
+      if (bracketNum !== null) {
+        return '失败不用管'
+      }
+    }
+    if (hedge.noTaskMsg) {
+      const bracketNum = extractBracketNumber(hedge.noTaskMsg)
+      if (bracketNum !== null) {
+        return '失败不用管'
+      }
+    }
+  }
+  
   // 优先使用 finalStatus（新版本）
   if (hedge.finalStatus === 'success') return '全部成功'
   if (hedge.finalStatus === 'failed') return '失败'
   if (hedge.finalStatus === 'timeout') return '超时'
   if (hedge.finalStatus === 'running') {
-    // 模式2：检查任务状态
+    // 模式2：检查任务状态（使用新的判断逻辑）
     if (hedge.isMode2) {
       const allTasks = [...(hedge.yesTasks || []), ...(hedge.noTasks || [])]
       if (allTasks.length === 0) return '等待提交'
-      const successCount = allTasks.filter(t => t.status === 2).length
-      const failedCount = allTasks.filter(t => t.status === 3).length
+      
+      // 使用新的判断逻辑统计成功和失败
+      const successCount = allTasks.filter(t => isTaskSuccess(t.status, t.msg)).length
+      const failedCount = allTasks.filter(t => !isTaskSuccess(t.status, t.msg) && t.status !== 9 && t.status !== 0 && t.status !== 1).length
       if (successCount > 0 || failedCount > 0) {
         return `进行中 (成功:${successCount}, 失败:${failedCount}, 总计:${allTasks.length})`
       }
@@ -9803,8 +9895,19 @@ const getHedgeStatusText = (hedge) => {
     }
     return '进行中'
   }
+  
   // 兼容旧版本（没有 finalStatus 字段的记录）
-  if (hedge.yesStatus === 2 && hedge.noStatus === 2) return '全部成功'
+  // 使用新的判断逻辑
+  const yesSuccess = hedge.yesStatus === 2 || isTaskSuccess(hedge.yesStatus, hedge.yesTaskMsg)
+  const noSuccess = hedge.noStatus === 2 || isTaskSuccess(hedge.noStatus, hedge.noTaskMsg)
+  
+  if (yesSuccess && noSuccess) return '全部成功'
+  // 检查是否有 [x] 格式的失败不用管
+  const yesBracketNum = extractBracketNumber(hedge.yesTaskMsg)
+  const noBracketNum = extractBracketNumber(hedge.noTaskMsg)
+  if (yesBracketNum !== null || noBracketNum !== null) {
+    return '失败不用管'
+  }
   if (hedge.yesStatus === 3 || hedge.noStatus === 3) return '部分失败'
   if (hedge.yesStatus === 9 || hedge.noStatus === 9) return '进行中'
   return '未知'
@@ -9815,12 +9918,52 @@ const getHedgeStatusText = (hedge) => {
  */
 const getHedgeStatusClass = (hedge) => {
   if (!hedge) return ''
+  
+  // 检查是否有 [x] 开头的 msg，如果 x < 10，显示黄色背景
+  if (hedge.isMode2) {
+    // 模式2：检查所有任务的 msg
+    const allTasks = [...(hedge.yesTasks || []), ...(hedge.noTasks || [])]
+    for (const task of allTasks) {
+      if (task.msg) {
+        const bracketNum = extractBracketNumber(task.msg)
+        if (bracketNum !== null) {
+          return 'hedge-warning'
+        }
+      }
+    }
+  } else {
+    // 模式1：检查 yesTaskMsg 和 noTaskMsg
+    if (hedge.yesTaskMsg) {
+      const bracketNum = extractBracketNumber(hedge.yesTaskMsg)
+      if (bracketNum !== null) {
+        return 'hedge-warning'
+      }
+    }
+    if (hedge.noTaskMsg) {
+      const bracketNum = extractBracketNumber(hedge.noTaskMsg)
+      if (bracketNum !== null) {
+        return 'hedge-warning'
+      }
+    }
+  }
+  
   // 优先使用 finalStatus（新版本）
   if (hedge.finalStatus === 'success') return 'hedge-success'
   if (hedge.finalStatus === 'failed') return 'hedge-failed'
   if (hedge.finalStatus === 'running') return 'hedge-running'
+  
   // 兼容旧版本（没有 finalStatus 字段的记录）
-  if (hedge.yesStatus === 2 && hedge.noStatus === 2) return 'hedge-success'
+  // 使用新的判断逻辑
+  const yesSuccess = hedge.yesStatus === 2 || isTaskSuccess(hedge.yesStatus, hedge.yesTaskMsg)
+  const noSuccess = hedge.noStatus === 2 || isTaskSuccess(hedge.noStatus, hedge.noTaskMsg)
+  
+  if (yesSuccess && noSuccess) return 'hedge-success'
+  // 检查是否有 [x] 格式的失败不用管
+  const yesBracketNum = extractBracketNumber(hedge.yesTaskMsg)
+  const noBracketNum = extractBracketNumber(hedge.noTaskMsg)
+  if (yesBracketNum !== null || noBracketNum !== null) {
+    return 'hedge-warning'
+  }
   if (hedge.yesStatus === 3 || hedge.noStatus === 3) return 'hedge-failed'
   if (hedge.yesStatus === 9 || hedge.noStatus === 9) return 'hedge-running'
   return ''
@@ -9829,7 +9972,14 @@ const getHedgeStatusClass = (hedge) => {
 /**
  * 获取任务状态样式类
  */
-const getTaskStatusClass = (status) => {
+const getTaskStatusClass = (status, msg = null) => {
+  // 如果传入了 msg，需要根据新的逻辑判断
+  if (msg !== null && msg !== undefined) {
+    if (isTaskSuccess(status, msg)) {
+      return 'task-success'
+    }
+  }
+  
   const classMap = {
     0: 'task-pending',
     2: 'task-success',
@@ -10819,6 +10969,7 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
           if (taskData) {
             const oldStatus = task.status
             task.status = taskData.status
+            task.msg = taskData.msg || ''
             if (oldStatus !== taskData.status) {
               console.log(`[模式2-monitorHedgeStatus] YES任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
             }
@@ -10834,6 +10985,7 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
           if (taskData) {
             const oldStatus = task.status
             task.status = taskData.status
+            task.msg = taskData.msg || ''
             if (oldStatus !== taskData.status) {
               console.log(`[模式2-monitorHedgeStatus] NO任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
             }
@@ -10877,10 +11029,9 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
       return
     }
     
-    // 所有计划任务都已提交，检查是否都完成
-    const allCompleted = allTasks.every(t => t.status === 2 || t.status === 3)
-    const hasFailed = allTasks.some(t => t.status === 3)
-    const allSuccess = allTasks.every(t => t.status === 2)
+    // 所有计划任务都已提交，检查是否都完成（使用新的判断逻辑）
+    const allCompleted = allTasks.every(t => t.status === 2 || t.status === 3 || isTaskSuccess(t.status, t.msg))
+    const allSuccess = allTasks.every(t => isTaskSuccess(t.status, t.msg))
     
     // 只有当所有任务都完成（成功或失败）时，才判断最终状态
     if (allCompleted) {
@@ -10888,7 +11039,7 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
         console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 所有任务都成功`)
         hedgeRecord.finalStatus = 'success'
       } else {
-        console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 有任务失败（${allTasks.filter(t => t.status === 3).length}个失败）`)
+        console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 有任务失败（${allTasks.filter(t => !isTaskSuccess(t.status, t.msg)).length}个失败）`)
         hedgeRecord.finalStatus = 'failed'
       }
       finishHedge(config, hedgeRecord)
@@ -10896,8 +11047,8 @@ const monitorHedgeStatusV2 = (config, hedgeRecord, submitSecondSideTasksCallback
     }
     
     // 如果还有任务未完成，继续监控
-    const runningTasks = allTasks.filter(t => t.status === 9 || t.status === 0)
-    const completedTasks = allTasks.filter(t => t.status === 2 || t.status === 3)
+    const runningTasks = allTasks.filter(t => t.status === 9 || t.status === 0 || t.status === 1)
+    const completedTasks = allTasks.filter(t => t.status === 2 || t.status === 3 || isTaskSuccess(t.status, t.msg))
     console.log(`[模式2-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 任务进度: ${completedTasks.length}/${allTasks.length} 完成，${runningTasks.length} 个运行中`)
     
     setTimeout(checkStatus, 5000)
@@ -11827,7 +11978,112 @@ const executeAutoHedgeTasks = async () => {
 /**
  * 获取状态文本
  */
-const getStatusText = (status) => {
+/**
+ * 判断任务是否成功（根据 status 和 msg）
+ */
+const isTaskSuccess = (status, msg) => {
+  // 如果 status === 2，直接返回成功
+  if (status === 2) {
+    return true
+  }
+  
+  // 如果 status !== 2，需要判断 msg
+  if (!msg) {
+    return false
+  }
+  
+  // 尝试解析 msg 是否为 JSON 格式
+  let msgObj = null
+  try {
+    // 如果 msg 是 JSON 字符串，尝试解析
+    if (typeof msg === 'string' && msg.trim().startsWith('{')) {
+      msgObj = JSON.parse(msg)
+    }
+  } catch (e) {
+    // 解析失败，说明不是 JSON 格式，继续使用字符串匹配逻辑
+    msgObj = null
+  }
+  
+  // 如果是 JSON 格式
+  if (msgObj && typeof msgObj === 'object') {
+    // 检查 type 字段
+    if (msgObj.type === 'TYPE5_SUCCESS') {
+      // 全部成交
+      return true
+    } else if (msgObj.type === 'TYPE5_PARTIAL') {
+      // 部分成交，需要检查进度是否大于80%
+      if (msgObj.progress) {
+        try {
+          // 解析 progress 字段，格式如："551.41 / 552.86 shares" 或 "$306.06 / $312.98"
+          const progressMatch = msgObj.progress.match(/\$?([\d,]+\.?\d*)\s*\/\s*\$?([\d,]+\.?\d*)/)
+          if (progressMatch) {
+            const filled = parseFloat(progressMatch[1].replace(/,/g, ''))
+            const total = parseFloat(progressMatch[2].replace(/,/g, ''))
+            
+            if (total > 0 && filled / total > 0.8) {
+              return true
+            }
+          }
+        } catch (e) {
+          console.error('解析JSON中的进度失败:', e)
+        }
+      }
+      return false
+    }
+  }
+  
+  // 如果不是 JSON 格式，使用原有的字符串匹配逻辑
+  // 检查是否是"全部成交"
+  if (msg.includes('全部成交') || msg.includes('✅ 全部成交') || msg.includes('SUCCESS')) {
+    return true
+  }
+  
+  // 检查是否是"部分成交"，需要判断进度是否大于80%
+  if (msg.includes('部分成交') || msg.includes('⚠️ 部分成交') || msg.includes('PARTIAL')) {
+    // 尝试从 msg 中提取进度信息
+    // 格式如：部分成交 | 现有数量: 0.0 | 成交价格: 78.3 | 挂单价格: 78.3¢ | 进度: $586.57 / $636.57 | 交易费: $0.0
+    const progressMatch = msg.match(/进度[:\s]*\$?([\d,]+\.?\d*)\s*\/\s*\$?([\d,]+\.?\d*)/i)
+    if (progressMatch) {
+      try {
+        // 提取前一个值和后一个值，去除逗号和$符号
+        const filled = parseFloat(progressMatch[1].replace(/,/g, ''))
+        const total = parseFloat(progressMatch[2].replace(/,/g, ''))
+        
+        if (total > 0 && filled / total > 0.8) {
+          return true
+        }
+      } catch (e) {
+        console.error('解析进度失败:', e)
+      }
+    }
+  }
+  
+  return false
+}
+
+/**
+ * 从 msg 中提取 [x] 开头的数字
+ */
+const extractBracketNumber = (msg) => {
+  if (!msg) return null
+  const match = msg.match(/\[(\d+)\]/)
+  if (match) {
+    const num = parseInt(match[1])
+    if (num < 10) {
+      return num
+    }
+  }
+  return null
+}
+
+const getStatusText = (status, msg = null) => {
+  // 如果传入了 msg，需要根据新的逻辑判断
+  if (msg !== null && msg !== undefined) {
+    if (isTaskSuccess(status, msg)) {
+      return '成功'
+    }
+  }
+  
   const statusMap = {
     0: '待处理',
     1: '处理中',
@@ -11841,7 +12097,14 @@ const getStatusText = (status) => {
 /**
  * 获取状态样式类
  */
-const getStatusClass = (status) => {
+const getStatusClass = (status, msg = null) => {
+  // 如果传入了 msg，需要根据新的逻辑判断
+  if (msg !== null && msg !== undefined) {
+    if (isTaskSuccess(status, msg)) {
+      return 'status-completed'
+    }
+  }
+  
   const classMap = {
     0: 'status-pending',
     1: 'status-running',
@@ -13235,6 +13498,11 @@ onUnmounted(() => {
 .hedge-running {
   background: #ffc107;
   color: #333;
+}
+
+.hedge-warning {
+  background: #ffc107;
+  color: #856404;
 }
 
 .hedge-details {

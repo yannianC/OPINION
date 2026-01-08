@@ -7163,7 +7163,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 add_bro_log_entry(bro_log_list, browser_id, "[15]任务成功，保持浏览器打开以收集数据")
                 log_print(f"[{browser_id}] 任务成功，保持浏览器打开以收集数据...")
             else:
-                add_bro_log_entry(bro_log_list, browser_id, f"任务执行失败，返回结果到上层处理: {failure_reason}")
+                add_bro_log_entry(bro_log_list, browser_id, f"{failure_reason}")
                 log_print(f"[{browser_id}] 任务执行失败，返回结果到上层处理: {failure_reason}")
             return success, failure_reason, driver, browser_id, exchange_name, available_balance
         else:
@@ -15676,7 +15676,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 available_balance = None
             
             # 立即上传任务结果（不等待数据收集）
-            log_print(f"[{browser_id}] Type {mission_type} 任务{'成功' if success else '失败'}，立即上传结果...")
+            log_print(f"[{browser_id}] Type {mission_type} 任务{'成功' if success else '失败'}，立即上传结果... {failure_reason}")
             status = 2 if success else 3
             save_mission_result(mission_id, status, failure_reason or '')
             log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已上传")
