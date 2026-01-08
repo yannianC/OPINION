@@ -309,12 +309,15 @@
         
         <div class="tasks-container">
           <!-- 模式1的显示 -->
-          <div v-if="queryMode === 1" class="task-groups-list">
-            <div 
-              v-for="(item, itemIndex) in taskGroupsWithIndex" 
-              :key="item.groupKey"
-              :class="['task-group-card', `group-color-${item.colorIndex}`]"
-            >
+          <div v-if="queryMode === 1" class="task-groups-list-wrapper" ref="taskGroupsListRef" @scroll="handleTaskGroupsScroll">
+            <div class="task-groups-spacer-top" :style="{ height: taskGroupsTopSpacer + 'px' }"></div>
+            <div class="task-groups-list">
+              <div 
+                v-for="(item, itemIndex) in visibleTaskGroups" 
+                :key="item.groupKey"
+                :class="['task-group-card', `group-color-${item.colorIndex}`]"
+                :ref="el => setTaskGroupRef(el, itemIndex)"
+              >
               <!-- 组头部：总状态和获取服务器数据按钮 -->
               <div class="mode1-group-header">
                 <div class="mode1-group-status">
@@ -407,19 +410,7 @@
                     </a>
                   </div>
                   
-                  <!-- 显示tp7和tp8（openorder和closeorder） -->
-                  <div v-if="task.tp7 || task.tp8" class="task-order-info">
-                    <div v-if="task.tp7" class="order-info-item">
-                      <span class="order-label">挂单数据:</span>
-                      <span class="order-content">{{ task.tp7 }}</span>
-                    </div>
-                    <div v-if="task.tp8" class="order-info-item">
-                      <span class="order-label">已成交数据:</span>
-                      <span class="order-content">{{ task.tp8 }}</span>
-                    </div>
-                  </div>
-                  
-                  <!-- 显示服务器数据（如果已获取） -->
+                  <!-- 显示服务器数据（如果已获取，优先显示；否则显示tp7和tp8） -->
                   <div v-if="task.serverData" class="task-server-data">
                     <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
                       <div class="server-data-title">挂单数据:</div>
@@ -434,9 +425,22 @@
                       </div>
                     </div>
                   </div>
+                  <!-- 如果没有serverData，显示tp7和tp8（从任务信息中获取的） -->
+                  <div v-else-if="task.tp7 || task.tp8" class="task-order-info">
+                    <div v-if="task.tp7" class="order-info-item">
+                      <span class="order-label">挂单数据:</span>
+                      <span class="order-content">{{ task.tp7 }}</span>
+                    </div>
+                    <div v-if="task.tp8" class="order-info-item">
+                      <span class="order-label">已成交数据:</span>
+                      <span class="order-content">{{ task.tp8 }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
+              </div>
             </div>
+            <div class="task-groups-spacer-bottom" :style="{ height: taskGroupsBottomSpacer + 'px' }"></div>
           </div>
           
           <!-- 模式2的显示 -->
@@ -862,7 +866,7 @@ export default {
         startTime: '',
         endTime: ''
       },
-      recentHours: 3, // 默认查询最近3小时
+      recentHours: 1, // 默认查询最近3小时
       timeRangeStart: '', // 时间区间开始：格式为"日-时"，如"24-16"
       timeRangeEnd: '', // 时间区间结束：格式为"日-时"，如"24-18"
       loading: false,
@@ -898,7 +902,13 @@ export default {
       currentBroNumber: null,  // 当前查看的浏览器ID
       isLoadingBroLogs: false,  // 是否正在加载日志
       // 获取服务器数据
-      fetchingServerDataGroups: new Set()  // 正在获取服务器数据的组key集合
+      fetchingServerDataGroups: new Set(),  // 正在获取服务器数据的组key集合
+      // 虚拟滚动相关
+      taskGroupsScrollTop: 0,  // 任务组列表滚动位置
+      taskGroupHeights: [],  // 每个任务组的高度
+      taskGroupRefs: [],  // 任务组DOM引用
+      estimatedGroupHeight: 200,  // 估算的任务组高度
+      visibleBuffer: 3  // 可见区域缓冲区（上下各显示3个）
     }
   },
   mounted() {
@@ -1032,6 +1042,52 @@ export default {
           colorIndex: groupIdColorMap.get(internalGroupId) || 0
         }
       })
+    },
+    
+    // 可见的任务组（虚拟滚动）
+    visibleTaskGroups() {
+      if (this.queryMode !== 1) return []
+      
+      const allGroups = this.taskGroupsWithIndex
+      if (allGroups.length === 0) return []
+      
+      // 如果任务组数量较少，直接返回全部（不需要虚拟滚动）
+      if (allGroups.length <= 20) {
+        return allGroups
+      }
+      
+      // 计算可见范围
+      const containerHeight = 800 // 容器高度（可以根据实际情况调整）
+      const startIndex = Math.max(0, Math.floor(this.taskGroupsScrollTop / this.estimatedGroupHeight) - this.visibleBuffer)
+      const visibleCount = Math.ceil(containerHeight / this.estimatedGroupHeight) + this.visibleBuffer * 2
+      const endIndex = Math.min(allGroups.length, startIndex + visibleCount)
+      
+      return allGroups.slice(startIndex, endIndex)
+    },
+    
+    // 顶部占位高度
+    taskGroupsTopSpacer() {
+      if (this.queryMode !== 1) return 0
+      const allGroups = this.taskGroupsWithIndex
+      if (allGroups.length <= 20) return 0
+      
+      const startIndex = Math.max(0, Math.floor(this.taskGroupsScrollTop / this.estimatedGroupHeight) - this.visibleBuffer)
+      return startIndex * this.estimatedGroupHeight
+    },
+    
+    // 底部占位高度
+    taskGroupsBottomSpacer() {
+      if (this.queryMode !== 1) return 0
+      const allGroups = this.taskGroupsWithIndex
+      if (allGroups.length <= 20) return 0
+      
+      const containerHeight = 800
+      const startIndex = Math.max(0, Math.floor(this.taskGroupsScrollTop / this.estimatedGroupHeight) - this.visibleBuffer)
+      const visibleCount = Math.ceil(containerHeight / this.estimatedGroupHeight) + this.visibleBuffer * 2
+      const endIndex = Math.min(allGroups.length, startIndex + visibleCount)
+      const remainingCount = allGroups.length - endIndex
+      
+      return remainingCount * this.estimatedGroupHeight
     },
     
     // 获取带索引的任务组列表，用于颜色循环（模式2）
@@ -2362,11 +2418,36 @@ export default {
     },
     
     /**
+     * 从 msg 中提取 [x] 开头的数字
+     */
+    extractBracketNumber(msg) {
+      if (!msg) return null
+      const match = msg.match(/\[(\d+)\]/)
+      if (match) {
+        const num = parseInt(match[1])
+        if (num < 10) {
+          return num
+        }
+      }
+      return null
+    },
+    
+    /**
      * 计算组的总状态
      */
     calculateGroupStatus(tasks) {
       if (!tasks || tasks.length === 0) {
         return 'unknown'
+      }
+      
+      // 优先检查是否有 [x] 格式的失败无影响（x < 10）
+      for (const task of tasks) {
+        if (task.msg) {
+          const bracketNum = this.extractBracketNumber(task.msg)
+          if (bracketNum !== null) {
+            return 'noImpact'
+          }
+        }
       }
       
       // 检查所有任务是否都成功
@@ -2398,6 +2479,7 @@ export default {
         'success': '全部成功',
         'failed': '失败',
         'running': '进行中',
+        'noImpact': '失败无影响',
         'unknown': '未知'
       }
       return statusMap[finalStatus] || '未知'
@@ -2411,6 +2493,7 @@ export default {
         'success': 'status-success',
         'failed': 'status-failed',
         'running': 'status-running',
+        'noImpact': 'status-no-impact',
         'unknown': 'status-unknown'
       }
       return classMap[finalStatus] || 'status-unknown'
@@ -2507,8 +2590,8 @@ export default {
           if (response.data && response.data.code === 0 && response.data.data) {
             const serverData = response.data.data.hist || {}
             
-            // 更新任务的服务器数据（使用$set确保响应式）
-            this.$set(task, 'serverData', serverData)
+            // 更新任务的服务器数据（Vue 3 直接赋值即可）
+            task.serverData = serverData
             
             // 处理openorder和closeorder
             let openOrderStr = null
@@ -2529,8 +2612,21 @@ export default {
             if (serverData.closedOrderList && serverData.closedOrderList.length > 0) {
               // 如果有多个，取时间最新的（按time或convertTime排序）
               const sortedClosedOrders = [...serverData.closedOrderList].sort((a, b) => {
-                const timeA = a.convertTime || a.time || 0
-                const timeB = b.convertTime || b.time || 0
+                // 处理时间：如果是字符串，转换为时间戳；如果是数字，直接使用
+                let timeA = 0
+                if (a.convertTime) {
+                  timeA = typeof a.convertTime === 'string' ? new Date(a.convertTime).getTime() : a.convertTime
+                } else if (a.time) {
+                  timeA = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time
+                }
+                
+                let timeB = 0
+                if (b.convertTime) {
+                  timeB = typeof b.convertTime === 'string' ? new Date(b.convertTime).getTime() : b.convertTime
+                } else if (b.time) {
+                  timeB = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time
+                }
+                
                 return timeB - timeA
               })
               closeOrderStr = this.formatClosedOrderMsg(sortedClosedOrders[0])
@@ -2540,12 +2636,12 @@ export default {
             if (openOrderStr || closeOrderStr) {
               await this.updateMissionTp(task.id, openOrderStr, closeOrderStr)
               
-              // 更新任务的tp7和tp8（使用$set确保响应式）
+              // 更新任务的tp7和tp8（Vue 3 直接赋值即可）
               if (openOrderStr) {
-                this.$set(task, 'tp7', openOrderStr)
+                task.tp7 = openOrderStr
               }
               if (closeOrderStr) {
-                this.$set(task, 'tp8', closeOrderStr)
+                task.tp8 = closeOrderStr
               }
             }
           }
@@ -2623,6 +2719,28 @@ export default {
       } catch (e) {
         console.error('时间转换失败:', e)
         return '-'
+      }
+    },
+    
+    /**
+     * 处理任务组列表滚动
+     */
+    handleTaskGroupsScroll(event) {
+      this.taskGroupsScrollTop = event.target.scrollTop
+    },
+    
+    /**
+     * 设置任务组DOM引用
+     */
+    setTaskGroupRef(el, index) {
+      if (el) {
+        this.taskGroupRefs[index] = el
+        // 更新实际高度
+        this.$nextTick(() => {
+          if (el.offsetHeight) {
+            this.taskGroupHeights[index] = el.offsetHeight
+          }
+        })
       }
     },
     
@@ -3241,6 +3359,19 @@ export default {
   background: transparent;
 }
 
+/* 虚拟滚动容器 */
+.task-groups-list-wrapper {
+  height: 800px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.task-groups-spacer-top,
+.task-groups-spacer-bottom {
+  width: 100%;
+  flex-shrink: 0;
+}
+
 .task-groups-list {
   display: flex;
   flex-direction: column;
@@ -3652,6 +3783,11 @@ export default {
 .group-status-badge.status-unknown {
   background: rgba(149, 165, 166, 0.3);
   color: #95a5a6;
+}
+
+.group-status-badge.status-no-impact {
+  background: rgba(241, 196, 15, 0.3);
+  color: #f1c40f;
 }
 
 .btn-fetch-server-data {
