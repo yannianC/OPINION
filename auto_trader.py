@@ -7720,6 +7720,39 @@ def fetch_orderbook_data(token_id):
         return None
 
 
+def get_best_bid_ask(orderbook_data):
+    """
+    从订单薄数据中获取买一价和卖一价
+    
+    Args:
+        orderbook_data: 订单薄数据字典，包含 bids 和 asks
+        
+    Returns:
+        tuple: (best_bid_price, best_bid_depth, best_ask_price, best_ask_depth)
+               失败返回 (None, None, None, None)
+    """
+    if not orderbook_data:
+        return None, None, None, None
+    
+    bids = orderbook_data.get('bids', [])
+    asks = orderbook_data.get('asks', [])
+    
+    if not bids or not asks:
+        return None, None, None, None
+    
+    # 买一价：bids 中 price 最大的那一个
+    best_bid = max(bids, key=lambda x: float(x.get('price', 0)))
+    best_bid_price = float(best_bid.get('price', 0)) * 100  # 转换为百分比
+    best_bid_depth = float(best_bid.get('size', 0))  # 使用 size 字段
+    
+    # 卖一价：asks 中 price 最小的那一个
+    best_ask = min(asks, key=lambda x: float(x.get('price', 0)))
+    best_ask_price = float(best_ask.get('price', 0)) * 100  # 转换为百分比
+    best_ask_depth = float(best_ask.get('size', 0))  # 使用 size 字段
+    
+    return best_bid_price, best_bid_depth, best_ask_price, best_ask_depth
+
+
 def save_exchange_config_blacklist(exchange_config_id, trending, trending_part1, trending_part2, trending_part3, op_url, poly_url, op_topic_id, weight, is_open):
     """
     保存exchangeConfig的a字段为1（拉黑事件）
@@ -8061,11 +8094,11 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
         # 获取失败，继续流程
     else:
         # 检查价格
+        best_bid_price, best_bid_depth, best_ask_price, best_ask_depth = get_best_bid_ask(orderbook_data)
+        
         if is_buy:
             # 买入（开仓）：检查是否是买一价
-            if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
-                # API返回的价格是小数，需要乘以100转换为百分比
-                best_bid_price = float(orderbook_data['bids'][0].get('price', 0)) * 100
+            if best_bid_price is not None:
                 is_best_bid = abs(best_bid_price - mission_price) < 0.01
                 
                 log_msg = f"[OP] 任务一: 买一价: {best_bid_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_bid}"
@@ -8092,9 +8125,7 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
                 return False, fail_msg
         else:
             # 卖出（平仓）：检查是否是卖一价
-            if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
-                # API返回的价格是小数，需要乘以100转换为百分比
-                best_ask_price = float(orderbook_data['asks'][0].get('price', 0)) * 100
+            if best_ask_price is not None:
                 is_best_ask = abs(best_ask_price - mission_price) < 0.01
                 
                 log_msg = f"[OP] 任务一: 卖一价: {best_ask_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_ask}"
@@ -8156,10 +8187,11 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
                 continue
             
             # 检查价格
+            best_bid_price, best_bid_depth, best_ask_price, best_ask_depth = get_best_bid_ask(orderbook_data)
+            
             if is_buy:
                 # 买入（开仓）：检查是否是买一价
-                if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
-                    best_bid_price = float(orderbook_data['bids'][0].get('price', 0)) * 100
+                if best_bid_price is not None:
                     is_best_bid = abs(best_bid_price - mission_price) < 0.01
                     
                     log_msg = f"[OP] 任务一: 买一价: {best_bid_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_bid}"
@@ -8186,8 +8218,7 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
                     return False, fail_msg
             else:
                 # 卖出（平仓）：检查是否是卖一价
-                if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
-                    best_ask_price = float(orderbook_data['asks'][0].get('price', 0)) * 100
+                if best_ask_price is not None:
                     is_best_ask = abs(best_ask_price - mission_price) < 0.01
                     
                     log_msg = f"[OP] 任务一: 卖一价: {best_ask_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_ask}"
@@ -8241,10 +8272,11 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
         return True, ""
     
     # 检查最终状态
+    best_bid_price, best_bid_depth, best_ask_price, best_ask_depth = get_best_bid_ask(orderbook_data)
+    
     if is_buy:
         # 买入（开仓）：检查是否仍然是买一价
-        if 'bids' in orderbook_data and len(orderbook_data['bids']) > 0:
-            best_bid_price = float(orderbook_data['bids'][0].get('price', 0)) * 100
+        if best_bid_price is not None:
             is_best_bid = abs(best_bid_price - mission_price) < 0.01
             
             log_msg = f"[OP] 任务一: tp2时间结束，买一价: {best_bid_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_bid}"
@@ -8266,8 +8298,7 @@ def check_tp2_position_and_orderbook(driver, browser_id, task_data, initial_posi
             return True, ""
     else:
         # 卖出（平仓）：检查是否仍然是卖一价
-        if 'asks' in orderbook_data and len(orderbook_data['asks']) > 0:
-            best_ask_price = float(orderbook_data['asks'][0].get('price', 0)) * 100
+        if best_ask_price is not None:
             is_best_ask = abs(best_ask_price - mission_price) < 0.01
             
             log_msg = f"[OP] 任务一: tp2时间结束，卖一价: {best_ask_price:.1f}, 我的价格: {mission_price:.1f}, 是否相等: {is_best_ask}"
@@ -9068,21 +9099,16 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                     # 继续后面的步骤
                                 else:
                                     # 解析订单薄数据
-                                    bids = orderbook_data.get('bids', [])
-                                    asks = orderbook_data.get('asks', [])
+                                    best_bid_price, best_bid_depth, best_ask_price, best_ask_depth = get_best_bid_ask(orderbook_data)
                                     
-                                    if len(bids) == 0 or len(asks) == 0:
+                                    if best_bid_price is None or best_ask_price is None:
                                         log_msg = "[5]订单薄获取失败"
                                         log_print(f"[{browser_id}] ✗ {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
                                         save_mission_result(mission.get('id'), 21, log_msg)
                                         # 继续后面的步骤
                                     else:
-                                        # 获取买一价和卖一价（API返回的是小数，需要乘以100转换为百分比）
-                                        best_bid_price = float(bids[0].get('price', 0)) * 100
-                                        best_bid_depth = float(bids[0].get('amount', 0))
-                                        best_ask_price = float(asks[0].get('price', 0)) * 100
-                                        best_ask_depth = float(asks[0].get('amount', 0))
+                                        # 获取买一价和卖一价（已在 get_best_bid_ask 中转换为百分比）
                                         
                                         # 计算深度差（卖一价减去买一价的绝对值）
                                         depth_diff = abs(best_ask_price - best_bid_price)

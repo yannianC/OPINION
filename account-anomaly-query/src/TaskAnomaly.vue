@@ -1052,12 +1052,12 @@ export default {
       if (allGroups.length === 0) return []
       
       // 如果任务组数量较少，直接返回全部（不需要虚拟滚动）
-      if (allGroups.length <= 20) {
+      if (allGroups.length <= 30) {
         return allGroups
       }
       
-      // 计算可见范围
-      const containerHeight = 800 // 容器高度（可以根据实际情况调整）
+      // 计算可见范围（使用更大的容器高度，可以查看更多数据）
+      const containerHeight = window.innerHeight - 50 // 视口高度减去查询区域的大概高度，让列表占据更多空间
       const startIndex = Math.max(0, Math.floor(this.taskGroupsScrollTop / this.estimatedGroupHeight) - this.visibleBuffer)
       const visibleCount = Math.ceil(containerHeight / this.estimatedGroupHeight) + this.visibleBuffer * 2
       const endIndex = Math.min(allGroups.length, startIndex + visibleCount)
@@ -1069,7 +1069,7 @@ export default {
     taskGroupsTopSpacer() {
       if (this.queryMode !== 1) return 0
       const allGroups = this.taskGroupsWithIndex
-      if (allGroups.length <= 20) return 0
+      if (allGroups.length <= 30) return 0
       
       const startIndex = Math.max(0, Math.floor(this.taskGroupsScrollTop / this.estimatedGroupHeight) - this.visibleBuffer)
       return startIndex * this.estimatedGroupHeight
@@ -1079,9 +1079,9 @@ export default {
     taskGroupsBottomSpacer() {
       if (this.queryMode !== 1) return 0
       const allGroups = this.taskGroupsWithIndex
-      if (allGroups.length <= 20) return 0
+      if (allGroups.length <= 30) return 0
       
-      const containerHeight = 800
+      const containerHeight = window.innerHeight - 50 // 视口高度减去查询区域的大概高度，让列表占据更多空间
       const startIndex = Math.max(0, Math.floor(this.taskGroupsScrollTop / this.estimatedGroupHeight) - this.visibleBuffer)
       const visibleCount = Math.ceil(containerHeight / this.estimatedGroupHeight) + this.visibleBuffer * 2
       const endIndex = Math.min(allGroups.length, startIndex + visibleCount)
@@ -3050,10 +3050,14 @@ export default {
   border-radius: 8px;
   padding: 30px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  min-height: 200vh; /* 增加整个页面的高度，让列表可以占据更多空间 */
 }
 
 .results-header {
   margin-bottom: 20px;
+  flex-shrink: 0; /* 防止被压缩 */
 }
 
 .results-section h2 {
@@ -3357,11 +3361,18 @@ export default {
 .tasks-container {
   padding: 0;
   background: transparent;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* 重要：允许flex子元素缩小 */
 }
 
-/* 虚拟滚动容器 */
+/* 虚拟滚动容器 - 使用更大的高度 */
 .task-groups-list-wrapper {
-  height: 800px;
+  flex: 1;
+  height: calc(100vh - 50px); /* 使用更大的高度，减去查询区域的大概高度 */
+  min-height: calc(100vh - 50px); /* 最小高度也设置大一些 */
+  max-height: calc(100vh - 50px); /* 设置最大高度，确保容器有固定高度 */
   overflow-y: auto;
   overflow-x: hidden;
 }

@@ -10596,6 +10596,7 @@ const executeHedgeTask = async (config, hedgeData) => {
     finalStatus: 'running',  // running, success, failed
     missionId: missionId,  // 组任务的任务id
     priceInfo: priceInfo,  // 订单薄数据
+    tp2: hedgeData.tp2,  // 保存tp2值，用于后挂方任务提交
     // 用于收集所有子任务的映射：{number: misId}
     subTaskMap: {},  // {浏览器编号: 子任务id}
     wasCounted: true  // 标记此任务已被计入 runningHedgeGroupsCount
@@ -10971,6 +10972,11 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     
     // 如果开关打开，才传递tp2和tp4
     if (hedgeMode.enableDepthDiffParams) {
+      // 如果tp2有值，添加到任务数据中
+      if (hedgeRecord.tp2 !== null && hedgeRecord.tp2 !== undefined) {
+        taskData.tp2 = Math.round(hedgeRecord.tp2)  // tp2转换为整数（秒）
+        console.log(`后挂方任务添加tp2字段: ${taskData.tp2}秒`)
+      }
       // 添加tp4字段（最大允许深度）
       taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
     }
