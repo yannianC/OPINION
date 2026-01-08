@@ -405,8 +405,7 @@ def save_mission_result(mission_id, status, msg=""):
             response = requests.post(url, json=payload, timeout=10)
             
             if response.status_code == 200:
-                if attempt > 0:
-                    log_print(f"[系统] ✓ 保存任务{mission_id}结果成功 （第 {attempt + 1} 次尝试）")
+                log_print(f"[系统] ✓ 保存任务{mission_id}结果成功 （第 {attempt + 1} 次尝试）")
                 return True
             else:
                 log_print(f"[系统] ⚠ 保存任务{mission_id}结果失败，状态码: {response.status_code}")
@@ -3396,7 +3395,8 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     # 检查 tp2 是否有值，如果有则等待
                                     tp2 = mission.get('tp2')
                                     if tp2:
-                                        wait_time = tp2 + 120  # tp2的值+60秒
+                                        tp2_time = int(tp2) if isinstance(tp2, (int, str)) and str(tp2).isdigit() else 0
+                                        wait_time = tp2_time + 120  # tp2的值+120秒
                                         log_msg = f"[OP] 任务二: 检测到tp2={tp2}，需要等待{wait_time}秒..."
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3419,7 +3419,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                                     buttons[0].click()  # 点击取消按钮
                                                     return False, "[8]本任务正常，任务一确认失败"
-                                                elif tp1_status == 22:
+                                                elif tp1_status == 22 or tp1_status == 12:
                                                     log_msg = f"[9]任务一在规定时间内，仍是买一或卖一"
                                                     log_print(f"[{serial_number}] {log_msg}")
                                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -9256,6 +9256,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                                     save_mission_result(mission_id, 21, log_msg)
                                                     # 更新price变量，用于后续步骤
                                                     price = new_price
+                                                    # 同时更新task_data中的价格，确保后续检查使用新价格
+                                                    mission['price'] = new_price
                                                 else:
                                                     log_msg = f"[5]价格更新后验证失败，但继续执行"
                                                     log_print(f"[{browser_id}] ⚠ {log_msg}")
@@ -9310,6 +9312,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                             log_print(f"[{browser_id}] ✓ {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
                                             price = calculated_price  # 更新price变量
+                                            # 同时更新task_data中的价格，确保后续检查使用新价格
+                                            mission['price'] = calculated_price
                                             task1_price_updated = True
                                         else:
                                             log_msg = f"[5]价格更新失败，但继续执行"
