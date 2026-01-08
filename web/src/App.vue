@@ -3555,36 +3555,48 @@ const saveTopicSettings = (config) => {
     const hasTasksPerTopic = config.tasksPerTopic !== undefined && config.tasksPerTopic !== null && config.tasksPerTopic !== ''
     const hasMaxDepth = config.maxDepth !== undefined && config.maxDepth !== null && config.maxDepth !== ''
     
+    const configId = String(config.id)
+    
+    // 如果两个值都为空，则删除该主题的设置，使用总设置的值
     if (!hasTasksPerTopic && !hasMaxDepth) {
-      showToast('请至少填写"同时任务"或"最大允许深度"其中一个值', 'warning')
+      delete savedSettings[configId]
+      // 清空config中的保存值
+      config.savedTasksPerTopic = undefined
+      config.savedMaxDepth = undefined
+      // 保存到本地存储
+      localStorage.setItem(CONFIG_TOPIC_SETTINGS_KEY, JSON.stringify(savedSettings))
+      showToast(`主题"${config.trending}"的单独设置已清除，将使用总设置的值`, 'success')
+      console.log(`主题 ${config.id} 设置已清除，将使用总设置`)
       return
     }
     
-    // 保存设置（保留之前保存的值，只更新有值的字段）
-    const configId = String(config.id)
-    // 保留之前保存的设置，不要清空
+    // 保存设置（有值则保存，无值则删除）
     if (!savedSettings[configId]) {
       savedSettings[configId] = {}
     }
     
+    // 处理"同时任务"字段
     if (hasTasksPerTopic) {
       savedSettings[configId].tasksPerTopic = Number(config.tasksPerTopic)
+      config.savedTasksPerTopic = Number(config.tasksPerTopic)
+    } else {
+      // 如果为空，则删除该字段
+      delete savedSettings[configId].tasksPerTopic
+      config.savedTasksPerTopic = undefined
     }
     
+    // 处理"最大允许深度"字段
     if (hasMaxDepth) {
       savedSettings[configId].maxDepth = Number(config.maxDepth)
+      config.savedMaxDepth = Number(config.maxDepth)
+    } else {
+      // 如果为空，则删除该字段
+      delete savedSettings[configId].maxDepth
+      config.savedMaxDepth = undefined
     }
     
     // 保存到本地存储
     localStorage.setItem(CONFIG_TOPIC_SETTINGS_KEY, JSON.stringify(savedSettings))
-    
-    // 更新config中的保存值，使其立即生效
-    if (hasTasksPerTopic) {
-      config.savedTasksPerTopic = Number(config.tasksPerTopic)
-    }
-    if (hasMaxDepth) {
-      config.savedMaxDepth = Number(config.maxDepth)
-    }
     
     showToast(`主题"${config.trending}"的设置已保存`, 'success')
     console.log(`主题 ${config.id} 设置已保存:`, savedSettings[configId])
