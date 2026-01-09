@@ -960,6 +960,16 @@
                 :disabled="autoHedgeRunning"
                 title="输入一个主题同时执行的对冲任务数量"
               />
+              <label style="font-size: 14px; margin-left: 8px;">每轮最多任务数：</label>
+              <input 
+                type="number" 
+                v-model.number="hedgeMaxTasksPerRound" 
+                min="1" 
+                max="10"
+                style="width: 60px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                :disabled="autoHedgeRunning"
+                title="每一轮循环中，每个主题最多新增的任务数量（限制单轮爆发量）"
+              />
               <label style="font-size: 14px; margin-left: 8px;">任务间隔(分钟)：</label>
               <input 
                 type="number" 
@@ -3084,6 +3094,7 @@ const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
 const hedgeTasksPerTopic = ref(2)  // 一个主题同时执行的对冲任务数量，默认为2
+const hedgeMaxTasksPerRound = ref(2)  // 每一轮每个主题最多任务数，默认为10
 const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不等待）
 const runningHedgeGroupsCount = ref(0)  // 当前正在运行的任务组数
 
@@ -9068,14 +9079,18 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     // 检查当前正在执行的对冲任务数量
     const currentHedges = config.currentHedges || []
     const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
-    const availableSlots = taskCount - runningHedges.length
+    const totalAvailableSlots = taskCount - runningHedges.length
     
-    if (availableSlots <= 0) {
+    if (totalAvailableSlots <= 0) {
       console.log(`配置 ${config.id} - 已达到最大任务数 ${taskCount}，跳过`)
       return
     }
     
-    console.log(`配置 ${config.id} - 需要执行 ${availableSlots} 个对冲任务（最大: ${taskCount}, 当前运行: ${runningHedges.length}）`)
+    // 每一轮最多任务数限制
+    const maxPerRound = hedgeMaxTasksPerRound.value || 10
+    const availableSlots = Math.min(totalAvailableSlots, maxPerRound)
+    
+    console.log(`配置 ${config.id} - 需要执行 ${availableSlots} 个对冲任务（总上限: ${taskCount}, 当前运行: ${runningHedges.length}, 本轮上限: ${maxPerRound}）`)
     
     // 顺序请求多个对冲任务（避免同时请求导致的问题）
     const hedgeResults = []
@@ -10579,6 +10594,7 @@ const saveHedgeSettings = () => {
       balancePriority: hedgeMode.balancePriority,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
+      hedgeMaxTasksPerRound: hedgeMaxTasksPerRound.value,
       hedgeTaskInterval: hedgeTaskInterval.value,
       randomGetCount: randomGetCount.value,
       enableBatchMode: enableBatchMode.value,
@@ -10723,6 +10739,9 @@ const loadHedgeSettings = () => {
     // 其他设置
     if (settings.hedgeTasksPerTopic !== undefined) {
       hedgeTasksPerTopic.value = settings.hedgeTasksPerTopic
+    }
+    if (settings.hedgeMaxTasksPerRound !== undefined) {
+      hedgeMaxTasksPerRound.value = settings.hedgeMaxTasksPerRound
     }
     if (settings.hedgeTaskInterval !== undefined) {
       hedgeTaskInterval.value = settings.hedgeTaskInterval
