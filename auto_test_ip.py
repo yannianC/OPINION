@@ -34,13 +34,23 @@ except ImportError:
 # ============================================================================
 
 
-def read_computer_group():
+def read_computer_config():
     """
-    从同级目录下的 COMPUTER.txt 文件读取电脑组号
+    从同级目录下的 COMPUTER.txt 文件读取电脑配置
+    
+    文件格式（逗号分隔）：电脑组,IP线程数,交易/仓位线程数
+    示例：23,15,10
+    
+    如果只有一个值，则作为电脑组号，线程数使用默认值
     
     Returns:
-        str: 电脑组号，如果读取失败则返回 "0"
+        tuple: (电脑组号, IP线程数, 交易线程数)
     """
+    # 默认值
+    default_group = "0"
+    default_ip_thread_count = 15
+    default_trade_thread_count = 15
+    
     try:
         # 获取脚本所在目录
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -50,17 +60,50 @@ def read_computer_group():
             with open(computer_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
                 if content:
-                    log_print(f"[系统] 从 COMPUTER.txt 读取到电脑组: {content}")
-                    return content
+                    # 解析配置，支持逗号分隔
+                    parts = [p.strip() for p in content.split(',')]
+                    
+                    # 第一个值：电脑组
+                    group = parts[0] if len(parts) > 0 and parts[0] else default_group
+                    
+                    # 第二个值：IP线程数
+                    ip_thread_count = default_ip_thread_count
+                    if len(parts) > 1 and parts[1]:
+                        try:
+                            ip_thread_count = int(parts[1])
+                        except ValueError:
+                            log_print(f"[系统] ⚠ IP线程数配置无效: {parts[1]}，使用默认值: {default_ip_thread_count}")
+                    
+                    # 第三个值：交易/仓位线程数
+                    trade_thread_count = default_trade_thread_count
+                    if len(parts) > 2 and parts[2]:
+                        try:
+                            trade_thread_count = int(parts[2])
+                        except ValueError:
+                            log_print(f"[系统] ⚠ 交易线程数配置无效: {parts[2]}，使用默认值: {default_trade_thread_count}")
+                    
+                    log_print(f"[系统] 从 COMPUTER.txt 读取配置: 电脑组={group}, IP线程数={ip_thread_count}, 交易线程数={trade_thread_count}")
+                    return (group, ip_thread_count, trade_thread_count)
                 else:
-                    log_print(f"[系统] ⚠ COMPUTER.txt 文件为空，使用默认电脑组: 0")
-                    return "0"
+                    log_print(f"[系统] ⚠ COMPUTER.txt 文件为空，使用默认配置")
+                    return (default_group, default_ip_thread_count, default_trade_thread_count)
         else:
-            log_print(f"[系统] ⚠ 未找到 COMPUTER.txt 文件，使用默认电脑组: 0")
-            return "0"
+            log_print(f"[系统] ⚠ 未找到 COMPUTER.txt 文件，使用默认配置")
+            return (default_group, default_ip_thread_count, default_trade_thread_count)
     except Exception as e:
-        log_print(f"[系统] ⚠ 读取 COMPUTER.txt 失败: {str(e)}，使用默认电脑组: 0")
-        return "0"
+        log_print(f"[系统] ⚠ 读取 COMPUTER.txt 失败: {str(e)}，使用默认配置")
+        return (default_group, default_ip_thread_count, default_trade_thread_count)
+
+
+def read_computer_group():
+    """
+    从同级目录下的 COMPUTER.txt 文件读取电脑组号（兼容旧接口）
+    
+    Returns:
+        str: 电脑组号，如果读取失败则返回 "0"
+    """
+    group, _, _ = read_computer_config()
+    return group
 
 
 def get_browser_password(browser_id):
@@ -97,8 +140,9 @@ def get_browser_password(browser_id):
 # 配置区域
 # ============================================================================
 
-# 电脑组（从 COMPUTER.txt 文件读取）
-COMPUTER_GROUP = read_computer_group()
+# 电脑配置（从 COMPUTER.txt 文件读取）
+# 格式：电脑组,IP线程数,交易线程数
+COMPUTER_GROUP, IP_THREAD_COUNT, TRADE_THREAD_COUNT = read_computer_config()
 
 # 特定浏览器ID的密码配置
 # 格式：浏览器ID: 密码
@@ -270,8 +314,8 @@ TARGET_URL_2 = "https://app.opinion.trade/profile"
 # 最大重试次数
 MAX_RETRIES = 3
 
-# 线程数
-THREAD_COUNT = 15
+# 线程数（从 COMPUTER.txt 读取的 IP_THREAD_COUNT）
+THREAD_COUNT = IP_THREAD_COUNT
 
 # API接口
 API_BASE_URL = "https://sg.bicoin.com.cn/99l"

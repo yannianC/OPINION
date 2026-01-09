@@ -27,13 +27,23 @@ def log_print(*args, **kwargs):
     print(f"[{timestamp}]", *args, **kwargs)
 
 
-def read_computer_group():
+def read_computer_config():
     """
-    从同级目录下的 COMPUTER.txt 文件读取电脑组号
+    从同级目录下的 COMPUTER.txt 文件读取电脑配置
+    
+    文件格式（逗号分隔）：电脑组,IP线程数,交易/仓位线程数
+    示例：23,15,10
+    
+    如果只有一个值，则作为电脑组号，线程数使用默认值
     
     Returns:
-        str: 电脑组号，如果读取失败则返回 "0"
+        tuple: (电脑组号, IP线程数, 交易线程数)
     """
+    # 默认值
+    default_group = "0"
+    default_ip_thread_count = 15
+    default_trade_thread_count = 15
+    
     try:
         # 获取脚本所在目录
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -43,17 +53,50 @@ def read_computer_group():
             with open(computer_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
                 if content:
-                    log_print(f"[系统] 从 COMPUTER.txt 读取到电脑组: {content}")
-                    return content
+                    # 解析配置，支持逗号分隔
+                    parts = [p.strip() for p in content.split(',')]
+                    
+                    # 第一个值：电脑组
+                    group = parts[0] if len(parts) > 0 and parts[0] else default_group
+                    
+                    # 第二个值：IP线程数
+                    ip_thread_count = default_ip_thread_count
+                    if len(parts) > 1 and parts[1]:
+                        try:
+                            ip_thread_count = int(parts[1])
+                        except ValueError:
+                            log_print(f"[系统] ⚠ IP线程数配置无效: {parts[1]}，使用默认值: {default_ip_thread_count}")
+                    
+                    # 第三个值：交易/仓位线程数
+                    trade_thread_count = default_trade_thread_count
+                    if len(parts) > 2 and parts[2]:
+                        try:
+                            trade_thread_count = int(parts[2])
+                        except ValueError:
+                            log_print(f"[系统] ⚠ 交易线程数配置无效: {parts[2]}，使用默认值: {default_trade_thread_count}")
+                    
+                    log_print(f"[系统] 从 COMPUTER.txt 读取配置: 电脑组={group}, IP线程数={ip_thread_count}, 交易线程数={trade_thread_count}")
+                    return (group, ip_thread_count, trade_thread_count)
                 else:
-                    log_print(f"[系统] ⚠ COMPUTER.txt 文件为空，使用默认电脑组: 0")
-                    return "0"
+                    log_print(f"[系统] ⚠ COMPUTER.txt 文件为空，使用默认配置")
+                    return (default_group, default_ip_thread_count, default_trade_thread_count)
         else:
-            log_print(f"[系统] ⚠ 未找到 COMPUTER.txt 文件，使用默认电脑组: 0")
-            return "0"
+            log_print(f"[系统] ⚠ 未找到 COMPUTER.txt 文件，使用默认配置")
+            return (default_group, default_ip_thread_count, default_trade_thread_count)
     except Exception as e:
-        log_print(f"[系统] ⚠ 读取 COMPUTER.txt 失败: {str(e)}，使用默认电脑组: 0")
-        return "0"
+        log_print(f"[系统] ⚠ 读取 COMPUTER.txt 失败: {str(e)}，使用默认配置")
+        return (default_group, default_ip_thread_count, default_trade_thread_count)
+
+
+def read_computer_group():
+    """
+    从同级目录下的 COMPUTER.txt 文件读取电脑组号（兼容旧接口）
+    
+    Returns:
+        str: 电脑组号，如果读取失败则返回 "0"
+    """
+    group, _, _ = read_computer_config()
+    return group
 
 
 def get_browser_password(browser_id):
@@ -90,8 +133,9 @@ def get_browser_password(browser_id):
 # 配置区域
 # ============================================================================
 
-# 电脑组（从 COMPUTER.txt 文件读取）
-COMPUTER_GROUP = read_computer_group()
+# 电脑配置（从 COMPUTER.txt 文件读取）
+# 格式：电脑组,IP线程数,交易线程数
+COMPUTER_GROUP, IP_THREAD_COUNT, TRADE_THREAD_COUNT = read_computer_config()
 
 # 特定浏览器ID的密码配置
 # 格式：浏览器ID: 密码
@@ -421,8 +465,8 @@ def save_mission_result(mission_id, status, msg=""):
     
     return False
 
-# 全局线程池配置
-MAX_WORKERS = 15
+# 全局线程池配置（从 COMPUTER.txt 读取的 TRADE_THREAD_COUNT）
+MAX_WORKERS = TRADE_THREAD_COUNT
 global_thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 active_tasks_lock = threading.Lock()
 active_tasks = {}  # {mission_id: {'futures': [], 'results': {}, 'total': 0, 'completed': 0}}
@@ -4391,7 +4435,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         break;
                        
                 else:
-                    if current_status == 14:
+                    if current_status == 14 or current_status == 2:
                         both_hava_order = True
                         break;
                     elif current_status == 13:
@@ -4733,7 +4777,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 第三阶段检测成功但交易费检查失败，任务失败")
                 add_bro_log_entry(bro_log_list, serial_number, f"[22][{serial_number}] 第三阶段检测成功但交易费检查失败")
-                return False, msg
+                return True, msg
         
         log_print(f"[{serial_number}] [{task_label}] 15分钟检测超时或未满足条件，继续执行原流程...")
         add_bro_log_entry(bro_log_list, serial_number, f"[23][{serial_number}] 15分钟检测超时，继续原流程")
@@ -4964,7 +5008,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 return True, msg
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 差额检查通过但交易费检查失败，任务失败")
-                return False, msg
+                return True, msg
         
         # 点击Open Orders
         log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
@@ -5019,7 +5063,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 return True, msg
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                return False, msg
+                return True, msg
         
         # 获取 tbody 和 tr
         try:
@@ -5056,7 +5100,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 return True, msg
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                return False, msg
+                return True, msg
         
         if not tr_list or len(tr_list) == 0:
             # 没有tr，说明没有挂单
@@ -5089,7 +5133,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 return True, msg
             else:
                 log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                return False, msg
+                return True, msg
         
         # 有Open Orders，任务失败，需要获取挂单价格和进度
         pending_price = ""
@@ -5688,7 +5732,7 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
                     return True, msg
                 else:
                     log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                    return False, msg
+                    return True, msg
             
             # 有Open Orders，任务失败，需要获取挂单价格和进度
             pending_price = ""
@@ -9224,9 +9268,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     mission = task_data.get('mission', {})
                     exchange_config = task_data.get('exchangeConfig', {})
                     mission_type = mission.get('type')
-                    tp2 = mission.get('tp2')
+                    # tp2 = mission.get('tp2')
                     
-                    if mission_type == 5 and tp2:
+                    if mission_type == 5:
                         add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.5: Type 5 任务 - 订单薄检查和价格调整")
                         log_print(f"[{browser_id}] 步骤7.5: Type 5 任务 - 订单薄检查和价格调整...")
                         
@@ -11850,9 +11894,9 @@ def parse_progress_string(progress_str):
         fill_part = parts[0].strip()
         amt_part = parts[1].strip()
         
-        # 移除货币符号和单位
-        fill_part = fill_part.replace("$", "").replace("shares", "").strip()
-        amt_part = amt_part.replace("$", "").replace("shares", "").strip()
+        # 移除货币符号、单位和千位分隔符逗号
+        fill_part = fill_part.replace("$", "").replace("shares", "").replace(",", "").strip()
+        amt_part = amt_part.replace("$", "").replace("shares", "").replace(",", "").strip()
         
         # 转换为浮点数
         try:

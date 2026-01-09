@@ -288,6 +288,64 @@
             </div>
           </div>
           
+          <!-- 模式1：仓位统计区域（仅失败状态） -->
+          <div v-if="queryMode === 1 && groupStatusStatistics.failed > 0" class="position-statistics">
+            <div class="position-stat-header">
+              <span class="position-stat-title">失败任务仓位统计</span>
+              <button 
+                class="btn-query-position-stat"
+                @click="queryPositionStatistics"
+                :disabled="isQueryingPositionStat"
+              >
+                {{ isQueryingPositionStat ? '查询中...' : '查询统计' }}
+              </button>
+              <span v-if="positionStatistics.validCount > 0 || positionStatistics.invalidCount > 0" class="position-stat-summary">
+                仓位已更新: <strong class="stat-valid">{{ positionStatistics.validCount }}</strong> 组
+                <button class="btn-stat-detail" @click="showStatDetail('仓位已更新的任务组', positionStatistics.validTaskIds)">详情</button>
+                | 仓位未更新: <strong class="stat-invalid">{{ positionStatistics.invalidCount }}</strong> 组
+                <button class="btn-stat-detail" @click="showStatDetail('仓位未更新的任务组', positionStatistics.invalidTaskIds)">详情</button>
+                <button 
+                  class="btn-fetch-invalid-position"
+                  @click="fetchInvalidPositionData"
+                  :disabled="isFetchingInvalidPosition"
+                >
+                  {{ isFetchingInvalidPosition ? `抓取中(${invalidPositionFetchProgress})` : '抓取仓位未更新的仓位' }}
+                </button>
+              </span>
+            </div>
+            
+            <!-- 按主题分组的详细统计（过滤掉完全一致的主题） -->
+            <div v-if="filteredPositionDetails.length > 0" class="position-detail-section">
+              <div class="position-detail-title">仓位已更新的任务详细统计（按主题分组，已过滤完全一致的）：</div>
+              
+              <div v-for="item in filteredPositionDetails" :key="item.trending" class="trending-stat-group">
+                <div class="trending-name">{{ item.trending }}</div>
+                
+                <!-- 两边数量一致但有挂单未成交的统计 -->
+                <div v-if="item.detail.balanced.length > 0" class="stat-category balanced">
+                  <div class="stat-category-header">
+                    <span class="category-label">两边数量一致（{{ item.detail.balanced.length }}组）:</span>
+                  </div>
+                  <div v-for="(statItem, idx) in item.detail.balanced" :key="'b'+idx" class="stat-detail-item">
+                    <span class="stat-description">{{ statItem.description }}</span>
+                    <button class="btn-detail" @click="showStatDetail('两边数量一致 - ' + statItem.description, statItem.taskIds)">详情</button>
+                  </div>
+                </div>
+                
+                <!-- 两边数量不一致的统计 -->
+                <div v-if="item.detail.unbalanced.length > 0" class="stat-category unbalanced">
+                  <div class="stat-category-header">
+                    <span class="category-label">两边数量不一致（{{ item.detail.unbalanced.length }}组）:</span>
+                  </div>
+                  <div v-for="(statItem, idx) in item.detail.unbalanced" :key="'u'+idx" class="stat-detail-item">
+                    <span class="stat-description">{{ statItem.description }}</span>
+                    <button class="btn-detail" @click="showStatDetail('两边数量不一致 - 需' + statItem.needDirection + statItem.needSide + ':' + statItem.needAmount, statItem.taskIds)">详情</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
           <!-- 筛选区域 -->
           <div class="filter-section">
             <div class="filter-input-wrapper">
@@ -324,6 +382,44 @@
               @click="clearFilter"
             >
               清除
+            </button>
+          </div>
+          
+          <!-- 精确筛选区域 -->
+          <div class="filter-section precise-filter">
+            <div class="filter-group">
+              <label>任务ID:</label>
+              <input 
+                v-model="filterTaskId" 
+                type="text" 
+                class="filter-input-small"
+                placeholder="如: 123 或 123,456 或 100-200"
+              />
+            </div>
+            <div class="filter-group">
+              <label>电脑组:</label>
+              <input 
+                v-model="filterGroupNo" 
+                type="text" 
+                class="filter-input-small"
+                placeholder="如: 1 或 1,2,3 或 1-5"
+              />
+            </div>
+            <div class="filter-group">
+              <label>浏览器编号:</label>
+              <input 
+                v-model="filterBrowserId" 
+                type="text" 
+                class="filter-input-small"
+                placeholder="如: 521 或 521,522 或 500-600"
+              />
+            </div>
+            <button 
+              v-if="filterTaskId || filterGroupNo || filterBrowserId" 
+              class="clear-filter-btn"
+              @click="clearPreciseFilters"
+            >
+              清除精确筛选
             </button>
             
             <!-- 模式1：状态筛选 -->
@@ -380,7 +476,7 @@
                 :ref="el => setTaskGroupRef(el, itemIndex)"
               >
               <!-- 组头部：总状态和获取服务器数据按钮 -->
-              <div class="mode1-group-header">
+              <div :class="['mode1-group-header', 'header-' + item.group.finalStatus]">
                 <div class="mode1-group-status">
                   <span class="group-status-label">总状态:</span>
                   <span 
@@ -908,6 +1004,29 @@
       </div>
     </div>
 
+    <!-- 统计详情弹窗 -->
+    <div v-if="showStatDetailDialog" class="modal-overlay" @click.self="closeStatDetailDialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ statDetailTitle }}</h3>
+          <button class="modal-close" @click="closeStatDetailDialog">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="stat-detail-task-list">
+            <div class="stat-detail-label">相关任务ID（共 {{ statDetailTaskIds.length }} 个）：</div>
+            <div class="stat-detail-ids">
+              <span v-for="(taskId, idx) in statDetailTaskIds" :key="idx" class="task-id-tag">
+                {{ taskId }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" @click="closeStatDetailDialog">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast 提示 -->
     <div v-if="toast.show" :class="['toast', toast.type]">
       {{ toast.message }}
@@ -934,6 +1053,9 @@ export default {
       results: {},
       hasQueried: false,
       filterKeyword: '', // 筛选关键词
+      filterTaskId: '', // 任务ID筛选
+      filterGroupNo: '', // 电脑组筛选
+      filterBrowserId: '', // 浏览器编号筛选
       filterHistory: [], // 筛选历史
       expandedGroups: {}, // 模式2中展开的分组 {trendingId: {successYes: true, successNo: true}}
       selectedGroup: 'default', // 当前选择的分组
@@ -957,6 +1079,24 @@ export default {
       batchFetchProgress: { current: 0, total: 0 }, // 批量获取进度
       isBatchSubmittingPosition: false, // 是否正在批量提交更新仓位任务
       batchPositionProgress: { current: 0, total: 0, success: 0, failed: 0 }, // 批量提交仓位任务进度
+      // 账户配置缓存数据
+      accountConfigCache: [], // 账户配置缓存列表
+      accountConfigMap: {}, // fingerprintNo -> config 映射
+      // 仓位统计数据
+      positionStatistics: {
+        validCount: 0, // 仓位已更新的任务组数
+        invalidCount: 0, // 仓位未更新的任务组数
+        validTaskIds: [], // 仓位已更新的任务ID列表
+        invalidTaskIds: [], // 仓位未更新的任务ID列表
+        detailByTrending: {} // 按主题分组的详细统计
+      },
+      // 统计详情弹窗
+      showStatDetailDialog: false,
+      statDetailTitle: '',
+      statDetailTaskIds: [],
+      isQueryingPositionStat: false, // 是否正在查询仓位统计
+      isFetchingInvalidPosition: false, // 是否正在抓取仓位未更新的仓位
+      invalidPositionFetchProgress: '', // 抓取仓位进度
       toast: {
         show: false,
         message: '',
@@ -1085,6 +1225,48 @@ export default {
         result = statusFiltered
       }
       
+      // 模式1时应用精确筛选（任务ID、电脑组、浏览器编号）
+      if (this.queryMode === 1) {
+        const hasTaskIdFilter = this.filterTaskId && this.filterTaskId.trim() !== ''
+        const hasGroupNoFilter = this.filterGroupNo && this.filterGroupNo.trim() !== ''
+        const hasBrowserIdFilter = this.filterBrowserId && this.filterBrowserId.trim() !== ''
+        
+        if (hasTaskIdFilter || hasGroupNoFilter || hasBrowserIdFilter) {
+          const preciseFiltered = {}
+          
+          // 解析筛选条件
+          const taskIdSet = hasTaskIdFilter ? this.parseFilterInput(this.filterTaskId) : null
+          const groupNoSet = hasGroupNoFilter ? this.parseFilterInput(this.filterGroupNo) : null
+          const browserIdSet = hasBrowserIdFilter ? this.parseFilterInput(this.filterBrowserId) : null
+          
+          Object.keys(result).forEach(groupKey => {
+            const group = result[groupKey]
+            
+            // 检查组内是否有任务匹配筛选条件
+            const hasMatch = group.tasks.some(task => {
+              // 任务ID筛选
+              if (taskIdSet && !taskIdSet.has(String(task.id))) {
+                return false
+              }
+              // 电脑组筛选
+              if (groupNoSet && !groupNoSet.has(String(task.groupNo))) {
+                return false
+              }
+              // 浏览器编号筛选
+              if (browserIdSet && !browserIdSet.has(String(task.browserId))) {
+                return false
+              }
+              return true
+            })
+            
+            if (hasMatch) {
+              preciseFiltered[groupKey] = group
+            }
+          })
+          result = preciseFiltered
+        }
+      }
+      
       return result
     },
     
@@ -1104,6 +1286,28 @@ export default {
       })
       
       return stats
+    },
+    
+    // 过滤后的仓位详细统计（过滤掉完全一致的主题）
+    filteredPositionDetails() {
+      const result = []
+      for (const [trending, detail] of Object.entries(this.positionStatistics.detailByTrending)) {
+        // 过滤掉完全一致的（balanced和unbalanced都为空，或者balanced里没有挂单未成交的）
+        const hasUnbalanced = detail.unbalanced && detail.unbalanced.length > 0
+        // balanced中过滤掉完全成交的（pendingAmount为0的）
+        const filteredBalanced = (detail.balanced || []).filter(item => parseFloat(item.pendingAmount) > 0)
+        
+        if (hasUnbalanced || filteredBalanced.length > 0) {
+          result.push({
+            trending,
+            detail: {
+              balanced: filteredBalanced,
+              unbalanced: detail.unbalanced || []
+            }
+          })
+        }
+      }
+      return result
     },
     
     // 获取带索引的任务组列表，用于颜色循环（模式1）
@@ -1832,6 +2036,12 @@ export default {
           // 根据模式处理数据
           if (this.queryMode === 1) {
             this.processMode1Data(missions)
+            // 重置仓位统计（需要点击按钮才计算）
+            this.positionStatistics = {
+              validCount: 0,
+              invalidCount: 0,
+              detailByTrending: {}
+            }
           } else {
             this.processMode2Data(missions)
           }
@@ -2249,6 +2459,46 @@ export default {
     clearFilter() {
       this.filterKeyword = ''
       this.showToast('筛选已清除', 'info')
+    },
+    
+    // 清除精确筛选
+    clearPreciseFilters() {
+      this.filterTaskId = ''
+      this.filterGroupNo = ''
+      this.filterBrowserId = ''
+      this.showToast('精确筛选已清除', 'info')
+    },
+    
+    /**
+     * 解析筛选输入，支持逗号分隔和区间格式
+     * 如: "123" -> Set(['123'])
+     * 如: "123,456,789" -> Set(['123', '456', '789'])
+     * 如: "100-200" -> Set(['100', '101', ..., '200'])
+     * 如: "1,5-10,20" -> Set(['1', '5', '6', '7', '8', '9', '10', '20'])
+     * @returns {Set} 包含所有匹配值的 Set
+     */
+    parseFilterInput(input) {
+      if (!input || input.trim() === '') return new Set()
+      
+      const result = new Set()
+      const parts = input.split(',').map(p => p.trim()).filter(p => p)
+      
+      for (const part of parts) {
+        if (part.includes('-')) {
+          // 区间格式
+          const [start, end] = part.split('-').map(s => parseInt(s.trim()))
+          if (!isNaN(start) && !isNaN(end) && start <= end) {
+            for (let i = start; i <= end; i++) {
+              result.add(String(i))
+            }
+          }
+        } else {
+          // 单个值
+          result.add(part)
+        }
+      }
+      
+      return result
     },
     
     // 从本地存储加载筛选历史
@@ -2997,6 +3247,511 @@ export default {
     },
     
     /**
+     * 查询仓位统计（点击按钮触发）
+     */
+    async queryPositionStatistics() {
+      if (this.isQueryingPositionStat) return
+      
+      this.isQueryingPositionStat = true
+      
+      try {
+        // 获取账户配置缓存
+        await this.fetchAccountConfigCache()
+        // 计算仓位统计
+        this.calculatePositionStatistics()
+        this.showToast('仓位统计查询完成', 'success')
+      } catch (error) {
+        console.error('查询仓位统计失败:', error)
+        this.showToast('查询仓位统计失败', 'error')
+      } finally {
+        this.isQueryingPositionStat = false
+      }
+    },
+    
+    /**
+     * 抓取仓位未更新的仓位
+     * 为仓位未更新的且状态不等于2的任务提交type=2的任务
+     */
+    async fetchInvalidPositionData() {
+      if (this.isFetchingInvalidPosition) return
+      
+      // 收集需要抓取仓位的浏览器
+      const tasksToFetch = []
+      
+      Object.values(this.results).forEach(group => {
+        if (group.finalStatus !== 'failed') return
+        
+        // 检查这个组是否仓位未更新
+        const isPositionValid = this.checkGroupPositionValid(group)
+        if (isPositionValid) return // 仓位已更新，跳过
+        
+        // 遍历组内任务
+        if (group.tasks) {
+          group.tasks.forEach(task => {
+            // 只处理状态不等于2的任务
+            if (task.status === 2) return
+            
+            const browserId = task.browserId
+            const groupNo = task.groupNo || group.groupNo
+            
+            if (browserId && !tasksToFetch.some(t => t.browserId === browserId)) {
+              tasksToFetch.push({
+                browserId,
+                groupNo,
+                taskId: task.id
+              })
+            }
+          })
+        }
+      })
+      
+      if (tasksToFetch.length === 0) {
+        this.showToast('没有需要抓取仓位的任务', 'info')
+        return
+      }
+      
+      this.isFetchingInvalidPosition = true
+      const total = tasksToFetch.length
+      let completed = 0
+      let success = 0
+      let failed = 0
+      
+      // 并发控制，5个一批
+      const concurrency = 5
+      
+      for (let i = 0; i < tasksToFetch.length; i += concurrency) {
+        const batch = tasksToFetch.slice(i, i + concurrency)
+        
+        await Promise.all(batch.map(async (task) => {
+          try {
+            const result = await this.submitSinglePositionUpdate(task.browserId, task.groupNo, 3)
+            if (result) {
+              success++
+            } else {
+              failed++
+            }
+          } catch (error) {
+            console.error(`提交仓位更新失败 - 浏览器:${task.browserId}`, error)
+            failed++
+          } finally {
+            completed++
+            this.invalidPositionFetchProgress = `${completed}/${total}`
+          }
+        }))
+      }
+      
+      this.isFetchingInvalidPosition = false
+      this.showToast(`仓位抓取完成: 成功 ${success}, 失败 ${failed}`, success > 0 ? 'success' : 'error')
+    },
+    
+    /**
+     * 获取账户配置缓存
+     */
+    async fetchAccountConfigCache() {
+      try {
+        const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+        if (response.data && response.data.data) {
+          this.accountConfigCache = response.data.data || []
+          // 建立 fingerprintNo -> config 映射
+          this.accountConfigMap = {}
+          this.accountConfigCache.forEach(config => {
+            if (config.fingerprintNo) {
+              this.accountConfigMap[config.fingerprintNo] = config
+            }
+          })
+          console.log(`账户配置缓存加载成功，共 ${this.accountConfigCache.length} 条`)
+        }
+      } catch (error) {
+        console.error('获取账户配置缓存失败:', error)
+        this.accountConfigCache = []
+        this.accountConfigMap = {}
+      }
+    },
+    
+    /**
+     * 计算仓位统计（仅对失败状态的任务组）
+     */
+    calculatePositionStatistics() {
+      // 重置统计数据
+      this.positionStatistics = {
+        validCount: 0,
+        invalidCount: 0,
+        validTaskIds: [],
+        invalidTaskIds: [],
+        detailByTrending: {}
+      }
+      
+      // 遍历所有失败状态的任务组
+      Object.values(this.results).forEach(group => {
+        if (group.finalStatus !== 'failed') return
+        
+        // 获取组内所有任务ID
+        const taskIds = group.tasks ? group.tasks.map(t => t.id) : []
+        
+        // 检查组内任务的仓位数据是否正确
+        const isPositionValid = this.checkGroupPositionValid(group)
+        
+        if (isPositionValid) {
+          this.positionStatistics.validCount++
+          this.positionStatistics.validTaskIds.push(...taskIds)
+          // 计算详细统计
+          this.calculateGroupDetailStatistics(group)
+        } else {
+          this.positionStatistics.invalidCount++
+          this.positionStatistics.invalidTaskIds.push(...taskIds)
+        }
+      })
+    },
+    
+    /**
+     * 检查任务组的仓位数据是否正确
+     * 判断条件：账户配置中的 d 字段（仓位抓取时间）大于任务的 updateTime 30分钟以上
+     */
+    checkGroupPositionValid(group) {
+      if (!group.tasks || group.tasks.length === 0) return false
+      
+      // 检查组内所有任务
+      for (const task of group.tasks) {
+        const browserId = task.browserId
+        if (!browserId) continue
+        
+        const config = this.accountConfigMap[String(browserId)]
+        if (!config) continue
+        
+        // d 字段是仓位抓取时间（时间戳字符串）
+        const catchTime = config.d ? parseInt(config.d) : null
+        if (!catchTime) continue
+        
+        // 任务的 updateTime
+        const updateTime = task.updateTime ? new Date(task.updateTime).getTime() : null
+        if (!updateTime) continue
+        
+        // 判断仓位抓取时间是否大于任务结束时间30分钟（30 * 60 * 1000 = 1800000ms）
+        if (catchTime > updateTime + 1800000) {
+          return true // 只要有一个任务的仓位数据正确，就认为组的仓位数据正确
+        }
+      }
+      
+      return false
+    },
+    
+    /**
+     * 计算任务组的详细统计
+     */
+    calculateGroupDetailStatistics(group) {
+      if (!group.tasks || group.tasks.length !== 2) return
+      
+      const trending = group.tasks[0].trending
+      if (!trending) return
+      
+      // 初始化该主题的统计
+      if (!this.positionStatistics.detailByTrending[trending]) {
+        this.positionStatistics.detailByTrending[trending] = {
+          balanced: [], // 两边数量一致的
+          unbalanced: [] // 两边数量不一致的
+        }
+      }
+      
+      // 解析两个子任务的数据
+      const task1Data = this.parseTaskOrderData(group.tasks[0])
+      const task2Data = this.parseTaskOrderData(group.tasks[1])
+      
+      if (!task1Data || !task2Data) return
+      
+      // 判断两边总数量是否一致（允许5%误差）
+      const avgTotal = (task1Data.total + task2Data.total) / 2
+      const totalDiff = Math.abs(task1Data.total - task2Data.total)
+      const diffPercent = avgTotal > 0 ? (totalDiff / avgTotal) * 100 : 0
+      
+      if (diffPercent <= 5) {
+        // 两边总数量一致
+        const pendingAmount = Math.max(task1Data.pending, task2Data.pending)
+        const pendingTask = task1Data.pending >= task2Data.pending ? group.tasks[0] : group.tasks[1]
+        const pendingSide = pendingTask.psSide === 1 ? 'YES' : 'NO'
+        const pendingDirection = pendingTask.side === 1 ? '买入' : '卖出'
+        
+        this.positionStatistics.detailByTrending[trending].balanced.push({
+          taskIds: group.tasks.map(t => t.id),
+          pendingAmount: pendingAmount.toFixed(2),
+          pendingSide,
+          pendingDirection,
+          description: `${pendingAmount.toFixed(2)} ${pendingSide} ${pendingDirection}挂单未成交`
+        })
+      } else {
+        // 两边总数量不一致
+        const task1 = group.tasks[0]
+        const task2 = group.tasks[1]
+        
+        // 计算各方的已成交和挂单
+        const filledYes = task1.psSide === 1 ? task1Data.filled : (task2.psSide === 1 ? task2Data.filled : 0)
+        const filledNo = task1.psSide === 2 ? task1Data.filled : (task2.psSide === 2 ? task2Data.filled : 0)
+        const pendingYes = task1.psSide === 1 ? task1Data.pending : (task2.psSide === 1 ? task2Data.pending : 0)
+        const pendingNo = task1.psSide === 2 ? task1Data.pending : (task2.psSide === 2 ? task2Data.pending : 0)
+        
+        const totalYes = filledYes + pendingYes
+        const totalNo = filledNo + pendingNo
+        const diff = totalYes - totalNo
+        
+        const needSide = diff > 0 ? 'NO' : 'YES'
+        const needDirection = group.tasks[0].side === 1 ? '买入' : '卖出'
+        const needAmount = Math.abs(diff)
+        
+        this.positionStatistics.detailByTrending[trending].unbalanced.push({
+          taskIds: group.tasks.map(t => t.id),
+          filledYes: filledYes.toFixed(2),
+          filledNo: filledNo.toFixed(2),
+          pendingYes: pendingYes.toFixed(2),
+          pendingNo: pendingNo.toFixed(2),
+          needSide,
+          needDirection,
+          needAmount: needAmount.toFixed(2),
+          description: `已成交YES:${filledYes.toFixed(2)}, NO:${filledNo.toFixed(2)}, 挂单YES:${pendingYes.toFixed(2)}, NO:${pendingNo.toFixed(2)}, 需${needDirection}${needSide}:${needAmount.toFixed(2)}`
+        })
+      }
+    },
+    
+    /**
+     * 解析任务的订单数据（优先级：tp8 > tp7 > msg）
+     * @returns {Object|null} { total: 总数量, filled: 已成交数量, pending: 未成交数量 }
+     */
+    parseTaskOrderData(task) {
+      if (!task) return null
+      
+      // 如果子任务状态是2（成功），直接使用 amt 字段作为 total 和 filled
+      if (task.status === 2) {
+        const amt = parseFloat(task.amt) || 0
+        return {
+          total: amt,
+          filled: amt,
+          pending: 0
+        }
+      }
+      
+      // 优先使用 tp8（已成交数据）
+      if (task.tp8) {
+        return this.parseTp8Data(task.tp8, task.side)
+      }
+      
+      // 其次使用 tp7（挂单数据）
+      if (task.tp7) {
+        return this.parseTp7Data(task.tp7, task.side)
+      }
+      
+      // 最后使用 msg
+      if (task.msg) {
+        const msgResult = this.parseMsgData(task.msg, task.side)
+        if (msgResult) {
+          // 如果返回 useAmt 标记，表示 PARTIAL 类型但没有有效 progress，使用 amt
+          if (msgResult.useAmt) {
+            const amt = parseFloat(task.amt) || 0
+            return {
+              total: amt,
+              filled: 0,
+              pending: amt
+            }
+          }
+          return msgResult
+        }
+      }
+      
+      return null
+    },
+    
+    /**
+     * 解析 tp8 数据
+     * 格式: "时间: 2026-01-09 14:23:17 (不同时区) | 方向: 卖 | 结果: NO | 价格: 82.3 | 进度: 100.00% (399.46/399.46) | 状态: filled"
+     * 买入时: "时间: 2026-01-09 13:57:51 | 方向: 买 | 结果: YES | 价格: 7.9 | 进度: 100.00% (52.21/52.21) | 状态: filled"
+     * @param {string} tp8 - tp8 数据字符串
+     * @param {number} taskSide - 任务方向 (1=买入, 2=卖出)
+     */
+    parseTp8Data(tp8, taskSide) {
+      if (!tp8) return null
+      
+      // 检查状态，如果是 canceled，返回全0
+      const statusMatch = tp8.match(/状态:\s*(\w+)/)
+      if (statusMatch && statusMatch[1] === 'canceled') {
+        return {
+          total: 0,
+          filled: 0,
+          pending: 0
+        }
+      }
+      
+      // 提取方向
+      const sideMatch = tp8.match(/方向:\s*(买|卖)/)
+      const isBuy = sideMatch && sideMatch[1] === '买'
+      
+      // 提取价格（美分）
+      const priceMatch = tp8.match(/价格:\s*([\d.]+)/)
+      const price = priceMatch ? parseFloat(priceMatch[1]) : 0
+      
+      // 提取进度信息 (已成交/总数)
+      const progressMatch = tp8.match(/进度:\s*[\d.]+%\s*\(([\d.]+)\/([\d.]+)\)/)
+      if (progressMatch) {
+        let filled = parseFloat(progressMatch[1])
+        let total = parseFloat(progressMatch[2])
+        
+        // 买入时，进度是金额（美元），价格是美分，需要转换为数量
+        // 数量 = 金额 * 100 / 价格
+        if (isBuy && price > 0) {
+          filled = (filled * 100) / price
+          total = (total * 100) / price
+        }
+        
+        return {
+          total,
+          filled,
+          pending: 0 // tp8是已成交数据，没有挂单
+        }
+      }
+      return null
+    },
+    
+    /**
+     * 解析 tp7 数据（挂单数据）
+     * 格式: "创建时间: 2026-01-09 13:27:46 | 方向: 卖 | 结果: YES | 价格: 0.177 | 进度: 51.57% (206.00/399.46)"
+     * 买入时进度是金额，需要转换为数量。tp7 的价格单位是美元
+     * @param {string} tp7 - tp7 数据字符串
+     * @param {number} taskSide - 任务方向 (1=买入, 2=卖出)
+     */
+    parseTp7Data(tp7, taskSide) {
+      if (!tp7) return null
+      
+      // 提取方向
+      const sideMatch = tp7.match(/方向:\s*(买|卖)/)
+      const isBuy = sideMatch && sideMatch[1] === '买'
+      
+      // 提取价格（美元）
+      const priceMatch = tp7.match(/价格:\s*([\d.]+)/)
+      const price = priceMatch ? parseFloat(priceMatch[1]) : 0
+      
+      // 提取进度信息 (已成交/总数)
+      const progressMatch = tp7.match(/进度:\s*[\d.]+%\s*\(([\d.]+)\/([\d.]+)\)/)
+      if (progressMatch) {
+        let filled = parseFloat(progressMatch[1])
+        let total = parseFloat(progressMatch[2])
+        
+        // 买入时，进度是金额（美元），价格是美元，需要转换为数量
+        // 数量 = 金额 / 价格
+        if (isBuy && price > 0) {
+          filled = filled / price
+          total = total / price
+        }
+        
+        return {
+          total,
+          filled,
+          pending: total - filled // 挂单的未成交部分
+        }
+      }
+      return null
+    },
+    
+    /**
+     * 解析 msg 数据
+     * TYPE5_PARTIAL: {"type": "TYPE5_PARTIAL", "filled_amount": "816.32", "progress": "0 / 273.88 shares", ...}
+     * TYPE5_SUCCESS: {"type": "TYPE5_SUCCESS", "filled_amount": "273.88", ...}
+     * 买入时 PARTIAL 类型的进度是金额，需要转换为数量；SUCCESS 类型不需要转换
+     * @param {string} msg - msg 数据字符串
+     * @param {number} taskSide - 任务方向 (1=买入, 2=卖出)
+     * @returns {Object|null} { total, filled, pending } 或 { useAmt: true } 表示使用 amt，或 null
+     */
+    parseMsgData(msg, taskSide) {
+      if (!msg) return null
+      
+      try {
+        let msgObj = null
+        if (typeof msg === 'string' && msg.trim().startsWith('{')) {
+          msgObj = JSON.parse(msg)
+        }
+        
+        // 如果不是 JSON 对象（如错误信息字符串），返回全0
+        if (!msgObj) {
+          return {
+            total: 0,
+            filled: 0,
+            pending: 0
+          }
+        }
+        
+        if (msgObj.type === 'TYPE5_SUCCESS' || msgObj.type === 'TYPE1_SUCCESS') {
+          // 完全成交 - 不需要转换，filled_amount 已经是数量
+          const filled = parseFloat(String(msgObj.filled_amount).replace(/,/g, '')) || 0
+          return {
+            total: filled,
+            filled: filled,
+            pending: 0
+          }
+        } else if (msgObj.type === 'TYPE5_PARTIAL' || msgObj.type === 'TYPE1_PARTIAL') {
+          // 部分成交，从 progress 中提取
+          // progress 格式: "0 / 273.88 shares" 或 "1,797.46 / 3,389.75 shares"（注意数字中可能有逗号）
+          // 买入时进度是金额，需要转换
+          const price = parseFloat(String(msgObj.filled_price).replace(/,/g, '')) || 0
+          const isBuy = taskSide === 1
+          
+          if (msgObj.progress) {
+            // 移除数字中的逗号后再匹配
+            const cleanProgress = msgObj.progress.replace(/,/g, '')
+            const progressMatch = cleanProgress.match(/([\d.]+)\s*\/\s*([\d.]+)/)
+            if (progressMatch) {
+              let filled = parseFloat(progressMatch[1])
+              let total = parseFloat(progressMatch[2])
+              
+              // 买入时，进度是金额（美元），价格是美分，需要转换为数量
+              // 数量 = 金额 * 100 / 价格
+              if (isBuy && price > 0) {
+                filled = (filled * 100) / price
+                total = (total * 100) / price
+              }
+              
+              return {
+                total,
+                filled,
+                pending: total - filled
+              }
+            }
+          }
+          // PARTIAL 类型但没有有效 progress（如只有初始数量和现有数量），返回特殊标记让调用方使用 amt
+          return { useAmt: true }
+        } else {
+          // 其他类型的 JSON 消息（非 SUCCESS/PARTIAL），返回全0
+          return {
+            total: 0,
+            filled: 0,
+            pending: 0
+          }
+        }
+      } catch (e) {
+        console.error('解析msg失败:', e)
+      }
+      
+      // 解析失败，返回全0
+      return {
+        total: 0,
+        filled: 0,
+        pending: 0
+      }
+    },
+    
+    /**
+     * 显示统计详情弹窗
+     */
+    showStatDetail(title, taskIds) {
+      this.statDetailTitle = title
+      this.statDetailTaskIds = taskIds
+      this.showStatDetailDialog = true
+    },
+    
+    /**
+     * 关闭统计详情弹窗
+     */
+    closeStatDetailDialog() {
+      this.showStatDetailDialog = false
+      this.statDetailTitle = ''
+      this.statDetailTaskIds = []
+    },
+    
+    /**
      * 根据tp7/tp8判断任务是否已修复成功
      * @param {Object} task 任务对象
      * @returns {boolean} 是否修复成功
@@ -3678,6 +4433,47 @@ export default {
   gap: 8px;
 }
 
+/* 精确筛选区域 */
+.filter-section.precise-filter {
+  background: #f8f9fa;
+  padding: 12px 15px;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  margin-top: 10px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+  white-space: nowrap;
+}
+
+.filter-input-small {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 160px;
+  transition: border-color 0.3s;
+}
+
+.filter-input-small:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.filter-input-small::placeholder {
+  color: #aaa;
+  font-size: 12px;
+}
+
 .filter-input {
   padding: 10px 15px;
   border: 1px solid #ddd;
@@ -4007,6 +4803,220 @@ export default {
   background: #2dd163;
 }
 
+/* 仓位统计区域 */
+.position-statistics {
+  background: linear-gradient(135deg, #fff5f5 0%, #fee2e2 100%);
+  border-radius: 8px;
+  padding: 15px 20px;
+  margin-bottom: 15px;
+  border: 1px solid #fecaca;
+}
+
+.position-stat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.position-stat-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #991b1b;
+}
+
+.btn-query-position-stat {
+  padding: 5px 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 12px;
+}
+
+.btn-query-position-stat:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
+.btn-query-position-stat:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.position-stat-summary {
+  font-size: 14px;
+  color: #666;
+}
+
+.position-stat-summary .stat-valid {
+  color: #16a34a;
+}
+
+.position-stat-summary .stat-invalid {
+  color: #dc2626;
+}
+
+.btn-stat-detail {
+  padding: 2px 8px;
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: all 0.2s;
+}
+
+.btn-stat-detail:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.btn-fetch-invalid-position {
+  padding: 5px 14px;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 12px;
+}
+
+.btn-fetch-invalid-position:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+}
+
+.btn-fetch-invalid-position:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.position-detail-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #fecaca;
+}
+
+.position-detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 12px;
+}
+
+.trending-stat-group {
+  background: white;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid #e5e7eb;
+}
+
+.trending-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.stat-category {
+  margin-bottom: 8px;
+}
+
+.stat-category-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.category-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.stat-category.balanced .category-label {
+  color: #16a34a;
+}
+
+.stat-category.unbalanced .category-label {
+  color: #dc2626;
+}
+
+.stat-detail-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.stat-description {
+  color: #374151;
+  flex: 1;
+}
+
+.btn-detail {
+  padding: 3px 10px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-left: 10px;
+}
+
+.btn-detail:hover {
+  background: #5568d3;
+}
+
+/* 统计详情弹窗 */
+.stat-detail-task-list {
+  padding: 10px 0;
+}
+
+.stat-detail-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  margin-bottom: 12px;
+}
+
+.stat-detail-ids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-id-tag {
+  padding: 4px 12px;
+  background: #e5e7eb;
+  color: #374151;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: monospace;
+}
+
 /* 弹窗样式 */
 .modal-overlay {
   position: fixed;
@@ -4155,12 +5165,37 @@ export default {
 /* 模式1组头部样式 */
 .mode1-group-header {
   padding: 12px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #764ba2 66%, #764ba2 100%);
   color: white;
   border-bottom: 2px solid rgba(255, 255, 255, 0.2);
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* 根据状态修改header右边1/3的背景颜色 */
+.mode1-group-header.header-success {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #27ae60 66%, #27ae60 100%);
+}
+
+.mode1-group-header.header-repaired {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #3498db 66%, #3498db 100%);
+}
+
+.mode1-group-header.header-failed {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #e74c3c 66%, #e74c3c 100%);
+}
+
+.mode1-group-header.header-running {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #f39c12 66%, #f39c12 100%);
+}
+
+.mode1-group-header.header-noImpact {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #f39c12 66%, #f39c12 100%);
+}
+
+.mode1-group-header.header-unknown {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #95a5a6 66%, #95a5a6 100%);
 }
 
 .mode1-group-status {
@@ -4193,7 +5228,7 @@ export default {
 
 .group-status-badge.status-running {
   background: rgba(241, 196, 15, 0.3);
-  color: #f1c40f;
+  color: #f39c12;
 }
 
 .group-status-badge.status-unknown {
@@ -4203,7 +5238,7 @@ export default {
 
 .group-status-badge.status-no-impact {
   background: rgba(241, 196, 15, 0.3);
-  color: #f1c40f;
+  color: #f39c12;
 }
 
 .group-status-badge.status-repaired {
