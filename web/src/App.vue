@@ -538,6 +538,19 @@
                   style="width: 100px;"
                 />
               </div>
+              <div class="trending-filter">
+                <label style="color: #000;">最大允许深度:</label>
+                <input 
+                  v-model.number="hedgeMode.maxDepth" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  placeholder="1000"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 100px;"
+                />
+              </div>
             </div>
           </div>
           
@@ -1206,7 +1219,7 @@
                           <div class="hedge-task-section">
                             <div class="task-title">
                               任务一 - {{ hedge.firstSide }}
-                              <span class="task-amount">x{{ hedge.share }}</span>
+                              <span class="task-amount">x{{ hedge.firstShareReduction ? (hedge.share - hedge.firstShareReduction).toFixed(2) : hedge.share }}</span>
                             </div>
                             <div class="hedge-task-details-grid">
                               <div class="hedge-detail-row">
@@ -1257,7 +1270,7 @@
                               </div>
                               <div class="hedge-detail-row">
                                 <span>数量:</span>
-                                <span>{{ hedge.share }}</span>
+                                <span>{{ hedge.firstShareReduction ? (hedge.share - hedge.firstShareReduction).toFixed(2) : hedge.share }}</span>
                               </div>
                             </div>
                           </div>
@@ -3508,16 +3521,18 @@ const handleQuery = async () => {
       const maxDepth = getMaxDepth(querySelectedConfig.value)
       if (priceInfo.diff <= 0.15) {
         if (!hedgeMode.isClose) {
-          // 开仓模式：检查买一深度
-          if (priceInfo.depth1 >= maxDepth) {
-            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+          // 开仓模式：检查买一价值（买一价 × 买一深度 / 100）
+          const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+          if (bidValue >= maxDepth) {
+            reason = `先挂方买一价值 ${bidValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
           } else {
             reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
           }
         } else {
-          // 平仓模式：检查卖一深度
-          if (priceInfo.depth2 >= maxDepth) {
-            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+          // 平仓模式：检查卖一价值（卖一价 × 卖一深度 / 100）
+          const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+          if (askValue >= maxDepth) {
+            reason = `先挂方卖一价值 ${askValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
           } else {
             reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
           }
@@ -3605,16 +3620,18 @@ const handleTest = async () => {
       const maxDepth = getMaxDepth(config)
       if (priceInfo.diff <= 0.15) {
         if (!hedgeMode.isClose) {
-          // 开仓模式：检查买一深度
-          if (priceInfo.depth1 >= maxDepth) {
-            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+          // 开仓模式：检查买一价值（买一价 × 买一深度 / 100）
+          const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+          if (bidValue >= maxDepth) {
+            reason = `先挂方买一价值 ${bidValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
           } else {
             reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
           }
         } else {
-          // 平仓模式：检查卖一深度
-          if (priceInfo.depth2 >= maxDepth) {
-            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+          // 平仓模式：检查卖一价值（卖一价 × 卖一深度 / 100）
+          const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+          if (askValue >= maxDepth) {
+            reason = `先挂方卖一价值 ${askValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
           } else {
             reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
           }
@@ -4031,16 +4048,18 @@ const handleTestForConfig = async (config) => {
       const maxDepth = getMaxDepth(config)
       if (priceInfo.diff <= 0.15) {
         if (!hedgeMode.isClose) {
-          // 开仓模式：检查买一深度
-          if (priceInfo.depth1 >= maxDepth) {
-            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+          // 开仓模式：检查买一价值（买一价 × 买一深度 / 100）
+          const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+          if (bidValue >= maxDepth) {
+            reason = `先挂方买一价值 ${bidValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
           } else {
             reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
           }
         } else {
-          // 平仓模式：检查卖一深度
-          if (priceInfo.depth2 >= maxDepth) {
-            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+          // 平仓模式：检查卖一价值（卖一价 × 卖一深度 / 100）
+          const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+          if (askValue >= maxDepth) {
+            reason = `先挂方卖一价值 ${askValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
           } else {
             reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
           }
@@ -7908,16 +7927,18 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
             const maxDepth = getMaxDepth(config)
             if (priceInfo.diff <= 0.15) {
               if (!hedgeMode.isClose) {
-                // 开仓模式：检查买一深度
-                if (priceInfo.depth1 >= maxDepth) {
-                  orderbookReason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+                // 开仓模式：检查买一价值（买一价 × 买一深度 / 100）
+                const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+                if (bidValue >= maxDepth) {
+                  orderbookReason = `先挂方买一价值 ${bidValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
                 } else {
                   orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
                 }
               } else {
-                // 平仓模式：检查卖一深度
-                if (priceInfo.depth2 >= maxDepth) {
-                  orderbookReason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+                // 平仓模式：检查卖一价值（卖一价 × 卖一深度 / 100）
+                const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+                if (askValue >= maxDepth) {
+                  orderbookReason = `先挂方卖一价值 ${askValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
                 } else {
                   orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
                 }
@@ -8616,7 +8637,7 @@ const parseOrderbookData = async (config, isClose) => {
     // 根据深度差范围计算价格和 tp2
     let finalPrice = null
     let tp2 = null
-    let extraShare = 0  // 深度差0.1时，开仓模式下需要额外增加的数量
+    let firstShareReduction = 0  // 深度差0.1时，先挂方数量需要减少的量
     
     // 获取配置的深度差阈值
     const threshold1 = hedgeMode.depthThreshold1  // 默认15
@@ -8630,14 +8651,22 @@ const parseOrderbookData = async (config, isClose) => {
     }
     
     // 辅助函数：计算价格调整值（根据配置的最小值和最大值）
+    // 先在minPercent到maxPercent之间随机选一个百分比，再乘以深度差，最后确保结果至少为0.1
     const calculatePriceAdjustment = (diff, minPercent, maxPercent) => {
-      const minAdjust = Math.max(0.1, diff * (minPercent / 100))
-      const maxAdjust = diff * (maxPercent / 100)
-      return Math.random() * (maxAdjust - minAdjust) + minAdjust
+      // 在minPercent到maxPercent之间随机选一个百分比
+      const randomPercent = Math.random() * (maxPercent - minPercent) + minPercent
+      // 深度差乘以随机百分比
+      const adjustment = diff * (randomPercent / 100)
+      // 确保结果至少为0.1
+      return Math.max(0.1, adjustment)
     }
     
     if (depthDiff > threshold1) {
-      // 深度差 > 阈值1：使用原始数据计算价格，使用该区间的价格波动配置
+      // 深度差 > 阈值1：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParamsGt15) {
+        throw new Error(`深度差>${threshold1}时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
+      // 使用原始数据计算价格，使用该区间的价格波动配置
       const minVolatility = hedgeMode.priceVolatilityGt15Min
       const maxVolatility = hedgeMode.priceVolatilityGt15Max
       
@@ -8670,7 +8699,10 @@ const parseOrderbookData = async (config, isClose) => {
       console.log(`深度差 > ${threshold1} - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
       
     } else if (depthDiff >= threshold2) {
-      // 深度差 阈值2-阈值1
+      // 深度差 阈值2-阈值1：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParams2To15) {
+        throw new Error(`深度差在${threshold2}-${threshold1}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
       const minVolatility = hedgeMode.priceVolatility2To15Min
       const maxVolatility = hedgeMode.priceVolatility2To15Max
       
@@ -8691,7 +8723,10 @@ const parseOrderbookData = async (config, isClose) => {
       console.log(`深度差 ${threshold2}-${threshold1} - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
       
     } else if (depthDiff >= threshold3) {
-      // 深度差 阈值3-阈值2
+      // 深度差 阈值3-阈值2：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParams02To2) {
+        throw new Error(`深度差在${threshold3}-${threshold2}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
       const minVolatility = hedgeMode.priceVolatility02To2Min
       const maxVolatility = hedgeMode.priceVolatility02To2Max
       
@@ -8712,70 +8747,68 @@ const parseOrderbookData = async (config, isClose) => {
       console.log(`深度差 ${threshold3}-${threshold2} - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
       
     } else if (Math.abs(depthDiff - 0.1) < 0.01) {
-      // 深度差 0.1（允许0.09-0.11的误差）
-      // 根据开关决定是否执行逻辑C
+      // 深度差 0.1（允许0.09-0.11的误差）：检查开关是否打开
       if (!hedgeMode.enableDepthDiffParams01) {
-        // 开关关闭，不执行逻辑C，直接判断是否符合条件
-        if (isClose) {
-          // 平仓：检查卖一价值
-          const askValue = rawAsk1 * rawAsk1Depth
-          const maxDepth = hedgeMode.maxDepth
-          if (askValue >= maxDepth) {
-            throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)} >= 最大允许深度 ${maxDepth}`)
-          }
-          finalPrice = rawAsk1
-        } else {
-          // 开仓：检查买一价值
-          const bidValue = rawBid1 * rawBid1Depth
-          const maxDepth = hedgeMode.maxDepth
-          if (bidValue >= maxDepth) {
-            throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}`)
-          }
-          finalPrice = rawBid1
-        }
-        console.log(`深度差 0.1 - 开关关闭，使用简单逻辑，价格: ${finalPrice.toFixed(2)}`)
+        throw new Error(`深度差0.1时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
       } else {
         // 开关打开，执行逻辑C
-        const maxEatValue = hedgeMode.maxEatValue01
-        const maxDepth = hedgeMode.maxDepth
+        const maxEatValue = hedgeMode.maxEatValue01  // 深度差0.1最大多吃价值(U)
+        const maxDepth = hedgeMode.maxDepth  // 最大允许深度(U)
         
         if (isClose) {
-          // 平仓：先用卖一价*深度（即数量），得到价值
-          const askValue = rawAsk1 * rawAsk1Depth
+          // 【平仓逻辑】
+          // 先计算 卖一价深度*卖一价/100 得到 卖一价的价值（美元）
+          const askValue = rawAsk1 * rawAsk1Depth / 100
           
           if (askValue < maxDepth) {
-            // 价值小于最大允许深度，符合要求
+            // 卖一价的价值 < 最大允许深度，价格取卖一价，数量正常（先挂方=后挂方）
             finalPrice = rawAsk1
-            console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)} < 最大允许深度 ${maxDepth}，使用卖一价: ${finalPrice.toFixed(2)}`)
+            console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)}U < 最大允许深度 ${maxDepth}U，使用卖一价: ${finalPrice.toFixed(2)}`)
           } else {
-            // 价值大于最大允许深度，直接不符合要求
-            throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)} >= 最大允许深度 ${maxDepth}`)
+            // 卖一价的价值 >= 最大允许深度，查看买一价的价值
+            const bidValue = rawBid1 * rawBid1Depth / 100
+            
+            if (bidValue >= maxEatValue) {
+              // 买一价的价值 >= 深度差0.1最大多吃价值，订单薄不符合条件
+              throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)}U >= 最大允许深度 ${maxDepth}U，且买一价值 ${bidValue.toFixed(2)}U >= 最大多吃价值 ${maxEatValue}U`)
+            } else {
+              // 买一价的价值 < 深度差0.1最大多吃价值
+              // 价格取买一价，后挂方数量=服务器下发数量，先挂方数量需要减少
+              finalPrice = rawBid1
+              // 先挂方数量 = 服务器下发数量 - 深度差0.1最大多吃价值 / 买一价
+              firstShareReduction = (maxEatValue / rawBid1)*100
+              console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)}U >= 最大允许深度 ${maxDepth}U，但买一价值 ${bidValue.toFixed(2)}U < 最大多吃价值 ${maxEatValue}U，使用买一价: ${finalPrice.toFixed(2)}，先挂方数量减少: ${firstShareReduction.toFixed(2)}`)
+            }
           }
         } else {
-          // 开仓：先用买一价*深度（即数量），得到价值
-          const bidValue = rawBid1 * rawBid1Depth
+          // 【开仓逻辑】
+          // 先计算 买一价深度*买一价/100 得到 买一价的价值（美元）
+          const bidValue = rawBid1 * rawBid1Depth / 100
           
           if (bidValue < maxDepth) {
-            // 价值小于最大允许深度，符合要求
+            // 买一价的价值 < 最大允许深度，价格取买一价，数量正常（先挂方=后挂方）
             finalPrice = rawBid1
-            console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)} < 最大允许深度 ${maxDepth}，使用买一价: ${finalPrice.toFixed(2)}`)
+            console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)}U < 最大允许深度 ${maxDepth}U，使用买一价: ${finalPrice.toFixed(2)}`)
           } else {
-            // 价值大于最大允许深度，检查卖一价的价值是否小于最大多吃价值
-            const askValue = rawAsk1 * rawAsk1Depth
+            // 买一价的价值 >= 最大允许深度，查看卖一价的价值
+            const askValue = rawAsk1 * rawAsk1Depth / 100
             
-            if (askValue < maxEatValue) {
-              // 使用卖一价，并且需要记录增加的数量（卖一价的深度）
-              finalPrice = rawAsk1
-              extraShare = rawAsk1Depth
-              console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，但卖一价值 ${askValue.toFixed(2)} < 最大多吃价值 ${maxEatValue}，使用卖一价: ${finalPrice.toFixed(2)}，需要增加数量: ${extraShare.toFixed(2)}`)
+            if (askValue >= maxEatValue) {
+              // 卖一价的价值 >= 深度差0.1最大多吃价值，订单薄不符合条件
+              throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)}U >= 最大允许深度 ${maxDepth}U，且卖一价值 ${askValue.toFixed(2)}U >= 最大多吃价值 ${maxEatValue}U`)
             } else {
-              throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)} >= 最大允许深度 ${maxDepth}，且卖一价值 ${askValue.toFixed(2)} >= 最大多吃价值 ${maxEatValue}`)
+              // 卖一价的价值 < 深度差0.1最大多吃价值
+              // 价格取卖一价，后挂方数量=服务器下发数量，先挂方数量需要减少
+              finalPrice = rawAsk1
+              // 先挂方数量 = 服务器下发数量 - 深度差0.1最大多吃价值 / 卖一价
+              firstShareReduction = (maxEatValue / rawAsk1)*100
+              console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)}U >= 最大允许深度 ${maxDepth}U，但卖一价值 ${askValue.toFixed(2)}U < 最大多吃价值 ${maxEatValue}U，使用卖一价: ${finalPrice.toFixed(2)}，先挂方数量减少: ${firstShareReduction.toFixed(2)}`)
             }
           }
         }
       }
       
-      // 深度差0.1时，永远不传tp2和tp4
+      // 深度差0.1时，不传tp2（tp4会在后面添加，固定为1）
       tp2 = null
       
       console.log(`深度差 0.1 - 最终价格: ${finalPrice.toFixed(2)}`)
@@ -8813,8 +8846,7 @@ const parseOrderbookData = async (config, isClose) => {
       topNAsksDepth,    // 卖1-N深度累计
       finalPrice,       // 计算出的最终价格
       tp2,              // 延时检测时间（秒）
-      extraShare,        // 深度差0.1时，开仓模式下需要额外增加的数量
-      rawAsk1Depth      // 原始数据的卖一深度（用于深度差0.1时增加数量）
+      firstShareReduction  // 深度差0.1时，先挂方数量需要减少的量
     }
   } catch (error) {
     console.error('解析订单薄数据失败:', error)
@@ -8896,6 +8928,7 @@ const checkHedgeCondition = (task) => {
  * 类似 App_old.vue 中的判断逻辑：
  * 1. 先挂方的买一和卖一价差值 > 0.15
  * 2. 或者根据开仓/平仓判断先挂方的深度
+ * 3. 深度差0.1时，如果开关打开，使用特殊的"多吃价值"逻辑
  * @param {Object} priceInfo - 订单薄价格信息
  * @param {Object} config - 主题配置（可选，用于获取主题单独设置的最大允许深度）
  */
@@ -8916,31 +8949,73 @@ const checkOrderbookHedgeCondition = (priceInfo, config = null) => {
     // 先挂方的买卖价差大于0.15，可以对冲
     canHedge = true
     console.log(`✅ 先挂方买卖价差充足 (${priceInfo.diff.toFixed(2)})，满足对冲条件`)
-  } else {
-    // 差值小于等于0.15，根据开仓/平仓判断先挂方的深度
-    console.log(`⚠️ 先挂方买卖价差不足 (${priceInfo.diff.toFixed(2)})，检查深度条件`)
+  } else if (priceInfo.depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+    // 深度差0.1且开关打开，使用特殊的"多吃价值"逻辑
+    // 如果 parseOrderbookData 已经通过了检查并返回了 finalPrice，说明满足条件
+    console.log(`⚠️ 深度差0.1，检查多吃价值条件`)
+    
+    const maxEatValue = hedgeMode.maxEatValue01  // 深度差0.1最大多吃价值(U)
     
     if (!hedgeMode.isClose) {
-      // 开仓模式：判断先挂方买一价的深度（depth1，因为开仓是买入）
-      const bidDepth = priceInfo.depth1
-      console.log(`开仓模式，先挂方买一深度: ${bidDepth.toFixed(2)}, 最大允许深度: ${maxDepth}`)
+      // 开仓模式：
+      // 1. 买一价值 < 最大允许深度 → 允许对冲
+      // 2. 买一价值 >= 最大允许深度，但卖一价值 < 最大多吃价值 → 也允许对冲
+      const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+      const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+      console.log(`开仓模式，买一价值: ${bidValue.toFixed(2)}U, 卖一价值: ${askValue.toFixed(2)}U, 最大允许深度: ${maxDepth}U, 最大多吃价值: ${maxEatValue}U`)
       
-      if (bidDepth < maxDepth) {
+      if (bidValue < maxDepth) {
         canHedge = true
-        console.log(`✅ 深度满足条件 (${bidDepth.toFixed(2)} < ${maxDepth})，允许对冲`)
+        console.log(`✅ 买一价值满足条件 (${bidValue.toFixed(2)}U < ${maxDepth}U)，允许对冲`)
+      } else if (askValue < maxEatValue) {
+        canHedge = true
+        console.log(`✅ 买一价值超限但卖一价值满足多吃条件 (${askValue.toFixed(2)}U < ${maxEatValue}U)，允许对冲`)
       } else {
-        console.log(`❌ 深度超过限制 (${bidDepth.toFixed(2)} >= ${maxDepth})，不对冲`)
+        console.log(`❌ 买一价值超限 (${bidValue.toFixed(2)}U >= ${maxDepth}U) 且卖一价值也超限 (${askValue.toFixed(2)}U >= ${maxEatValue}U)，不对冲`)
       }
     } else {
-      // 平仓模式：判断先挂方卖一价的深度（depth2，因为是卖出）
-      const askDepth = priceInfo.depth2
-      console.log(`平仓模式，先挂方卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${maxDepth}`)
+      // 平仓模式：
+      // 1. 卖一价值 < 最大允许深度 → 允许对冲
+      // 2. 卖一价值 >= 最大允许深度，但买一价值 < 最大多吃价值 → 也允许对冲
+      const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+      const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+      console.log(`平仓模式，卖一价值: ${askValue.toFixed(2)}U, 买一价值: ${bidValue.toFixed(2)}U, 最大允许深度: ${maxDepth}U, 最大多吃价值: ${maxEatValue}U`)
       
-      if (askDepth < maxDepth) {
+      if (askValue < maxDepth) {
         canHedge = true
-        console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${maxDepth})，允许对冲`)
+        console.log(`✅ 卖一价值满足条件 (${askValue.toFixed(2)}U < ${maxDepth}U)，允许对冲`)
+      } else if (bidValue < maxEatValue) {
+        canHedge = true
+        console.log(`✅ 卖一价值超限但买一价值满足多吃条件 (${bidValue.toFixed(2)}U < ${maxEatValue}U)，允许对冲`)
       } else {
-        console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${maxDepth})，不对冲`)
+        console.log(`❌ 卖一价值超限 (${askValue.toFixed(2)}U >= ${maxDepth}U) 且买一价值也超限 (${bidValue.toFixed(2)}U >= ${maxEatValue}U)，不对冲`)
+      }
+    }
+  } else {
+    // 其他情况（差值小于等于0.15且不是深度差0.1特殊逻辑），根据开仓/平仓判断先挂方的价值
+    console.log(`⚠️ 先挂方买卖价差不足 (${priceInfo.diff.toFixed(2)})，检查价值条件`)
+    
+    if (!hedgeMode.isClose) {
+      // 开仓模式：判断先挂方买一价值（买一价 × 买一深度 / 100）
+      const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+      console.log(`开仓模式，先挂方买一价值: ${bidValue.toFixed(2)}U, 最大允许深度: ${maxDepth}U`)
+      
+      if (bidValue < maxDepth) {
+        canHedge = true
+        console.log(`✅ 价值满足条件 (${bidValue.toFixed(2)}U < ${maxDepth}U)，允许对冲`)
+      } else {
+        console.log(`❌ 价值超过限制 (${bidValue.toFixed(2)}U >= ${maxDepth}U)，不对冲`)
+      }
+    } else {
+      // 平仓模式：判断先挂方卖一价值（卖一价 × 卖一深度 / 100）
+      const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+      console.log(`平仓模式，先挂方卖一价值: ${askValue.toFixed(2)}U, 最大允许深度: ${maxDepth}U`)
+      
+      if (askValue < maxDepth) {
+        canHedge = true
+        console.log(`✅ 价值满足条件 (${askValue.toFixed(2)}U < ${maxDepth}U)，允许对冲`)
+      } else {
+        console.log(`❌ 价值超过限制 (${askValue.toFixed(2)}U >= ${maxDepth}U)，不对冲`)
       }
     }
   }
@@ -9124,14 +9199,16 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 根据模式执行不同的对冲任务
           // 根据深度差范围和开关决定是否传递tp2和tp4
           let shouldPassTp2Tp4 = false
+          let shouldPassTp4For01 = false  // 深度差0.1时只传tp4（固定为1），不传tp2
           if (priceInfo.depthDiffRange === 'gt15' && hedgeMode.enableDepthDiffParamsGt15) {
             shouldPassTp2Tp4 = true
           } else if (priceInfo.depthDiffRange === '2to15' && hedgeMode.enableDepthDiffParams2To15) {
             shouldPassTp2Tp4 = true
           } else if (priceInfo.depthDiffRange === '02to2' && hedgeMode.enableDepthDiffParams02To2) {
             shouldPassTp2Tp4 = true
+          } else if (priceInfo.depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+            shouldPassTp4For01 = true  // 深度差0.1时只传tp4，固定为1
           }
-          // 深度差0.1永远不传tp2和tp4
           
           if (currentMode === 2 || currentMode === 3) {
             // 模式2和模式3：使用新的多任务逻辑
@@ -9153,7 +9230,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
               missionId: missionId,  // 传递组任务id
               priceInfo: priceInfo,   // 传递订单薄数据，用于构建 depthStr
               tp2: shouldPassTp2Tp4 ? priceInfo.tp2 : null,  // 根据开关决定是否传递 tp2
-              extraShare: priceInfo.extraShare || 0,  // 传递深度差0.1时需要额外增加的数量
+              firstShareReduction: priceInfo.firstShareReduction || 0,  // 传递深度差0.1时先挂方数量需要减少的量
               depthDiffRange: priceInfo.depthDiffRange  // 传递深度差范围标识
             })
           }
@@ -9274,16 +9351,18 @@ const updateOrderbookForConfig = async (config) => {
           const maxDepth = getMaxDepth(config)
           if (priceInfo.diff <= 0.15) {
             if (!hedgeMode.isClose) {
-              // 开仓模式：检查买一深度
-              if (priceInfo.depth1 >= maxDepth) {
-                orderbookReason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+              // 开仓模式：检查买一价值（买一价 × 买一深度 / 100）
+              const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+              if (bidValue >= maxDepth) {
+                orderbookReason = `先挂方买一价值 ${bidValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
               } else {
                 orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
               }
             } else {
-              // 平仓模式：检查卖一深度
-              if (priceInfo.depth2 >= maxDepth) {
-                orderbookReason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+              // 平仓模式：检查卖一价值（卖一价 × 卖一深度 / 100）
+              const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+              if (askValue >= maxDepth) {
+                orderbookReason = `先挂方卖一价值 ${askValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
               } else {
                 orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
               }
@@ -11052,13 +11131,6 @@ const executeHedgeTask = async (config, hedgeData) => {
   // 计算数量并保留2位小数向下取整
   let calculatedShare = hedgeMode.isClose ? hedgeData.share : (hedgeData.share * 100)
   
-  // 深度差0.1时的特殊处理：如果是开仓且使用了卖一价，需要增加先挂方的数量
-  if (hedgeData.extraShare && hedgeData.extraShare > 0 && !hedgeMode.isClose) {
-    // 开仓模式，深度差0.1，且最终价格是卖一价，需要增加卖一价的深度
-    calculatedShare += hedgeData.extraShare
-    console.log(`深度差0.1 - 开仓模式特殊处理，先挂方数量增加: ${hedgeData.extraShare.toFixed(2)}, 最终数量: ${calculatedShare.toFixed(2)}`)
-  }
-  
   const roundedShare = floorToTwoDecimals(calculatedShare)
   
   const missionId = hedgeData.missionId  // 组任务的任务id
@@ -11091,6 +11163,7 @@ const executeHedgeTask = async (config, hedgeData) => {
     missionId: missionId,  // 组任务的任务id
     priceInfo: priceInfo,  // 订单薄数据
     tp2: hedgeData.tp2,  // 保存tp2值，用于后挂方任务提交
+    firstShareReduction: hedgeData.firstShareReduction || 0,  // 深度差0.1时，先挂方数量需要减少的量
     // 用于收集所有子任务的映射：{number: misId}
     subTaskMap: {},  // {浏览器编号: 子任务id}
     wasCounted: true  // 标记此任务已被计入 runningHedgeGroupsCount
@@ -11119,6 +11192,13 @@ const executeHedgeTask = async (config, hedgeData) => {
     const groupNo = firstSide === 'YES' ? yesGroupNo : noGroupNo
     console.log(`[executeHedgeTask] 提交第一个任务，使用组号: ${groupNo} (firstSide: ${firstSide}, yesGroupNo: ${yesGroupNo}, noGroupNo: ${noGroupNo})`)
     
+    // 计算先挂方数量（如果存在 firstShareReduction，需要减去）
+    let firstShare = roundedShare
+    if (hedgeData.firstShareReduction && hedgeData.firstShareReduction > 0) {
+      firstShare = roundedShare - hedgeData.firstShareReduction
+      console.log(`深度差0.1 - 先挂方数量减少: ${hedgeData.firstShareReduction.toFixed(2)}, 原数量: ${roundedShare}, 新数量: ${firstShare.toFixed(2)}`)
+    }
+    
     const taskData = {
       groupNo: groupNo,
       numberList: parseInt(firstBrowser),
@@ -11127,7 +11207,7 @@ const executeHedgeTask = async (config, hedgeData) => {
       exchangeName: 'OP',
       side: hedgeMode.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: firstPsSide,
-      amt: roundedShare,  // 保留2位小数向下取整
+      amt: floorToTwoDecimals(firstShare),  // 先挂方数量，保留2位小数向下取整
       price: hedgeData.currentPrice,
       tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
     }
@@ -11135,14 +11215,16 @@ const executeHedgeTask = async (config, hedgeData) => {
     // 根据深度差范围和开关决定是否传递tp2和tp4
     const depthDiffRange = hedgeData.depthDiffRange
     let shouldPassTp2Tp4 = false
+    let shouldPassTp4For01 = false  // 深度差0.1时只传tp4（固定为1），不传tp2
     if (depthDiffRange === 'gt15' && hedgeMode.enableDepthDiffParamsGt15) {
       shouldPassTp2Tp4 = true
     } else if (depthDiffRange === '2to15' && hedgeMode.enableDepthDiffParams2To15) {
       shouldPassTp2Tp4 = true
     } else if (depthDiffRange === '02to2' && hedgeMode.enableDepthDiffParams02To2) {
       shouldPassTp2Tp4 = true
+    } else if (depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+      shouldPassTp4For01 = true  // 深度差0.1时只传tp4，固定为1
     }
-    // 深度差0.1永远不传tp2和tp4
     
     if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
       taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
@@ -11153,6 +11235,9 @@ const executeHedgeTask = async (config, hedgeData) => {
     if (shouldPassTp2Tp4) {
       taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
       console.log(`添加tp4字段: ${taskData.tp4}`)
+    } else if (shouldPassTp4For01) {
+      taskData.tp4 = getMaxDepth(config)  // 深度差0.1时tp4也传最大允许深度
+      console.log(`深度差0.1添加tp4字段: ${taskData.tp4}`)
     }
     
     const response = await axios.post(
@@ -11462,6 +11547,9 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     // 获取第一个任务的ID
     const firstTaskId = hedgeRecord.firstSide === 'YES' ? hedgeRecord.yesTaskId : hedgeRecord.noTaskId
     
+    // 后挂方数量直接使用服务器下发的数量（深度差0.1时先挂方已经减少了）
+    const secondShare = hedgeRecord.share
+    
     const taskData = {
       groupNo: groupNo,
       numberList: parseInt(secondBrowser),
@@ -11470,7 +11558,7 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       exchangeName: 'OP',
       side: hedgeRecord.isClose ? 2 : 1,  // 开仓=1，平仓=2
       psSide: secondPsSide,
-      amt: floorToTwoDecimals(hedgeRecord.share),  // 保留2位小数向下取整
+      amt: floorToTwoDecimals(secondShare),  // 后挂方数量，保留2位小数向下取整
       price: parseFloat(secondPrice),
       tp1: firstTaskId,  // 任务二需要传递任务一的ID
       tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
@@ -11479,14 +11567,16 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     // 根据深度差范围和开关决定是否传递tp2和tp4
     const depthDiffRange = hedgeRecord.priceInfo?.depthDiffRange
     let shouldPassTp2Tp4 = false
+    let shouldPassTp4For01 = false  // 深度差0.1时只传tp4（固定为1），不传tp2
     if (depthDiffRange === 'gt15' && hedgeMode.enableDepthDiffParamsGt15) {
       shouldPassTp2Tp4 = true
     } else if (depthDiffRange === '2to15' && hedgeMode.enableDepthDiffParams2To15) {
       shouldPassTp2Tp4 = true
     } else if (depthDiffRange === '02to2' && hedgeMode.enableDepthDiffParams02To2) {
       shouldPassTp2Tp4 = true
+    } else if (depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+      shouldPassTp4For01 = true  // 深度差0.1时只传tp4，固定为1
     }
-    // 深度差0.1永远不传tp2和tp4
     
     if (shouldPassTp2Tp4 && hedgeRecord.tp2 !== null && hedgeRecord.tp2 !== undefined) {
       taskData.tp2 = Math.round(hedgeRecord.tp2)  // tp2转换为整数（秒）
@@ -11497,6 +11587,9 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     if (shouldPassTp2Tp4) {
       taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
       console.log(`后挂方任务添加tp4字段: ${taskData.tp4}`)
+    } else if (shouldPassTp4For01) {
+      taskData.tp4 = getMaxDepth(config)  // 深度差0.1时tp4也传最大允许深度
+      console.log(`深度差0.1后挂方任务添加tp4字段: ${taskData.tp4}`)
     }
     
     const response = await axios.post(
@@ -11737,14 +11830,16 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         // 根据深度差范围和开关决定是否传递tp2和tp4
         const depthDiffRange = hedgeData.depthDiffRange
         let shouldPassTp2Tp4 = false
+        let shouldPassTp4For01 = false  // 深度差0.1时只传tp4（固定为1），不传tp2
         if (depthDiffRange === 'gt15' && hedgeMode.enableDepthDiffParamsGt15) {
           shouldPassTp2Tp4 = true
         } else if (depthDiffRange === '2to15' && hedgeMode.enableDepthDiffParams2To15) {
           shouldPassTp2Tp4 = true
         } else if (depthDiffRange === '02to2' && hedgeMode.enableDepthDiffParams02To2) {
           shouldPassTp2Tp4 = true
+        } else if (depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+          shouldPassTp4For01 = true  // 深度差0.1时只传tp4，固定为1
         }
-        // 深度差0.1永远不传tp2和tp4
         
         if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
           taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
@@ -11755,6 +11850,9 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
         if (shouldPassTp2Tp4) {
           taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
           console.log(`[executeHedgeTaskV2] 先挂方任务添加 tp4 字段: ${taskData.tp4}`)
+        } else if (shouldPassTp4For01) {
+          taskData.tp4 = getMaxDepth(config)  // 深度差0.1时tp4也传最大允许深度
+          console.log(`[executeHedgeTaskV2] 深度差0.1先挂方任务添加 tp4 字段: ${taskData.tp4}`)
         }
         
         const response = await axios.post(
@@ -11931,14 +12029,16 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           // 根据深度差范围和开关决定是否传递tp2和tp4
           const depthDiffRange = hedgeData.depthDiffRange
           let shouldPassTp2Tp4 = false
+          let shouldPassTp4For01 = false  // 深度差0.1时只传tp4（固定为1），不传tp2
           if (depthDiffRange === 'gt15' && hedgeMode.enableDepthDiffParamsGt15) {
             shouldPassTp2Tp4 = true
           } else if (depthDiffRange === '2to15' && hedgeMode.enableDepthDiffParams2To15) {
             shouldPassTp2Tp4 = true
           } else if (depthDiffRange === '02to2' && hedgeMode.enableDepthDiffParams02To2) {
             shouldPassTp2Tp4 = true
+          } else if (depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+            shouldPassTp4For01 = true  // 深度差0.1时只传tp4，固定为1
           }
-          // 深度差0.1永远不传tp2和tp4
           
           if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
             taskData.tp2 = Math.round(hedgeData.tp2)  // tp2转换为整数（秒）
@@ -11949,6 +12049,9 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           if (shouldPassTp2Tp4) {
             taskData.tp4 = getMaxDepth(config)  // 最大允许深度（优先使用保存的单独设置，否则使用全局设置）
             console.log(`[executeHedgeTaskV2] 后挂方任务添加 tp4 字段: ${taskData.tp4}`)
+          } else if (shouldPassTp4For01) {
+            taskData.tp4 = getMaxDepth(config)  // 深度差0.1时tp4也传最大允许深度
+            console.log(`[executeHedgeTaskV2] 深度差0.1后挂方任务添加 tp4 字段: ${taskData.tp4}`)
           }
           
           const response = await axios.post(
@@ -12937,16 +13040,18 @@ const executeAutoHedgeTasks = async () => {
             const maxDepth = getMaxDepth(config)
             if (priceInfo.diff <= 0.15) {
               if (!hedgeMode.isClose) {
-                // 开仓模式：检查买一深度
-                if (priceInfo.depth1 >= maxDepth) {
-                  orderbookReason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+                // 开仓模式：检查买一价值（买一价 × 买一深度 / 100）
+                const bidValue = priceInfo.price1 * priceInfo.depth1 / 100
+                if (bidValue >= maxDepth) {
+                  orderbookReason = `先挂方买一价值 ${bidValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
                 } else {
                   orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
                 }
               } else {
-                // 平仓模式：检查卖一深度
-                if (priceInfo.depth2 >= maxDepth) {
-                  orderbookReason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${maxDepth}`
+                // 平仓模式：检查卖一价值（卖一价 × 卖一深度 / 100）
+                const askValue = priceInfo.price2 * priceInfo.depth2 / 100
+                if (askValue >= maxDepth) {
+                  orderbookReason = `先挂方卖一价值 ${askValue.toFixed(2)}U 超过最大允许深度 ${maxDepth}U`
                 } else {
                   orderbookReason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
                 }
