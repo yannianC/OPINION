@@ -267,6 +267,27 @@
           </div>
           <h2>查询结果 (共 {{ Object.keys(results).length }} 个任务组)</h2>
           
+          <!-- 模式1：组状态统计区域 -->
+          <div v-if="queryMode === 1" class="group-status-statistics">
+            <div class="status-stat-row">
+              <span class="status-stat-item status-success" @click="setStatusFilter('success')">
+                全部成功: {{ groupStatusStatistics.success }}
+              </span>
+              <span class="status-stat-item status-repaired" @click="setStatusFilter('repaired')">
+                修复后全部成功: {{ groupStatusStatistics.repaired }}
+              </span>
+              <span class="status-stat-item status-failed" @click="setStatusFilter('failed')">
+                失败: {{ groupStatusStatistics.failed }}
+              </span>
+              <span class="status-stat-item status-no-impact" @click="setStatusFilter('noImpact')">
+                失败无影响: {{ groupStatusStatistics.noImpact }}
+              </span>
+              <span class="status-stat-item status-running" @click="setStatusFilter('running')">
+                进行中: {{ groupStatusStatistics.running }}
+              </span>
+            </div>
+          </div>
+          
           <!-- 筛选区域 -->
           <div class="filter-section">
             <div class="filter-input-wrapper">
@@ -303,6 +324,46 @@
               @click="clearFilter"
             >
               清除
+            </button>
+            
+            <!-- 模式1：状态筛选 -->
+            <div v-if="queryMode === 1" class="status-filter-section">
+              <label>状态筛选:</label>
+              <select v-model="statusFilter" class="status-filter-select">
+                <option value="all">全部</option>
+                <option value="success">全部成功</option>
+                <option value="repaired">修复后全部成功</option>
+                <option value="failed">失败</option>
+                <option value="noImpact">失败无影响</option>
+                <option value="running">进行中</option>
+              </select>
+              <button 
+                v-if="statusFilter !== 'all'" 
+                class="clear-status-filter-btn"
+                @click="statusFilter = 'all'"
+              >
+                清除状态筛选
+              </button>
+            </div>
+            
+            <!-- 模式1：一键获取失败状态的服务数据 -->
+            <button 
+              v-if="queryMode === 1 && groupStatusStatistics.failed > 0"
+              class="batch-fetch-btn"
+              @click="batchFetchFailedServerData"
+              :disabled="isBatchFetchingServerData || isBatchSubmittingPosition"
+            >
+              {{ isBatchFetchingServerData ? `获取中 (${batchFetchProgress.current}/${batchFetchProgress.total})...` : `一键获取失败状态的服务数据 (${groupStatusStatistics.failed})` }}
+            </button>
+            
+            <!-- 模式1：一键抓取失败状态的仓位 -->
+            <button 
+              v-if="queryMode === 1 && groupStatusStatistics.failed > 0"
+              class="batch-position-btn"
+              @click="batchSubmitPositionUpdate"
+              :disabled="isBatchSubmittingPosition || isBatchFetchingServerData"
+            >
+              {{ isBatchSubmittingPosition ? `提交中 (${batchPositionProgress.current}/${batchPositionProgress.total}) 成功:${batchPositionProgress.success} 失败:${batchPositionProgress.failed}` : `一键抓取失败状态的仓位 (${groupStatusStatistics.failed})` }}
             </button>
           </div>
         </div>
@@ -891,6 +952,11 @@ export default {
       },
       orderFailedMsgs: [], // 存储"挂单失败"的所有不同msg（包含重复，用于统计）
       showOrderFailedMsgs: false, // 是否显示"挂单失败"的msg列表
+      statusFilter: 'all', // 模式1的总状态筛选：'all'全部, 'success'成功, 'failed'失败, 'noImpact'失败无影响, 'running'进行中, 'repaired'修复后全部成功
+      isBatchFetchingServerData: false, // 是否正在批量获取失败状态的服务器数据
+      batchFetchProgress: { current: 0, total: 0 }, // 批量获取进度
+      isBatchSubmittingPosition: false, // 是否正在批量提交更新仓位任务
+      batchPositionProgress: { current: 0, total: 0, success: 0, failed: 0 }, // 批量提交仓位任务进度
       toast: {
         show: false,
         message: '',
@@ -980,10 +1046,11 @@ export default {
       }
       
       // 模式1时应用交易方向筛选
+      let result = keywordFiltered
       if (this.queryMode === 1 && this.sideFilter !== 'all') {
         const sideFiltered = {}
-        Object.keys(keywordFiltered).forEach(groupKey => {
-          const group = keywordFiltered[groupKey]
+        Object.keys(result).forEach(groupKey => {
+          const group = result[groupKey]
           
           // 根据 sideFilter 筛选任务
           const filteredTasks = group.tasks.filter(task => {
@@ -1003,10 +1070,40 @@ export default {
             }
           }
         })
-        return sideFiltered
+        result = sideFiltered
       }
       
-      return keywordFiltered
+      // 模式1时应用总状态筛选
+      if (this.queryMode === 1 && this.statusFilter !== 'all') {
+        const statusFiltered = {}
+        Object.keys(result).forEach(groupKey => {
+          const group = result[groupKey]
+          if (group.finalStatus === this.statusFilter) {
+            statusFiltered[groupKey] = group
+          }
+        })
+        result = statusFiltered
+      }
+      
+      return result
+    },
+    
+    // 组状态统计（用于统计面板显示）
+    groupStatusStatistics() {
+      if (this.queryMode !== 1) return { success: 0, failed: 0, noImpact: 0, running: 0, repaired: 0, unknown: 0 }
+      
+      const stats = { success: 0, failed: 0, noImpact: 0, running: 0, repaired: 0, unknown: 0 }
+      
+      Object.values(this.results).forEach(group => {
+        const status = group.finalStatus || 'unknown'
+        if (stats[status] !== undefined) {
+          stats[status]++
+        } else {
+          stats.unknown++
+        }
+      })
+      
+      return stats
     },
     
     // 获取带索引的任务组列表，用于颜色循环（模式1）
@@ -2450,14 +2547,31 @@ export default {
         }
       }
       
-      // 检查所有任务是否都成功
-      const allSuccess = tasks.every(task => this.isTaskSuccess(task.status, task.msg))
-      if (allSuccess) {
+      // 检查所有任务是否都成功（包括tp7/tp8修复成功）
+      let hasRepaired = false
+      const allSuccessOrRepaired = tasks.every(task => {
+        // 原本就成功
+        if (this.isTaskSuccess(task.status, task.msg)) {
+          return true
+        }
+        // 通过tp7/tp8修复成功
+        if (this.isTaskRepairedSuccess(task)) {
+          hasRepaired = true
+          return true
+        }
+        return false
+      })
+      
+      if (allSuccessOrRepaired) {
+        // 如果有任何一个是修复成功的，返回 'repaired'
+        if (hasRepaired) {
+          return 'repaired'
+        }
         return 'success'
       }
       
       // 检查是否有任务失败（status === 3）
-      const hasFailed = tasks.some(task => task.status === 3)
+      const hasFailed = tasks.some(task => task.status === 3 && !this.isTaskRepairedSuccess(task))
       if (hasFailed) {
         return 'failed'
       }
@@ -2477,6 +2591,7 @@ export default {
     getGroupStatusText(finalStatus) {
       const statusMap = {
         'success': '全部成功',
+        'repaired': '修复后全部成功',
         'failed': '失败',
         'running': '进行中',
         'noImpact': '失败无影响',
@@ -2491,6 +2606,7 @@ export default {
     getGroupStatusClass(finalStatus) {
       const classMap = {
         'success': 'status-success',
+        'repaired': 'status-repaired',
         'failed': 'status-failed',
         'running': 'status-running',
         'noImpact': 'status-no-impact',
@@ -2508,10 +2624,12 @@ export default {
     
     /**
      * 获取服务器数据（针对组）
+     * @param {Object} group - 任务组
+     * @param {boolean} batchMode - 是否是批量模式（批量模式下只获取失败且未修复的子任务）
      */
-    async fetchServerDataForGroup(group) {
+    async fetchServerDataForGroup(group, batchMode = false) {
       if (!group || !group.tasks || group.tasks.length === 0) {
-        this.showToast('任务组数据不完整', 'warning')
+        if (!batchMode) this.showToast('任务组数据不完整', 'warning')
         return
       }
       
@@ -2533,6 +2651,18 @@ export default {
         for (const task of tasks) {
           if (!task.browserId || !task.trending) {
             continue
+          }
+          
+          // 批量模式下，只获取失败且未修复成功的子任务
+          if (batchMode) {
+            // 子任务状态是2（成功）的，不需要获取
+            if (task.status === 2) {
+              continue
+            }
+            // 已经修复成功的，不需要获取
+            if (this.isTaskRepairedSuccess(task)) {
+              continue
+            }
           }
           
           // 确定side参数：1=开仓（买入），2=平仓（卖出）
@@ -2647,14 +2777,289 @@ export default {
           }
         }
         
-        this.showToast('获取服务器数据成功', 'success')
+        // 获取完成后，重新计算组的总状态
+        this.recalculateGroupStatus(group)
+        
+        if (!batchMode) {
+          this.showToast('获取服务器数据成功', 'success')
+        }
       } catch (error) {
         console.error('获取服务器数据失败:', error)
-        this.showToast('获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
+        if (!batchMode) {
+          this.showToast('获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
+        }
       } finally {
         // 移除标记
         this.fetchingServerDataGroups.delete(groupKey)
       }
+    },
+    
+    /**
+     * 重新计算组的总状态（考虑tp7/tp8修复）
+     */
+    recalculateGroupStatus(group) {
+      if (!group || !group.tasks) return
+      
+      const newStatus = this.calculateGroupStatus(group.tasks)
+      group.finalStatus = newStatus
+    },
+    
+    /**
+     * 设置状态筛选
+     */
+    setStatusFilter(status) {
+      this.statusFilter = status
+    },
+    
+    /**
+     * 批量获取失败状态的服务数据（并发5个一组）
+     */
+    async batchFetchFailedServerData() {
+      if (this.isBatchFetchingServerData) return
+      
+      // 获取所有失败状态的组（排除已修复的）
+      const failedGroups = []
+      Object.values(this.results).forEach(group => {
+        // 只获取失败状态的组，排除已修复的（repaired）
+        if (group.finalStatus === 'failed') {
+          failedGroups.push(group)
+        }
+      })
+      
+      if (failedGroups.length === 0) {
+        this.showToast('没有失败状态的组需要获取', 'info')
+        return
+      }
+      
+      this.isBatchFetchingServerData = true
+      this.batchFetchProgress = { current: 0, total: failedGroups.length }
+      
+      const concurrency = 5 // 并发数
+      
+      try {
+        // 分批并发处理
+        for (let i = 0; i < failedGroups.length; i += concurrency) {
+          const batch = failedGroups.slice(i, i + concurrency)
+          const promises = batch.map(group => this.fetchServerDataForGroup(group, true)) // true表示是批量模式
+          
+          await Promise.all(promises)
+          
+          this.batchFetchProgress.current = Math.min(i + concurrency, failedGroups.length)
+          
+          // 批次之间间隔200ms
+          if (i + concurrency < failedGroups.length) {
+            await new Promise(resolve => setTimeout(resolve, 200))
+          }
+        }
+        this.showToast(`批量获取完成，共处理 ${failedGroups.length} 个组`, 'success')
+      } catch (error) {
+        console.error('批量获取服务器数据失败:', error)
+        this.showToast('批量获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchFetchingServerData = false
+        this.batchFetchProgress = { current: 0, total: 0 }
+      }
+    },
+    
+    /**
+     * 提交单个浏览器的更新仓位任务（type=2，带重试机制）
+     * @param {number} browserId - 浏览器ID
+     * @param {number} groupNo - 电脑组
+     * @param {number} maxRetries - 最大重试次数
+     * @returns {Promise<{success: boolean, error?: string}>}
+     */
+    async submitSinglePositionUpdate(browserId, groupNo, maxRetries = 3) {
+      const payload = {
+        type: 2,
+        groupNo: groupNo,
+        numberList: String(browserId),
+        exchangeName: 'OP'
+      }
+      
+      let lastError = null
+      
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          if (attempt > 0) {
+            // 重试前等待3秒
+            console.log(`浏览器ID ${browserId} 更新仓位第 ${attempt} 次重试，等待3秒...`)
+            await new Promise(resolve => setTimeout(resolve, 3000))
+          }
+          
+          const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/add', payload)
+          
+          if (response.data && response.data.code === 0) {
+            console.log(`浏览器ID ${browserId} 更新仓位成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+            return { success: true }
+          } else {
+            lastError = response.data?.msg || '未知错误'
+            console.error(`浏览器ID ${browserId} 更新仓位失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+          }
+        } catch (error) {
+          lastError = error.message || '未知错误'
+          console.error(`浏览器ID ${browserId} 更新仓位异常${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+        }
+      }
+      
+      return { success: false, error: lastError }
+    },
+    
+    /**
+     * 批量提交更新仓位任务（并发5个一组，带重试机制）
+     */
+    async batchSubmitPositionUpdate() {
+      if (this.isBatchSubmittingPosition) return
+      
+      // 收集所有需要更新仓位的浏览器
+      const tasksToUpdate = []
+      
+      Object.values(this.results).forEach(group => {
+        // 只处理失败状态的组
+        if (group.finalStatus !== 'failed') return
+        
+        group.tasks.forEach(task => {
+          // 子任务状态是2（成功）的，不需要更新仓位
+          if (task.status === 2) return
+          // 已经修复成功的，不需要更新仓位
+          if (this.isTaskRepairedSuccess(task)) return
+          // 没有浏览器ID的，跳过
+          if (!task.browserId || !task.groupNo) return
+          
+          tasksToUpdate.push({
+            browserId: task.browserId,
+            groupNo: task.groupNo,
+            taskId: task.id
+          })
+        })
+      })
+      
+      if (tasksToUpdate.length === 0) {
+        this.showToast('没有需要更新仓位的浏览器', 'info')
+        return
+      }
+      
+      // 去重（同一浏览器不重复提交）
+      const uniqueTasks = []
+      const seenBrowserIds = new Set()
+      for (const task of tasksToUpdate) {
+        if (!seenBrowserIds.has(task.browserId)) {
+          seenBrowserIds.add(task.browserId)
+          uniqueTasks.push(task)
+        }
+      }
+      
+      this.isBatchSubmittingPosition = true
+      this.batchPositionProgress = { current: 0, total: uniqueTasks.length, success: 0, failed: 0 }
+      
+      const concurrency = 5 // 并发数
+      
+      try {
+        // 分批并发处理
+        for (let i = 0; i < uniqueTasks.length; i += concurrency) {
+          const batch = uniqueTasks.slice(i, i + concurrency)
+          
+          const promises = batch.map(async (task) => {
+            const result = await this.submitSinglePositionUpdate(task.browserId, task.groupNo)
+            return { task, result }
+          })
+          
+          const results = await Promise.all(promises)
+          
+          // 统计成功/失败
+          for (const { result } of results) {
+            if (result.success) {
+              this.batchPositionProgress.success++
+            } else {
+              this.batchPositionProgress.failed++
+            }
+          }
+          
+          this.batchPositionProgress.current = Math.min(i + concurrency, uniqueTasks.length)
+          
+          // 批次之间间隔300ms
+          if (i + concurrency < uniqueTasks.length) {
+            await new Promise(resolve => setTimeout(resolve, 300))
+          }
+        }
+        
+        const { success, failed } = this.batchPositionProgress
+        this.showToast(`批量提交完成，成功: ${success}，失败: ${failed}`, success > 0 ? 'success' : 'error')
+      } catch (error) {
+        console.error('批量提交更新仓位失败:', error)
+        this.showToast('批量提交更新仓位失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchSubmittingPosition = false
+        // 保留进度显示一段时间后重置
+        setTimeout(() => {
+          this.batchPositionProgress = { current: 0, total: 0, success: 0, failed: 0 }
+        }, 5000)
+      }
+    },
+    
+    /**
+     * 根据tp7/tp8判断任务是否已修复成功
+     * @param {Object} task 任务对象
+     * @returns {boolean} 是否修复成功
+     */
+    isTaskRepairedSuccess(task) {
+      if (!task) return false
+      
+      // 如果任务原本就成功，不算修复
+      if (task.status === 2) return false
+      
+      // 检查tp8（已成交数据）
+      if (task.tp8) {
+        // tp8格式: "时间: 2026-01-09 14:23:17 (不同时区) | 方向: 卖 | 结果: NO | 价格: 82.3 | 进度: 100.00% (399.46/399.46) | 状态: filled"
+        // 检查状态是否为filled，且进度>=80%
+        if (task.tp8.includes('状态: filled')) {
+          const progressMatch = task.tp8.match(/进度:\s*([\d.]+)%/)
+          if (progressMatch) {
+            const progress = parseFloat(progressMatch[1])
+            if (progress >= 80) {
+              return true
+            }
+          }
+        }
+      }
+      
+      // 检查tp7（挂单数据）
+      if (task.tp7) {
+        // tp7格式: "创建时间: 2026-01-09 13:27:46 | 方向: 卖 | 结果: YES | 价格: 0.177 | 进度: 51.57% (206.00/399.46)"
+        const progressMatch = task.tp7.match(/进度:\s*([\d.]+)%/)
+        if (progressMatch) {
+          const progress = parseFloat(progressMatch[1])
+          if (progress >= 80) {
+            return true
+          }
+        }
+      }
+      
+      // 检查serverData
+      if (task.serverData) {
+        // 检查closedOrderList
+        if (task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0) {
+          for (const order of task.serverData.closedOrderList) {
+            if (order.status === 'filled') {
+              const progress = order.fillAmt && order.amt ? (order.fillAmt / order.amt * 100) : 0
+              if (progress >= 80) {
+                return true
+              }
+            }
+          }
+        }
+        
+        // 检查openOrderList
+        if (task.serverData.openOrderList && task.serverData.openOrderList.length > 0) {
+          for (const order of task.serverData.openOrderList) {
+            const progress = order.amt && order.restAmt !== undefined ? ((order.amt - order.restAmt) / order.amt * 100) : 0
+            if (progress >= 80) {
+              return true
+            }
+          }
+        }
+      }
+      
+      return false
     },
     
     /**
@@ -3052,7 +3457,7 @@ export default {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
-  min-height: 200vh; /* 增加整个页面的高度，让列表可以占据更多空间 */
+  min-height: calc(100vh - 300px); /* 页面高度减去查询区域高度 */
 }
 
 .results-header {
@@ -3260,7 +3665,7 @@ export default {
 .filter-section {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
 }
 
@@ -3799,6 +4204,172 @@ export default {
 .group-status-badge.status-no-impact {
   background: rgba(241, 196, 15, 0.3);
   color: #f1c40f;
+}
+
+.group-status-badge.status-repaired {
+  background: rgba(52, 152, 219, 0.3);
+  color: #3498db;
+}
+
+/* 组状态统计区域 */
+.group-status-statistics {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 8px;
+  padding: 15px 20px;
+  margin-bottom: 15px;
+  border: 1px solid #dee2e6;
+}
+
+.status-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.status-stat-item {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.status-stat-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.status-stat-item.status-success {
+  background: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+  border-color: rgba(39, 174, 96, 0.3);
+}
+
+.status-stat-item.status-repaired {
+  background: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+  border-color: rgba(52, 152, 219, 0.3);
+}
+
+.status-stat-item.status-failed {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border-color: rgba(231, 76, 60, 0.3);
+}
+
+.status-stat-item.status-no-impact {
+  background: rgba(241, 196, 15, 0.15);
+  color: #f39c12;
+  border-color: rgba(241, 196, 15, 0.3);
+}
+
+.status-stat-item.status-running {
+  background: rgba(155, 89, 182, 0.15);
+  color: #9b59b6;
+  border-color: rgba(155, 89, 182, 0.3);
+}
+
+/* 状态筛选区域 */
+.status-filter-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 15px;
+  padding-left: 15px;
+  border-left: 1px solid #ddd;
+}
+
+.status-filter-section label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  white-space: nowrap;
+}
+
+.status-filter-select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  min-width: 140px;
+  transition: border-color 0.3s;
+}
+
+.status-filter-select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.clear-status-filter-btn {
+  padding: 6px 12px;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.clear-status-filter-btn:hover {
+  background: #7f8c8d;
+}
+
+/* 批量获取按钮 */
+.batch-fetch-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 15px;
+  white-space: nowrap;
+}
+
+.batch-fetch-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+}
+
+.batch-fetch-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 批量更新仓位按钮 */
+.batch-position-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+.batch-position-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(155, 89, 182, 0.4);
+}
+
+.batch-position-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .btn-fetch-server-data {
