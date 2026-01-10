@@ -645,12 +645,12 @@
                     </div>
                   </div>
                   <!-- 如果没有serverData，显示tp7和tp8（从任务信息中获取的） -->
-                  <div v-else-if="task.tp7 || task.tp8" class="task-order-info">
+                  <div v-else-if="task.tp7 || (task.tp8 && isTp8TimeValid(task))" class="task-order-info">
                     <div v-if="task.tp7" class="order-info-item">
                       <span class="order-label">挂单数据:</span>
                       <span class="order-content">{{ task.tp7 }}</span>
                     </div>
-                    <div v-if="task.tp8" class="order-info-item">
+                    <div v-if="task.tp8 && isTp8TimeValid(task)" class="order-info-item">
                       <span class="order-label">已成交数据:</span>
                       <span class="order-content">{{ task.tp8 }}</span>
                     </div>
@@ -4195,8 +4195,9 @@ export default {
         }
       }
       
-      // 优先使用 tp8（已成交数据），但如果状态是 canceled 并且有 tp7，则使用 tp7
-      if (task.tp8) {
+      // 优先使用 tp8（已成交数据），需要时间在有效范围内
+      // 如果状态是 canceled 并且有 tp7，则使用 tp7
+      if (task.tp8 && this.isTp8TimeValid(task)) {
         const isCanceled = task.tp8.includes('状态: canceled') || task.tp8.includes('状态:canceled')
         if (isCanceled && task.tp7) {
           // tp8 状态是 canceled，优先使用 tp7 挂单数据
@@ -4205,8 +4206,8 @@ export default {
             return { ...data, source: 'tp7' }
           }
         } else {
-          // 正常使用 tp8
-          const data = this.parseTp8Data(task.tp8, task.side)
+          // 正常使用 tp8，传递 task 对象用于时间范围验证
+          const data = this.parseTp8Data(task.tp8, task.side, task)
           if (data) {
             return { ...data, source: 'tp8' }
           }
@@ -4372,9 +4373,9 @@ export default {
         }
       }
       
-      // 优先使用 tp8（已成交数据）
-      if (task.tp8) {
-        return this.parseTp8Data(task.tp8, task.side)
+      // 优先使用 tp8（已成交数据），需要时间在有效范围内
+      if (task.tp8 && this.isTp8TimeValid(task)) {
+        return this.parseTp8Data(task.tp8, task.side, task)
       }
       
       // 其次使用 tp7（挂单数据）
@@ -4408,19 +4409,31 @@ export default {
      * 买入时: "时间: 2026-01-09 13:57:51 | 方向: 买 | 结果: YES | 价格: 7.9 | 进度: 100.00% (52.21/52.21) | 状态: filled"
      * @param {string} tp8 - tp8 数据字符串
      * @param {number} taskSide - 任务方向 (1=买入, 2=卖出)
+     * @param {Object} task - 可选，任务对象，用于时间范围验证（包含 createTime 和 updateTime）
      */
-    parseTp8Data(tp8, taskSide) {
+    parseTp8Data(tp8, taskSide, task = null) {
       if (!tp8) return null
       
-      // 检查状态，如果是 canceled，返回全0
-      const statusMatch = tp8.match(/状态:\s*(\w+)/)
-      if (statusMatch && statusMatch[1] === 'canceled') {
-        return {
-          total: 0,
-          filled: 0,
-          pending: 0
+      // 如果提供了 task，验证 tp8 中的时间是否在 createTime 和 updateTime 之间
+      if (task && task.createTime && task.updateTime) {
+        // 提取 tp8 中的时间
+        const timeMatch = tp8.match(/时间:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+        if (timeMatch) {
+          const tp8Time = new Date(timeMatch[1]).getTime()
+          const createTime = new Date(task.createTime).getTime()
+          const updateTime = new Date(task.updateTime).getTime()
+          
+          // 检查 tp8 时间是否在 createTime 和 updateTime 之间
+          if (tp8Time < createTime || tp8Time > updateTime) {
+            // tp8 时间不在有效范围内，返回 null
+            return null
+          }
         }
       }
+      
+      // 检查状态
+      const statusMatch = tp8.match(/状态:\s*(\w+)/)
+      const status = statusMatch ? statusMatch[1] : null
       
       // 提取方向
       const sideMatch = tp8.match(/方向:\s*(买|卖)/)
@@ -4443,6 +4456,15 @@ export default {
           total = (total * 100) / price
         }
         
+        // 如果状态是 canceled，使用进度的前半部分（已成交量）作为 filled
+        if (status === 'canceled') {
+          return {
+            total,
+            filled, // 已成交量
+            pending: 0
+          }
+        }
+        
         return {
           total,
           filled,
@@ -4450,6 +4472,27 @@ export default {
         }
       }
       return null
+    },
+    
+    /**
+     * 检查 tp8 时间是否在有效范围内（createTime 和 updateTime 之间）
+     * @param {Object} task - 任务对象
+     * @returns {boolean} 是否有效
+     */
+    isTp8TimeValid(task) {
+      if (!task || !task.tp8) return false
+      if (!task.createTime || !task.updateTime) return true // 没有时间限制信息时默认有效
+      
+      // 提取 tp8 中的时间
+      const timeMatch = task.tp8.match(/时间:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+      if (!timeMatch) return true // 无法提取时间时默认有效
+      
+      const tp8Time = new Date(timeMatch[1]).getTime()
+      const createTime = new Date(task.createTime).getTime()
+      const updateTime = new Date(task.updateTime).getTime()
+      
+      // 检查 tp8 时间是否在 createTime 和 updateTime 之间
+      return tp8Time >= createTime && tp8Time <= updateTime
     },
     
     /**
@@ -4607,8 +4650,8 @@ export default {
       // 如果任务原本就成功，不算修复
       if (task.status === 2) return false
       
-      // 检查tp8（已成交数据）
-      if (task.tp8) {
+      // 检查tp8（已成交数据），需要时间在有效范围内
+      if (task.tp8 && this.isTp8TimeValid(task)) {
         // tp8格式: "时间: 2026-01-09 14:23:17 (不同时区) | 方向: 卖 | 结果: NO | 价格: 82.3 | 进度: 100.00% (399.46/399.46) | 状态: filled"
         // 检查状态是否为filled，且进度>=80%
         if (task.tp8.includes('状态: filled')) {
