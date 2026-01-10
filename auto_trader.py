@@ -2932,7 +2932,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
         log_print(f"[{serial_number}] {log_msg}")
         add_bro_log_entry(bro_log_list, browser_id, log_msg)
         
-        time.sleep(4)
+     
         p_tags = trade_box.find_elements(By.TAG_NAME, "p")
         
         for p in p_tags:
@@ -9614,12 +9614,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 
                 
         
-        
+                
                 # 10. 点击 Amount 标签
                 add_bro_log_entry(bro_log_list, browser_id, "[8]步骤10: 点击 Amount 标签")
                 log_print(f"[{browser_id}] 步骤10: 点击 Amount 标签...")
                 click_opinion_amount_tab(tabs_content, browser_id)
                 
+                
+                time.sleep(6)
                 # 11. 填入价格和数量
                 add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤11: 填入价格和数量（模式：{price_type}）")
                 log_print(f"[{browser_id}] 步骤11: 填入价格和数量（模式：{price_type}）...")

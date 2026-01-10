@@ -277,6 +277,12 @@
           <!-- 模式1：组状态统计区域（只有6个状态分类） -->
           <div v-if="queryMode === 1" class="group-status-statistics">
             <div class="status-stat-row">
+              <span class="status-stat-item status-type1-success" @click="setStatusFilter('type1Success')">
+                类型1成功: {{ groupStatusStatistics.type1Success }}
+              </span>
+              <span class="status-stat-item status-type2-no-impact" @click="setStatusFilter('type2NoImpact')">
+                类型2失败无影响: {{ groupStatusStatistics.type2NoImpact }}
+              </span>
               <span class="status-stat-item status-success" @click="setStatusFilter('success')">
                 全部成功(3-1): {{ groupStatusStatistics.success }}
               </span>
@@ -1398,15 +1404,15 @@ export default {
     },
     
     // 组状态统计（用于统计面板显示，使用分析后的最终状态）
-    // 7个状态分类（含已修复）
+    // 9个状态分类（含类型1成功、类型2失败无影响、已修复）
     groupStatusStatistics() {
       if (this.queryMode !== 1) return { 
-        success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
+        type1Success: 0, type2NoImpact: 0, success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
         problemOtherIn30: 0, pendingFailed: 0, confirmedProblem: 0 
       }
       
       const stats = { 
-        success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
+        type1Success: 0, type2NoImpact: 0, success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
         problemOtherIn30: 0, pendingFailed: 0, confirmedProblem: 0 
       }
       
@@ -3091,11 +3097,13 @@ export default {
     
     /**
      * 获取组状态文本
-     * 7个状态分类：全部成功(3-1)、失败无影响(4-1)、已修复、有问题但不到30分钟(3-2,3-3)、
-     * 30分钟之内有问题其他(3-4)、有挂单的失败(4-3,4-4)、确定有问题(4-2)
+     * 9个状态分类：类型1成功、类型2失败无影响、全部成功(3-1)、失败无影响(4-1)、已修复、
+     * 有问题但不到30分钟(3-2,3-3)、30分钟之内有问题其他(3-4)、有挂单的失败(4-3,4-4)、确定有问题(4-2)
      */
     getGroupStatusText(finalStatus) {
       const statusMap = {
+        'type1Success': '类型1成功',      // 类型1：两边都是全部成交
+        'type2NoImpact': '类型2失败无影响', // 类型2：两边状态3且[X]<10
         'success': '全部成功',           // 3-1
         'noImpact': '失败无影响',         // 4-1
         'repaired': '已修复',            // 手动标记已修复
@@ -3109,10 +3117,12 @@ export default {
     
     /**
      * 获取组状态样式类
-     * 7个状态分类（含已修复）
+     * 9个状态分类（含类型1成功、类型2失败无影响、已修复）
      */
     getGroupStatusClass(finalStatus) {
       const classMap = {
+        'type1Success': 'status-type1-success',    // 类型1成功
+        'type2NoImpact': 'status-type2-no-impact', // 类型2失败无影响
         'success': 'status-success',           // 3-1
         'noImpact': 'status-no-impact',        // 4-1
         'repaired': 'status-repaired',         // 手动标记已修复
@@ -3954,19 +3964,19 @@ export default {
       const task1 = group.tasks[0]
       const task2 = group.tasks[1]
       
-      // ========== 类型1：两边都是"全部成交"或状态为2的 ==========
+      // ========== 类型1：两边都是"全部成交"或状态为2的（独立分类：类型1成功）==========
       const task1IsAllFilled = task1.status === 2 || this.classifyTaskByMsg(task1.msg, task1.status) === 'allFilled'
       const task2IsAllFilled = task2.status === 2 || this.classifyTaskByMsg(task2.msg, task2.status) === 'allFilled'
       
       if (task1IsAllFilled && task2IsAllFilled) {
         return {
           text: '类型1',
-          newStatus: 'success',
-          statusClass: 'analysis-success'
+          newStatus: 'type1Success',
+          statusClass: 'analysis-type1-success'
         }
       }
       
-      // ========== 类型2：两边状态都是3，且msg包含"[X]本任务正常"（X<10）==========
+      // ========== 类型2：两边状态都是3，且msg包含"[X]本任务正常"（X<10）（独立分类：类型2失败无影响）==========
       if (task1.status === 3 && task2.status === 3) {
         console.log(`${task1.status}-${task1.msg}    ${task2.status}-${task2.msg}`);
         const extractBracketNum = (msg) => {
@@ -3987,8 +3997,8 @@ export default {
             task2BracketNum !== null && task2BracketNum < 10) {
           return {
             text: '类型2',
-            newStatus: 'noImpact',
-            statusClass: 'analysis-no-impact'
+            newStatus: 'type2NoImpact',
+            statusClass: 'analysis-type2-no-impact'
           }
         }
       }
@@ -4781,13 +4791,13 @@ export default {
     
     /**
      * 判断是否显示"更改状态为已修复"按钮
-     * 只有非"全部成功"、"失败无影响"、"已修复"状态的任务组才显示
+     * 只有非"类型1成功"、"类型2失败无影响"、"全部成功"、"失败无影响"、"已修复"状态的任务组才显示
      */
     shouldShowMarkRepairedButton(group) {
       if (!group) return false
       const status = this.getGroupFinalStatusWithAnalysis(group)
       // 这些状态不显示按钮
-      const excludeStatuses = ['success', 'noImpact', 'repaired']
+      const excludeStatuses = ['type1Success', 'type2NoImpact', 'success', 'noImpact', 'repaired']
       return !excludeStatuses.includes(status)
     },
     
@@ -5701,6 +5711,14 @@ export default {
   background-color: #27ae60;
 }
 
+.analysis-type1-success {
+  background-color: #16a085;
+}
+
+.analysis-type2-no-impact {
+  background-color: #8e44ad;
+}
+
 .analysis-repaired {
   background-color: #3498db;
 }
@@ -6273,6 +6291,16 @@ export default {
   font-weight: 600;
 }
 
+.group-status-badge.status-type1-success {
+  background: rgba(22, 160, 133, 0.3);
+  color: #16a085;
+}
+
+.group-status-badge.status-type2-no-impact {
+  background: rgba(142, 68, 173, 0.3);
+  color: #8e44ad;
+}
+
 .group-status-badge.status-success {
   background: rgba(39, 174, 96, 0.3);
   color: #27ae60;
@@ -6352,6 +6380,18 @@ export default {
 .status-stat-item:hover {
   transform: translateY(-2px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.status-stat-item.status-type1-success {
+  background: rgba(22, 160, 133, 0.15);
+  color: #16a085;
+  border-color: rgba(22, 160, 133, 0.3);
+}
+
+.status-stat-item.status-type2-no-impact {
+  background: rgba(142, 68, 173, 0.15);
+  color: #8e44ad;
+  border-color: rgba(142, 68, 173, 0.3);
 }
 
 .status-stat-item.status-success {
