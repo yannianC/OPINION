@@ -9435,7 +9435,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                                     else:
                                                         # 卖一价大于我的价格
                                                         if best_bid_value > tp4:
-                                                            fail_msg = f"[5]-4订单薄不符合条件{{买一价{best_bid_price:.1f}，买一价深度{best_bid_depth:.2f};卖一价{best_ask_price:.1f}，卖一价深度{best_ask_depth:.2f}，卖一价价值{best_bid_value:.2f}}}"
+                                                            fail_msg = f"[5]-4订单薄不符合条件{{买一价{best_bid_price:.1f}，买一价深度{best_bid_depth:.2f};卖一价{best_ask_price:.1f}，卖一价深度{best_ask_depth:.2f}，卖一价价值{best_ask_value:.2f}}}"
                                                             log_print(f"[{browser_id}] ✗ {fail_msg}")
                                                             add_bro_log_entry(bro_log_list, browser_id, f"[8]{fail_msg}")
                                                             return False, fail_msg, None

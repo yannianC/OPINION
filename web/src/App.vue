@@ -1080,6 +1080,14 @@
                     >
                       查看持仓
                     </button>
+                    <button 
+                      class="btn-position btn-sm" 
+                      @click="openOpenOrderDetail(config)"
+                      style="margin-left: 4px;"
+                      title="查看挂单详情"
+                    >
+                      查看挂单
+                    </button>
                     <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
                       ❌ 关闭任务
                     </button>
@@ -8466,42 +8474,42 @@ const parseOrderbookData = async (config, isClose) => {
     const noBidsRaw = JSON.parse(JSON.stringify(noBids))
     const noAsksRaw = JSON.parse(JSON.stringify(noAsks))
     
-    // 请求 calLimitOrder API 获取挂单数据
-    try {
-      const limitOrderData = await fetchCalLimitOrder(config.id)
-      console.log(`配置 ${config.id} - 获取到挂单数据:`, limitOrderData)
+    // // 请求 calLimitOrder API 获取挂单数据
+    // try {
+    //   const limitOrderData = await fetchCalLimitOrder(config.id)
+    //   console.log(`配置 ${config.id} - 获取到挂单数据:`, limitOrderData)
       
-      if (isClose) {
-        // 平仓模式：将买入转换为卖出，汇合卖出挂单
-        const convertedAsks = convertLimitOrdersForClose(limitOrderData)
+    //   if (isClose) {
+    //     // 平仓模式：将买入转换为卖出，汇合卖出挂单
+    //     const convertedAsks = convertLimitOrdersForClose(limitOrderData)
         
-        // 从订单薄中减去对应的卖出挂单
-        if (convertedAsks.yes.length > 0) {
-          yesAsks = subtractLimitOrdersFromOrderbook(yesAsks, convertedAsks.yes)
-          console.log(`配置 ${config.id} - 从YES卖单中减去 ${convertedAsks.yes.length} 个挂单`)
-        }
-        if (convertedAsks.no.length > 0) {
-          noAsks = subtractLimitOrdersFromOrderbook(noAsks, convertedAsks.no)
-          console.log(`配置 ${config.id} - 从NO卖单中减去 ${convertedAsks.no.length} 个挂单`)
-        }
-      } else {
-        // 开仓模式：将卖出转换为买入，汇合买入挂单
-        const convertedBids = convertLimitOrdersForOpen(limitOrderData)
+    //     // 从订单薄中减去对应的卖出挂单
+    //     if (convertedAsks.yes.length > 0) {
+    //       yesAsks = subtractLimitOrdersFromOrderbook(yesAsks, convertedAsks.yes)
+    //       console.log(`配置 ${config.id} - 从YES卖单中减去 ${convertedAsks.yes.length} 个挂单`)
+    //     }
+    //     if (convertedAsks.no.length > 0) {
+    //       noAsks = subtractLimitOrdersFromOrderbook(noAsks, convertedAsks.no)
+    //       console.log(`配置 ${config.id} - 从NO卖单中减去 ${convertedAsks.no.length} 个挂单`)
+    //     }
+    //   } else {
+    //     // 开仓模式：将卖出转换为买入，汇合买入挂单
+    //     const convertedBids = convertLimitOrdersForOpen(limitOrderData)
         
-        // 从订单薄中减去对应的买入挂单
-        if (convertedBids.yes.length > 0) {
-          yesBids = subtractLimitOrdersFromOrderbook(yesBids, convertedBids.yes)
-          console.log(`配置 ${config.id} - 从YES买单中减去 ${convertedBids.yes.length} 个挂单`)
-        }
-        if (convertedBids.no.length > 0) {
-          noBids = subtractLimitOrdersFromOrderbook(noBids, convertedBids.no)
-          console.log(`配置 ${config.id} - 从NO买单中减去 ${convertedBids.no.length} 个挂单`)
-        }
-      }
-    } catch (error) {
-      console.warn(`配置 ${config.id} - 获取挂单数据失败，继续使用原始订单薄:`, error.message)
-      // 如果获取挂单数据失败，继续使用原始订单薄数据
-    }
+    //     // 从订单薄中减去对应的买入挂单
+    //     if (convertedBids.yes.length > 0) {
+    //       yesBids = subtractLimitOrdersFromOrderbook(yesBids, convertedBids.yes)
+    //       console.log(`配置 ${config.id} - 从YES买单中减去 ${convertedBids.yes.length} 个挂单`)
+    //     }
+    //     if (convertedBids.no.length > 0) {
+    //       noBids = subtractLimitOrdersFromOrderbook(noBids, convertedBids.no)
+    //       console.log(`配置 ${config.id} - 从NO买单中减去 ${convertedBids.no.length} 个挂单`)
+    //     }
+    //   }
+    // } catch (error) {
+    //   console.warn(`配置 ${config.id} - 获取挂单数据失败，继续使用原始订单薄:`, error.message)
+    //   // 如果获取挂单数据失败，继续使用原始订单薄数据
+    // }
     
     // 基本数据检查
     if (yesBids.length === 0 || yesAsks.length === 0 || 
@@ -9524,6 +9532,20 @@ const openPositionDetail = (config) => {
   const trendingId = config.id
   const positionDetailUrl = `https://oss.w3id.info/Opanomaly/index.html#/position-detail?id=${trendingId}`
   window.open(positionDetailUrl, '_blank')
+}
+
+/**
+ * 打开挂单详情页面
+ */
+const openOpenOrderDetail = (config) => {
+  if (!config || !config.id) {
+    showToast('配置不存在', 'warning')
+    return
+  }
+  
+  const trendingId = config.id
+  const openOrderDetailUrl = `https://oss.w3id.info/Opanomaly/index.html#/open-order-detail?id=${trendingId}`
+  window.open(openOrderDetailUrl, '_blank')
 }
 
 /**

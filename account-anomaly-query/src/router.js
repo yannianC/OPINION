@@ -3,6 +3,7 @@ import TaskAnomaly from './TaskAnomaly.vue'
 import AccountAnomaly from './AccountAnomaly.vue'
 import EventAnomaly from './EventAnomaly.vue'
 import PositionDetail from './PositionDetail.vue'
+import OpenOrderDetail from './OpenOrderDetail.vue'
 
 const routes = [
   {
@@ -28,6 +29,11 @@ const routes = [
     path: '/position-detail',
     name: 'PositionDetail',
     component: PositionDetail
+  },
+  {
+    path: '/open-order-detail',
+    name: 'OpenOrderDetail',
+    component: OpenOrderDetail
   }
 ]
 

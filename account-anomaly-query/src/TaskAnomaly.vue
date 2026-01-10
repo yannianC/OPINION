@@ -68,25 +68,32 @@
           >
             {{ loading ? '查询中...' : '查询' }}
           </button>
+          <label class="toggle-switch">
+            <input 
+              type="checkbox" 
+              v-model="hideType1Type2" 
+              @change="saveHideType1Type2Setting"
+            />
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">不显示类型1和类型2（只统计数量）</span>
+          </label>
         </div>
         
         <div class="quick-query-form">
           <div class="form-group">
             <label>查询最近:</label>
             <input 
-              v-model.number="recentHours" 
-              type="number" 
-              class="hours-input"
-              placeholder="输入小时数"
-              min="1"
-              step="1"
+              v-model="recentHoursRange" 
+              type="text" 
+              class="hours-input hours-range-input"
+              placeholder="如: 0.5,3"
             />
-            <span class="hours-label">小时</span>
+            <span class="hours-label">小时（格式：近端,远端）</span>
           </div>
           <button 
             class="quick-query-btn" 
             @click="queryRecentHours"
-            :disabled="loading || !recentHours || recentHours <= 0"
+            :disabled="loading || !recentHoursRange"
           >
             {{ loading ? '查询中...' : '快速查询' }}
           </button>
@@ -267,29 +274,35 @@
           </div>
           <h2>查询结果 (共 {{ Object.keys(results).length }} 个任务组)</h2>
           
-          <!-- 模式1：组状态统计区域 -->
+          <!-- 模式1：组状态统计区域（只有6个状态分类） -->
           <div v-if="queryMode === 1" class="group-status-statistics">
             <div class="status-stat-row">
               <span class="status-stat-item status-success" @click="setStatusFilter('success')">
-                全部成功: {{ groupStatusStatistics.success }}
-              </span>
-              <span class="status-stat-item status-repaired" @click="setStatusFilter('repaired')">
-                修复后全部成功: {{ groupStatusStatistics.repaired }}
-              </span>
-              <span class="status-stat-item status-failed" @click="setStatusFilter('failed')">
-                失败: {{ groupStatusStatistics.failed }}
+                全部成功(3-1): {{ groupStatusStatistics.success }}
               </span>
               <span class="status-stat-item status-no-impact" @click="setStatusFilter('noImpact')">
-                失败无影响: {{ groupStatusStatistics.noImpact }}
+                失败无影响(4-1): {{ groupStatusStatistics.noImpact }}
               </span>
-              <span class="status-stat-item status-running" @click="setStatusFilter('running')">
-                进行中: {{ groupStatusStatistics.running }}
+              <span class="status-stat-item status-repaired" @click="setStatusFilter('repaired')">
+                已修复: {{ groupStatusStatistics.repaired }}
+              </span>
+              <span class="status-stat-item status-problem-in-30" @click="setStatusFilter('problemIn30')">
+                有问题但不到30分钟(3-2,3-3(需要重新抓取)): {{ groupStatusStatistics.problemIn30 }}
+              </span>
+              <span class="status-stat-item status-problem-other-in-30" @click="setStatusFilter('problemOtherIn30')">
+                30分钟之内有问题其他(3-4(需要重新抓取)): {{ groupStatusStatistics.problemOtherIn30 }}
+              </span>
+              <span class="status-stat-item status-pending-failed" @click="setStatusFilter('pendingFailed')">
+                有挂单的失败(4-3,4-4(需要修复)): {{ groupStatusStatistics.pendingFailed }}
+              </span>
+              <span class="status-stat-item status-confirmed-problem" @click="setStatusFilter('confirmedProblem')">
+                确定有问题(4-2(需要修复)): {{ groupStatusStatistics.confirmedProblem }}
               </span>
             </div>
           </div>
           
-          <!-- 模式1：仓位统计区域（仅失败状态） -->
-          <div v-if="queryMode === 1 && groupStatusStatistics.failed > 0" class="position-statistics">
+          <!-- 模式1：仓位统计区域（需处理的状态） -->
+          <div v-if="queryMode === 1 && needProcessCount > 0" class="position-statistics">
             <div class="position-stat-header">
               <span class="position-stat-title">失败任务仓位统计</span>
               <button 
@@ -422,16 +435,17 @@
               清除精确筛选
             </button>
             
-            <!-- 模式1：状态筛选 -->
+            <!-- 模式1：状态筛选（只有6个状态分类） -->
             <div v-if="queryMode === 1" class="status-filter-section">
               <label>状态筛选:</label>
               <select v-model="statusFilter" class="status-filter-select">
                 <option value="all">全部</option>
-                <option value="success">全部成功</option>
-                <option value="repaired">修复后全部成功</option>
-                <option value="failed">失败</option>
-                <option value="noImpact">失败无影响</option>
-                <option value="running">进行中</option>
+                <option value="success">全部成功(3-1)</option>
+                <option value="noImpact">失败无影响(4-1)</option>
+                <option value="problemIn30">有问题但不到30分钟(3-2,3-3)</option>
+                <option value="problemOtherIn30">30分钟之内有问题其他(3-4)</option>
+                <option value="pendingFailed">有挂单的失败(4-3,4-4)</option>
+                <option value="confirmedProblem">确定有问题(4-2)</option>
               </select>
               <button 
                 v-if="statusFilter !== 'all'" 
@@ -444,22 +458,42 @@
             
             <!-- 模式1：一键获取失败状态的服务数据 -->
             <button 
-              v-if="queryMode === 1 && groupStatusStatistics.failed > 0"
+              v-if="queryMode === 1 && needProcessCount > 0"
               class="batch-fetch-btn"
               @click="batchFetchFailedServerData"
               :disabled="isBatchFetchingServerData || isBatchSubmittingPosition"
             >
-              {{ isBatchFetchingServerData ? `获取中 (${batchFetchProgress.current}/${batchFetchProgress.total})...` : `一键获取失败状态的服务数据 (${groupStatusStatistics.failed})` }}
+              {{ isBatchFetchingServerData ? `获取中 (${batchFetchProgress.current}/${batchFetchProgress.total})...` : `一键获取需处理的服务数据 (${needProcessCount})` }}
             </button>
             
-            <!-- 模式1：一键抓取失败状态的仓位 -->
+            <!-- 模式1：一键抓取需处理的仓位 -->
             <button 
-              v-if="queryMode === 1 && groupStatusStatistics.failed > 0"
+              v-if="queryMode === 1 && needProcessCount > 0"
               class="batch-position-btn"
               @click="batchSubmitPositionUpdate"
               :disabled="isBatchSubmittingPosition || isBatchFetchingServerData"
             >
-              {{ isBatchSubmittingPosition ? `提交中 (${batchPositionProgress.current}/${batchPositionProgress.total}) 成功:${batchPositionProgress.success} 失败:${batchPositionProgress.failed}` : `一键抓取失败状态的仓位 (${groupStatusStatistics.failed})` }}
+              {{ isBatchSubmittingPosition ? `提交中 (${batchPositionProgress.current}/${batchPositionProgress.total}) 成功:${batchPositionProgress.success} 失败:${batchPositionProgress.failed}` : `一键抓取需处理的仓位 (${needProcessCount})` }}
+            </button>
+            
+            <!-- 模式1：一键获取当前列表需处理的服务数据 -->
+            <button 
+              v-if="queryMode === 1 && filteredNeedProcessCount > 0"
+              class="batch-fetch-filtered-btn"
+              @click="batchFetchFilteredServerData"
+              :disabled="isBatchFetchingServerData || isBatchSubmittingPosition"
+            >
+              {{ isBatchFetchingServerData ? `获取中 (${batchFetchProgress.current}/${batchFetchProgress.total})...` : `一键获取当前列表需处理的服务数据 (${filteredNeedProcessCount})` }}
+            </button>
+            
+            <!-- 模式1：一键抓取当前列表需处理的仓位 -->
+            <button 
+              v-if="queryMode === 1 && filteredNeedProcessCount > 0"
+              class="batch-position-filtered-btn"
+              @click="batchSubmitFilteredPositionUpdate"
+              :disabled="isBatchSubmittingPosition || isBatchFetchingServerData"
+            >
+              {{ isBatchSubmittingPosition ? `提交中 (${batchPositionProgress.current}/${batchPositionProgress.total}) 成功:${batchPositionProgress.success} 失败:${batchPositionProgress.failed}` : `一键抓取当前列表需处理的仓位 (${filteredNeedProcessCount})` }}
             </button>
           </div>
         </div>
@@ -476,14 +510,14 @@
                 :ref="el => setTaskGroupRef(el, itemIndex)"
               >
               <!-- 组头部：总状态和获取服务器数据按钮 -->
-              <div :class="['mode1-group-header', 'header-' + item.group.finalStatus]">
+              <div :class="['mode1-group-header', 'header-' + getGroupFinalStatusWithAnalysis(item.group)]">
                 <div class="mode1-group-status">
                   <span class="group-status-label">总状态:</span>
                   <span 
                     class="group-status-badge"
-                    :class="getGroupStatusClass(item.group.finalStatus)"
+                    :class="getGroupStatusClass(getGroupFinalStatusWithAnalysis(item.group))"
                   >
-                    {{ getGroupStatusText(item.group.finalStatus) }}
+                    {{ getGroupStatusText(getGroupFinalStatusWithAnalysis(item.group)) }}
                   </span>
                 </div>
                 <button 
@@ -493,6 +527,15 @@
                   style="margin-left: 8px; padding: 4px 12px; font-size: 12px;"
                 >
                   {{ isFetchingServerDataForGroup(item.groupKey) ? '获取中...' : '获取服务器数据' }}
+                </button>
+                <button 
+                  v-if="shouldShowMarkRepairedButton(item.group)"
+                  class="btn-mark-repaired" 
+                  @click="markGroupAsRepaired(item.group)"
+                  :disabled="isMarkingRepaired[item.groupKey]"
+                  style="margin-left: 8px; padding: 4px 12px; font-size: 12px;"
+                >
+                  {{ isMarkingRepaired[item.groupKey] ? '处理中...' : '更改状态为已修复' }}
                 </button>
                 <span 
                   v-if="getGroupAnalysisInfo(item.group)"
@@ -1087,7 +1130,8 @@ export default {
         startTime: '',
         endTime: ''
       },
-      recentHours: 1, // 默认查询最近3小时
+      recentHoursRange: '0.5,3', // 查询时间范围：近端,远端（如 0.5,3 表示最近3小时到最近0.5小时之间）
+      hideType1Type2: false, // 是否隐藏类型1和类型2的记录（只统计数量）
       timeRangeStart: '', // 时间区间开始：格式为"日-时"，如"24-16"
       timeRangeEnd: '', // 时间区间结束：格式为"日-时"，如"24-18"
       loading: false,
@@ -1151,6 +1195,7 @@ export default {
       isLoadingBroLogs: false,  // 是否正在加载日志
       // 获取服务器数据
       fetchingServerDataGroups: new Set(),  // 正在获取服务器数据的组key集合
+      isMarkingRepaired: {},  // 正在标记为已修复的组 {groupKey: true/false}
       // 虚拟滚动相关
       taskGroupsScrollTop: 0,  // 任务组列表滚动位置
       taskGroupHeights: [],  // 每个任务组的高度
@@ -1162,6 +1207,9 @@ export default {
   mounted() {
     // 从本地存储加载筛选历史
     this.loadFilterHistory()
+    
+    // 加载隐藏类型1和类型2的设置
+    this.loadHideType1Type2Setting()
     
     // 解析URL参数
     this.parseUrlParams()
@@ -1255,16 +1303,32 @@ export default {
         result = sideFiltered
       }
       
-      // 模式1时应用总状态筛选
+      // 模式1时应用总状态筛选（使用分析后的最终状态）
       if (this.queryMode === 1 && this.statusFilter !== 'all') {
         const statusFiltered = {}
         Object.keys(result).forEach(groupKey => {
           const group = result[groupKey]
-          if (group.finalStatus === this.statusFilter) {
+          const finalStatus = this.getGroupFinalStatusWithAnalysis(group)
+          if (finalStatus === this.statusFilter) {
             statusFiltered[groupKey] = group
           }
         })
         result = statusFiltered
+      }
+      
+      // 模式1时过滤掉类型1和类型2的记录（当开关开启时）
+      if (this.queryMode === 1 && this.hideType1Type2) {
+        const type1Type2Filtered = {}
+        Object.keys(result).forEach(groupKey => {
+          const group = result[groupKey]
+          const analysisInfo = this.getGroupAnalysisInfo(group)
+          // 过滤掉类型1和类型2
+          if (analysisInfo && (analysisInfo.text === '类型1' || analysisInfo.text === '类型2')) {
+            return // 跳过类型1和类型2
+          }
+          type1Type2Filtered[groupKey] = group
+        })
+        result = type1Type2Filtered
       }
       
       // 模式1时应用精确筛选（任务ID、电脑组、浏览器编号）
@@ -1312,18 +1376,48 @@ export default {
       return result
     },
     
-    // 组状态统计（用于统计面板显示）
+    // 需要处理的任务组数量（排除"全部成功"和"失败无影响"）
+    needProcessCount() {
+      if (this.queryMode !== 1) return 0
+      const stats = this.groupStatusStatistics
+      return stats.problemIn30 + stats.problemOtherIn30 + stats.pendingFailed + stats.confirmedProblem
+    },
+    
+    // 当前筛选后列表中需要处理的任务组数量
+    filteredNeedProcessCount() {
+      if (this.queryMode !== 1) return 0
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
+      let count = 0
+      Object.values(this.filteredResults).forEach(group => {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (needProcessStatuses.includes(status)) {
+          count++
+        }
+      })
+      return count
+    },
+    
+    // 组状态统计（用于统计面板显示，使用分析后的最终状态）
+    // 7个状态分类（含已修复）
     groupStatusStatistics() {
-      if (this.queryMode !== 1) return { success: 0, failed: 0, noImpact: 0, running: 0, repaired: 0, unknown: 0 }
+      if (this.queryMode !== 1) return { 
+        success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
+        problemOtherIn30: 0, pendingFailed: 0, confirmedProblem: 0 
+      }
       
-      const stats = { success: 0, failed: 0, noImpact: 0, running: 0, repaired: 0, unknown: 0 }
+      const stats = { 
+        success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
+        problemOtherIn30: 0, pendingFailed: 0, confirmedProblem: 0 
+      }
       
       Object.values(this.results).forEach(group => {
-        const status = group.finalStatus || 'unknown'
+        // 使用分析后的最终状态
+        const status = this.getGroupFinalStatusWithAnalysis(group)
         if (stats[status] !== undefined) {
           stats[status]++
         } else {
-          stats.unknown++
+          // 未匹配的归入"30分钟之内有问题其他"
+          stats.problemOtherIn30++
         }
       })
       
@@ -1978,15 +2072,37 @@ export default {
     },
     
     queryRecentHours() {
-      if (!this.recentHours || this.recentHours <= 0) {
+      if (!this.recentHoursRange || this.recentHoursRange.trim() === '') {
+        this.showToast('请输入时间范围', 'warning')
+        return
+      }
+      
+      // 解析时间范围格式：近端,远端（如 0.5,3 表示最近3小时到最近0.5小时之间）
+      const parts = this.recentHoursRange.split(',').map(s => s.trim())
+      if (parts.length !== 2) {
+        this.showToast('格式错误，请输入：近端,远端（如 0.5,3）', 'warning')
+        return
+      }
+      
+      const nearHours = parseFloat(parts[0])
+      const farHours = parseFloat(parts[1])
+      
+      if (isNaN(nearHours) || isNaN(farHours) || nearHours < 0 || farHours <= 0) {
         this.showToast('请输入有效的小时数', 'warning')
+        return
+      }
+      
+      if (nearHours >= farHours) {
+        this.showToast('近端时间必须小于远端时间', 'warning')
         return
       }
       
       // 计算时间范围
       const now = new Date()
-      const endTime = new Date(now)
-      const startTime = new Date(now.getTime() - this.recentHours * 60 * 60 * 1000)
+      // 远端时间作为开始时间（更早）
+      const startTime = new Date(now.getTime() - farHours * 60 * 60 * 1000)
+      // 近端时间作为结束时间（更晚）
+      const endTime = new Date(now.getTime() - nearHours * 60 * 60 * 1000)
       
       // 转换为 datetime-local 格式 (YYYY-MM-DDTHH:mm)
       const formatDateTime = (date) => {
@@ -2138,6 +2254,9 @@ export default {
           // 对模式1的失败组应用分析更新
           if (this.queryMode === 1) {
             this.applyAnalysisStatusUpdateToAllGroups()
+            
+            // 自动对 4-2、4-3、4-4 类型执行获取服务器数据
+            this.autoFetchServerDataForProblemGroups()
           }
         } else {
           this.showToast('查询失败', 'error')
@@ -2189,7 +2308,8 @@ export default {
           updateTime: mission.updateTime,
           status: mission.status, // 保存状态，用于判断是否失败
           tp7: mission.tp7 || null, // 保存tp7（openorder字符串）
-          tp8: mission.tp8 || null // 保存tp8（closeorder字符串）
+          tp8: mission.tp8 || null, // 保存tp8（closeorder字符串）
+          tp9: mission.tp9 || null // 保存tp9（已修复标记）
         }
         
         // 记录所有任务（使用字符串作为key）
@@ -2608,6 +2728,27 @@ export default {
       }
     },
     
+    // 从本地存储加载隐藏类型1和类型2的设置
+    loadHideType1Type2Setting() {
+      try {
+        const setting = localStorage.getItem('taskAnomaly_hideType1Type2')
+        if (setting !== null) {
+          this.hideType1Type2 = setting === 'true'
+        }
+      } catch (e) {
+        console.error('加载隐藏类型1和类型2设置失败:', e)
+      }
+    },
+    
+    // 保存隐藏类型1和类型2的设置到本地存储
+    saveHideType1Type2Setting() {
+      try {
+        localStorage.setItem('taskAnomaly_hideType1Type2', String(this.hideType1Type2))
+      } catch (e) {
+        console.error('保存隐藏类型1和类型2设置失败:', e)
+      }
+    },
+    
     // 保存筛选历史到本地存储
     saveFilterHistory(keyword) {
       if (!keyword || keyword.trim() === '') {
@@ -2930,33 +3071,91 @@ export default {
     },
     
     /**
+     * 获取考虑分析结果后的最终状态
+     * 所有任务都必须通过 getGroupAnalysisInfo 进行分类
+     */
+    getGroupFinalStatusWithAnalysis(group) {
+      if (!group) return 'problemOtherIn30'
+      
+      // 获取分析结果
+      const analysisInfo = this.getGroupAnalysisInfo(group)
+      
+      // 如果分析结果有 newStatus，使用它
+      if (analysisInfo && analysisInfo.newStatus) {
+        return analysisInfo.newStatus
+      }
+      
+      // 如果分析结果没有 newStatus，默认归类为"30分钟之内有问题其他"
+      return 'problemOtherIn30'
+    },
+    
+    /**
      * 获取组状态文本
+     * 7个状态分类：全部成功(3-1)、失败无影响(4-1)、已修复、有问题但不到30分钟(3-2,3-3)、
+     * 30分钟之内有问题其他(3-4)、有挂单的失败(4-3,4-4)、确定有问题(4-2)
      */
     getGroupStatusText(finalStatus) {
       const statusMap = {
-        'success': '全部成功',
-        'repaired': '修复后全部成功',
-        'failed': '失败',
-        'running': '进行中',
-        'noImpact': '失败无影响',
-        'unknown': '未知'
+        'success': '全部成功',           // 3-1
+        'noImpact': '失败无影响',         // 4-1
+        'repaired': '已修复',            // 手动标记已修复
+        'problemIn30': '有问题但不到30分钟', // 3-2, 3-3
+        'problemOtherIn30': '30分钟之内有问题其他', // 3-4
+        'pendingFailed': '有挂单的失败',   // 4-3, 4-4
+        'confirmedProblem': '确定有问题'   // 4-2
       }
-      return statusMap[finalStatus] || '未知'
+      return statusMap[finalStatus] || '30分钟之内有问题其他'
     },
     
     /**
      * 获取组状态样式类
+     * 7个状态分类（含已修复）
      */
     getGroupStatusClass(finalStatus) {
       const classMap = {
-        'success': 'status-success',
-        'repaired': 'status-repaired',
-        'failed': 'status-failed',
-        'running': 'status-running',
-        'noImpact': 'status-no-impact',
-        'unknown': 'status-unknown'
+        'success': 'status-success',           // 3-1
+        'noImpact': 'status-no-impact',        // 4-1
+        'repaired': 'status-repaired',         // 手动标记已修复
+        'problemIn30': 'status-problem-in-30', // 3-2, 3-3
+        'problemOtherIn30': 'status-problem-other-in-30', // 3-4
+        'pendingFailed': 'status-pending-failed',   // 4-3, 4-4
+        'confirmedProblem': 'status-confirmed-problem' // 4-2
       }
-      return classMap[finalStatus] || 'status-unknown'
+      return classMap[finalStatus] || 'status-problem-other-in-30'
+    },
+    
+    /**
+     * 自动对 4-2、4-3、4-4 类型的任务组执行获取服务器数据
+     * 在查询完成后自动调用
+     */
+    async autoFetchServerDataForProblemGroups() {
+      // 需要自动获取服务器数据的状态：confirmedProblem(4-2)、pendingFailed(4-3,4-4)
+      const targetStatuses = ['confirmedProblem', 'pendingFailed']
+      
+      // 收集需要获取服务器数据的组
+      const groupsToFetch = []
+      Object.values(this.results).forEach(group => {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (targetStatuses.includes(status)) {
+          groupsToFetch.push(group)
+        }
+      })
+      
+      if (groupsToFetch.length === 0) {
+        return
+      }
+      
+      console.log(`自动获取服务器数据：共 ${groupsToFetch.length} 个任务组`)
+      
+      // 并发获取，每批5个
+      const concurrency = 5
+      for (let i = 0; i < groupsToFetch.length; i += concurrency) {
+        const batch = groupsToFetch.slice(i, i + concurrency)
+        const promises = batch.map(group => this.fetchServerDataForGroup(group, true))
+        await Promise.all(promises)
+      }
+      
+      console.log('自动获取服务器数据完成')
     },
     
     /**
@@ -3164,11 +3363,13 @@ export default {
     },
     
     /**
-     * 对所有失败组应用分析更新
+     * 对所有需处理的组应用分析更新
      */
     applyAnalysisStatusUpdateToAllGroups() {
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
       Object.values(this.results).forEach(group => {
-        if (group.finalStatus === 'failed') {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (needProcessStatuses.includes(status)) {
           this.applyAnalysisStatusUpdate(group)
         }
       })
@@ -3182,22 +3383,24 @@ export default {
     },
     
     /**
-     * 批量获取失败状态的服务数据（并发5个一组）
+     * 批量获取需处理状态的服务数据（并发5个一组）
+     * 需处理的状态：problemIn30, problemOtherIn30, pendingFailed, confirmedProblem
      */
     async batchFetchFailedServerData() {
       if (this.isBatchFetchingServerData) return
       
-      // 获取所有失败状态的组（排除已修复的）
+      // 获取所有需要处理的组（排除"全部成功"和"失败无影响"）
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
       const failedGroups = []
       Object.values(this.results).forEach(group => {
-        // 只获取失败状态的组，排除已修复的（repaired）
-        if (group.finalStatus === 'failed') {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (needProcessStatuses.includes(status)) {
           failedGroups.push(group)
         }
       })
       
       if (failedGroups.length === 0) {
-        this.showToast('没有失败状态的组需要获取', 'info')
+        this.showToast('没有需要处理的组', 'info')
         return
       }
       
@@ -3222,6 +3425,57 @@ export default {
           }
         }
         this.showToast(`批量获取完成，共处理 ${failedGroups.length} 个组`, 'success')
+      } catch (error) {
+        console.error('批量获取服务器数据失败:', error)
+        this.showToast('批量获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchFetchingServerData = false
+        this.batchFetchProgress = { current: 0, total: 0 }
+      }
+    },
+    
+    /**
+     * 批量获取当前筛选后列表中需处理状态的服务数据（并发5个一组）
+     */
+    async batchFetchFilteredServerData() {
+      if (this.isBatchFetchingServerData) return
+      
+      // 获取当前筛选后列表中需要处理的组
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
+      const filteredGroups = []
+      Object.values(this.filteredResults).forEach(group => {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (needProcessStatuses.includes(status)) {
+          filteredGroups.push(group)
+        }
+      })
+      
+      if (filteredGroups.length === 0) {
+        this.showToast('当前列表中没有需要处理的组', 'info')
+        return
+      }
+      
+      this.isBatchFetchingServerData = true
+      this.batchFetchProgress = { current: 0, total: filteredGroups.length }
+      
+      const concurrency = 5 // 并发数
+      
+      try {
+        // 分批并发处理
+        for (let i = 0; i < filteredGroups.length; i += concurrency) {
+          const batch = filteredGroups.slice(i, i + concurrency)
+          const promises = batch.map(group => this.fetchServerDataForGroup(group, true))
+          
+          await Promise.all(promises)
+          
+          this.batchFetchProgress.current = Math.min(i + concurrency, filteredGroups.length)
+          
+          // 批次之间间隔200ms
+          if (i + concurrency < filteredGroups.length) {
+            await new Promise(resolve => setTimeout(resolve, 200))
+          }
+        }
+        this.showToast(`批量获取完成，共处理 ${filteredGroups.length} 个组`, 'success')
       } catch (error) {
         console.error('批量获取服务器数据失败:', error)
         this.showToast('批量获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
@@ -3281,11 +3535,13 @@ export default {
       if (this.isBatchSubmittingPosition) return
       
       // 收集所有需要更新仓位的浏览器
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
       const tasksToUpdate = []
       
       Object.values(this.results).forEach(group => {
-        // 只处理失败状态的组
-        if (group.finalStatus !== 'failed') return
+        // 只处理需要处理的组（排除"全部成功"和"失败无影响"）
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (!needProcessStatuses.includes(status)) return
         
         group.tasks.forEach(task => {
           // 子任务状态是2（成功）的，不需要更新仓位
@@ -3305,6 +3561,100 @@ export default {
       
       if (tasksToUpdate.length === 0) {
         this.showToast('没有需要更新仓位的浏览器', 'info')
+        return
+      }
+      
+      // 去重（同一浏览器不重复提交）
+      const uniqueTasks = []
+      const seenBrowserIds = new Set()
+      for (const task of tasksToUpdate) {
+        if (!seenBrowserIds.has(task.browserId)) {
+          seenBrowserIds.add(task.browserId)
+          uniqueTasks.push(task)
+        }
+      }
+      
+      this.isBatchSubmittingPosition = true
+      this.batchPositionProgress = { current: 0, total: uniqueTasks.length, success: 0, failed: 0 }
+      
+      const concurrency = 5 // 并发数
+      
+      try {
+        // 分批并发处理
+        for (let i = 0; i < uniqueTasks.length; i += concurrency) {
+          const batch = uniqueTasks.slice(i, i + concurrency)
+          
+          const promises = batch.map(async (task) => {
+            const result = await this.submitSinglePositionUpdate(task.browserId, task.groupNo)
+            return { task, result }
+          })
+          
+          const results = await Promise.all(promises)
+          
+          // 统计成功/失败
+          for (const { result } of results) {
+            if (result.success) {
+              this.batchPositionProgress.success++
+            } else {
+              this.batchPositionProgress.failed++
+            }
+          }
+          
+          this.batchPositionProgress.current = Math.min(i + concurrency, uniqueTasks.length)
+          
+          // 批次之间间隔300ms
+          if (i + concurrency < uniqueTasks.length) {
+            await new Promise(resolve => setTimeout(resolve, 300))
+          }
+        }
+        
+        const { success, failed } = this.batchPositionProgress
+        this.showToast(`批量提交完成，成功: ${success}，失败: ${failed}`, success > 0 ? 'success' : 'error')
+      } catch (error) {
+        console.error('批量提交更新仓位失败:', error)
+        this.showToast('批量提交更新仓位失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchSubmittingPosition = false
+        // 保留进度显示一段时间后重置
+        setTimeout(() => {
+          this.batchPositionProgress = { current: 0, total: 0, success: 0, failed: 0 }
+        }, 5000)
+      }
+    },
+    
+    /**
+     * 批量提交当前筛选后列表中的更新仓位任务（并发5个一组，带重试机制）
+     */
+    async batchSubmitFilteredPositionUpdate() {
+      if (this.isBatchSubmittingPosition) return
+      
+      // 收集当前筛选后列表中需要更新仓位的浏览器
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
+      const tasksToUpdate = []
+      
+      Object.values(this.filteredResults).forEach(group => {
+        // 只处理需要处理的组
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (!needProcessStatuses.includes(status)) return
+        
+        group.tasks.forEach(task => {
+          // 子任务状态是2（成功）的，不需要更新仓位
+          if (task.status === 2) return
+          // 已经修复成功的，不需要更新仓位
+          if (this.isTaskRepairedSuccess(task)) return
+          // 没有浏览器ID的，跳过
+          if (!task.browserId || !task.groupNo) return
+          
+          tasksToUpdate.push({
+            browserId: task.browserId,
+            groupNo: task.groupNo,
+            taskId: task.id
+          })
+        })
+      })
+      
+      if (tasksToUpdate.length === 0) {
+        this.showToast('当前列表中没有需要更新仓位的浏览器', 'info')
         return
       }
       
@@ -3396,10 +3746,12 @@ export default {
       if (this.isFetchingInvalidPosition) return
       
       // 收集需要抓取仓位的浏览器
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
       const tasksToFetch = []
       
       Object.values(this.results).forEach(group => {
-        if (group.finalStatus !== 'failed') return
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (!needProcessStatuses.includes(status)) return
         
         // 检查这个组是否仓位未更新
         const isPositionValid = this.checkGroupPositionValid(group)
@@ -3501,9 +3853,11 @@ export default {
         detailByTrending: {}
       }
       
-      // 遍历所有失败状态的任务组
+      // 遍历所有需处理状态的任务组
+      const needProcessStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed', 'confirmedProblem']
       Object.values(this.results).forEach(group => {
-        if (group.finalStatus !== 'failed') return
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (!needProcessStatuses.includes(status)) return
         
         // 获取组内所有任务ID
         const taskIds = group.tasks ? group.tasks.map(t => t.id) : []
@@ -3581,55 +3935,108 @@ export default {
     },
     
     /**
-     * 分析失败组的详细状态
-     * 返回: { text: 显示文本, newStatus: 新状态(可选), statusClass: 样式类 }
+     * 分析任务组的详细状态（对所有任务组进行分析，不仅仅是失败的）
+     * 返回: { text: 显示文本, newStatus: 新状态, statusClass: 样式类 }
      */
     getGroupAnalysisInfo(group) {
-      // 只对失败状态的组进行分析
-      if (!group || group.finalStatus !== 'failed') return null
-      if (!group.tasks || group.tasks.length !== 2) return null
+      // 对所有任务组进行分析
+      if (!group || !group.tasks) return null
       
-      // 找出失败的子任务（修复后也失败的）
-      const failedTasks = group.tasks.filter(task => {
-        // 状态为2的是成功的
-        if (task.status === 2) return false
-        // 通过tp7/tp8修复成功的也算成功
-        if (this.isTaskRepairedSuccess(task)) return false
-        return true
-      })
+      // 单个任务，没有匹配的任务组时
+      if (group.tasks.length !== 2) {
+        return {
+          text: '3-4，30分钟之内有问题其他',
+          newStatus: 'problemOtherIn30',
+          statusClass: 'analysis-other'
+        }
+      }
       
-      // 如果没有失败的任务，不需要分析
-      if (failedTasks.length === 0) return null
-      
-      // 获取所有失败任务的A时间
-      const failedTasksATime = failedTasks.map(task => ({
-        task,
-        aTime: this.getTaskATimeMinutes(task)
-      }))
-      
-      // 检查是否所有失败任务的A时间都大于30分钟
-      const allATimeValid = failedTasksATime.every(item => item.aTime !== null && item.aTime >= 30)
-      // 检查是否有至少一个失败任务的A时间小于30分钟
-      const hasATimeLessThan30 = failedTasksATime.some(item => item.aTime === null || item.aTime < 30)
-      
-      // 解析两个子任务的订单数据
       const task1 = group.tasks[0]
       const task2 = group.tasks[1]
+      
+      // ========== 类型1：两边都是"全部成交"或状态为2的 ==========
+      const task1IsAllFilled = task1.status === 2 || this.classifyTaskByMsg(task1.msg, task1.status) === 'allFilled'
+      const task2IsAllFilled = task2.status === 2 || this.classifyTaskByMsg(task2.msg, task2.status) === 'allFilled'
+      
+      if (task1IsAllFilled && task2IsAllFilled) {
+        return {
+          text: '类型1',
+          newStatus: 'success',
+          statusClass: 'analysis-success'
+        }
+      }
+      
+      // ========== 类型2：两边状态都是3，且msg包含"[X]本任务正常"（X<10）==========
+      if (task1.status === 3 && task2.status === 3) {
+        console.log(`${task1.status}-${task1.msg}    ${task2.status}-${task2.msg}`);
+        const extractBracketNum = (msg) => {
+          if (!msg) return null
+          if (msg === 'NEED_IP_RETRY') return 0
+          const match = msg.match(/^\[(\d+)\]/)
+          if (match) {
+            return parseInt(match[1])
+          }
+          return null
+        }
+        
+        const task1BracketNum = extractBracketNum(task1.msg)
+        const task2BracketNum = extractBracketNum(task2.msg)
+        console.log(`${task1.status}-${task1BracketNum}    ${task2.status}-${task2BracketNum}`);
+        // 两边的 [X] 值都小于10
+        if (task1BracketNum !== null && task1BracketNum < 10 && 
+            task2BracketNum !== null && task2BracketNum < 10) {
+          return {
+            text: '类型2',
+            newStatus: 'noImpact',
+            statusClass: 'analysis-no-impact'
+          }
+        }
+      }
+      
+      // ========== 已修复：检查是否有任务的 tp9 等于 "1" ==========
+      if (task1.tp9 === '1' || task1.tp9 === 1 || task2.tp9 === '1' || task2.tp9 === 1) {
+        return {
+          text: '已修复',
+          newStatus: 'repaired',
+          statusClass: 'analysis-repaired'
+        }
+      }
+      
+      // ========== 其他情况：按A时间逻辑判断 ==========
+      // 获取两个子任务的A时间（仓位抓取时间 - 任务结束时间）
+      const task1ATime = this.getTaskATimeMinutes(task1)
+      const task2ATime = this.getTaskATimeMinutes(task2)
+      
+      // 检查是否所有任务的A时间都大于30分钟
+      const allATimeOver30 = task1ATime !== null && task1ATime >= 30 && task2ATime !== null && task2ATime >= 30
+      // 检查是否至少有一方A时间小于30分钟或无法计算
+      const hasATimeLessThan30 = task1ATime === null || task1ATime < 30 || task2ATime === null || task2ATime < 30
+      
+      // 解析两个子任务的订单数据
       const task1Data = this.parseTaskOrderDataForAnalysis(task1)
       const task2Data = this.parseTaskOrderDataForAnalysis(task2)
       
       if (!task1Data || !task2Data) {
-        return { text: '数据解析失败', statusClass: 'analysis-error' }
+        // 无法解析数据，归类为"30分钟之内有问题其他"
+        return {
+          text: '3-4，30分钟之内有问题其他',
+          newStatus: 'problemOtherIn30',
+          statusClass: 'analysis-other'
+        }
       }
       
       // 计算各方的已成交和挂单
-      const yesTask = task1.psSide === 1 ? task1 : (task2.psSide === 1 ? task2 : null)
-      const noTask = task1.psSide === 2 ? task1 : (task2.psSide === 2 ? task2 : null)
       const yesData = task1.psSide === 1 ? task1Data : (task2.psSide === 1 ? task2Data : null)
       const noData = task1.psSide === 2 ? task1Data : (task2.psSide === 2 ? task2Data : null)
+      const yesTask = task1.psSide === 1 ? task1 : (task2.psSide === 1 ? task2 : null)
+      const noTask = task1.psSide === 2 ? task1 : (task2.psSide === 2 ? task2 : null)
       
       if (!yesData || !noData) {
-        return { text: '无法识别YES/NO任务', statusClass: 'analysis-error' }
+        return {
+          text: '3-4，30分钟之内有问题其他',
+          newStatus: 'problemOtherIn30',
+          statusClass: 'analysis-other'
+        }
       }
       
       const yesFilled = yesData.filled
@@ -3639,8 +4046,8 @@ export default {
       const yesTotal = yesFilled + yesPending
       const noTotal = noFilled + noPending
       
-      const hasYesPending = yesPending > 0
-      const hasNoPending = noPending > 0
+      const hasYesPending = yesPending > 0.01
+      const hasNoPending = noPending > 0.01
       const hasAnyPending = hasYesPending || hasNoPending
       
       // 辅助函数：判断两个数量是否一致（允许5%误差）
@@ -3652,14 +4059,14 @@ export default {
         return diffPercent <= 5
       }
       
-      if (allATimeValid) {
-        // 【1】所有失败的A时间都大于30分钟
+      if (allATimeOver30) {
+        // 【1】所有任务的A时间都大于30分钟
         if (!hasAnyPending) {
           // 都无挂单
           if (isAmountEqual(yesFilled, noFilled)) {
-            // 【1.1】都无挂单，已成交数量一致
+            // 【1.1】都无挂单，已成交数量一致（包括都是0的情况）
             return {
-              text: '4-1，无挂单，close',
+              text: '4-1，无挂单，close一致',
               newStatus: 'noImpact',
               statusClass: 'analysis-no-impact'
             }
@@ -3668,7 +4075,8 @@ export default {
             const moreSide = yesFilled > noFilled ? 'YES' : 'NO'
             const moreAmount = Math.abs(yesFilled - noFilled).toFixed(2)
             return {
-              text: `4-2，无挂单，close不等，${moreSide} 多了 ${moreAmount}个`,
+              text: `4-2，无挂单，close不等，${moreSide}多了${moreAmount}个`,
+              newStatus: 'confirmedProblem',
               statusClass: 'analysis-warning'
             }
           }
@@ -3679,7 +4087,8 @@ export default {
             const pendingSide = hasYesPending ? 'YES' : 'NO'
             const pendingAmount = (hasYesPending ? yesPending : noPending).toFixed(2)
             return {
-              text: `4-3，有挂单，open+close一致，${pendingSide} ${pendingAmount}个等待成交，等待抓取`,
+              text: `4-3，有挂单，open+close一致，${pendingSide}${pendingAmount}个等待成交，等待抓取`,
+              newStatus: 'pendingFailed',
               statusClass: 'analysis-waiting'
             }
           } else {
@@ -3689,45 +4098,74 @@ export default {
             const needSide = yesTotal > noTotal ? 'NO' : 'YES'
             const needAmount = Math.abs(yesTotal - noTotal).toFixed(2)
             return {
-              text: `4-4，有挂单，open+close不一致，有${waitingSide} ${waitingAmount}个等待成，还需补${needSide} ${needAmount}个，等待抓取需人工处理`,
+              text: `4-4，有挂单，open+close不一致，有${waitingSide}${waitingAmount}个等待成，还需补${needSide}${needAmount}个，等待抓取需人工处理`,
+              newStatus: 'pendingFailed',
               statusClass: 'analysis-manual'
             }
           }
         }
       } else if (hasATimeLessThan30) {
-        // 【2】A时间有至少一方小于30分钟
+        // 【2】A时间至少一方小于30分钟
         
-        // 检查是否能用已成交数据进行判断（只使用tp8或成功任务的amt）
-        const canCompareClose = this.canUseCloseDataForComparison(task1, task2)
+        // 判断是否可以使用已成交数据进行比较
+        // 只使用tp8（非canceled）或成功状态（status===2）的数据才算已成交量
+        const task1CanUse = task1.status === 2 || (task1.tp8 && !task1.tp8.includes('canceled'))
+        const task2CanUse = task2.status === 2 || (task2.tp8 && !task2.tp8.includes('canceled'))
+        const canCompareClose = task1CanUse && task2CanUse
         
-        if (canCompareClose && isAmountEqual(yesFilled, noFilled)) {
-          // 【2.1】两边已成交量一致
-          return {
-            text: '3-1，close一致，修复后成功',
-            newStatus: 'repaired',
-            statusClass: 'analysis-success'
-          }
-        } else if (canCompareClose && !isAmountEqual(yesFilled, noFilled)) {
-          // 【2.2】两边已成交量不一致
-          const needSide = yesFilled > noFilled ? 'NO' : 'YES'
-          const needAmount = Math.abs(yesFilled - noFilled).toFixed(2)
-          return {
-            text: `3-2，close不一致，部分成交，需要补${needSide} ${needAmount}个`,
-            statusClass: 'analysis-partial'
+        if (canCompareClose) {
+          if (isAmountEqual(yesFilled, noFilled)) {
+            // 【2.1】两边已成交量一致
+            return {
+              text: '3-1，close一致，成功',
+              newStatus: 'success',
+              statusClass: 'analysis-success'
+            }
+          } else {
+            // 【2.2】两边已成交量不一致
+            const needSide = yesFilled > noFilled ? 'NO' : 'YES'
+            const needAmount = Math.abs(yesFilled - noFilled).toFixed(2)
+            return {
+              text: `3-2，close不一致，部分成交，需要补${needSide}${needAmount}个`,
+              newStatus: 'problemIn30',
+              statusClass: 'analysis-partial'
+            }
           }
         } else {
-          // 【2.3】其他情况，等待数据同步
-          // 计算最小的A时间，看还差多少分钟到30分钟
-          const minATime = Math.min(...failedTasksATime.map(item => item.aTime !== null ? item.aTime : -999))
-          const remainingMinutes = minATime !== null && minATime >= 0 ? (30 - minATime) : 30
-          return {
-            text: `3-3，等待数据同步，还差${Math.max(0, remainingMinutes)}分钟`,
-            statusClass: 'analysis-sync'
+          // 检查任务状态
+          const task1StatusValid = task1.status !== 0 && task1.status !== undefined && task1.status !== null
+          const task2StatusValid = task2.status !== 0 && task2.status !== undefined && task2.status !== null
+          
+          if (task1StatusValid && task2StatusValid) {
+            // 【2.3】其他情况，任务状态不为0，等待数据同步
+            // 计算还差多少分钟到30分钟
+            const minATime = Math.min(
+              task1ATime !== null ? task1ATime : -999,
+              task2ATime !== null ? task2ATime : -999
+            )
+            const remainingMinutes = minATime >= 0 ? Math.max(0, 30 - minATime) : 30
+            return {
+              text: `3-3，等待数据同步，还差${remainingMinutes.toFixed(0)}分钟`,
+              newStatus: 'problemIn30',
+              statusClass: 'analysis-sync'
+            }
+          } else {
+            // 【2.4】任务状态为0，或获取不到任务信息
+            return {
+              text: '3-4，30分钟之内有问题其他',
+              newStatus: 'problemOtherIn30',
+              statusClass: 'analysis-other'
+            }
           }
         }
       }
       
-      return null
+      // 默认返回（理论上不应该走到这里，但作为安全兜底）
+      return {
+        text: '3-4，30分钟之内有问题其他',
+        newStatus: 'problemOtherIn30',
+        statusClass: 'analysis-other'
+      }
     },
     
     /**
@@ -4339,6 +4777,91 @@ export default {
       } catch (error) {
         console.error(`更新任务 ${taskId} 的tp7和tp8失败:`, error)
       }
+    },
+    
+    /**
+     * 判断是否显示"更改状态为已修复"按钮
+     * 只有非"全部成功"、"失败无影响"、"已修复"状态的任务组才显示
+     */
+    shouldShowMarkRepairedButton(group) {
+      if (!group) return false
+      const status = this.getGroupFinalStatusWithAnalysis(group)
+      // 这些状态不显示按钮
+      const excludeStatuses = ['success', 'noImpact', 'repaired']
+      return !excludeStatuses.includes(status)
+    },
+    
+    /**
+     * 将任务组标记为已修复（更新组内所有任务的 tp9 为 "1"）
+     */
+    async markGroupAsRepaired(group) {
+      if (!group || !group.tasks || group.tasks.length === 0) {
+        this.showToast('任务组数据不完整', 'warning')
+        return
+      }
+      
+      const groupKey = group.groupId || `group-${Date.now()}`
+      
+      // 防止重复点击
+      if (this.isMarkingRepaired[groupKey]) {
+        return
+      }
+      
+      // 标记为正在处理
+      this.isMarkingRepaired[groupKey] = true
+      
+      try {
+        // 为组内每个任务更新 tp9
+        const updatePromises = group.tasks.map(task => this.updateMissionTp9(task.id, '1'))
+        await Promise.all(updatePromises)
+        
+        // 更新本地数据
+        group.tasks.forEach(task => {
+          task.tp9 = '1'
+        })
+        
+        this.showToast('已标记为已修复', 'success')
+      } catch (error) {
+        console.error('标记已修复失败:', error)
+        this.showToast('标记失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isMarkingRepaired[groupKey] = false
+      }
+    },
+    
+    /**
+     * 更新任务的tp9
+     */
+    async updateMissionTp9(taskId, tp9) {
+      if (!taskId) {
+        return
+      }
+      
+      try {
+        const requestData = {
+          id: parseInt(taskId),
+          tp9: tp9
+        }
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/updateMissionTp',
+          requestData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data && response.data.code === 0) {
+          console.log(`任务 ${taskId} 的tp9保存成功`)
+        } else {
+          console.error(`任务 ${taskId} 的tp9保存失败:`, response.data)
+        }
+      } catch (error) {
+        console.error(`更新任务 ${taskId} 的tp9失败:`, error)
+        throw error
+      }
     }
   }
 }
@@ -4467,6 +4990,55 @@ export default {
   cursor: not-allowed;
 }
 
+/* 开关样式 */
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  margin-left: 15px;
+}
+
+.toggle-switch input {
+  display: none;
+}
+
+.toggle-slider {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  background: #ccc;
+  border-radius: 20px;
+  transition: background 0.3s;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.3s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.toggle-switch input:checked + .toggle-slider::after {
+  transform: translateX(20px);
+}
+
+.toggle-label {
+  font-size: 13px;
+  color: #666;
+  white-space: nowrap;
+}
+
 /* 快速查询区域 */
 .quick-query-form {
   display: flex;
@@ -4490,6 +5062,10 @@ export default {
   font-size: 14px;
   width: 100px;
   transition: border-color 0.3s;
+}
+
+.hours-range-input {
+  width: 120px;
 }
 
 .hours-input:focus {
@@ -5125,6 +5701,10 @@ export default {
   background-color: #27ae60;
 }
 
+.analysis-repaired {
+  background-color: #3498db;
+}
+
 .analysis-warning {
   background-color: #d35400;
 }
@@ -5143,6 +5723,10 @@ export default {
 
 .analysis-sync {
   background-color: #7f8c8d;
+}
+
+.analysis-other {
+  background-color: #8e44ad;
 }
 
 .analysis-error {
@@ -5651,6 +6235,22 @@ export default {
   background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #f39c12 66%, #f39c12 100%);
 }
 
+.mode1-group-header.header-problemIn30 {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #e67e22 66%, #e67e22 100%);
+}
+
+.mode1-group-header.header-problemOtherIn30 {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #8e44ad 66%, #8e44ad 100%);
+}
+
+.mode1-group-header.header-pendingFailed {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #2980b9 66%, #2980b9 100%);
+}
+
+.mode1-group-header.header-confirmedProblem {
+  background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #c0392b 66%, #c0392b 100%);
+}
+
 .mode1-group-header.header-unknown {
   background: linear-gradient(to right, #667eea 0%, #764ba2 66%, #95a5a6 66%, #95a5a6 100%);
 }
@@ -5701,6 +6301,26 @@ export default {
 .group-status-badge.status-repaired {
   background: rgba(52, 152, 219, 0.3);
   color: #3498db;
+}
+
+.group-status-badge.status-problem-in-30 {
+  background: rgba(230, 126, 34, 0.3);
+  color: #e67e22;
+}
+
+.group-status-badge.status-problem-other-in-30 {
+  background: rgba(142, 68, 173, 0.3);
+  color: #8e44ad;
+}
+
+.group-status-badge.status-pending-failed {
+  background: rgba(41, 128, 185, 0.3);
+  color: #2980b9;
+}
+
+.group-status-badge.status-confirmed-problem {
+  background: rgba(192, 57, 43, 0.3);
+  color: #c0392b;
 }
 
 /* 组状态统计区域 */
@@ -5762,6 +6382,30 @@ export default {
   background: rgba(155, 89, 182, 0.15);
   color: #9b59b6;
   border-color: rgba(155, 89, 182, 0.3);
+}
+
+.status-stat-item.status-problem-in-30 {
+  background: rgba(230, 126, 34, 0.15);
+  color: #e67e22;
+  border-color: rgba(230, 126, 34, 0.3);
+}
+
+.status-stat-item.status-problem-other-in-30 {
+  background: rgba(142, 68, 173, 0.15);
+  color: #8e44ad;
+  border-color: rgba(142, 68, 173, 0.3);
+}
+
+.status-stat-item.status-pending-failed {
+  background: rgba(41, 128, 185, 0.15);
+  color: #2980b9;
+  border-color: rgba(41, 128, 185, 0.3);
+}
+
+.status-stat-item.status-confirmed-problem {
+  background: rgba(192, 57, 43, 0.15);
+  color: #c0392b;
+  border-color: rgba(192, 57, 43, 0.3);
 }
 
 /* 状态筛选区域 */
@@ -5864,6 +6508,56 @@ export default {
   cursor: not-allowed;
 }
 
+/* 一键获取当前列表需处理的服务数据按钮 */
+.batch-fetch-filtered-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #16a085 0%, #1abc9c 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+.batch-fetch-filtered-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(22, 160, 133, 0.4);
+}
+
+.batch-fetch-filtered-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 一键抓取当前列表需处理的仓位按钮 */
+.batch-position-filtered-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #2980b9 0%, #3498db 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+.batch-position-filtered-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(41, 128, 185, 0.4);
+}
+
+.batch-position-filtered-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .btn-fetch-server-data {
   background: rgba(255, 255, 255, 0.2);
   color: white;
@@ -5880,6 +6574,26 @@ export default {
 }
 
 .btn-fetch-server-data:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-mark-repaired {
+  background: rgba(52, 152, 219, 0.3);
+  color: white;
+  border: 1px solid rgba(52, 152, 219, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.btn-mark-repaired:hover:not(:disabled) {
+  background: rgba(52, 152, 219, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-mark-repaired:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

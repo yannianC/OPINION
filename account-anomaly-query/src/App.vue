@@ -9,6 +9,7 @@
       <router-link to="/account-anomaly" class="nav-link">账号异常查询</router-link>
       <router-link to="/event-anomaly" class="nav-link">事件异常</router-link>
       <router-link to="/position-detail" class="nav-link">持仓详情</router-link>
+      <router-link to="/open-order-detail" class="nav-link">挂单详情</router-link>
     </nav>
 
     <main class="main">
