@@ -494,6 +494,12 @@
                 >
                   {{ isFetchingServerDataForGroup(item.groupKey) ? '获取中...' : '获取服务器数据' }}
                 </button>
+                <span 
+                  v-if="getGroupAnalysisInfo(item.group)"
+                  :class="['group-analysis-info', getGroupAnalysisInfo(item.group).statusClass]"
+                >
+                  {{ getGroupAnalysisInfo(item.group).text }}
+                </span>
               </div>
               
               <div class="tasks-list">
@@ -568,7 +574,7 @@
                     <span class="task-separator">|</span>
                     <span 
                       v-if="getPositionUpdateStatus(task)"
-                      :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                      :class="['task-info', 'position-status', isPositionUpdateValid(task) ? 'position-updated' : 'position-not-updated']"
                     >
                       {{ getPositionUpdateStatus(task) }}
                     </span>
@@ -717,7 +723,7 @@
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
-                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                        :class="['task-info', 'position-status', isPositionUpdateValid(task) ? 'position-updated' : 'position-not-updated']"
                       >
                         {{ getPositionUpdateStatus(task) }}
                       </span>
@@ -811,7 +817,7 @@
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
-                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                        :class="['task-info', 'position-status', isPositionUpdateValid(task) ? 'position-updated' : 'position-not-updated']"
                       >
                         {{ getPositionUpdateStatus(task) }}
                       </span>
@@ -902,7 +908,7 @@
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
-                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                        :class="['task-info', 'position-status', isPositionUpdateValid(task) ? 'position-updated' : 'position-not-updated']"
                       >
                         {{ getPositionUpdateStatus(task) }}
                       </span>
@@ -993,7 +999,7 @@
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
-                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                        :class="['task-info', 'position-status', isPositionUpdateValid(task) ? 'position-updated' : 'position-not-updated']"
                       >
                         {{ getPositionUpdateStatus(task) }}
                       </span>
@@ -1096,6 +1102,7 @@ export default {
       selectedGroup: 'default', // 当前选择的分组
       groupConfigList: [], // 分组配置列表
       sideFilter: 'all', // 模式1的交易方向筛选：'all'全部, 'buy'买入, 'sell'卖出
+      queryTrendingId: null, // URL参数传入的trendingId，用于筛选特定主题的任务
       taskStatistics: {
         total: { buy: 0, sell: 0, total: 0 },
         allFilled: { buy: 0, sell: 0 },        // 全部成交的
@@ -1544,6 +1551,7 @@ export default {
       const hash = window.location.hash
       const params = new URLSearchParams(hash.split('?')[1] || '')
       const groupParam = params.get('group')
+      const trendingIdParam = params.get('trendingId')
       
       if (groupParam) {
         // 参数映射：分组1传2->收到2选分组2, 分组2传3->收到3选分组3, 分组3传1->收到1选分组3
@@ -1555,6 +1563,42 @@ export default {
           this.selectedGroup = '3' // 收到1，对应分组3
         }
       }
+      
+      // 如果有 trendingId 参数，自动查询最近24小时的数据
+      if (trendingIdParam) {
+        this.autoQueryWithTrendingId(trendingIdParam)
+      }
+    },
+    
+    /**
+     * 根据 trendingId 自动查询最近24小时的数据
+     */
+    async autoQueryWithTrendingId(trendingId) {
+      // 设置为模式1
+      this.queryMode = 1
+      
+      // 设置时间范围为最近24小时
+      const now = new Date()
+      const start = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      
+      // 格式化为 datetime-local 格式
+      const formatDateTime = (date) => {
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const hours = String(date.getHours()).padStart(2, '0')
+        const minutes = String(date.getMinutes()).padStart(2, '0')
+        return `${year}-${month}-${day}T${hours}:${minutes}`
+      }
+      
+      this.query.startTime = formatDateTime(start)
+      this.query.endTime = formatDateTime(now)
+      
+      // 保存 trendingId 用于查询
+      this.queryTrendingId = trendingId
+      
+      // 自动执行查询
+      await this.queryAnomalies()
     },
     
     // 加载分组配置
@@ -2057,12 +2101,19 @@ export default {
         
         // 调用接口，根据模式选择type
         const type = this.queryMode === 1 ? 5 : 1
+        const params = {
+          type: type,
+          startTime: startTimestamp,
+          endTime: endTimestamp
+        }
+        
+        // 如果有 trendingId 参数，添加到请求中
+        if (this.queryTrendingId) {
+          params.trendingId = this.queryTrendingId
+        }
+        
         const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
-          params: {
-            type: type,
-            startTime: startTimestamp,
-            endTime: endTimestamp
-          }
+          params: params
         })
         
         if (response.data && response.data.code === 0) {
@@ -2083,6 +2134,11 @@ export default {
           
           // 获取账户配置缓存，用于计算仓位抓取时间
           await this.fetchAccountConfigCache()
+          
+          // 对模式1的失败组应用分析更新
+          if (this.queryMode === 1) {
+            this.applyAnalysisStatusUpdateToAllGroups()
+          }
         } else {
           this.showToast('查询失败', 'error')
         }
@@ -3090,6 +3146,32 @@ export default {
       
       const newStatus = this.calculateGroupStatus(group.tasks)
       group.finalStatus = newStatus
+      
+      // 如果是失败状态，尝试根据分析结果更新状态
+      if (newStatus === 'failed') {
+        this.applyAnalysisStatusUpdate(group)
+      }
+    },
+    
+    /**
+     * 根据分析结果更新组状态
+     */
+    applyAnalysisStatusUpdate(group) {
+      const analysisInfo = this.getGroupAnalysisInfo(group)
+      if (analysisInfo && analysisInfo.newStatus) {
+        group.finalStatus = analysisInfo.newStatus
+      }
+    },
+    
+    /**
+     * 对所有失败组应用分析更新
+     */
+    applyAnalysisStatusUpdateToAllGroups() {
+      Object.values(this.results).forEach(group => {
+        if (group.finalStatus === 'failed') {
+          this.applyAnalysisStatusUpdate(group)
+        }
+      })
     },
     
     /**
@@ -3469,6 +3551,253 @@ export default {
         // 仓位抓取时间大于任务结束时间
         return `仓位已在任务结束后${diffMinutes}分钟更新`
       }
+    },
+    
+    /**
+     * 获取任务的A时间（仓位抓取时间 - 任务结束时间）分钟数
+     * @returns {number|null} 分钟数，null表示无法计算
+     */
+    getTaskATimeMinutes(task) {
+      if (!task || !task.browserId) return null
+      
+      const config = this.accountConfigMap[String(task.browserId)]
+      if (!config) return null
+      
+      const catchTime = config.d ? parseInt(config.d) : null
+      if (!catchTime) return null
+      
+      const updateTime = task.updateTime ? new Date(task.updateTime).getTime() : null
+      if (!updateTime) return null
+      
+      return Math.round((catchTime - updateTime) / 60000)
+    },
+    
+    /**
+     * 判断仓位更新状态是否为有效更新（大于30分钟）
+     */
+    isPositionUpdateValid(task) {
+      const minutes = this.getTaskATimeMinutes(task)
+      return minutes !== null && minutes >= 30
+    },
+    
+    /**
+     * 分析失败组的详细状态
+     * 返回: { text: 显示文本, newStatus: 新状态(可选), statusClass: 样式类 }
+     */
+    getGroupAnalysisInfo(group) {
+      // 只对失败状态的组进行分析
+      if (!group || group.finalStatus !== 'failed') return null
+      if (!group.tasks || group.tasks.length !== 2) return null
+      
+      // 找出失败的子任务（修复后也失败的）
+      const failedTasks = group.tasks.filter(task => {
+        // 状态为2的是成功的
+        if (task.status === 2) return false
+        // 通过tp7/tp8修复成功的也算成功
+        if (this.isTaskRepairedSuccess(task)) return false
+        return true
+      })
+      
+      // 如果没有失败的任务，不需要分析
+      if (failedTasks.length === 0) return null
+      
+      // 获取所有失败任务的A时间
+      const failedTasksATime = failedTasks.map(task => ({
+        task,
+        aTime: this.getTaskATimeMinutes(task)
+      }))
+      
+      // 检查是否所有失败任务的A时间都大于30分钟
+      const allATimeValid = failedTasksATime.every(item => item.aTime !== null && item.aTime >= 30)
+      // 检查是否有至少一个失败任务的A时间小于30分钟
+      const hasATimeLessThan30 = failedTasksATime.some(item => item.aTime === null || item.aTime < 30)
+      
+      // 解析两个子任务的订单数据
+      const task1 = group.tasks[0]
+      const task2 = group.tasks[1]
+      const task1Data = this.parseTaskOrderDataForAnalysis(task1)
+      const task2Data = this.parseTaskOrderDataForAnalysis(task2)
+      
+      if (!task1Data || !task2Data) {
+        return { text: '数据解析失败', statusClass: 'analysis-error' }
+      }
+      
+      // 计算各方的已成交和挂单
+      const yesTask = task1.psSide === 1 ? task1 : (task2.psSide === 1 ? task2 : null)
+      const noTask = task1.psSide === 2 ? task1 : (task2.psSide === 2 ? task2 : null)
+      const yesData = task1.psSide === 1 ? task1Data : (task2.psSide === 1 ? task2Data : null)
+      const noData = task1.psSide === 2 ? task1Data : (task2.psSide === 2 ? task2Data : null)
+      
+      if (!yesData || !noData) {
+        return { text: '无法识别YES/NO任务', statusClass: 'analysis-error' }
+      }
+      
+      const yesFilled = yesData.filled
+      const noFilled = noData.filled
+      const yesPending = yesData.pending
+      const noPending = noData.pending
+      const yesTotal = yesFilled + yesPending
+      const noTotal = noFilled + noPending
+      
+      const hasYesPending = yesPending > 0
+      const hasNoPending = noPending > 0
+      const hasAnyPending = hasYesPending || hasNoPending
+      
+      // 辅助函数：判断两个数量是否一致（允许5%误差）
+      const isAmountEqual = (a, b) => {
+        if (a === 0 && b === 0) return true
+        const avg = (a + b) / 2
+        if (avg === 0) return true
+        const diffPercent = Math.abs(a - b) / avg * 100
+        return diffPercent <= 5
+      }
+      
+      if (allATimeValid) {
+        // 【1】所有失败的A时间都大于30分钟
+        if (!hasAnyPending) {
+          // 都无挂单
+          if (isAmountEqual(yesFilled, noFilled)) {
+            // 【1.1】都无挂单，已成交数量一致
+            return {
+              text: '4-1，无挂单，close',
+              newStatus: 'noImpact',
+              statusClass: 'analysis-no-impact'
+            }
+          } else {
+            // 【1.2】都无挂单，已成交数量不一致
+            const moreSide = yesFilled > noFilled ? 'YES' : 'NO'
+            const moreAmount = Math.abs(yesFilled - noFilled).toFixed(2)
+            return {
+              text: `4-2，无挂单，close不等，${moreSide} 多了 ${moreAmount}个`,
+              statusClass: 'analysis-warning'
+            }
+          }
+        } else {
+          // 任一有挂单
+          if (isAmountEqual(yesTotal, noTotal)) {
+            // 【1.3】挂单+已成交一致
+            const pendingSide = hasYesPending ? 'YES' : 'NO'
+            const pendingAmount = (hasYesPending ? yesPending : noPending).toFixed(2)
+            return {
+              text: `4-3，有挂单，open+close一致，${pendingSide} ${pendingAmount}个等待成交，等待抓取`,
+              statusClass: 'analysis-waiting'
+            }
+          } else {
+            // 【1.4】挂单+已成交不一致
+            const waitingSide = hasYesPending ? 'YES' : (hasNoPending ? 'NO' : '')
+            const waitingAmount = (hasYesPending ? yesPending : noPending).toFixed(2)
+            const needSide = yesTotal > noTotal ? 'NO' : 'YES'
+            const needAmount = Math.abs(yesTotal - noTotal).toFixed(2)
+            return {
+              text: `4-4，有挂单，open+close不一致，有${waitingSide} ${waitingAmount}个等待成，还需补${needSide} ${needAmount}个，等待抓取需人工处理`,
+              statusClass: 'analysis-manual'
+            }
+          }
+        }
+      } else if (hasATimeLessThan30) {
+        // 【2】A时间有至少一方小于30分钟
+        
+        // 检查是否能用已成交数据进行判断（只使用tp8或成功任务的amt）
+        const canCompareClose = this.canUseCloseDataForComparison(task1, task2)
+        
+        if (canCompareClose && isAmountEqual(yesFilled, noFilled)) {
+          // 【2.1】两边已成交量一致
+          return {
+            text: '3-1，close一致，修复后成功',
+            newStatus: 'repaired',
+            statusClass: 'analysis-success'
+          }
+        } else if (canCompareClose && !isAmountEqual(yesFilled, noFilled)) {
+          // 【2.2】两边已成交量不一致
+          const needSide = yesFilled > noFilled ? 'NO' : 'YES'
+          const needAmount = Math.abs(yesFilled - noFilled).toFixed(2)
+          return {
+            text: `3-2，close不一致，部分成交，需要补${needSide} ${needAmount}个`,
+            statusClass: 'analysis-partial'
+          }
+        } else {
+          // 【2.3】其他情况，等待数据同步
+          // 计算最小的A时间，看还差多少分钟到30分钟
+          const minATime = Math.min(...failedTasksATime.map(item => item.aTime !== null ? item.aTime : -999))
+          const remainingMinutes = minATime !== null && minATime >= 0 ? (30 - minATime) : 30
+          return {
+            text: `3-3，等待数据同步，还差${Math.max(0, remainingMinutes)}分钟`,
+            statusClass: 'analysis-sync'
+          }
+        }
+      }
+      
+      return null
+    },
+    
+    /**
+     * 解析任务订单数据用于分析（优先使用tp8，成功任务使用amt）
+     */
+    parseTaskOrderDataForAnalysis(task) {
+      if (!task) return null
+      
+      // 如果任务成功（状态为2），直接使用amt作为已成交数量
+      if (task.status === 2) {
+        const amt = parseFloat(task.amt) || 0
+        return {
+          total: amt,
+          filled: amt,
+          pending: 0,
+          source: 'success_amt'
+        }
+      }
+      
+      // 优先使用 tp8（已成交数据），但如果状态是 canceled 并且有 tp7，则使用 tp7
+      if (task.tp8) {
+        const isCanceled = task.tp8.includes('状态: canceled') || task.tp8.includes('状态:canceled')
+        if (isCanceled && task.tp7) {
+          // tp8 状态是 canceled，优先使用 tp7 挂单数据
+          const data = this.parseTp7Data(task.tp7, task.side)
+          if (data) {
+            return { ...data, source: 'tp7' }
+          }
+        } else {
+          // 正常使用 tp8
+          const data = this.parseTp8Data(task.tp8, task.side)
+          if (data) {
+            return { ...data, source: 'tp8' }
+          }
+        }
+      }
+      
+      // 其次使用 tp7（挂单数据）
+      if (task.tp7) {
+        const data = this.parseTp7Data(task.tp7, task.side)
+        if (data) {
+          return { ...data, source: 'tp7' }
+        }
+      }
+      
+      // 使用 msg
+      if (task.msg) {
+        const msgResult = this.parseMsgData(task.msg, task.side)
+        if (msgResult) {
+          return { ...msgResult, source: 'msg' }
+        }
+      }
+      
+      // 默认返回下单量作为总数，无成交
+      const amt = parseFloat(task.amt) || 0
+      return {
+        total: amt,
+        filled: 0,
+        pending: 0,
+        source: 'default'
+      }
+    },
+    
+    /**
+     * 检查是否可以使用close数据进行比较（只使用tp8或成功任务的amt）
+     */
+    canUseCloseDataForComparison(task1, task2) {
+      const task1CanUse = task1.status === 2 || task1.tp8
+      const task2CanUse = task2.status === 2 || task2.tp8
+      return task1CanUse && task2CanUse
     },
     
     /**
@@ -4776,6 +5105,48 @@ export default {
   background-color: rgba(39, 174, 96, 0.1);
   padding: 2px 6px;
   border-radius: 3px;
+}
+
+/* 组分析结果样式 */
+.group-analysis-info {
+  margin-left: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.analysis-no-impact {
+  background-color: #2980b9;
+}
+
+.analysis-success {
+  background-color: #27ae60;
+}
+
+.analysis-warning {
+  background-color: #d35400;
+}
+
+.analysis-waiting {
+  background-color: #8e44ad;
+}
+
+.analysis-manual {
+  background-color: #c0392b;
+}
+
+.analysis-partial {
+  background-color: #e67e22;
+}
+
+.analysis-sync {
+  background-color: #7f8c8d;
+}
+
+.analysis-error {
+  background-color: #e74c3c;
 }
 
 .field-label {

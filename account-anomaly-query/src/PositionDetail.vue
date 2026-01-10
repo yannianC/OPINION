@@ -289,7 +289,8 @@ const yesTableData = computed(() => {
     const column = yesColumns.value.find(col => (col.prop || col.type) === yesSortState.value.column)
     if (column && column.sortMethod) {
       const sorted = [...data].sort((a, b) => {
-        const result = column.sortMethod(a[yesSortState.value.column], b[yesSortState.value.column])
+        // sortMethod 接收整行数据，内部提取需要的字段进行比较
+        const result = column.sortMethod(a, b)
         return yesSortState.value.order === 'asc' ? result : -result
       })
       data = sorted
@@ -310,7 +311,8 @@ const noTableData = computed(() => {
     const column = noColumns.value.find(col => (col.prop || col.type) === noSortState.value.column)
     if (column && column.sortMethod) {
       const sorted = [...data].sort((a, b) => {
-        const result = column.sortMethod(a[noSortState.value.column], b[noSortState.value.column])
+        // sortMethod 接收整行数据，内部提取需要的字段进行比较
+        const result = column.sortMethod(a, b)
         return noSortState.value.order === 'asc' ? result : -result
       })
       data = sorted

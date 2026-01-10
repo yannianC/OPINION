@@ -1072,6 +1072,14 @@
                     >
                       {{ isUpdatingOrderbook(config) ? '更新中...' : '更新订单薄' }}
                     </button>
+                    <button 
+                      class="btn-position btn-sm" 
+                      @click="openPositionDetail(config)"
+                      style="margin-left: 4px;"
+                      title="查看持仓详情"
+                    >
+                      查看持仓
+                    </button>
                     <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
                       ❌ 关闭任务
                     </button>
@@ -9494,7 +9502,28 @@ const updateOrderbookForConfig = async (config) => {
   } finally {
     // 移除更新标记
     updatingOrderbookConfigIds.value.delete(configId)
+    
+    // 5秒后跳转到任务异常界面，传递 trendingId 参数
+    setTimeout(() => {
+      const trendingId = config.id
+      const taskAnomalyUrl = `https://oss.w3id.info/Opanomaly/index.html#/task-anomaly?trendingId=${trendingId}`
+      window.open(taskAnomalyUrl, '_blank')
+    }, 5000)
   }
+}
+
+/**
+ * 打开持仓详情页面
+ */
+const openPositionDetail = (config) => {
+  if (!config || !config.id) {
+    showToast('配置不存在', 'warning')
+    return
+  }
+  
+  const trendingId = config.id
+  const positionDetailUrl = `https://oss.w3id.info/Opanomaly/index.html#/position-detail?id=${trendingId}`
+  window.open(positionDetailUrl, '_blank')
 }
 
 /**
@@ -14525,6 +14554,21 @@ onUnmounted(() => {
   cursor: pointer;
   font-size: 0.75rem;
   white-space: nowrap;
+}
+
+.btn-position {
+  padding: 0.3rem 0.6rem;
+  background: rgba(100, 181, 246, 0.6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.btn-position:hover {
+  background: rgba(100, 181, 246, 0.8);
 }
 
 .btn-log:hover {
