@@ -565,6 +565,13 @@
                     >
                       查看
                     </a>
+                    <span class="task-separator">|</span>
+                    <span 
+                      v-if="getPositionUpdateStatus(task)"
+                      :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                    >
+                      {{ getPositionUpdateStatus(task) }}
+                    </span>
                   </div>
                   
                   <!-- 显示服务器数据（如果已获取，优先显示；否则显示tp7和tp8） -->
@@ -707,6 +714,13 @@
                       >
                         查看
                       </a>
+                      <span class="task-separator">|</span>
+                      <span 
+                        v-if="getPositionUpdateStatus(task)"
+                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                      >
+                        {{ getPositionUpdateStatus(task) }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -794,6 +808,13 @@
                       >
                         查看
                       </a>
+                      <span class="task-separator">|</span>
+                      <span 
+                        v-if="getPositionUpdateStatus(task)"
+                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                      >
+                        {{ getPositionUpdateStatus(task) }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -878,6 +899,13 @@
                       >
                         查看
                       </a>
+                      <span class="task-separator">|</span>
+                      <span 
+                        v-if="getPositionUpdateStatus(task)"
+                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                      >
+                        {{ getPositionUpdateStatus(task) }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -962,6 +990,13 @@
                       >
                         查看
                       </a>
+                      <span class="task-separator">|</span>
+                      <span 
+                        v-if="getPositionUpdateStatus(task)"
+                        :class="['task-info', 'position-status', getPositionUpdateStatus(task) === '仓位还未更新' ? 'position-not-updated' : 'position-updated']"
+                      >
+                        {{ getPositionUpdateStatus(task) }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -2045,6 +2080,9 @@ export default {
           } else {
             this.processMode2Data(missions)
           }
+          
+          // 获取账户配置缓存，用于计算仓位抓取时间
+          await this.fetchAccountConfigCache()
         } else {
           this.showToast('查询失败', 'error')
         }
@@ -3349,7 +3387,7 @@ export default {
      */
     async fetchAccountConfigCache() {
       try {
-        const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+        const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCacheSimple')
         if (response.data && response.data.data) {
           this.accountConfigCache = response.data.data || []
           // 建立 fingerprintNo -> config 映射
@@ -3401,6 +3439,36 @@ export default {
           this.positionStatistics.invalidTaskIds.push(...taskIds)
         }
       })
+    },
+    
+    /**
+     * 获取任务的仓位更新状态描述
+     * 返回格式: "仓位已在任务结束后X分钟更新" 或 "仓位还未更新"
+     */
+    getPositionUpdateStatus(task) {
+      if (!task || !task.browserId) return null
+      
+      const config = this.accountConfigMap[String(task.browserId)]
+      if (!config) return null
+      
+      // d 字段是仓位抓取时间（时间戳字符串）
+      const catchTime = config.d ? parseInt(config.d) : null
+      if (!catchTime) return null
+      
+      // 任务的 updateTime（任务结束时间）
+      const updateTime = task.updateTime ? new Date(task.updateTime).getTime() : null
+      if (!updateTime) return null
+      
+      // 计算仓位抓取时间与任务结束时间的差值（分钟）
+      const diffMinutes = Math.round((catchTime - updateTime) / 60000)
+      
+      if (catchTime < updateTime) {
+        // 仓位抓取时间小于任务结束时间，说明仓位还未更新
+        return '仓位还未更新'
+      } else {
+        // 仓位抓取时间大于任务结束时间
+        return `仓位已在任务结束后${diffMinutes}分钟更新`
+      }
     },
     
     /**
@@ -4690,6 +4758,24 @@ export default {
 
 .task-info {
   color: #333;
+}
+
+.position-status {
+  font-weight: 500;
+}
+
+.position-not-updated {
+  color: #e67e22;
+  background-color: rgba(230, 126, 34, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.position-updated {
+  color: #27ae60;
+  background-color: rgba(39, 174, 96, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
 }
 
 .field-label {
