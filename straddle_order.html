@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面15-对敲</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .auto-refresh-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 10px;
+        }
+        
+        .auto-refresh-control input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .auto-refresh-control input[type="number"] {
+            width: 60px;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .auto-refresh-control label {
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            margin-right: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+        }
+        
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #007bff;
+            color: white;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        th:first-child, td:first-child {
+            width: 400px;
+            min-width: 400px;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        tr:hover {
+            background-color: #e9ecef;
+        }
+        
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        input[type="text"]:focus, input[type="number"]:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        
+        input[type="text"]:disabled, input[type="number"]:disabled {
+            background-color: #e9ecef;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .status-running {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .status-paused {
+            color: #ffc107;
+            font-weight: bold;
+        }
+        
+        .msg-error {
+            color: #dc3545;
+            font-size: 12px;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <button class="btn" onclick="addRow(10)">新增对敲10列</button>
+        <button class="btn" onclick="addRow(1)">新增对敲1列</button>
+        <div class="auto-refresh-control">
+            <input type="checkbox" id="autoRefreshCheckbox" checked>
+            <label for="autoRefreshCheckbox">自动刷新</label>
+            <input type="number" id="refreshInterval" value="3" min="1" step="1">
+            <label for="refreshInterval">分钟</label>
+        </div>
+    </div>
+    
+    <table id="orderTable">
+        <thead>
+            <tr>
+                <th>链接</th>
+                <th>控制钱变少到多少<br>(逗号分隔区间)</th>
+                <th>单次金额(u)<br>(逗号分隔区间)</th>
+                <th>报错金额(u)</th>
+                <th>每次交易间隔(秒)<br>(逗号分隔区间)</th>
+                <th>钱变多账户</th>
+                <th>挂单价格(钱变多)</th>
+                <th>钱变少账户</th>
+                <th>挂单价格(钱变少)</th>
+                <th>添加时间</th>
+                <th>状态</th>
+                <th>msg</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+        </tbody>
+    </table>
+
+    <script>
+        const API_BASE = 'https://sg.bicoin.com.cn/99k/v2/straddle';
+        let rowIdCounter = 0;
+        let serverDataMap = new Map(); // 存储服务器返回的数据，key为唯一标识
+        let newRowsSet = new Set(); // 存储新增行的ID
+        let submittedRowIds = new Set(); // 存储已提交的行ID，用于清理
+        let refreshTimer = null; // 自动刷新定时器
+        
+        // 生成唯一ID
+        function generateRowId() {
+            return 'row_' + (++rowIdCounter) + '_' + Date.now();
+        }
+        
+        // 格式化时间戳为月日时分秒
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '';
+            // 处理时间戳（可能是字符串或数字）
+            const ts = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp;
+            // 判断是秒级还是毫秒级时间戳
+            const date = new Date(ts > 1000000000000 ? ts : ts * 1000);
+            
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            
+            return `${month}月${day}日 ${hours}:${minutes}:${seconds}`;
+        }
+        
+        // 设置行的所有输入框禁用/启用状态
+        function setRowInputsDisabled(row, disabled) {
+            const inputs = row.querySelectorAll('input[type="text"], input[type="number"]');
+            inputs.forEach(input => {
+                input.disabled = disabled;
+            });
+        }
+        
+        // 添加新行
+        function addRow(count) {
+            const tbody = document.getElementById('tableBody');
+            for (let i = 0; i < count; i++) {
+                const rowId = generateRowId();
+                newRowsSet.add(rowId);
+                const row = createTableRow(rowId);
+                tbody.appendChild(row);
+            }
+        }
+        
+        // 创建表格行
+        function createTableRow(rowId, data = null) {
+            const tr = document.createElement('tr');
+            tr.id = rowId;
+            tr.dataset.rowId = rowId;
+            
+            // 链接
+            const td1 = document.createElement('td');
+            td1.innerHTML = '<input type="text" class="input-url" placeholder="https://www.asterdex.com/en/trade/pro/spot/CSXHUSDT" value="' + (data?.url || '') + '">';
+            
+            // 控制钱变少到多少
+            const td2 = document.createElement('td');
+            td2.innerHTML = '<input type="text" class="input-endBalanceArea" placeholder="30,50" value="' + (data?.endBalanceArea || '') + '">';
+            
+            // 单次金额
+            const td3 = document.createElement('td');
+            td3.innerHTML = '<input type="text" class="input-singleOrderArea" placeholder="100,200" value="' + (data?.singleOrderArea || '') + '">';
+            
+            // 报错金额
+            const td4 = document.createElement('td');
+            td4.innerHTML = '<input type="text" class="input-maxFailSum" placeholder="10" value="' + (data?.maxFailSum || '') + '">';
+            
+            // 每次交易间隔
+            const td5 = document.createElement('td');
+            td5.innerHTML = '<input type="text" class="input-intervalArea" placeholder="3,5" value="' + (data?.intervalArea || '') + '">';
+            
+            // 钱变多账户
+            const td6 = document.createElement('td');
+            td6.innerHTML = '<input type="text" class="input-addBalanceAccount" placeholder="2" value="' + (data?.addBalanceAccount || '') + '">';
+            
+            // 挂单价格(钱变多)
+            const td7 = document.createElement('td');
+            td7.innerHTML = '<input type="number" step="0.000001" class="input-addBalanceOrderPrice" placeholder="0.004000" value="' + (data?.addBalanceOrderPrice || '') + '">';
+            
+            // 钱变少账户
+            const td8 = document.createElement('td');
+            td8.innerHTML = '<input type="text" class="input-reduceBalanceAccountList" placeholder="1324,1445,1446,1447" value="' + (data?.reduceBalanceAccountList || '') + '">';
+            
+            // 挂单价格(钱变少)
+            const td9 = document.createElement('td');
+            td9.innerHTML = '<input type="number" step="0.000001" class="input-reduceBalanceOrderPrice" placeholder="0.000520" value="' + (data?.reduceBalanceOrderPrice || '') + '">';
+            
+            // 添加时间
+            const td10 = document.createElement('td');
+            td10.className = 'add-time';
+            td10.textContent = data?.addTime ? formatTimestamp(data.addTime) : '';
+            // 存储原始addTime到行的dataset中，用于停止订单
+            if (data?.addTime) {
+                tr.dataset.addTime = data.addTime;
+            }
+            
+            // 状态
+            const td11 = document.createElement('td');
+            td11.className = 'status';
+            const status = data?.status;
+            if (status === 0) {
+                td11.textContent = '运行中';
+                td11.className += ' status-running';
+            } else if (status === 2) {
+                td11.textContent = '暂停';
+                td11.className += ' status-paused';
+            } else {
+                td11.textContent = '';
+            }
+            
+            // msg
+            const td12 = document.createElement('td');
+            td12.className = 'msg';
+            if (data?.msg) {
+                td12.textContent = data.msg;
+                td12.className += ' msg-error';
+            }
+            
+            // 操作
+            const td13 = document.createElement('td');
+            const canExecute = !status || status === 2; // 无状态或暂停状态可以执行
+            const btn = document.createElement('button');
+            btn.className = 'btn action-btn';
+            if (status === 0) {
+                btn.textContent = '停止';
+                btn.className += ' btn-danger';
+                btn.onclick = () => stopOrder(rowId);
+                btn.disabled = false;
+            } else {
+                btn.textContent = '开始执行';
+                btn.className += ' btn-success';
+                btn.onclick = () => executeOrder(rowId);
+                btn.disabled = !canExecute;
+            }
+            td13.appendChild(btn);
+            
+            tr.appendChild(td1);
+            tr.appendChild(td2);
+            tr.appendChild(td3);
+            tr.appendChild(td4);
+            tr.appendChild(td5);
+            tr.appendChild(td6);
+            tr.appendChild(td7);
+            tr.appendChild(td8);
+            tr.appendChild(td9);
+            tr.appendChild(td10);
+            tr.appendChild(td11);
+            tr.appendChild(td12);
+            tr.appendChild(td13);
+            
+            // 如果状态是运行中，禁用所有输入框
+            if (status === 0) {
+                setRowInputsDisabled(tr, true);
+            }
+            
+            return tr;
+        }
+        
+        // 停止订单
+        async function stopOrder(rowId) {
+            const row = document.getElementById(rowId);
+            if (!row) return;
+            
+            const addTime = row.dataset.addTime;
+            if (!addTime) {
+                alert('无法获取订单时间，停止失败');
+                return;
+            }
+            
+            try {
+                const response = await fetch(API_BASE + '/stopOrder', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        addTime: addTime
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 0 || response.ok) {
+                    alert('停止成功');
+                    // 刷新列表
+                    loadOrderList();
+                } else {
+                    alert('停止失败: ' + (result.msg || '未知错误'));
+                }
+            } catch (error) {
+                alert('停止失败: ' + error.message);
+            }
+        }
+        
+        // 执行订单
+        async function executeOrder(rowId) {
+            const row = document.getElementById(rowId);
+            if (!row) return;
+            
+            // 获取输入值
+            const url = row.querySelector('.input-url').value.trim();
+            const endBalanceArea = row.querySelector('.input-endBalanceArea').value.trim();
+            const singleOrderArea = row.querySelector('.input-singleOrderArea').value.trim();
+            const maxFailSum = row.querySelector('.input-maxFailSum').value.trim();
+            const intervalArea = row.querySelector('.input-intervalArea').value.trim();
+            const addBalanceAccount = row.querySelector('.input-addBalanceAccount').value.trim();
+            const addBalanceOrderPrice = parseFloat(row.querySelector('.input-addBalanceOrderPrice').value);
+            const reduceBalanceAccountList = row.querySelector('.input-reduceBalanceAccountList').value.trim();
+            const reduceBalanceOrderPrice = parseFloat(row.querySelector('.input-reduceBalanceOrderPrice').value);
+            
+            // 验证必填字段
+            if (!url || !endBalanceArea || !singleOrderArea || !maxFailSum || !intervalArea || 
+                !addBalanceAccount || !addBalanceOrderPrice || !reduceBalanceAccountList || !reduceBalanceOrderPrice) {
+                alert('请填写所有必填字段');
+                return;
+            }
+            
+            // 格式化数据（直接使用用户输入的值，用逗号分隔区间）
+            const requestData = {
+                url: url,
+                endBalanceArea: endBalanceArea,
+                singleOrderArea: singleOrderArea,
+                maxFailSum: parseFloat(maxFailSum),
+                intervalArea: intervalArea,
+                addBalanceAccount: addBalanceAccount,
+                addBalanceOrderPrice: addBalanceOrderPrice,
+                reduceBalanceAccountList: reduceBalanceAccountList,
+                reduceBalanceOrderPrice: reduceBalanceOrderPrice
+            };
+            
+            try {
+                const response = await fetch(API_BASE + '/order', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 0 || response.ok) {
+                    alert('提交成功');
+                    // 标记该行为已提交，需要在刷新列表时清理
+                    submittedRowIds.add(rowId);
+                    // 刷新列表
+                    loadOrderList();
+                } else {
+                    alert('提交失败: ' + (result.msg || '未知错误'));
+                }
+            } catch (error) {
+                alert('提交失败: ' + error.message);
+            }
+        }
+        
+        // 生成行的唯一标识（基于数据内容）
+        function generateRowKey(data) {
+            return data.url + '|' + data.addBalanceAccount + '|' + data.reduceBalanceAccountList;
+        }
+        
+        // 加载订单列表
+        async function loadOrderList() {
+            try {
+                const response = await fetch(API_BASE + '/orderList', {
+                    method: 'GET'
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 0 && result.data && result.data.list) {
+                    const tbody = document.getElementById('tableBody');
+                    const existingRows = Array.from(tbody.querySelectorAll('tr'));
+                    
+                    // 保存新增的未提交行（没有serverKey的行）
+                    const newRows = [];
+                    existingRows.forEach(row => {
+                        if (!row.dataset.serverKey && !submittedRowIds.has(row.id)) {
+                            // 这是新增的未提交行，需要保留
+                            newRows.push(row);
+                        }
+                    });
+                    
+                    // 清空表格
+                    tbody.innerHTML = '';
+                    
+                    // 根据服务器数据重新创建所有行
+                    result.data.list.forEach(item => {
+                        const rowId = generateRowId();
+                        const row = createTableRow(rowId, item);
+                        const key = generateRowKey(item);
+                        row.dataset.serverKey = key;
+                        tbody.appendChild(row);
+                    });
+                    
+                    // 重新添加新增的未提交行
+                    newRows.forEach(row => {
+                        tbody.appendChild(row);
+                    });
+                    
+                    // 清理已提交的行ID记录
+                    submittedRowIds.clear();
+                    
+                    // 更新服务器数据映射
+                    const newServerDataMap = new Map();
+                    result.data.list.forEach(item => {
+                        const key = generateRowKey(item);
+                        newServerDataMap.set(key, item);
+                    });
+                    serverDataMap = newServerDataMap;
+                }
+            } catch (error) {
+                console.error('加载订单列表失败:', error);
+            }
+        }
+        
+        // 根据数据更新行
+        function updateRowFromData(row, data) {
+            row.querySelector('.input-url').value = data.url || '';
+            row.querySelector('.input-endBalanceArea').value = data.endBalanceArea || '';
+            row.querySelector('.input-singleOrderArea').value = data.singleOrderArea || '';
+            row.querySelector('.input-maxFailSum').value = data.maxFailSum || '';
+            row.querySelector('.input-intervalArea').value = data.intervalArea || '';
+            row.querySelector('.input-addBalanceAccount').value = data.addBalanceAccount || '';
+            row.querySelector('.input-addBalanceOrderPrice').value = data.addBalanceOrderPrice || '';
+            row.querySelector('.input-reduceBalanceAccountList').value = data.reduceBalanceAccountList || '';
+            row.querySelector('.input-reduceBalanceOrderPrice').value = data.reduceBalanceOrderPrice || '';
+            
+            // 更新添加时间
+            const addTimeCell = row.querySelector('.add-time');
+            if (addTimeCell) {
+                addTimeCell.textContent = data.addTime ? formatTimestamp(data.addTime) : '';
+            }
+            
+            // 更新状态
+            const statusCell = row.querySelector('.status');
+            const status = data.status;
+            if (statusCell) {
+                statusCell.className = 'status';
+                if (status === 0) {
+                    statusCell.textContent = '运行中';
+                    statusCell.className += ' status-running';
+                } else if (status === 2) {
+                    statusCell.textContent = '暂停';
+                    statusCell.className += ' status-paused';
+                } else {
+                    statusCell.textContent = '';
+                }
+            }
+            
+            // 更新msg
+            const msgCell = row.querySelector('.msg');
+            if (msgCell) {
+                msgCell.className = 'msg';
+                if (data.msg) {
+                    msgCell.textContent = data.msg;
+                    msgCell.className += ' msg-error';
+                } else {
+                    msgCell.textContent = '';
+                }
+            }
+            
+            // 更新按钮状态
+            const btn = row.querySelector('.action-btn');
+            if (btn) {
+                if (status === 0) {
+                    btn.textContent = '停止';
+                    btn.className = 'btn btn-danger action-btn';
+                    btn.disabled = false;
+                    const rowId = row.id;
+                    btn.onclick = () => stopOrder(rowId);
+                } else {
+                    btn.textContent = '开始执行';
+                    btn.className = 'btn btn-success action-btn';
+                    const canExecute = !status || status === 2;
+                    btn.disabled = !canExecute;
+                    const rowId = row.id;
+                    btn.onclick = () => executeOrder(rowId);
+                }
+            }
+            
+            // 更新addTime到行的dataset中
+            if (data.addTime) {
+                row.dataset.addTime = data.addTime;
+            }
+            
+            // 根据状态设置输入框的禁用状态
+            if (status === 0) {
+                setRowInputsDisabled(row, true);
+            } else {
+                setRowInputsDisabled(row, false);
+            }
+        }
+        
+        // 启动自动刷新
+        function startAutoRefresh() {
+            // 清除现有定时器
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+            
+            const checkbox = document.getElementById('autoRefreshCheckbox');
+            const intervalInput = document.getElementById('refreshInterval');
+            
+            if (checkbox.checked) {
+                const minutes = parseInt(intervalInput.value) || 3;
+                const milliseconds = minutes * 60 * 1000;
+                refreshTimer = setInterval(loadOrderList, milliseconds);
+            }
+        }
+        
+        // 停止自动刷新
+        function stopAutoRefresh() {
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+        }
+        
+        // 初始化
+        window.onload = function() {
+            // 初始加载
+            loadOrderList();
+            
+            // 设置自动刷新控制
+            const checkbox = document.getElementById('autoRefreshCheckbox');
+            const intervalInput = document.getElementById('refreshInterval');
+            
+            // checkbox变化时，启动或停止自动刷新
+            checkbox.addEventListener('change', function() {
+                if (this.checked) {
+                    startAutoRefresh();
+                } else {
+                    stopAutoRefresh();
+                }
+            });
+            
+            // 输入框变化时，如果checkbox选中，重新启动自动刷新
+            intervalInput.addEventListener('change', function() {
+                if (checkbox.checked) {
+                    startAutoRefresh();
+                }
+            });
+            
+            // 默认启动自动刷新
+            startAutoRefresh();
+        };
+    </script>
+</body>
+</html>

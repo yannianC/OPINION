@@ -4617,7 +4617,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         add_bro_log_entry(bro_log_list, serial_number, f"[19][{serial_number}] 开始15分钟仓位变化检测")
         
         phase3_timeout = 900  # 15分钟
-        phase3_check_interval = 120  # 2分钟
+        phase3_check_interval = 90  # 2分钟
         phase3_start_time = time.time()
         phase3_position_change_detected = False
         phase3_use_api_data = False  # 标记最终使用哪种数据
@@ -8679,6 +8679,10 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
             if trade_type == 'Sell' and matched_tr:
                 return get_position_amount_from_tr(matched_tr, browser_id, option_type)
             
+            if trade_type == 'Buy' and matched_tr:    
+                # 如果存在匹配的option_type，获取实际持仓数量
+                return get_position_amount_from_tr(matched_tr, browser_id, option_type)
+            
             # 如果是Buy，需要检查匹配的tr中是否有对应option_type的p标签
             if trade_type == 'Buy' and opposite_tr:
                 log_print(f"[{browser_id}] Buy类型：检查匹配tr中是否包含 '{option_type}' 的p标签...")
@@ -8699,9 +8703,7 @@ def check_position_count(driver, browser_id, trending_part1='', trade_type='Buy'
                         log_print(f"[{browser_id}] ⚠ 未找到对向的tr，返回 -2")
                         return -2
                     
-            if trade_type == 'Buy' and matched_tr:    
-                # 如果存在匹配的option_type，获取实际持仓数量
-                return get_position_amount_from_tr(matched_tr, browser_id, option_type)
+            
             
             # Buy类型但无匹配tr，返回0
             if trade_type == 'Buy':

@@ -230,6 +230,26 @@
           />
         </div>
         <div class="filter-item">
+          <label>余额+Portfolio:</label>
+          <el-select 
+            v-model="filters.balancePlusPortfolioOperator" 
+            placeholder="选择"
+            size="small"
+            style="width: 80px"
+          >
+            <el-option label="大于" value=">" />
+            <el-option label="小于" value="<" />
+          </el-select>
+          <el-input 
+            v-model="filters.balancePlusPortfolioValue" 
+            placeholder="输入数值"
+            clearable
+            size="small"
+            style="width: 120px; margin-left: 8px"
+            type="number"
+          />
+        </div>
+        <div class="filter-item">
           <el-checkbox v-model="filters.showNoAddress" @change="applyFilters">
             显示无地址
           </el-checkbox>
@@ -333,6 +353,9 @@
         </el-button>
         <el-button type="info" size="small" @click="exportFilteredBrowserIds">
           导出筛选结果的浏览器编号
+        </el-button>
+        <el-button type="primary" size="small" @click="exportFilteredToExcel">
+          导出筛选结果为Excel
         </el-button>
       </div>
       <!-- 导出的浏览器编号显示区域 -->
@@ -1582,6 +1605,8 @@ const filters = ref({
   positionSearch: '',  // 新增：仓位搜索
   balanceMin: '',  // 余额最小值
   balanceMax: '',  // 余额最大值
+  balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
+  balancePlusPortfolioValue: '',  // 余额+Portfolio值
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
@@ -1604,6 +1629,8 @@ const activeFilters = ref({
   positionSearch: '',  // 新增：仓位搜索
   balanceMin: null,  // 余额最小值
   balanceMax: null,  // 余额最大值
+  balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
+  balancePlusPortfolioValue: null,  // 余额+Portfolio值
   showNoAddress: false,  // 显示无地址
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
@@ -1678,6 +1705,10 @@ const applyFilters = () => {
   const balanceMin = filters.value.balanceMin ? parseFloat(filters.value.balanceMin) : null
   const balanceMax = filters.value.balanceMax ? parseFloat(filters.value.balanceMax) : null
   
+  // 解析余额+Portfolio值
+  const balancePlusPortfolioValue = filters.value.balancePlusPortfolioValue ? parseFloat(filters.value.balancePlusPortfolioValue) : null
+  const balancePlusPortfolioOperator = filters.value.balancePlusPortfolioOperator || '>'
+  
   // 解析打开时间
   const openTimeValue = filters.value.openTimeValue ? parseInt(filters.value.openTimeValue) : null
   const openTimeOperator = filters.value.openTimeOperator || '>'
@@ -1693,6 +1724,8 @@ const applyFilters = () => {
     positionSearch: filters.value.positionSearch.trim(),
     balanceMin: isNaN(balanceMin) ? null : balanceMin,
     balanceMax: isNaN(balanceMax) ? null : balanceMax,
+    balancePlusPortfolioOperator: balancePlusPortfolioOperator,
+    balancePlusPortfolioValue: isNaN(balancePlusPortfolioValue) ? null : balancePlusPortfolioValue,
     showNoAddress: filters.value.showNoAddress,
     showDuplicateAddress: filters.value.showDuplicateAddress,
     showNoPoints: filters.value.showNoPoints,
@@ -1722,6 +1755,8 @@ const clearFilters = () => {
     positionSearch: '',
     balanceMin: '',
     balanceMax: '',
+    balancePlusPortfolioOperator: '>',
+    balancePlusPortfolioValue: '',
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
@@ -1744,6 +1779,8 @@ const clearFilters = () => {
     positionSearch: '',
     balanceMin: null,
     balanceMax: null,
+    balancePlusPortfolioOperator: '>',
+    balancePlusPortfolioValue: null,
     showNoAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
@@ -1787,6 +1824,7 @@ const filteredTableData = computed(() => {
                     filters.positionSearch ||
                     filters.balanceMin !== null ||
                     filters.balanceMax !== null ||
+                    (filters.balancePlusPortfolioValue !== null && filters.balancePlusPortfolioValue !== undefined) ||
                     filters.showNoAddress ||
                     filters.showDuplicateAddress ||
                     filters.showNoPoints ||
@@ -1844,6 +1882,22 @@ const filteredTableData = computed(() => {
         }
         if (filters.balanceMax !== null && balance > filters.balanceMax) {
           return false
+        }
+      }
+      
+      // 余额+Portfolio筛选
+      if (filters.balancePlusPortfolioValue !== null && filters.balancePlusPortfolioValue !== undefined) {
+        const balance = parseFloat(row.balance) || 0
+        const portfolio = parseFloat(row.c) || 0
+        const total = balance + portfolio
+        if (filters.balancePlusPortfolioOperator === '>') {
+          if (total <= filters.balancePlusPortfolioValue) {
+            return false
+          }
+        } else if (filters.balancePlusPortfolioOperator === '<') {
+          if (total >= filters.balancePlusPortfolioValue) {
+            return false
+          }
         }
       }
       
@@ -5579,6 +5633,124 @@ const exportFilteredBrowserIds = () => {
     ElMessage.error('导出浏览器编号失败: ' + (error.message || '未知错误'))
     exportedBrowserIds.value = ''
     exportedBrowserIdsCount.value = 0
+  }
+}
+
+/**
+ * 格式化时间戳为日期时间字符串
+ */
+const formatTimestampForExcel = (timestamp) => {
+  if (!timestamp) return ''
+  try {
+    const ts = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp
+    const date = new Date(ts)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 导出筛选结果为Excel (CSV格式)
+ */
+const exportFilteredToExcel = () => {
+  try {
+    const filteredData = filteredTableData.value
+    if (filteredData.length === 0) {
+      ElMessage.warning('当前没有筛选结果')
+      return
+    }
+    
+    // 定义列标题
+    const headers = [
+      '序号',
+      '电脑组',
+      '指纹浏览器编号',
+      '平台',
+      '余额',
+      '可用',
+      'Portfolio',
+      '余额+Portfolio',
+      '地址',
+      '钱包地址',
+      '持有仓位',
+      '链上信息',
+      '挂单仓位',
+      '仓位抓取时间',
+      '打开时间',
+      '积分'
+    ]
+    
+    // 转义CSV字段（处理逗号、换行、双引号）
+    const escapeCSVField = (field) => {
+      if (field === null || field === undefined) return ''
+      const str = String(field)
+      // 如果包含逗号、换行或双引号，需要用双引号包裹，并将内部双引号转义
+      if (str.includes(',') || str.includes('\n') || str.includes('\r') || str.includes('"')) {
+        return '"' + str.replace(/"/g, '""') + '"'
+      }
+      return str
+    }
+    
+    // 生成CSV内容
+    const rows = [headers.map(escapeCSVField).join(',')]
+    
+    for (const row of filteredData) {
+      const balance = parseFloat(row.balance) || 0
+      const portfolio = parseFloat(row.c) || 0
+      const balancePlusPortfolio = balance + portfolio
+      
+      const rowData = [
+        row.index || '',
+        row.computeGroup || '',
+        row.fingerprintNo || '',
+        row.platform || '',
+        row.balance || '',
+        row.p || '',
+        row.c || '',
+        balancePlusPortfolio.toFixed(2),
+        row.h || '',
+        row.n || '',
+        row.a || '',
+        getChainInfo(row) || '',
+        row.b || '',
+        formatTimestampForExcel(row.d),
+        formatTimestampForExcel(row.f),
+        row.k || ''
+      ]
+      rows.push(rowData.map(escapeCSVField).join(','))
+    }
+    
+    // 添加BOM以支持中文
+    const BOM = '\uFEFF'
+    const csvContent = BOM + rows.join('\n')
+    
+    // 创建Blob并下载
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    
+    // 生成文件名（包含日期时间）
+    const now = new Date()
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+    link.download = `筛选结果_${dateStr}.csv`
+    
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    
+    ElMessage.success(`已导出 ${filteredData.length} 条数据`)
+  } catch (error) {
+    console.error('导出Excel失败:', error)
+    ElMessage.error('导出Excel失败: ' + (error.message || '未知错误'))
   }
 }
 
