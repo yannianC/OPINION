@@ -341,14 +341,43 @@ def get_mission_info(mission_id):
         return None
 
 
-def update_mission_tp(mission_id, tp5=None, tp8=None, price=None):
+def get_mission_tp9(mission_id):
     """
-    更新任务数据（tp5, tp8, price）
+    获取任务的tp9值（用于Type5任务二的状态同步）
+    
+    Args:
+        mission_id: 任务ID
+        
+    Returns:
+        int: tp9的值，失败或无值返回None
+    """
+    try:
+        url = f"{SERVER_BASE_URL}/mission/status"
+        response = requests.get(url, params={"id": mission_id}, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('code') == 0 and data.get('data') and data['data'].get('mission'):
+                tp9 = data['data']['mission'].get('tp9')
+                if tp9 is not None:
+                    try:
+                        return int(tp9)
+                    except (ValueError, TypeError):
+                        return None
+        return None
+    except Exception as e:
+        log_print(f"[系统] 获取任务tp9失败: {str(e)}")
+        return None
+
+
+def update_mission_tp(mission_id, tp5=None, tp8=None, tp9=None, price=None):
+    """
+    更新任务数据（tp5, tp8, tp9, price）
     
     Args:
         mission_id: 任务ID
         tp5: tp5字段值（可选）
         tp8: tp8字段值（可选）
+        tp9: tp9字段值（可选）- 用于Type5任务二的状态同步
         price: price字段值（可选）
         
     Returns:
@@ -362,6 +391,8 @@ def update_mission_tp(mission_id, tp5=None, tp8=None, price=None):
             payload["tp5"] = tp5
         if tp8 is not None:
             payload["tp8"] = tp8
+        if tp9 is not None:
+            payload["tp9"] = tp9
         if price is not None:
             payload["price"] = price
         
@@ -3223,7 +3254,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         buttons[0].click()  # 点击取消按钮
                                         return False, "[9]本任务正常，但任务二已失败"
                                     
-                                    # 任务一：先通知准备就绪，等待任务二准备就绪
+                                    # 任务一：设置自己状态为5（准备就绪），等待任务二通过tp9通知准备就绪
                                     log_msg = f"[9] 任务一: 设置状态为5（准备就绪）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3236,10 +3267,10 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             return False, True  # 失败，可重试
                                     
-                                    log_msg = f"[9] 任务一: 等待任务二准备就绪（状态6）..."
+                                    log_msg = f"[9] 任务一: 等待任务二准备就绪（tp9=6）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    # 轮询等待状态变为6
+                                    # 轮询等待tp9变为6（任务二通过tp9通知准备就绪）
                                     max_wait_time = 600  # 最多等待10分钟
                                     start_time = time.time()
                                     while True:
@@ -3250,19 +3281,24 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             buttons[0].click()  # 点击取消按钮
                                             return False, "[9]本任务等待任务二超时"
                                         
-                                        status = get_mission_status(mission_id)
-                                        if status == 6:
-                                            log_msg = f"[9] ✓ 任务二已准备就绪（状态6）"
+                                        tp9_value = get_mission_tp9(mission_id)
+                                        current_status = get_mission_status(mission_id)
+                                        log_msg = f"[9] 任务一: 当前状态={current_status}, tp9={tp9_value}"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        
+                                        if tp9_value == 6:
+                                            log_msg = f"[9] ✓ 任务二已准备就绪（tp9=6）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
-                                        elif status == 3:
+                                        elif tp9_value == 3:
                                             log_msg = f"[9] 本任务正常，但任务二已失败"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             buttons[0].click()  # 点击取消按钮
                                             return False, "[9]本任务正常，但任务二已失败"
-                                        elif  status == 9:
+                                        elif current_status == 9:
                                             save_mission_result(mission_id, 5)
                                         time.sleep(10)
                                     
@@ -3296,10 +3332,10 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     log_msg = f"[11] 任务一: 等待20秒后开始轮询检查状态..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    time.sleep(20)  # 先等待20秒
+                                    time.sleep(5)  # 先等待20秒
                                     
-                                    max_poll_time = 60  # 1分钟内
-                                    poll_interval = 20  # 每20秒执行一次
+                                    max_poll_time = 30  # 1分钟内
+                                    poll_interval = 10  # 每20秒执行一次
                                     start_poll_time = time.time()
                                     poll_count = 0
                                     
@@ -3315,8 +3351,8 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
-                                        elif status == 6:
-                                            log_msg = f"[9] 任务一状态变为6，重新设置为7..."
+                                        elif status == 6 or status == 5:
+                                            log_msg = f"[9] 任务一状态变为{status}，重新设置为7..."
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             save_result_success = save_mission_result(mission_id, 7)
@@ -3357,7 +3393,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     return True, True  # 成功
                                     
                                 else:
-                                    # 任务二：等待任务一准备就绪，然后通知任务一可以执行
+                                    # 任务二：等待任务一准备就绪（status=5），然后通过tp9通知任务一
                                     log_msg = f"[9] 任务二: 等待任务一准备就绪（状态5）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3388,22 +3424,22 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         
                                         time.sleep(10)
                                     
-                                    # 更改任务一状态为6（任务二也准备就绪）
-                                    log_msg = f"[9] 任务二: 设置任务一状态为6（任务二就绪）..."
+                                    # 任务二：设置任务一的tp9为6（通知任务一：任务二准备就绪）
+                                    log_msg = f"[9] 任务二: 设置任务一tp9=6（任务二就绪）..."
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    save_result_success = save_mission_result(tp1, 6)
-                                    if not save_result_success:
+                                    tp_update_success = update_mission_tp(tp1, tp9=6)
+                                    if not tp_update_success:
                                         time.sleep(2)
-                                        save_result_success = save_mission_result(tp1, 6)
-                                        if not save_result_success:
+                                        tp_update_success = update_mission_tp(tp1, tp9=6)
+                                        if not tp_update_success:
                                             time.sleep(5)
-                                            save_result_success = save_mission_result(tp1, 6)
-                                            if not save_result_success:
-                                                log_msg = f"[9] ✗ 连续10次设置任务状态失败"
+                                            tp_update_success = update_mission_tp(tp1, tp9=6)
+                                            if not tp_update_success:
+                                                log_msg = f"[9] ✗ 连续3次设置tp9失败"
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                                log_msg = f"[9] 连续10次设置任务状态失败，但已点击确认，请检查网络"
+                                                log_msg = f"[9] 连续3次设置tp9失败，请检查网络"
                                                 send_feishu_custom_message(browser_id, log_msg)
                                                 return False, True  # 失败，可重试
                                     
@@ -3424,7 +3460,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         if tp1_status == 7 or tp1_status == 2 or tp1_status == 8 or tp1_status == 12:
                                             time.sleep(5)
                                             
-                                            log_msg = f"[9] ✓ 任务一已点击确认（状态7）"
+                                            log_msg = f"[9] ✓ 任务一已点击确认（状态{tp1_status}）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                             break
@@ -3437,47 +3473,6 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         
                                         time.sleep(10)
                                     
-                                    # 检查 tp2 是否有值，如果有则等待
-                                    # tp2 = mission.get('tp2')
-                                    # if tp2:
-                                    #     tp2_time = int(tp2) if isinstance(tp2, (int, str)) and str(tp2).isdigit() else 0
-                                    #     wait_time = tp2_time + 80  # tp2的值+120秒
-                                    #     log_msg = f"[OP] 任务二: 检测到tp2={tp2}，需要等待{wait_time}秒..."
-                                    #     log_print(f"[{serial_number}] {log_msg}")
-                                    #     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                        
-                                    #     start_wait_time = time.time()
-                                    #     check_interval = 8  # 每30秒检查一次
-                                    #     last_check_time = start_wait_time
-                                        
-                                    #     while time.time() - start_wait_time < wait_time:
-                                    #         # 每隔30秒检查一次任务一状态
-                                    #         if time.time() - last_check_time >= check_interval:
-                                    #             tp1_status = get_mission_status(tp1)
-                                    #             log_msg = f"[OP] 任务二: 等待期间检查任务一状态: {tp1_status}"
-                                    #             log_print(f"[{serial_number}] {log_msg}")
-                                    #             add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                                
-                                    #             if tp1_status == 3:
-                                    #                 log_msg = f"[OP] 本任务正常，任务一确认失败，点击取消"
-                                    #                 log_print(f"[{serial_number}] {log_msg}")
-                                    #                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    #                 buttons[0].click()  # 点击取消按钮
-                                    #                 return False, "[8]本任务正常，任务一确认失败"
-                                    #             elif tp1_status == 22 or tp1_status == 12:
-                                    #                 log_msg = f"[9]任务一在规定时间内，仍是买一或卖一"
-                                    #                 log_print(f"[{serial_number}] {log_msg}")
-                                    #                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    #                 break
-                                                
-                                    #             last_check_time = time.time()
-                                            
-                                    #         time.sleep(1)  # 每秒检查一次是否到达检查间隔
-                                        
-                                    #     log_msg = f"[OP] ✓ 任务二: 等待{wait_time}秒完成，任务一状态正常，继续流程"
-                                    #     log_print(f"[{serial_number}] {log_msg}")
-                                    #     add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    
                                     # 点击确认按钮
                                     log_msg = f"[11] 任务二: 点击OKX确认按钮..."
                                     log_print(f"[{serial_number}] {log_msg}")
@@ -3487,6 +3482,13 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     update_browser_timestamp_q(browser_id, trendingId)
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                    
+                                    # 任务二：设置任务一的tp9为7（通知任务一：任务二已确认）
+                                    log_msg = f"[11] 任务二: 设置任务一tp9=7（任务二已确认）..."
+                                    log_print(f"[{serial_number}] {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                    update_mission_tp(tp1, tp9=7)
+                                    
                                     log_msg = f"[11] ✓ 任务二提交订单成功"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -4100,34 +4102,35 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     if api_detected_first:
                         log_print(f"[{serial_number}] [{task_label}] ✓ 本地数据也已检测到变化，可以继续执行")
                     
-                    # 更新任务一的状态
+                    # 更新任务状态（任务一修改status，任务二修改tp9）
                     current_status = get_mission_status(target_mission_id)
-                    log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                    current_tp9 = get_mission_tp9(target_mission_id)
+                    log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                     
                     if is_task1:
-                            # 任务一检测到变化
-                                if current_status == 13 or current_status == 14:
-                                    # 任务一状态已经是11，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                            # 任务一检测到变化，通过tp9判断任务二的进度
+                                if current_tp9 == 13 or current_tp9 == 14:
+                                    # 任务二也检测到变化了，设置状态为14
+                                    log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，更改状态为14...")
                                     save_mission_result(target_mission_id, 14)
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一状态为{current_status}，更改为14...")
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] tp9为{current_tp9}，更改状态为14...")
                                 elif current_status is not None:
-                                    # 任务一检测到变化，改为8
+                                    # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                     else:
-                                # 任务二检测到变化
+                                # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
-                                    # 任务一状态已经是8，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
-                                    save_mission_result(target_mission_id, 14)
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一状态为{current_status}，更改为14...")
+                                    # 任务一也检测到变化了，设置tp9为14
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                                    update_mission_tp(target_mission_id, tp9=14)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一状态为{current_status}，设置tp9为14...")
                                 elif current_status is not None and current_status != 2:
-                                    # 任务二检测到变化，改为9
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
-                                    save_mission_result(target_mission_id, 13)
+                                    # 任务二检测到变化，设置tp9为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，设置任务一tp9为13...")
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务二检测到变化，设置tp9为13...")
+                                    update_mission_tp(target_mission_id, tp9=13)
                     
                     break
                 
@@ -4148,29 +4151,30 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         
                         add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 检测到Open Orders数量变化！")
                         
-                        # 更新任务一的状态
+                        # 更新任务状态（任务一修改status，任务二修改tp9）
                         current_status = get_mission_status(target_mission_id)
-                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                        current_tp9 = get_mission_tp9(target_mission_id)
+                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                         if is_task1:
-                            # 任务一检测到变化
-                                if current_status == 13 or current_status == 14:
-                                    # 任务一状态已经是11，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                            # 任务一检测到变化，通过tp9判断任务二的进度
+                                if current_tp9 == 13 or current_tp9 == 14:
+                                    # 任务二也检测到变化了，设置状态为14
+                                    log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，更改状态为14...")
                                     save_mission_result(target_mission_id, 14)
                                 elif current_status is not None:
-                                    # 任务一检测到变化，改为8
+                                    # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                         else:
-                                # 任务二检测到变化
+                                # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
-                                    # 任务一状态已经是8，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
-                                    save_mission_result(target_mission_id, 14)
+                                    # 任务一也检测到变化了，设置tp9为14
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                                    update_mission_tp(target_mission_id, tp9=14)
                                 elif current_status is not None and current_status != 2:
-                                    # 任务二检测到变化，改为9
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
-                                    save_mission_result(target_mission_id, 13)
+                                    # 任务二检测到变化，设置tp9为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，设置任务一tp9为13...")
+                                    update_mission_tp(target_mission_id, tp9=13)
                         hava_order = True
                         time.sleep(check_interval)
                         continue;
@@ -4190,30 +4194,31 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
                             log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
                             add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 检测到Closed Orders时间变化！")
-                            # 更新任务一的状态
+                            # 更新任务状态（任务一修改status，任务二修改tp9）
                             current_status = get_mission_status(target_mission_id)
-                            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                            current_tp9 = get_mission_tp9(target_mission_id)
+                            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                             
                             if is_task1:
-                            # 任务一检测到变化
-                                if current_status == 13 or current_status == 14:
-                                    # 任务一状态已经是11，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                            # 任务一检测到变化，通过tp9判断任务二的进度
+                                if current_tp9 == 13 or current_tp9 == 14:
+                                    # 任务二也检测到变化了，设置状态为14
+                                    log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，更改状态为14...")
                                     save_mission_result(target_mission_id, 14)
                                 elif current_status is not None:
-                                    # 任务一检测到变化，改为8
+                                    # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                             else:
-                                # 任务二检测到变化
+                                # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
-                                    # 任务一状态已经是8，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
-                                    save_mission_result(target_mission_id, 14)
+                                    # 任务一也检测到变化了，设置tp9为14
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                                    update_mission_tp(target_mission_id, tp9=14)
                                 elif current_status is not None and current_status != 2:
-                                    # 任务二检测到变化，改为9
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
-                                    save_mission_result(target_mission_id, 13)
+                                    # 任务二检测到变化，设置tp9为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，设置任务一tp9为13...")
+                                    update_mission_tp(target_mission_id, tp9=13)
                             hava_order = True
                             break
                       # 继续等待，不退出循环
@@ -4279,34 +4284,35 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     if api_detected_first:
                         log_print(f"[{serial_number}] [{task_label}] ✓ 本地数据也已检测到变化，可以继续执行")
                     
-                    # 更新任务一的状态
+                    # 更新任务状态（任务一修改status，任务二修改tp9）
                     current_status = get_mission_status(target_mission_id)
-                    log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                    current_tp9 = get_mission_tp9(target_mission_id)
+                    log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                     
                     if is_task1:
-                            # 任务一检测到变化
-                                if current_status == 13 or current_status == 14:
-                                    # 任务一状态已经是11，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                            # 任务一检测到变化，通过tp9判断任务二的进度
+                                if current_tp9 == 13 or current_tp9 == 14:
+                                    # 任务二也检测到变化了，设置状态为14
+                                    log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，更改状态为14...")
                                     save_mission_result(target_mission_id, 14)
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务一状态为{current_status}，更改为14..")
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] tp9为{current_tp9}，更改状态为14..")
                                 elif current_status is not None:
-                                    # 任务一检测到变化，改为8
+                                    # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务一检测到变化，更改状态为12...")
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
                     else:
-                                # 任务二检测到变化
+                                # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
-                                    # 任务一状态已经是8，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
-                                    save_mission_result(target_mission_id, 14)
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务一检测到变化，更改状态为12...")
+                                    # 任务一也检测到变化了，设置tp9为14
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                                    update_mission_tp(target_mission_id, tp9=14)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一状态为{current_status}，设置tp9为14...")
                                 elif current_status is not None  and current_status != 2:
-                                    # 任务二检测到变化，改为9
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
-                                    save_mission_result(target_mission_id, 13)
-                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  任务二检测到变化，更改任务一状态为13...")
+                                    # 任务二检测到变化，设置tp9为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，设置任务一tp9为13...")
+                                    update_mission_tp(target_mission_id, tp9=13)
+                                    add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务二检测到变化，设置tp9为13...")
                     
                     break
                 
@@ -4325,30 +4331,31 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     if current_open_orders_count > initial_open_orders_count:
                         log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
                         add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  检测到Open Orders数量变化！")
-                        # 更新任务一的状态
+                        # 更新任务状态（任务一修改status，任务二修改tp9）
                         current_status = get_mission_status(target_mission_id)
-                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                        current_tp9 = get_mission_tp9(target_mission_id)
+                        log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                         
                         if is_task1:
-                            # 任务一检测到变化
-                                if current_status == 13 or current_status == 14:
-                                    # 任务一状态已经是11，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                            # 任务一检测到变化，通过tp9判断任务二的进度
+                                if current_tp9 == 13 or current_tp9 == 14:
+                                    # 任务二也检测到变化了，设置状态为14
+                                    log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，更改状态为14...")
                                     save_mission_result(target_mission_id, 14)
                                 elif current_status is not None:
-                                    # 任务一检测到变化，改为8
+                                    # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                         else:
-                                # 任务二检测到变化
+                                # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
-                                    # 任务一状态已经是8，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
-                                    save_mission_result(target_mission_id, 14)
+                                    # 任务一也检测到变化了，设置tp9为14
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                                    update_mission_tp(target_mission_id, tp9=14)
                                 elif current_status is not None and current_status != 2:
-                                    # 任务二检测到变化，改为9
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
-                                    save_mission_result(target_mission_id, 13)
+                                    # 任务二检测到变化，设置tp9为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，设置任务一tp9为13...")
+                                    update_mission_tp(target_mission_id, tp9=13)
                         hava_order = True
                         # 继续等待，不退出循环
                         time.sleep(check_interval)
@@ -4368,30 +4375,31 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
                             log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
                             add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}]  检测到Closed Orders时间变化！")
-                            # 更新任务一的状态
+                            # 更新任务状态（任务一修改status，任务二修改tp9）
                             current_status = get_mission_status(target_mission_id)
-                            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}")
+                            current_tp9 = get_mission_tp9(target_mission_id)
+                            log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                             
                             if is_task1:
-                            # 任务一检测到变化
-                                if current_status == 13 or current_status == 14:
-                                    # 任务一状态已经是11，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
+                            # 任务一检测到变化，通过tp9判断任务二的进度
+                                if current_tp9 == 13 or current_tp9 == 14:
+                                    # 任务二也检测到变化了，设置状态为14
+                                    log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，更改状态为14...")
                                     save_mission_result(target_mission_id, 14)
                                 elif current_status is not None:
-                                    # 任务一检测到变化，改为8
+                                    # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                             else:
-                                # 任务二检测到变化
+                                # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
-                                    # 任务一状态已经是8，改为10
-                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，更改为14...")
-                                    save_mission_result(target_mission_id, 14)
+                                    # 任务一也检测到变化了，设置tp9为14
+                                    log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                                    update_mission_tp(target_mission_id, tp9=14)
                                 elif current_status is not None and current_status != 2:
-                                    # 任务二检测到变化，改为9
-                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，更改任务一状态为13...")
-                                    save_mission_result(target_mission_id, 13)
+                                    # 任务二检测到变化，设置tp9为13
+                                    log_print(f"[{serial_number}] [{task_label}] 任务二检测到变化，设置任务一tp9为13...")
+                                    update_mission_tp(target_mission_id, tp9=13)
                             hava_order = True
                             # 继续等待，不退出循环
                             break
@@ -4418,35 +4426,34 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
         while time.time() - phase2_start_time < phase2_timeout:
             try:
                 elapsed = int(time.time() - phase2_start_time)
-                # 获取任务一的状态
+                # 获取任务一的状态和tp9
                 current_status = get_mission_status(target_mission_id)
+                current_tp9 = get_mission_tp9(target_mission_id)
+                log_print(f"[{serial_number}] [{task_label}] phase2轮询: status={current_status}, tp9={current_tp9}")
+                
                 if is_task1:
-                    if current_status == 14:
+                    # 任务一：通过tp9判断任务二的进度
+                    if current_tp9 == 13 or current_tp9 == 14 or current_tp9 == 2:
+                        # 任务二也检测到变化了，设置状态为14
+                        log_print(f"[{serial_number}] [{task_label}] tp9为{current_tp9}，任务二也检测到变化，设置状态为14...")
+                        save_mission_result(target_mission_id, 14)
                         both_hava_order = True
                         break;
                     elif current_status == 12:
                         continue;
-                    elif current_status == 13:
-                        both_hava_order = True
-                        break;
-                    elif current_status == 11:
-                        both_hava_order = True
-                        break;
-                    elif current_status == 3:
+                    elif current_tp9 == 3:
                         break;
                        
                 else:
-                    if current_status == 14 or current_status == 2:
+                    # 任务二：通过status判断任务一的进度
+                    if current_status == 14 or current_status == 2 or current_status == 12:
                         both_hava_order = True
+                        # 任务一也检测到变化了，设置tp9为14
+                        log_print(f"[{serial_number}] [{task_label}] 任务一状态为{current_status}，任务一也检测到变化，设置tp9为14...")
+                        update_mission_tp(target_mission_id, tp9=14)
                         break;
-                    elif current_status == 13:
+                    elif current_tp9 == 13:
                         continue;
-                    elif current_status == 12:
-                        both_hava_order = True
-                        break;
-                    elif current_status == 8:
-                        both_hava_order = True
-                        break;
                     elif current_status == 3:
                         break;
                 
@@ -16238,18 +16245,15 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             log_print(f"[{browser_id}] ✓ Type {mission_type} 任务结果已记录到内存")
             
             # Type 5任务特殊处理：任务二失败时通知任务一
-            if mission_type == 5 and not success:
+            if mission_type == 5:
                 tp1 = mission.get('tp1')
                 if tp1:
-                    # 这是任务二，失败了，需要获取任务一的原msg并一起发送
-                    log_print(f"[{browser_id}] Type 5 任务二失败，获取任务一信息...")
-                    tp1_info = get_mission_info(tp1)
-                    original_msg = ""
-                    if tp1_info and tp1_info.get('status') != 2:
-                        if tp1_info.get('msg'):
-                            original_msg = tp1_info.get('msg')
-                            log_print(f"[{browser_id}] 获取到任务一原msg: {original_msg}")
-                            save_mission_result(tp1, 3, original_msg)
+                    if not success:
+                        update_mission_tp(tp1, tp9=3)
+                        log_print(f"[{browser_id}] Type 5 任务二失败，设置任务一tp9为3...")
+                    else:
+                        update_mission_tp(tp1, tp9=2)
+                        log_print(f"[{browser_id}] Type 5 任务二成功，设置任务一tp9为2...")
             
             # # Type 5任务完成后发送 fingerprint 监控请求
             # if mission_type == 5 and task_browser_id:
