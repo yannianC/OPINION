@@ -634,13 +634,13 @@
                     <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
                       <div class="server-data-title">挂单数据:</div>
                       <div v-for="(order, idx) in task.serverData.openOrderList" :key="idx" class="server-data-item">
-                        <span>{{ formatOpenOrderMsg(order) }}</span>
+                        <span>{{ formatOpenOrderMsgForDisplay(order) }}</span>
                       </div>
                     </div>
                     <div v-if="task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0" class="server-data-group">
                       <div class="server-data-title">已成交数据:</div>
                       <div v-for="(order, idx) in task.serverData.closedOrderList" :key="idx" class="server-data-item">
-                        <span>{{ formatClosedOrderMsg(order) }}</span>
+                        <span>{{ formatClosedOrderMsgForDisplay(order) }}</span>
                       </div>
                     </div>
                   </div>
@@ -648,11 +648,11 @@
                   <div v-else-if="task.tp7 || (task.tp8 && isTp8TimeValid(task))" class="task-order-info">
                     <div v-if="task.tp7" class="order-info-item">
                       <span class="order-label">挂单数据:</span>
-                      <span class="order-content">{{ task.tp7 }}</span>
+                      <span class="order-content">{{ formatTp7ForDisplay(task.tp7) }}</span>
                     </div>
                     <div v-if="task.tp8 && isTp8TimeValid(task)" class="order-info-item">
                       <span class="order-label">已成交数据:</span>
-                      <span class="order-content">{{ task.tp8 }}</span>
+                      <span class="order-content">{{ formatTp8ForDisplay(task.tp8) }}</span>
                     </div>
                   </div>
                 </div>
@@ -4729,6 +4729,57 @@ export default {
     },
     
     /**
+     * 格式化挂单数据用于显示（买入时将金额进度转换为数量进度）
+     * tp7 价格单位是美元，转换公式：数量 = 金额 / 价格
+     */
+    formatOpenOrderMsgForDisplay(order) {
+      if (!order) return ''
+      const time = this.timestampToBeijingTime(order.ctime)
+      const side = this.formatSide(order.side)
+      const isBuy = order.side === 1 || order.side === '1' || order.side === 'BUY' || order.side === 'buy'
+      const price = parseFloat(order.price) || 0
+      
+      // 计算已成交和总数
+      let filledAmt = order.amt - order.restAmt
+      let totalAmt = order.amt
+      
+      // 买入时，将金额转换为数量显示
+      if (isBuy && price > 0) {
+        filledAmt = filledAmt / price
+        totalAmt = totalAmt / price
+      }
+      
+      const progress = totalAmt > 0 ? ((filledAmt / totalAmt) * 100).toFixed(2) : '0.00'
+      return `创建时间: ${time} | 方向: ${side} | 结果: ${order.outCome} | 价格: ${order.price} | 进度: ${progress}% (${filledAmt.toFixed(2)}/${totalAmt.toFixed(2)})`
+    },
+    
+    /**
+     * 格式化已成交数据用于显示（买入时将金额进度转换为数量进度）
+     * tp8 价格单位是美分，转换公式：数量 = 金额 * 100 / 价格
+     */
+    formatClosedOrderMsgForDisplay(order) {
+      if (!order) return ''
+      const time = order.convertTime ? this.timestampToBeijingTime(order.convertTime) : this.timestampToBeijingTime(order.time, true)
+      const timezoneNote = !order.convertTime ? ' (不同时区)' : ''
+      const side = this.formatSide(order.side)
+      const isBuy = order.side === 1 || order.side === '1' || order.side === 'BUY' || order.side === 'buy'
+      const price = parseFloat(order.price) || 0
+      
+      // 计算已成交和总数
+      let filledAmt = order.fillAmt
+      let totalAmt = order.amt
+      
+      // 买入时，将金额转换为数量显示（价格是美分）
+      if (isBuy && price > 0) {
+        filledAmt = (filledAmt * 100) / price
+        totalAmt = (totalAmt * 100) / price
+      }
+      
+      const progress = totalAmt > 0 ? ((filledAmt / totalAmt) * 100).toFixed(2) : '0.00'
+      return `时间: ${time}${timezoneNote} | 方向: ${side} | 结果: ${order.outCome} | 价格: ${order.price} | 进度: ${progress}% (${filledAmt.toFixed(2)}/${totalAmt.toFixed(2)}) | 状态: ${order.status}`
+    },
+    
+    /**
      * 格式化side值（1=买，2=卖）
      */
     formatSide(side) {
@@ -4737,6 +4788,94 @@ export default {
       if (side === 'BUY' || side === 'buy') return '买'
       if (side === 'SELL' || side === 'sell') return '卖'
       return side
+    },
+    
+    /**
+     * 格式化 tp7 用于显示（买入时将金额进度转换为数量进度）
+     * tp7 价格单位是美元，转换公式：数量 = 金额 / 价格
+     */
+    formatTp7ForDisplay(tp7) {
+      if (!tp7) return ''
+      
+      // 提取方向
+      const sideMatch = tp7.match(/方向:\s*(买|卖)/)
+      const isBuy = sideMatch && sideMatch[1] === '买'
+      
+      if (!isBuy) {
+        return tp7 // 非买入，直接返回原字符串
+      }
+      
+      // 提取价格（美元）
+      const priceMatch = tp7.match(/价格:\s*([\d.]+)/)
+      const price = priceMatch ? parseFloat(priceMatch[1]) : 0
+      
+      if (price <= 0) {
+        return tp7 // 无有效价格，直接返回原字符串
+      }
+      
+      // 提取进度信息 (已成交/总数) - 这里是金额，需要转换为数量
+      const progressMatch = tp7.match(/进度:\s*([\d.]+)%\s*\(([\d.]+)\/([\d.]+)\)/)
+      if (!progressMatch) {
+        return tp7 // 无法解析进度，直接返回原字符串
+      }
+      
+      const percentage = progressMatch[1]
+      let filled = parseFloat(progressMatch[2])
+      let total = parseFloat(progressMatch[3])
+      
+      // 转换为数量：数量 = 金额 / 价格
+      filled = filled / price
+      total = total / price
+      
+      // 替换进度部分
+      return tp7.replace(
+        /进度:\s*[\d.]+%\s*\([\d.]+\/[\d.]+\)/,
+        `进度: ${percentage}% (${filled.toFixed(2)}/${total.toFixed(2)})`
+      )
+    },
+    
+    /**
+     * 格式化 tp8 用于显示（买入时将金额进度转换为数量进度）
+     * tp8 价格单位是美分，转换公式：数量 = 金额 * 100 / 价格
+     */
+    formatTp8ForDisplay(tp8) {
+      if (!tp8) return ''
+      
+      // 提取方向
+      const sideMatch = tp8.match(/方向:\s*(买|卖)/)
+      const isBuy = sideMatch && sideMatch[1] === '买'
+      
+      if (!isBuy) {
+        return tp8 // 非买入，直接返回原字符串
+      }
+      
+      // 提取价格（美分）
+      const priceMatch = tp8.match(/价格:\s*([\d.]+)/)
+      const price = priceMatch ? parseFloat(priceMatch[1]) : 0
+      
+      if (price <= 0) {
+        return tp8 // 无有效价格，直接返回原字符串
+      }
+      
+      // 提取进度信息 (已成交/总数) - 这里是金额，需要转换为数量
+      const progressMatch = tp8.match(/进度:\s*([\d.]+)%\s*\(([\d.]+)\/([\d.]+)\)/)
+      if (!progressMatch) {
+        return tp8 // 无法解析进度，直接返回原字符串
+      }
+      
+      const percentage = progressMatch[1]
+      let filled = parseFloat(progressMatch[2])
+      let total = parseFloat(progressMatch[3])
+      
+      // 转换为数量：数量 = 金额 * 100 / 价格（价格是美分）
+      filled = (filled * 100) / price
+      total = (total * 100) / price
+      
+      // 替换进度部分
+      return tp8.replace(
+        /进度:\s*[\d.]+%\s*\([\d.]+\/[\d.]+\)/,
+        `进度: ${percentage}% (${filled.toFixed(2)}/${total.toFixed(2)})`
+      )
     },
     
     /**
