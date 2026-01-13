@@ -375,7 +375,7 @@ def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=
     
     Args:
         mission_id: 任务ID
-        tp5: tp5字段值（可选）
+        tp5: tp5字段值（可选）- 挂单超过XX小时撤单
         tp6: tp6字段值（可选）- 用于存储使用的IP和代理方式，格式：ip|||http/socks5
         tp8: tp8字段值（可选）
         tp9: tp9字段值（可选）- 用于Type5任务二的状态同步
@@ -3239,12 +3239,12 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 
-                                message_text = f"电脑组{COMPUTER_GROUP}浏览器编号{browser_id} okx按钮被禁用，请复核"
-                                send_feishu_custom_message(browser_id, message_text)
-                                # 停留30秒
-                                log_print(f"[{serial_number}] 停留30秒等待人工检查...")
-                                time.sleep(10)
-                                log_print(f"[{serial_number}] 发送飞书消息: {message_text}")
+                                # message_text = f"电脑组{COMPUTER_GROUP}浏览器编号{browser_id} okx按钮被禁用，请复核"
+                                # send_feishu_custom_message(browser_id, message_text)
+                                # # 停留30秒
+                                # log_print(f"[{serial_number}] 停留30秒等待人工检查...")
+                                time.sleep(3)
+                                # log_print(f"[{serial_number}] 发送飞书消息: {message_text}")
                            
                                 buttons[0].click()  # 点击取消按钮
                                 return False, "[9]okx确认交易按钮不能点击,检查okx是否正常"
@@ -9038,11 +9038,11 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 add_bro_log_entry(bro_log_list, browser_id, "[6]Position按钮未出现，页面加载可能失败")
                 log_print(f"[{browser_id}] ✗ Position按钮未出现，页面加载可能失败")
                 
-                time.sleep(10)
+                time.sleep(3)
                 # 发送飞书消息
-                message_text = f"电脑组{COMPUTER_GROUP}浏览器编号{browser_id} Position按钮未出现。请人工复核"
-                log_print(f"[{browser_id}] 发送飞书消息: {message_text}")
-                send_feishu_custom_message(browser_id, message_text)
+                # message_text = f"电脑组{COMPUTER_GROUP}浏览器编号{browser_id} Position按钮未出现。请人工复核"
+                # log_print(f"[{browser_id}] 发送飞书消息: {message_text}")
+                # send_feishu_custom_message(browser_id, message_text)
                 return False, "[4]Position按钮未出现，页面加载可能失败", None
         
         time.sleep(10)

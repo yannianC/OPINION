@@ -129,6 +129,140 @@
             {{ loading ? '查询中...' : '时间区间查询' }}
           </button>
         </div>
+        
+        <!-- 预警功能 -->
+        <div class="alert-monitor-form">
+          <div class="alert-monitor-container">
+            <!-- 左侧：设置列 -->
+            <div class="alert-settings-column">
+              <div class="form-group">
+                <label class="toggle-switch">
+                  <input 
+                    type="checkbox" 
+                    v-model="alertMonitorEnabled" 
+                    @change="onAlertMonitorToggle"
+                  />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">启用预警监控</span>
+                </label>
+              </div>
+              <div v-if="alertMonitorEnabled" class="alert-settings">
+                <div class="form-group">
+                  <label>成功率阈值 (%):</label>
+                  <input 
+                    v-model.number="alertSuccessRateThreshold" 
+                    type="number" 
+                    class="alert-input"
+                    min="0"
+                    max="100"
+                    step="1"
+                    @change="saveAlertMonitorSettings"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>连续失败数阈值:</label>
+                  <input 
+                    v-model.number="alertConsecutiveFailThreshold" 
+                    type="number" 
+                    class="alert-input"
+                    min="1"
+                    step="1"
+                    @change="saveAlertMonitorSettings"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>间隔时间 (分钟):</label>
+                  <input 
+                    v-model.number="alertMonitorInterval" 
+                    type="number" 
+                    class="alert-input"
+                    min="1"
+                    step="1"
+                    @change="onIntervalChange"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>结束时间 (分钟前):</label>
+                  <input 
+                    v-model.number="alertEndTimeMinutes" 
+                    type="number" 
+                    class="alert-input"
+                    min="1"
+                    step="1"
+                    @change="saveAlertMonitorSettings"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>开始时间 (分钟前):</label>
+                  <input 
+                    v-model.number="alertStartTimeMinutes" 
+                    type="number" 
+                    class="alert-input"
+                    min="1"
+                    step="1"
+                    @change="saveAlertMonitorSettings"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>监控状态:</label>
+                  <span :class="['monitor-status', alertMonitorRunning ? 'running' : 'stopped']">
+                    {{ alertMonitorRunning ? '运行中' : '已停止' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 右侧：统计信息列 -->
+            <div v-if="alertMonitorEnabled" class="alert-stats-column">
+              <div class="form-group">
+                <label>上次检测:</label>
+                <span v-if="alertLastCheckTime" class="last-check-time">
+                  {{ formatTime(alertLastCheckTime) }}
+                </span>
+                <span v-else class="last-check-time no-data">暂无数据</span>
+              </div>
+              <div v-if="Object.keys(alertGroupStats).length > 0" class="group-stats-text">
+                <div class="stats-description">（{{alertStartTimeMinutes}}分钟前至{{alertEndTimeMinutes}}分钟前，电脑组，总个数，成功率，连续失败次数）</div>
+                <!-- 正常的电脑组 -->
+                <template v-if="normalGroupStats.length > 0">
+                  <template v-for="(item, index) in normalGroupStats" :key="item.groupNo">
+                    <span class="group-stats-item">
+                      <span class="group-no">电脑组 {{ item.groupNo }}</span>，
+                      <span class="total-count">{{ item.stats.totalCount }}</span>，
+                      <span class="success-rate">
+                        {{ item.stats.successRate.toFixed(2) }}%
+                      </span>，
+                      <span class="consecutive-fail">
+                        {{ item.stats.consecutiveFail }}
+                      </span>；
+                    </span>
+                  </template>
+                </template>
+                <br>
+
+                <!-- 异常的电脑组（成功率过低或连续失败任务过多） -->
+                <template v-if="alertGroupStatsList.length > 0">
+                  <br v-if="normalGroupStats.length > 0" />
+                  <template v-for="(item, index) in alertGroupStatsList" :key="item.groupNo">
+                    <span class="group-stats-item alert">
+                      <span class="group-no">电脑组 {{ item.groupNo }}</span>，
+                      <span class="total-count">{{ item.stats.totalCount }}</span>，
+                      <span :class="['success-rate', item.stats.successRate < alertSuccessRateThreshold ? 'warning' : '']">
+                        {{ item.stats.successRate.toFixed(2) }}%
+                      </span>，
+                      <span :class="['consecutive-fail', item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'warning' : '']">
+                        {{ item.stats.consecutiveFail }}
+                      </span>；
+                    </span>
+                  </template>
+                </template>
+              </div>
+              <div v-else class="no-stats-data">
+                暂无统计数据
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- 结果区域 -->
@@ -1227,7 +1361,18 @@ export default {
       taskGroupHeights: [],  // 每个任务组的高度
       taskGroupRefs: [],  // 任务组DOM引用
       estimatedGroupHeight: 200,  // 估算的任务组高度
-      visibleBuffer: 3  // 可见区域缓冲区（上下各显示3个）
+      visibleBuffer: 3,  // 可见区域缓冲区（上下各显示3个）
+      // 预警监控相关
+      alertMonitorEnabled: false,  // 预警监控开关
+      alertMonitorTimer: null,  // 预警监控定时器
+      alertMonitorRunning: false,  // 预警监控是否正在运行
+      alertSuccessRateThreshold: 50,  // 成功率阈值（%）
+      alertConsecutiveFailThreshold: 3,  // 连续失败数阈值
+      alertMonitorInterval: 5,  // 间隔时间（分钟），默认5分钟
+      alertEndTimeMinutes: 20,  // 预警查询结束时间（分钟前），默认20分钟前
+      alertStartTimeMinutes: 80,  // 预警查询开始时间（分钟前），默认80分钟前（即1小时20分钟前）
+      alertLastCheckTime: null,  // 上次检查时间
+      alertGroupStats: {}  // 每个电脑组的统计信息 {groupNo: {successRate, consecutiveFail, totalCount, successCount}}
     }
   },
   mounted() {
@@ -1237,6 +1382,9 @@ export default {
     // 加载隐藏类型1和类型2的设置
     this.loadHideType1Type2Setting()
     
+    // 加载预警监控设置
+    this.loadAlertMonitorSettings()
+    
     // 解析URL参数
     this.parseUrlParams()
     
@@ -1244,6 +1392,15 @@ export default {
     if (this.selectedGroup !== 'default') {
       this.loadGroupConfig(this.selectedGroup)
     }
+    
+    // 如果预警监控已启用，启动定时器
+    if (this.alertMonitorEnabled) {
+      this.startAlertMonitor()
+    }
+  },
+  beforeDestroy() {
+    // 清理预警监控定时器
+    this.stopAlertMonitor()
   },
   computed: {
     // 过滤后的结果
@@ -1448,6 +1605,44 @@ export default {
       })
       
       return stats
+    },
+    
+    // 预警监控：正常的电脑组（成功率 >= 阈值 且 连续失败数 < 阈值）
+    normalGroupStats() {
+      const result = []
+      for (const [groupNo, stats] of Object.entries(this.alertGroupStats)) {
+        const isNormal = stats.successRate >= this.alertSuccessRateThreshold && 
+                        stats.consecutiveFail < this.alertConsecutiveFailThreshold
+        if (isNormal) {
+          result.push({ groupNo, stats })
+        }
+      }
+      // 按电脑组编号排序
+      result.sort((a, b) => {
+        const numA = parseInt(a.groupNo) || 0
+        const numB = parseInt(b.groupNo) || 0
+        return numA - numB
+      })
+      return result
+    },
+    
+    // 预警监控：异常的电脑组（成功率 < 阈值 或 连续失败数 >= 阈值）
+    alertGroupStatsList() {
+      const result = []
+      for (const [groupNo, stats] of Object.entries(this.alertGroupStats)) {
+        const isAlert = stats.successRate < this.alertSuccessRateThreshold || 
+                       stats.consecutiveFail >= this.alertConsecutiveFailThreshold
+        if (isAlert) {
+          result.push({ groupNo, stats })
+        }
+      }
+      // 按电脑组编号排序
+      result.sort((a, b) => {
+        const numA = parseInt(a.groupNo) || 0
+        const numB = parseInt(b.groupNo) || 0
+        return numA - numB
+      })
+      return result
     },
     
     // 过滤后的仓位详细统计（过滤掉完全一致的主题）
@@ -2774,6 +2969,413 @@ export default {
         localStorage.setItem('taskAnomaly_hideType1Type2', String(this.hideType1Type2))
       } catch (e) {
         console.error('保存隐藏类型1和类型2设置失败:', e)
+      }
+    },
+    
+    // 加载预警监控设置
+    loadAlertMonitorSettings() {
+      try {
+        const enabled = localStorage.getItem('taskAnomaly_alertMonitorEnabled')
+        if (enabled !== null) {
+          this.alertMonitorEnabled = enabled === 'true'
+        }
+        
+        const successRate = localStorage.getItem('taskAnomaly_alertSuccessRateThreshold')
+        if (successRate !== null) {
+          this.alertSuccessRateThreshold = parseFloat(successRate) || 50
+        }
+        
+        const consecutiveFail = localStorage.getItem('taskAnomaly_alertConsecutiveFailThreshold')
+        if (consecutiveFail !== null) {
+          this.alertConsecutiveFailThreshold = parseInt(consecutiveFail) || 3
+        }
+        
+        const interval = localStorage.getItem('taskAnomaly_alertMonitorInterval')
+        if (interval !== null) {
+          this.alertMonitorInterval = parseInt(interval) || 5
+        }
+        
+        const endTimeMinutes = localStorage.getItem('taskAnomaly_alertEndTimeMinutes')
+        if (endTimeMinutes !== null) {
+          this.alertEndTimeMinutes = parseInt(endTimeMinutes) || 20
+        }
+        
+        const startTimeMinutes = localStorage.getItem('taskAnomaly_alertStartTimeMinutes')
+        if (startTimeMinutes !== null) {
+          this.alertStartTimeMinutes = parseInt(startTimeMinutes) || 80
+        }
+      } catch (e) {
+        console.error('加载预警监控设置失败:', e)
+      }
+    },
+    
+    // 保存预警监控设置
+    saveAlertMonitorSettings() {
+      try {
+        localStorage.setItem('taskAnomaly_alertMonitorEnabled', String(this.alertMonitorEnabled))
+        localStorage.setItem('taskAnomaly_alertSuccessRateThreshold', String(this.alertSuccessRateThreshold))
+        localStorage.setItem('taskAnomaly_alertConsecutiveFailThreshold', String(this.alertConsecutiveFailThreshold))
+        localStorage.setItem('taskAnomaly_alertMonitorInterval', String(this.alertMonitorInterval))
+        localStorage.setItem('taskAnomaly_alertEndTimeMinutes', String(this.alertEndTimeMinutes))
+        localStorage.setItem('taskAnomaly_alertStartTimeMinutes', String(this.alertStartTimeMinutes))
+      } catch (e) {
+        console.error('保存预警监控设置失败:', e)
+      }
+    },
+    
+    // 预警监控开关切换
+    onAlertMonitorToggle() {
+      this.saveAlertMonitorSettings()
+      if (this.alertMonitorEnabled) {
+        this.startAlertMonitor()
+      } else {
+        this.stopAlertMonitor()
+      }
+    },
+    
+    // 启动预警监控
+    startAlertMonitor() {
+      // 如果已经在运行，先停止旧的定时器
+      if (this.alertMonitorTimer) {
+        clearInterval(this.alertMonitorTimer)
+        this.alertMonitorTimer = null
+      }
+      
+      this.alertMonitorRunning = true
+      // 立即执行一次检查
+      this.performAlertCheck()
+      
+      // 使用配置的间隔时间执行检查
+      const intervalMs = this.alertMonitorInterval * 60 * 1000 // 转换为毫秒
+      this.alertMonitorTimer = setInterval(() => {
+        this.performAlertCheck()
+      }, intervalMs)
+    },
+    
+    // 间隔时间改变时的处理
+    onIntervalChange() {
+      this.saveAlertMonitorSettings()
+      // 如果监控正在运行，重新启动以应用新的间隔时间
+      if (this.alertMonitorRunning) {
+        this.startAlertMonitor()
+      }
+    },
+    
+    // 停止预警监控
+    stopAlertMonitor() {
+      if (this.alertMonitorTimer) {
+        clearInterval(this.alertMonitorTimer)
+        this.alertMonitorTimer = null
+      }
+      this.alertMonitorRunning = false
+    },
+    
+    // 执行预警检查
+    async performAlertCheck() {
+      try {
+        this.alertLastCheckTime = new Date()
+        
+        // 计算时间范围：使用配置的时间参数
+        const now = new Date()
+        const endTime = new Date(now.getTime() - this.alertEndTimeMinutes * 60 * 1000) // 结束时间（分钟前）
+        const startTime = new Date(now.getTime() - this.alertStartTimeMinutes * 60 * 1000) // 开始时间（分钟前）
+        
+        // 查询模式1的任务（type=5）
+        const params = {
+          type: 5, // 模式1对应type=5
+          startTime: startTime.getTime(),
+          endTime: endTime.getTime()
+        }
+        
+        const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/listPart', {
+          params: params
+        })
+        
+        if (response.data && response.data.code === 0) {
+          const missions = response.data.data.list || []
+          
+          // 如果启用了预警监控，将查询结果更新到查询结果区域
+          if (this.alertMonitorEnabled && missions.length > 0) {
+            // 设置查询模式为模式1
+            this.queryMode = 1
+            // 设置查询时间范围（用于显示）- 转换为 datetime-local 格式
+            const formatDateTimeForInput = (date) => {
+              const y = date.getFullYear()
+              const m = String(date.getMonth() + 1).padStart(2, '0')
+              const d = String(date.getDate()).padStart(2, '0')
+              const h = String(date.getHours()).padStart(2, '0')
+              const min = String(date.getMinutes()).padStart(2, '0')
+              return `${y}-${m}-${d}T${h}:${min}`
+            }
+            this.query.startTime = formatDateTimeForInput(startTime)
+            this.query.endTime = formatDateTimeForInput(endTime)
+            // 处理数据并更新查询结果
+            this.processMode1Data(missions)
+            // 标记已查询
+            this.hasQueried = true
+            
+            // 获取账户配置缓存，用于计算仓位抓取时间
+            await this.fetchAccountConfigCache()
+            
+            // 对模式1的失败组应用分析更新
+            this.applyAnalysisStatusUpdateToAllGroups()
+            
+            // 自动对 4-2、4-3、4-4 类型执行获取服务器数据
+            this.autoFetchServerDataForProblemGroups()
+          }
+          
+          // 按电脑组分组任务
+          const tasksByGroup = {}
+          missions.forEach(item => {
+            const mission = item.mission
+            const groupNo = mission.groupNo
+            
+            if (!groupNo) return
+            
+            if (!tasksByGroup[groupNo]) {
+              tasksByGroup[groupNo] = []
+            }
+            
+            tasksByGroup[groupNo].push({
+              id: mission.id,
+              groupNo: groupNo,
+              status: mission.status,
+              createTime: mission.createTime,
+              updateTime: mission.updateTime
+            })
+          })
+          
+          // 重置统计信息
+          const newGroupStats = {}
+          
+          // 对每个电脑组进行统计和检查
+          for (const groupNo in tasksByGroup) {
+            const tasks = tasksByGroup[groupNo]
+            
+            // 按时间排序（从新到旧）
+            tasks.sort((a, b) => {
+              const timeA = new Date(a.updateTime || a.createTime).getTime()
+              const timeB = new Date(b.updateTime || b.createTime).getTime()
+              return timeB - timeA
+            })
+            
+            // 统计成功数（status == 2）
+            const totalCount = tasks.length
+            const successCount = tasks.filter(t => t.status === 2).length
+            const successRate = totalCount > 0 ? (successCount / totalCount) * 100 : 0
+            
+            // 检查连续失败数（从最新的任务开始）
+            // 统计 status 不等于 2 的连续任务个数
+            let consecutiveFailCount = 0
+            for (const task of tasks) {
+              if (task.status === 2) {
+                // 遇到成功的任务（status === 2），停止计数
+                break
+              } else {
+                // 失败的任务（status !== 2），计数加1
+                consecutiveFailCount++
+              }
+            }
+            
+            // 保存统计信息
+            newGroupStats[groupNo] = {
+              successRate: successRate,
+              consecutiveFail: consecutiveFailCount,
+              totalCount: totalCount,
+              successCount: successCount
+            }
+            
+            // 检查成功率报警（已禁用飞书消息发送）
+            if (successRate < this.alertSuccessRateThreshold) {
+              console.log(`【任务预警】电脑组 ${groupNo} 成功率过低 - 成功率: ${successRate.toFixed(2)}% (阈值: ${this.alertSuccessRateThreshold}%)`)
+              // 不再发送飞书消息
+            }
+            
+            // 检查连续失败报警（已禁用飞书消息发送）
+            if (consecutiveFailCount >= this.alertConsecutiveFailThreshold) {
+              console.log(`【任务预警】电脑组 ${groupNo} 连续失败任务过多 - 连续失败数: ${consecutiveFailCount} (阈值: ${this.alertConsecutiveFailThreshold})`)
+              // 不再发送飞书消息
+            }
+          }
+          
+          // 更新统计信息（使用Vue的响应式更新）
+          this.alertGroupStats = newGroupStats
+        }
+      } catch (error) {
+        console.error('预警检查失败:', error)
+      }
+    },
+    
+    
+    // 格式化时间（用于显示上次检查时间）
+    formatTime(date) {
+      const h = String(date.getHours()).padStart(2, '0')
+      const m = String(date.getMinutes()).padStart(2, '0')
+      const s = String(date.getSeconds()).padStart(2, '0')
+      return `${h}:${m}:${s}`
+    },
+    
+    // 发送飞书消息（使用fetch API避免CORS问题）
+    async sendFeishuMessage(messageText) {
+      try {
+        // 先获取 tenant_access_token
+        const tokenUrl = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+        const tokenPayload = {
+          "app_id": "cli_a6010dfab0b1500b",
+          "app_secret": "vwSJuuQLiPelg3QJQeQmrcTpSa2uQrW0"
+        }
+        
+        let tenant_access_token = null
+        const tokenMaxRetries = 3
+        
+        for (let tokenAttempt = 0; tokenAttempt < tokenMaxRetries; tokenAttempt++) {
+          try {
+            // 使用fetch API，设置mode为cors
+            const tokenResponse = await fetch(tokenUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(tokenPayload),
+              mode: 'cors',
+              credentials: 'omit'
+            })
+            
+            if (!tokenResponse.ok) {
+              throw new Error(`HTTP error! status: ${tokenResponse.status}`)
+            }
+            
+            const tokenData = await tokenResponse.json()
+            
+            if (tokenData.code !== 0) {
+              console.error(`获取飞书访问令牌失败: ${tokenData.msg}`)
+              if (tokenAttempt < tokenMaxRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000))
+              }
+              continue
+            }
+            
+            tenant_access_token = tokenData.tenant_access_token
+            if (!tenant_access_token) {
+              console.error('获取飞书访问令牌失败: 响应中未找到 tenant_access_token')
+              if (tokenAttempt < tokenMaxRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000))
+              }
+              continue
+            }
+            
+            break
+          } catch (e) {
+            // 检测CORS错误
+            const isCorsError = e.message && (
+              e.message.includes('CORS') || 
+              e.message.includes('cors') ||
+              e.message.includes('Access-Control-Allow-Origin') ||
+              e.message.includes('Failed to fetch') ||
+              e.name === 'TypeError'
+            )
+            
+            if (isCorsError) {
+              console.error('飞书API不支持跨域请求，需要通过后端代理发送消息')
+              if (tokenAttempt === 0) {
+                // 只在第一次尝试时提示，避免重复提示
+                this.showToast('飞书消息发送失败：浏览器跨域限制，需要后端代理支持', 'warning')
+              }
+              return false
+            }
+            console.error(`获取飞书访问令牌时发生错误: ${e.message}`)
+            if (tokenAttempt < tokenMaxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 2000))
+            }
+          }
+        }
+        
+        if (!tenant_access_token) {
+          console.error('获取飞书访问令牌失败，已达到最大重试次数')
+          return false
+        }
+        
+        // 使用获取到的 token 发送消息
+        const url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+        const headers = {
+          'Authorization': `Bearer ${tenant_access_token}`,
+          'Content-Type': 'application/json; charset=utf-8'
+        }
+        
+        const payload = {
+          "receive_id": "oc_ce7c949dd73b573a28063d76f0d02e24",
+          "msg_type": "text",
+          "content": JSON.stringify({"text": messageText})
+        }
+        
+        const maxRetries = 3
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify(payload),
+              mode: 'cors',
+              credentials: 'omit'
+            })
+            
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`)
+            }
+            
+            const data = await response.json()
+            
+            if (data.code === 0) {
+              console.log('飞书消息发送成功')
+              return true
+            } else {
+              console.error(`飞书消息发送失败: ${data.msg}`)
+              if (attempt < maxRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000))
+              }
+            }
+          } catch (e) {
+            // 检测CORS错误
+            const isCorsError = e.message && (
+              e.message.includes('CORS') || 
+              e.message.includes('cors') ||
+              e.message.includes('Access-Control-Allow-Origin') ||
+              e.message.includes('Failed to fetch') ||
+              e.name === 'TypeError'
+            )
+            
+            if (isCorsError) {
+              console.error('飞书API不支持跨域请求，需要通过后端代理发送消息')
+              if (attempt === 0) {
+                // 只在第一次尝试时提示，避免重复提示
+                this.showToast('飞书消息发送失败：浏览器跨域限制，需要后端代理支持', 'warning')
+              }
+              return false
+            }
+            console.error(`发送飞书消息时发生错误: ${e.message}`)
+            if (attempt < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 2000))
+            }
+          }
+        }
+        
+        console.error('飞书消息发送失败，已达到最大重试次数')
+        return false
+      } catch (error) {
+        console.error('发送飞书消息异常:', error)
+        // 检测CORS错误
+        const isCorsError = error.message && (
+          error.message.includes('CORS') || 
+          error.message.includes('cors') ||
+          error.message.includes('Access-Control-Allow-Origin') ||
+          error.message.includes('Failed to fetch') ||
+          error.name === 'TypeError'
+        )
+        
+        if (isCorsError) {
+          this.showToast('飞书消息发送失败：浏览器跨域限制，需要后端代理支持', 'warning')
+        }
+        return false
       }
     },
     
@@ -5420,6 +6022,191 @@ export default {
   cursor: not-allowed;
 }
 
+/* 预警监控表单 */
+.alert-monitor-form {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.alert-monitor-container {
+  display: flex;
+  gap: 30px;
+  align-items: flex-start;
+}
+
+.alert-settings-column {
+  flex: 0 0 auto;
+  min-width: 350px;
+  width: 350px;
+}
+
+.alert-settings-column .form-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.alert-settings-column .form-group:first-child {
+  margin-bottom: 20px;
+}
+
+.alert-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
+.alert-settings .form-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px;
+  margin-bottom: 0;
+  flex-wrap: nowrap !important;
+  width: 100%;
+}
+
+.alert-settings .form-group label {
+  min-width: 140px;
+  max-width: 140px;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  font-weight: 500;
+  color: #555;
+  white-space: nowrap;
+  text-align: right;
+  padding-right: 10px;
+  margin-bottom: 0 !important;
+}
+
+.alert-input {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  width: 100px;
+  flex-shrink: 0;
+  transition: border-color 0.3s;
+}
+
+.alert-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.monitor-status {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.monitor-status.running {
+  background: #d4edda;
+  color: #155724;
+}
+
+.monitor-status.stopped {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.alert-stats-column {
+  flex: 1 1 auto;
+  min-width: 300px;
+}
+
+.alert-stats-column .form-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.alert-stats-column .form-group label {
+  min-width: 80px;
+  font-weight: 500;
+  color: #555;
+}
+
+.last-check-time {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+.last-check-time.no-data {
+  color: #999;
+  font-weight: normal;
+}
+
+.group-stats-text {
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  padding: 15px;
+  font-size: 14px;
+  line-height: 1.8;
+  word-wrap: break-word;
+}
+
+.stats-description {
+  color: #666;
+  font-size: 13px;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.group-stats-item {
+  display: inline;
+}
+
+.group-no {
+  font-weight: 500;
+  color: #333;
+}
+
+.total-count {
+  color: #333;
+  font-weight: 500;
+}
+
+.success-rate {
+  color: #27ae60;
+  font-weight: 500;
+}
+
+.success-rate.warning {
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+.consecutive-fail {
+  color: #333;
+  font-weight: 500;
+}
+
+.consecutive-fail.warning {
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+.no-stats-data {
+  padding: 20px;
+  text-align: center;
+  color: #999;
+  font-size: 14px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
 /* 结果区域 */
 .results-section {
   background: white;
@@ -7223,6 +8010,33 @@ export default {
   }
   
   .summary-content {
+    font-size: 13px;
+  }
+  
+  .alert-monitor-container {
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .alert-settings-column {
+    min-width: 100%;
+    width: 100%;
+  }
+  
+  .alert-settings .form-group {
+    flex-wrap: nowrap !important;
+  }
+  
+  .alert-settings .form-group label {
+    min-width: 120px !important;
+    max-width: 120px !important;
+  }
+  
+  .alert-stats-column {
+    min-width: 100%;
+  }
+  
+  .group-stats-text {
     font-size: 13px;
   }
 }
