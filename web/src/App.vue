@@ -295,6 +295,19 @@
                 @blur="saveHedgeSettings"
               />
             </div>
+            <div class="trending-filter">
+              <label>挂单超过XX小时撤单:</label>
+              <input 
+                v-model.number="hedgeMode.openOrderCancelHours" 
+                type="number" 
+                class="filter-input" 
+                min="1"
+                placeholder="72"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+                style="width: 80px;"
+              />
+            </div>
           </div>
           
           <!-- 深度差相关设置 -->
@@ -550,6 +563,42 @@
                   @blur="saveHedgeSettings"
                   style="width: 100px;"
                 />
+              </div>
+            </div>
+          </div>
+          
+          <!-- 总任务数控制设置 -->
+          <div class="total-task-control-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
+            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">总任务数控制设置</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+              <div class="trending-filter">
+                <label style="color: #000;">总任务数阈值:</label>
+                <input 
+                  v-model.number="hedgeMode.maxTotalTaskCount" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  placeholder="999"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 120px;"
+                />
+                <span style="margin-left: 8px; color: #666; font-size: 0.875rem;">超过此值不分任务</span>
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">休息时间(分钟):</label>
+                <input 
+                  v-model.number="hedgeMode.waitIntervalMinutes" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  step="1"
+                  placeholder="2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 120px;"
+                />
+                <span style="margin-left: 8px; color: #666; font-size: 0.875rem;">超过阈值时休息</span>
               </div>
             </div>
           </div>
@@ -3200,7 +3249,11 @@ const hedgeMode = reactive({
   priceVolatility02To2Max: 10, // 深度差阈值3-阈值2的价格波动最大值%
   // 兼容旧配置（保留，但不再使用）
   enableDepthDiffParams: false,  // 是否在mission/add请求中传递tp2和tp4参数（默认关闭）- 已废弃，使用各区间独立开关
-  maxPriceVolatility: 10  // 先挂方价格最大波动（买卖深度差的百分比）- 已废弃，使用各区间独立配置
+  maxPriceVolatility: 10,  // 先挂方价格最大波动（买卖深度差的百分比）- 已废弃，使用各区间独立配置
+  // 总任务数控制设置
+  maxTotalTaskCount: 999,  // 总任务数阈值，超过此值不分任务（默认999）
+  waitIntervalMinutes: 2,  // 等待间隔（分钟），超过阈值时每隔此时间检查一次（默认2分钟）
+  openOrderCancelHours: 72  // 挂单超过XX小时撤单（默认72小时）
 })
 
 // 交易费查询
@@ -7475,6 +7528,93 @@ const getTaskStatusText = (status) => {
 }
 
 /**
+ * 获取总任务数（总计个数）
+ * 参考browser_status.html的逻辑
+ */
+const getTotalTaskCount = async () => {
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/hedge/groupStatusV2')
+    const result = response.data
+
+    if (result.code === 0 && result.data) {
+      // 固定的电脑组列表（与browser_status.html保持一致）
+      const fixedGroupIds = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,901,902,903,904,905,906,907,908,909,910,911,912,913,914,915,916,921,922,923,924,925,926,927]
+      
+      const detail = result.data.detail || {}
+      let totalSum = 0
+
+      // 遍历每个固定的电脑组
+      fixedGroupIds.forEach(groupId => {
+        // 将组号转换为字符串和数字，以便匹配数据
+        const groupIdStr = String(groupId)
+        const groupIdNum = Number(groupId)
+        
+        // 尝试从detail中获取浏览器列表（支持字符串和数字key）
+        const browserList = detail[groupIdStr] || detail[groupIdNum] || []
+        
+        // 累加总计个数
+        totalSum += browserList.length
+      })
+
+      return totalSum
+    } else {
+      console.error('获取总任务数失败:', result.msg || '无数据')
+      return null
+    }
+  } catch (error) {
+    console.error('获取总任务数异常:', error)
+    return null
+  }
+}
+
+/**
+ * 等待总任务数降至阈值以下
+ * 在30分钟内每隔waitIntervalMinutes分钟检查一次
+ * 如果总任务数小于阈值或30分钟结束，返回true继续执行；否则返回false
+ */
+const waitForTaskCountBelowThreshold = async () => {
+  const maxWaitTime = 30 * 60 * 1000 // 30分钟（毫秒）
+  const waitIntervalMs = hedgeMode.waitIntervalMinutes * 60 * 1000 // 等待间隔（毫秒）
+  const threshold = hedgeMode.maxTotalTaskCount
+
+  const startTime = Date.now()
+  console.log(`开始检查总任务数，阈值: ${threshold}，等待间隔: ${hedgeMode.waitIntervalMinutes}分钟，最大等待时间: 30分钟`)
+
+  while (Date.now() - startTime < maxWaitTime) {
+    // 检查是否还在运行状态
+    if (!autoHedgeRunning.value) {
+      console.log('自动对冲已停止，退出等待')
+      return false
+    }
+
+    const totalCount = await getTotalTaskCount()
+    
+    if (totalCount === null) {
+      // 获取失败，继续等待
+      console.log('获取总任务数失败，继续等待...')
+    } else {
+      console.log(`当前总任务数: ${totalCount}，阈值: ${threshold}`)
+      
+      if (totalCount < threshold) {
+        console.log(`总任务数(${totalCount})已低于阈值(${threshold})，继续执行`)
+        return true
+      } else {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000 / 60)
+        const remaining = 30 - elapsed
+        console.log(`总任务数(${totalCount})超过阈值(${threshold})，等待${hedgeMode.waitIntervalMinutes}分钟后再次检查（剩余最大等待时间: ${remaining}分钟）`)
+      }
+    }
+
+    // 等待指定间隔时间
+    await new Promise(resolve => setTimeout(resolve, waitIntervalMs))
+  }
+
+  // 30分钟时间到，继续执行
+  console.log('已等待30分钟，继续执行后续流程')
+  return true
+}
+
+/**
  * 执行所有主题（不分批模式）
  */
 const executeAllTopics = async () => {
@@ -7593,6 +7733,17 @@ const moveToNextBatch = () => {
  */
 const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   console.log(`执行批次任务，包含 ${batchConfigs.length} 个主题`)
+  
+  // 检查总任务数是否超过阈值
+  const totalCount = await getTotalTaskCount()
+  if (totalCount !== null && totalCount >= hedgeMode.maxTotalTaskCount) {
+    console.log(`总任务数(${totalCount})超过阈值(${hedgeMode.maxTotalTaskCount})，等待任务数降低...`)
+    const shouldContinue = await waitForTaskCountBelowThreshold()
+    if (!shouldContinue) {
+      console.log('等待过程中自动对冲已停止，退出执行')
+      return
+    }
+  }
   
   // 检查是否可以下发新的对冲任务
   const canStartNewHedge = !(hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0)
@@ -10686,6 +10837,11 @@ const saveHedgeSettings = () => {
       priceVolatility02To2Max: hedgeMode.priceVolatility02To2Max,
       // 兼容旧配置（保留但不使用）
       maxPriceVolatility: hedgeMode.maxPriceVolatility,
+      // 总任务数控制设置
+      maxTotalTaskCount: hedgeMode.maxTotalTaskCount,
+      waitIntervalMinutes: hedgeMode.waitIntervalMinutes,
+      // 挂单超时撤单设置
+      openOrderCancelHours: hedgeMode.openOrderCancelHours,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -10899,6 +11055,19 @@ const loadHedgeSettings = () => {
     // 兼容旧配置
     if (settings.maxPriceVolatility !== undefined) {
       hedgeMode.maxPriceVolatility = settings.maxPriceVolatility
+    }
+    
+    // 总任务数控制设置
+    if (settings.maxTotalTaskCount !== undefined) {
+      hedgeMode.maxTotalTaskCount = settings.maxTotalTaskCount
+    }
+    if (settings.waitIntervalMinutes !== undefined) {
+      hedgeMode.waitIntervalMinutes = settings.waitIntervalMinutes
+    }
+    
+    // 挂单超时撤单设置
+    if (settings.openOrderCancelHours !== undefined) {
+      hedgeMode.openOrderCancelHours = settings.openOrderCancelHours
     }
     
     // yes数量大于、模式选择、账户选择
@@ -11279,7 +11448,8 @@ const executeHedgeTask = async (config, hedgeData) => {
       psSide: firstPsSide,
       amt: floorToTwoDecimals(firstShare),  // 先挂方数量，保留2位小数向下取整
       price: hedgeData.currentPrice,
-      tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
+      tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
+      tp5: hedgeMode.openOrderCancelHours  // 挂单超过XX小时撤单
     }
     
     // 根据深度差范围和开关决定是否传递tp2和tp4
@@ -11631,7 +11801,8 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       amt: floorToTwoDecimals(secondShare),  // 后挂方数量，保留2位小数向下取整
       price: parseFloat(secondPrice),
       tp1: firstTaskId,  // 任务二需要传递任务一的ID
-      tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
+      tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
+      tp5: hedgeMode.openOrderCancelHours  // 挂单超过XX小时撤单
     }
     
     // 根据深度差范围和开关决定是否传递tp2和tp4
@@ -11894,7 +12065,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           psSide: firstPsSide,
           amt: share,
           price: taskPrice,
-          tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
+          tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
+          tp5: hedgeMode.openOrderCancelHours  // 挂单超过XX小时撤单
         }
         
         // 根据深度差范围和开关决定是否传递tp2和tp4
@@ -12092,7 +12264,8 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
             psSide: secondPsSide,
             amt: share,
             price: taskPrice,
-            tp3: isFastMode.value ? "1" : "0"  // 根据模式设置tp3
+            tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
+            tp5: hedgeMode.openOrderCancelHours  // 挂单超过XX小时撤单
             // 不再需要tp1
           }
           

@@ -369,13 +369,14 @@ def get_mission_tp9(mission_id):
         return None
 
 
-def update_mission_tp(mission_id, tp5=None, tp8=None, tp9=None, price=None):
+def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=None):
     """
-    更新任务数据（tp5, tp8, tp9, price）
+    更新任务数据（tp5, tp6, tp8, tp9, price）
     
     Args:
         mission_id: 任务ID
         tp5: tp5字段值（可选）
+        tp6: tp6字段值（可选）- 用于存储使用的IP和代理方式，格式：ip|||http/socks5
         tp8: tp8字段值（可选）
         tp9: tp9字段值（可选）- 用于Type5任务二的状态同步
         price: price字段值（可选）
@@ -389,6 +390,8 @@ def update_mission_tp(mission_id, tp5=None, tp8=None, tp9=None, price=None):
         
         if tp5 is not None:
             payload["tp5"] = tp5
+        if tp6 is not None:
+            payload["tp6"] = tp6
         if tp8 is not None:
             payload["tp8"] = tp8
         if tp9 is not None:
@@ -542,7 +545,7 @@ MAX_RETRIES = 3
 
 
 
-def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
+def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0, mission_id=None):
     """
     获取浏览器新代理配置的接口（从IP状态列表中按延迟选择）
     
@@ -553,6 +556,7 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
             - 0: 获取延迟最低的IP及代理方式
             - 1: 获取延迟第二低的IP及代理方式
             - 依次类推
+        mission_id: 任务ID（可选），如果传入则会将选择的IP和代理方式更新到任务的tp6字段
         
     Returns:
         dict: 代理配置信息，包含 ip, port, username, password, type, delay，失败返回None
@@ -736,6 +740,23 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
                 
                 selected_option = available_options[ip_index]
                 log_print(f"[{browser_id}] ✓ 选择第{ip_index+1}个配置: IP={selected_option['ip']}, Port={selected_option['port']}, Type={selected_option['type']}, Delay={selected_option['delay']}")
+                
+                # 如果传入了mission_id，更新任务的tp6字段为 ip|||代理方式
+                if mission_id is not None:
+                    # 先获取任务的当前信息，检查tp6是否已有值
+                    mission_info = get_mission_info(mission_id)
+                    new_tp6_value = f"{selected_option['ip']}|||{selected_option['type']}"
+                    
+                    if mission_info and mission_info.get('tp6'):
+                        # 如果tp6已有值，用分号拼接新值
+                        existing_tp6 = mission_info.get('tp6')
+                        tp6_value = f"{existing_tp6};{new_tp6_value}"
+                    else:
+                        # 如果tp6没有值，直接使用新值
+                        tp6_value = new_tp6_value
+                    
+                    update_mission_tp(mission_id, tp6=tp6_value)
+                    log_print(f"[{browser_id}] ✓ 已更新任务{mission_id}的tp6为: {tp6_value}")
                 
                 return selected_option
                     
@@ -991,7 +1012,7 @@ def get_ip_list_by_number(browser_id, timeout=15):
         return None
 
 
-def get_ip_for_retry(browser_id, retry_count, timeout=15):
+def get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=None):
     """
     根据重试次数获取代理配置（支持多次IP更换）
     
@@ -999,6 +1020,7 @@ def get_ip_for_retry(browser_id, retry_count, timeout=15):
         browser_id: 浏览器编号
         retry_count: 当前重试次数（0=第一次更换，1=第二次更换，以此类推）
         timeout: 请求超时时间（秒），默认15秒
+        mission_id: 任务ID（可选），如果传入则会将选择的IP和代理方式更新到任务的tp6字段
         
     Returns:
         dict: 代理配置信息，包含 ip, port, username, password, type, delay，失败返回None
@@ -1007,7 +1029,7 @@ def get_ip_for_retry(browser_id, retry_count, timeout=15):
     ip_index = retry_count + 1
     log_print(f"[{browser_id}] 第{retry_count+1}次IP更换：使用 ip_index={ip_index}...")
     
-    proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=ip_index)
+    proxy_config = get_new_ip_for_browser(browser_id, timeout=timeout, ip_index=ip_index, mission_id=mission_id)
     
     if proxy_config:
         log_print(f"[{browser_id}] ✓ 第{retry_count+1}次IP更换成功: IP={proxy_config['ip']}, Port={proxy_config['port']}, Type={proxy_config['type']}, Delay={proxy_config.get('delay')}")
@@ -1017,13 +1039,14 @@ def get_ip_for_retry(browser_id, retry_count, timeout=15):
         return None
 
 
-def try_update_ip_before_start(browser_id, bro_log_list=None):
+def try_update_ip_before_start(browser_id, bro_log_list=None, mission_id=None):
     """
     在打开浏览器前尝试获取并更新代理配置（8秒超时）
     
     Args:
         browser_id: 浏览器编号
         bro_log_list: 浏览器日志列表（可选），如果提供则记录日志
+        mission_id: 任务ID（可选），如果传入则会将选择的IP和代理方式更新到任务的tp6字段
         
     Returns:
         tuple: (bool, str, int) - (是否成功更新了代理配置, 当前使用的IP, 延迟)
@@ -1034,7 +1057,7 @@ def try_update_ip_before_start(browser_id, bro_log_list=None):
         if bro_log_list is not None:
             add_bro_log_entry(bro_log_list, browser_id, "尝试在打开浏览器前获取新代理配置...")
         
-        proxy_config = get_new_ip_for_browser(browser_id, timeout=8, ip_index=0)
+        proxy_config = get_new_ip_for_browser(browser_id, timeout=8, ip_index=0, mission_id=mission_id)
         
         if proxy_config:
             current_ip = proxy_config.get("ip")
@@ -3439,7 +3462,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                                 log_msg = f"[9] ✗ 连续3次设置tp9失败"
                                                 log_print(f"[{serial_number}] {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                                log_msg = f"[9] 连续3次设置tp9失败，请检查网络"
+                                                log_msg = f"[9] [{serial_number}] 连续3次设置tp9失败，请检查网络"
                                                 send_feishu_custom_message(browser_id, log_msg)
                                                 return False, True  # 失败，可重试
                                     
@@ -7046,14 +7069,14 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     log_print(f"[{browser_id}] 使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                 else:
                     log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                    _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
+                    _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id)
                     if current_ip:
                         add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             else:
                 # 浏览器未运行，需要更新IP并启动浏览器
                 add_bro_log_entry(bro_log_list, browser_id, "[0]步骤2: 检查IP并更新代理")
                 log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id)
     
                 
                 # 3. 启动浏览器
@@ -7083,7 +7106,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list)
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id)
                 if current_ip:
                     add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             
@@ -7228,7 +7251,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     # 2. 根据重试次数获取IP
                     add_bro_log_entry(bro_log_list, browser_id, f"[1]步骤2: 更换IP（第{retry_count+1}次）")
                     log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                     
                     if not proxy_config:
                         add_bro_log_entry(bro_log_list, browser_id, "[1]获取新IP失败")
@@ -7300,7 +7323,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 # 2. 根据重试次数获取IP
                 add_bro_log_entry(bro_log_list, browser_id, f"[2]步骤2: 更换IP（第{retry_count+1}次）")
                 log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                 
                 if not proxy_config:
                     add_bro_log_entry(bro_log_list, browser_id, "[2]获取新IP失败")
@@ -7424,7 +7447,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 # 2. 根据重试次数获取IP
                 add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤2: 更换IP（第{retry_count+1}次）")
                 log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                 
                 if not proxy_config:
                     add_bro_log_entry(bro_log_list, browser_id, "[8]获取新IP失败")
@@ -11304,6 +11327,238 @@ def cancel_opinion_open_orders_by_tp1(driver, serial_number, tp1):
         return False
 
 
+def cancel_expired_open_orders(driver, serial_number, tp5, current_ip=None):
+    """
+    根据 tp5 值（小时数）取消超时的 Open Orders 订单
+    
+    Args:
+        driver: Selenium WebDriver对象
+        serial_number: 浏览器序列号
+        tp5: 挂单超过XX小时撤单的阈值（小时）
+        current_ip: 当前IP地址，用于时区转换（可选）
+        
+    Returns:
+        bool: 是否成功完成操作
+    """
+    from datetime import datetime
+    import pytz
+    
+    if not tp5:
+        log_print(f"[{serial_number}] [OP] tp5 为空，跳过超时撤单检查")
+        return True
+    
+    try:
+        tp5_hours = float(tp5)
+    except (ValueError, TypeError):
+        log_print(f"[{serial_number}] [OP] tp5 值无效: {tp5}，跳过超时撤单检查")
+        return True
+    
+    log_print(f"[{serial_number}] [OP] 开始超时撤单检查，tp5={tp5_hours}小时")
+    
+    # 预先查询时区（如果需要）
+    cached_timezone = None
+    if serial_number not in BEIJING_TIME_PAGE_TIMEZONE:
+        if current_ip:
+            cached_timezone = get_timezone_from_ip(current_ip)
+            if cached_timezone:
+                log_print(f"[{serial_number}] [OP] ✓ 预先查询时区成功: {cached_timezone}")
+    
+    try:
+        # 先点击 Open Orders 按钮
+        log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Open Orders 按钮...")
+        open_orders_clicked = False
+        start_time = time.time()
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                for button in buttons:
+                    if button.text.strip() == "Open Orders":
+                        button.click()
+                        log_print(f"[{serial_number}] [OP] ✓ 已点击 Open Orders 按钮")
+                        open_orders_clicked = True
+                        break
+                if open_orders_clicked:
+                    break
+                time.sleep(0.5)
+            except:
+                time.sleep(0.5)
+        
+        if not open_orders_clicked:
+            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮")
+            return False
+        
+        time.sleep(5)
+        
+        # 循环检查并取消超时订单
+        while True:
+            try:
+                # 获取 open_orders_div
+                log_print(f"[{serial_number}] [OP] 获取 Open Orders 内容区域...")
+                open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                
+                # 检查是否有 "No data yet"
+                all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
+                has_no_data = False
+                for p in all_p_tags_in_div:
+                    if "No data yet" in p.text:
+                        log_print(f"[{serial_number}] [OP] ✓ 发现 'No data yet'，无超时订单需要取消")
+                        has_no_data = True
+                        break
+                
+                if has_no_data:
+                    break
+                
+                # 获取 tbody 和 tr 列表
+                try:
+                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                    tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                except:
+                    log_print(f"[{serial_number}] [OP] ⚠ 未找到 tbody 或 tr 列表")
+                    break
+                
+                if len(tr_list) == 0:
+                    log_print(f"[{serial_number}] [OP] ⚠ tr 列表为空")
+                    break
+                
+                # 解析 tr 列表，找到超时订单
+                current_main_title = ""
+                found_expired_order = False
+                i = 0
+                tr_count = len(tr_list)
+                
+                # 获取当前北京时间
+                beijing_tz = pytz.timezone('Asia/Shanghai')
+                now_beijing = datetime.now(beijing_tz)
+                now_timestamp = int(now_beijing.timestamp() * 1000)  # 毫秒
+                
+                while i < tr_count:
+                    try:
+                        # 重新获取tr元素
+                        try:
+                            open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                            tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                            current_tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                            
+                            if len(current_tr_list) != tr_count:
+                                log_print(f"[{serial_number}] [OP] ⚠ tr数量从 {tr_count} 变为 {len(current_tr_list)}，更新计数")
+                                tr_count = len(current_tr_list)
+                                if i >= tr_count:
+                                    break
+                            
+                            tr = current_tr_list[i]
+                        except Exception as e:
+                            log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr元素失败: {str(e)}，跳过当前tr")
+                            i += 1
+                            continue
+                        
+                        td_list = tr.find_elements(By.TAG_NAME, "td")
+                        
+                        # 如果只有一个td，这是主标题
+                        if len(td_list) == 1:
+                            main_title_text = get_p_tag_text_from_element(td_list[0])
+                            if main_title_text:
+                                current_main_title = main_title_text.strip()
+                            i += 1
+                            continue
+                        
+                        # 如果有多个td（至少8个，因为第8个是时间），这是挂单仓位信息
+                        if len(td_list) >= 8 and current_main_title:
+                            # 第8个td: 时间（如 Jan 05, 2026 13:30:43）
+                            eighth_td_text = get_p_tag_text_from_element(td_list[7]).strip()
+                            
+                            if eighth_td_text:
+                                # 转换时间为北京时间戳
+                                original_time, convert_time_timestamp = convert_time_to_beijing(
+                                    eighth_td_text, current_ip, serial_number=serial_number, cached_timezone=cached_timezone
+                                )
+                                
+                                if convert_time_timestamp > 0:
+                                    # 计算时间差（小时）
+                                    time_diff_hours = (now_timestamp - convert_time_timestamp) / (1000 * 60 * 60)
+                                    log_print(f"[{serial_number}] [OP] 订单时间: {eighth_td_text} -> 北京时间戳: {convert_time_timestamp}, 距今: {time_diff_hours:.2f}小时")
+                                    
+                                    if time_diff_hours > tp5_hours:
+                                        log_print(f"[{serial_number}] [OP] ⚠ 发现超时订单（{time_diff_hours:.2f}小时 > {tp5_hours}小时），开始取消...")
+                                        
+                                        # 找到最后一个td，点击svg
+                                        last_td = td_list[-1]
+                                        svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
+                                        
+                                        if svg_elements and len(svg_elements) > 0:
+                                            log_print(f"[{serial_number}] [OP] 点击取消按钮...")
+                                            svg_elements[0].click()
+                                            time.sleep(2)
+                                            
+                                            # 在10秒内找到"Confirm"按钮并点击
+                                            log_print(f"[{serial_number}] [OP] 查找Confirm按钮...")
+                                            confirm_found = False
+                                            confirm_timeout = 10
+                                            confirm_start_time = time.time()
+                                            
+                                            while time.time() - confirm_start_time < confirm_timeout:
+                                                try:
+                                                    all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                                                    for btn in all_buttons:
+                                                        if btn.text.strip() == "Confirm":
+                                                            log_print(f"[{serial_number}] [OP] ✓ 找到Confirm按钮，点击...")
+                                                            btn.click()
+                                                            confirm_found = True
+                                                            break
+                                                    
+                                                    if confirm_found:
+                                                        break
+                                                    
+                                                    time.sleep(0.5)
+                                                except Exception as e:
+                                                    log_print(f"[{serial_number}] [OP] ⚠ 查找Confirm按钮时出错: {str(e)}")
+                                                    time.sleep(0.5)
+                                            
+                                            if not confirm_found:
+                                                log_print(f"[{serial_number}] [OP] ⚠ 10秒内未找到Confirm按钮")
+                                                return False
+                                            
+                                            found_expired_order = True
+                                            log_print(f"[{serial_number}] [OP] ✓ 超时订单取消成功，等待5秒后重新检查...")
+                                            time.sleep(5)
+                                            break  # 取消一个后重新获取列表
+                                        else:
+                                            log_print(f"[{serial_number}] [OP] ⚠ 未找到svg元素")
+                        
+                        i += 1
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "stale element" in error_msg.lower():
+                            log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签时遇到stale element，重新获取tr列表...")
+                            try:
+                                open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
+                                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                                tr_count = len(tr_list)
+                                continue
+                            except Exception as e2:
+                                log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr列表失败: {str(e2)}，跳过当前tr")
+                                i += 1
+                        else:
+                            log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {error_msg}")
+                            i += 1
+                
+                if not found_expired_order:
+                    log_print(f"[{serial_number}] [OP] ✓ 没有更多超时订单需要取消")
+                    break
+                    
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 获取 Open Orders 数据失败: {str(e)}")
+                break
+        
+        log_print(f"[{serial_number}] [OP] ✓ 超时撤单检查完成")
+        return True
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [OP] ✗ 超时撤单操作失败: {str(e)}")
+        return False
+
+
 def click_opinion_open_orders_and_get_data(driver, serial_number):
     """
     点击 Opinion Trade Open Orders 按钮并获取数据，返回标准格式字符串（支持分页）
@@ -14496,7 +14751,7 @@ def process_type3_mission(task_data):
 # Type 2 任务处理函数
 # ============================================================================
 
-def collect_position_data(driver, browser_id, exchange_name, tp3, available_balance=None):
+def collect_position_data(driver, browser_id, exchange_name, tp3, available_balance=None, tp5=None):
     """
     收集持仓和订单数据（可在 type=1 任务后调用）
     
@@ -14506,6 +14761,7 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
         exchange_name: 交易所名称
         tp3: 任务参数
         available_balance: 可用余额（可选）
+        tp5: 挂单超过XX小时撤单（可选）
         
     Returns:
         tuple: (success, collected_data)
@@ -14730,6 +14986,11 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                             else:
                                 log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Position 数据获取失败")
                                 return False,""
+                    
+                    # 如果 tp5 有值，先执行超时撤单检查
+                    if tp5:
+                        log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}执行超时撤单检查 (tp5={tp5}小时)...")
+                        cancel_expired_open_orders(driver, browser_id, tp5, current_ip)
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}点击 Open Orders 并获取数据...")
                     open_orders_data, need_retry_orders = click_opinion_open_orders_and_get_data(driver, browser_id)
@@ -15109,7 +15370,7 @@ def process_type2_mission(task_data, retry_count=0):
         current_delay = None
         if retry_count == 0:
             log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
-            _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+            _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id)
         else:
             log_print(f"[{browser_id}] 步骤1: 跳过IP更新（重试中，IP已在重试流程中更新）...")
             # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
@@ -15120,7 +15381,7 @@ def process_type2_mission(task_data, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id)
         
         # 确保 current_ip 和 current_delay 已初始化（用于后续代码使用）
         if current_ip is None:
@@ -15174,7 +15435,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 2. 根据重试次数获取IP
                         log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -15228,7 +15489,7 @@ def process_type2_mission(task_data, retry_count=0):
                     
                     # 2. 根据重试次数获取IP
                     log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                     
                     if not proxy_config:
                         log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -15315,7 +15576,7 @@ def process_type2_mission(task_data, retry_count=0):
                             
                             # 2. 根据重试次数获取IP
                             log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                            proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                            proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                             
                             if not proxy_config:
                                 log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -15393,7 +15654,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 2. 根据重试次数获取IP
                         log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -15453,7 +15714,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 2. 根据重试次数获取IP
                         log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -15628,7 +15889,12 @@ def process_type2_mission(task_data, retry_count=0):
                     if mission_type == 4:
                         log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7.5: Type 4 任务 - 执行取消订单操作...")
                         tp1 = mission.get('tp1')
-                        if tp1:
+                        tp5 = mission.get('tp5')
+                         # 如果 tp5 有值，先执行超时撤单检查
+                        if tp5:
+                            log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}执行超时撤单检查 (tp5={tp5}小时)...")
+                            cancel_expired_open_orders(driver, browser_id, tp5, current_ip)
+                        elif tp1:
                             log_print(f"[{browser_id}] Type 4 任务 tp1 值: {tp1}")
                             cancel_success = cancel_opinion_open_orders_by_tp1(driver, browser_id, tp1)
                             if not cancel_success:
@@ -15950,7 +16216,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 2. 根据重试次数获取IP
                         log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15)
+                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                         
                         if not proxy_config:
                             log_print(f"[{browser_id}] ✗ 获取新IP失败")
@@ -16267,7 +16533,8 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 try:
                     log_print(f"[{browser_id}] 开始额外收集持仓数据（不影响任务结果）...")
                     tp3 = mission.get('tp3')
-                    collect_position_data(driver, task_browser_id, task_exchange_name, tp3, available_balance)
+                    tp5 = mission.get('tp5')
+                    collect_position_data(driver, task_browser_id, task_exchange_name, tp3, available_balance, tp5)
                     log_print(f"[{browser_id}] ✓ 额外持仓数据收集完成")
                 except Exception as e:
                     log_print(f"[{browser_id}] ⚠ 额外数据收集异常: {str(e)}，但不影响任务")

@@ -177,14 +177,13 @@
         <thead>
             <tr>
                 <th>链接</th>
-                <th>控制钱变少到多少<br>(逗号分隔区间)</th>
-                <th>单次金额(u)<br>(逗号分隔区间)</th>
-                <th>报错金额(u)</th>
-                <th>每次交易间隔(秒)<br>(逗号分隔区间)</th>
-                <th>钱变多账户</th>
-                <th>挂单价格(钱变多)</th>
-                <th>钱变少账户</th>
-                <th>挂单价格(钱变少)</th>
+                <th>单次开单<br>(逗号分隔区间)</th>
+                <th>差额上限</th>
+                <th>间隔(秒)<br>(逗号分隔区间)</th>
+                <th>添加账号及最大添加到资产<br>(格式：2383,3000;1283,4000)</th>
+                <th>减少账号及最小减少到资产<br>(格式：260,20000)</th>
+                <th>钱变多账户挂单低价买入价格</th>
+                <th>钱变多账户挂单高价卖出价格</th>
                 <th>添加时间</th>
                 <th>状态</th>
                 <th>msg</th>
@@ -254,71 +253,67 @@
             const td1 = document.createElement('td');
             td1.innerHTML = '<input type="text" class="input-url" placeholder="https://www.asterdex.com/en/trade/pro/spot/CSXHUSDT" value="' + (data?.url || '') + '">';
             
-            // 控制钱变少到多少
+            // 单次开单
             const td2 = document.createElement('td');
-            td2.innerHTML = '<input type="text" class="input-endBalanceArea" placeholder="30,50" value="' + (data?.endBalanceArea || '') + '">';
+            td2.innerHTML = '<input type="text" class="input-singleOrderArea" placeholder="100,200" value="' + (data?.singleOrderArea || '') + '">';
             
-            // 单次金额
+            // 差额上限
             const td3 = document.createElement('td');
-            td3.innerHTML = '<input type="text" class="input-singleOrderArea" placeholder="100,200" value="' + (data?.singleOrderArea || '') + '">';
+            td3.innerHTML = '<input type="text" class="input-maxFailSum" placeholder="10" value="' + (data?.maxFailSum || '') + '">';
             
-            // 报错金额
+            // 间隔
             const td4 = document.createElement('td');
-            td4.innerHTML = '<input type="text" class="input-maxFailSum" placeholder="10" value="' + (data?.maxFailSum || '') + '">';
+            td4.innerHTML = '<input type="text" class="input-intervalArea" placeholder="3,5" value="' + (data?.intervalArea || '') + '">';
             
-            // 每次交易间隔
+            // 添加账号及最大添加到资产
             const td5 = document.createElement('td');
-            td5.innerHTML = '<input type="text" class="input-intervalArea" placeholder="3,5" value="' + (data?.intervalArea || '') + '">';
+            td5.innerHTML = '<input type="text" class="input-addBalanceAccountStr" placeholder="2383,3000;1283,4000" value="' + (data?.addBalanceAccountStr || '') + '">';
             
-            // 钱变多账户
+            // 减少账号及最小减少到资产
             const td6 = document.createElement('td');
-            td6.innerHTML = '<input type="text" class="input-addBalanceAccount" placeholder="2" value="' + (data?.addBalanceAccount || '') + '">';
+            td6.innerHTML = '<input type="text" class="input-reduceBalanceAccountStr" placeholder="260,20000" value="' + (data?.reduceBalanceAccountStr || '') + '">';
             
-            // 挂单价格(钱变多)
+            // 钱变多账户挂单低价买入价格
             const td7 = document.createElement('td');
-            td7.innerHTML = '<input type="number" step="0.000001" class="input-addBalanceOrderPrice" placeholder="0.004000" value="' + (data?.addBalanceOrderPrice || '') + '">';
+            td7.innerHTML = '<input type="number" step="0.000001" class="input-addBalanceOrderBuyPrice" placeholder="0.004000" value="' + (data?.addBalanceOrderBuyPrice || '') + '">';
             
-            // 钱变少账户
+            // 钱变多账户挂单高价卖出价格
             const td8 = document.createElement('td');
-            td8.innerHTML = '<input type="text" class="input-reduceBalanceAccountList" placeholder="1324,1445,1446,1447" value="' + (data?.reduceBalanceAccountList || '') + '">';
-            
-            // 挂单价格(钱变少)
-            const td9 = document.createElement('td');
-            td9.innerHTML = '<input type="number" step="0.000001" class="input-reduceBalanceOrderPrice" placeholder="0.000520" value="' + (data?.reduceBalanceOrderPrice || '') + '">';
+            td8.innerHTML = '<input type="number" step="0.000001" class="input-addBalanceOrderSellPrice" placeholder="0.004500" value="' + (data?.addBalanceOrderSellPrice || '') + '">';
             
             // 添加时间
-            const td10 = document.createElement('td');
-            td10.className = 'add-time';
-            td10.textContent = data?.addTime ? formatTimestamp(data.addTime) : '';
+            const td9 = document.createElement('td');
+            td9.className = 'add-time';
+            td9.textContent = data?.addTime ? formatTimestamp(data.addTime) : '';
             // 存储原始addTime到行的dataset中，用于停止订单
             if (data?.addTime) {
                 tr.dataset.addTime = data.addTime;
             }
             
             // 状态
-            const td11 = document.createElement('td');
-            td11.className = 'status';
+            const td10 = document.createElement('td');
+            td10.className = 'status';
             const status = data?.status;
             if (status === 0) {
-                td11.textContent = '运行中';
-                td11.className += ' status-running';
+                td10.textContent = '运行中';
+                td10.className += ' status-running';
             } else if (status === 2) {
-                td11.textContent = '暂停';
-                td11.className += ' status-paused';
+                td10.textContent = '暂停';
+                td10.className += ' status-paused';
             } else {
-                td11.textContent = '';
+                td10.textContent = '';
             }
             
             // msg
-            const td12 = document.createElement('td');
-            td12.className = 'msg';
+            const td11 = document.createElement('td');
+            td11.className = 'msg';
             if (data?.msg) {
-                td12.textContent = data.msg;
-                td12.className += ' msg-error';
+                td11.textContent = data.msg;
+                td11.className += ' msg-error';
             }
             
             // 操作
-            const td13 = document.createElement('td');
+            const td12 = document.createElement('td');
             const canExecute = !status || status === 2; // 无状态或暂停状态可以执行
             const btn = document.createElement('button');
             btn.className = 'btn action-btn';
@@ -333,7 +328,7 @@
                 btn.onclick = () => executeOrder(rowId);
                 btn.disabled = !canExecute;
             }
-            td13.appendChild(btn);
+            td12.appendChild(btn);
             
             tr.appendChild(td1);
             tr.appendChild(td2);
@@ -347,7 +342,6 @@
             tr.appendChild(td10);
             tr.appendChild(td11);
             tr.appendChild(td12);
-            tr.appendChild(td13);
             
             // 如果状态是运行中，禁用所有输入框
             if (status === 0) {
@@ -400,18 +394,17 @@
             
             // 获取输入值
             const url = row.querySelector('.input-url').value.trim();
-            const endBalanceArea = row.querySelector('.input-endBalanceArea').value.trim();
             const singleOrderArea = row.querySelector('.input-singleOrderArea').value.trim();
             const maxFailSum = row.querySelector('.input-maxFailSum').value.trim();
             const intervalArea = row.querySelector('.input-intervalArea').value.trim();
-            const addBalanceAccount = row.querySelector('.input-addBalanceAccount').value.trim();
-            const addBalanceOrderPrice = parseFloat(row.querySelector('.input-addBalanceOrderPrice').value);
-            const reduceBalanceAccountList = row.querySelector('.input-reduceBalanceAccountList').value.trim();
-            const reduceBalanceOrderPrice = parseFloat(row.querySelector('.input-reduceBalanceOrderPrice').value);
+            const addBalanceAccountStr = row.querySelector('.input-addBalanceAccountStr').value.trim();
+            const reduceBalanceAccountStr = row.querySelector('.input-reduceBalanceAccountStr').value.trim();
+            const addBalanceOrderBuyPrice = parseFloat(row.querySelector('.input-addBalanceOrderBuyPrice').value);
+            const addBalanceOrderSellPrice = parseFloat(row.querySelector('.input-addBalanceOrderSellPrice').value);
             
             // 验证必填字段
-            if (!url || !endBalanceArea || !singleOrderArea || !maxFailSum || !intervalArea || 
-                !addBalanceAccount || !addBalanceOrderPrice || !reduceBalanceAccountList || !reduceBalanceOrderPrice) {
+            if (!url || !singleOrderArea || !maxFailSum || !intervalArea || 
+                !addBalanceAccountStr || !addBalanceOrderBuyPrice || !addBalanceOrderSellPrice || !reduceBalanceAccountStr) {
                 alert('请填写所有必填字段');
                 return;
             }
@@ -419,14 +412,13 @@
             // 格式化数据（直接使用用户输入的值，用逗号分隔区间）
             const requestData = {
                 url: url,
-                endBalanceArea: endBalanceArea,
                 singleOrderArea: singleOrderArea,
                 maxFailSum: parseFloat(maxFailSum),
                 intervalArea: intervalArea,
-                addBalanceAccount: addBalanceAccount,
-                addBalanceOrderPrice: addBalanceOrderPrice,
-                reduceBalanceAccountList: reduceBalanceAccountList,
-                reduceBalanceOrderPrice: reduceBalanceOrderPrice
+                addBalanceAccountStr: addBalanceAccountStr,
+                reduceBalanceAccountStr: reduceBalanceAccountStr,
+                addBalanceOrderBuyPrice: addBalanceOrderBuyPrice,
+                addBalanceOrderSellPrice: addBalanceOrderSellPrice
             };
             
             try {
@@ -456,7 +448,7 @@
         
         // 生成行的唯一标识（基于数据内容）
         function generateRowKey(data) {
-            return data.url + '|' + data.addBalanceAccount + '|' + data.reduceBalanceAccountList;
+            return data.url + '|' + (data.addBalanceAccountStr || '') + '|' + (data.reduceBalanceAccountStr || '');
         }
         
         // 加载订单列表
@@ -517,14 +509,13 @@
         // 根据数据更新行
         function updateRowFromData(row, data) {
             row.querySelector('.input-url').value = data.url || '';
-            row.querySelector('.input-endBalanceArea').value = data.endBalanceArea || '';
             row.querySelector('.input-singleOrderArea').value = data.singleOrderArea || '';
             row.querySelector('.input-maxFailSum').value = data.maxFailSum || '';
             row.querySelector('.input-intervalArea').value = data.intervalArea || '';
-            row.querySelector('.input-addBalanceAccount').value = data.addBalanceAccount || '';
-            row.querySelector('.input-addBalanceOrderPrice').value = data.addBalanceOrderPrice || '';
-            row.querySelector('.input-reduceBalanceAccountList').value = data.reduceBalanceAccountList || '';
-            row.querySelector('.input-reduceBalanceOrderPrice').value = data.reduceBalanceOrderPrice || '';
+            row.querySelector('.input-addBalanceAccountStr').value = data.addBalanceAccountStr || '';
+            row.querySelector('.input-reduceBalanceAccountStr').value = data.reduceBalanceAccountStr || '';
+            row.querySelector('.input-addBalanceOrderBuyPrice').value = data.addBalanceOrderBuyPrice || '';
+            row.querySelector('.input-addBalanceOrderSellPrice').value = data.addBalanceOrderSellPrice || '';
             
             // 更新添加时间
             const addTimeCell = row.querySelector('.add-time');

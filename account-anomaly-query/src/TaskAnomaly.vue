@@ -620,6 +620,10 @@
                     >
                       查看
                     </a>
+                    <span v-if="task.tp6" class="task-separator">|</span>
+                    <span v-if="task.tp6" class="task-info">
+                      <span class="field-label">IP代理:</span>{{ formatTp6ForDisplay(task.tp6) }}
+                    </span>
                     <span class="task-separator">|</span>
                     <span 
                       v-if="getPositionUpdateStatus(task)"
@@ -769,6 +773,10 @@
                       >
                         查看
                       </a>
+                      <span v-if="task.tp6" class="task-separator">|</span>
+                      <span v-if="task.tp6" class="task-info">
+                        <span class="field-label">IP代理:</span>{{ formatTp6ForDisplay(task.tp6) }}
+                      </span>
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
@@ -863,6 +871,10 @@
                       >
                         查看
                       </a>
+                      <span v-if="task.tp6" class="task-separator">|</span>
+                      <span v-if="task.tp6" class="task-info">
+                        <span class="field-label">IP代理:</span>{{ formatTp6ForDisplay(task.tp6) }}
+                      </span>
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
@@ -954,6 +966,10 @@
                       >
                         查看
                       </a>
+                      <span v-if="task.tp6" class="task-separator">|</span>
+                      <span v-if="task.tp6" class="task-info">
+                        <span class="field-label">IP代理:</span>{{ formatTp6ForDisplay(task.tp6) }}
+                      </span>
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
@@ -1045,6 +1061,10 @@
                       >
                         查看
                       </a>
+                      <span v-if="task.tp6" class="task-separator">|</span>
+                      <span v-if="task.tp6" class="task-info">
+                        <span class="field-label">IP代理:</span>{{ formatTp6ForDisplay(task.tp6) }}
+                      </span>
                       <span class="task-separator">|</span>
                       <span 
                         v-if="getPositionUpdateStatus(task)"
@@ -2313,6 +2333,7 @@ export default {
           createTime: mission.createTime,
           updateTime: mission.updateTime,
           status: mission.status, // 保存状态，用于判断是否失败
+          tp6: mission.tp6 || null, // 保存tp6（IP和代理类型信息）
           tp7: mission.tp7 || null, // 保存tp7（openorder字符串）
           tp8: mission.tp8 || null, // 保存tp8（closeorder字符串）
           tp9: mission.tp9 || null // 保存tp9（已修复标记）
@@ -2527,7 +2548,8 @@ export default {
           createTime: mission.createTime,
           updateTime: mission.updateTime,
           status: mission.status,
-          msg: mission.msg
+          msg: mission.msg,
+          tp6: mission.tp6 || null // 保存tp6（IP和代理类型信息）
         }
         
         group.tasks.push(task)
@@ -4879,6 +4901,35 @@ export default {
     },
     
     /**
+     * 格式化 tp6 用于显示（IP和代理类型信息）
+     * tp6 格式：ip|||代理类型;ip2|||ip2代理类型；ip3|||ip3代理类型
+     */
+    formatTp6ForDisplay(tp6) {
+      if (!tp6) return ''
+      
+      // 按分号或中文分号分割
+      const items = tp6.split(/[;；]/).filter(item => item.trim())
+      
+      if (items.length === 0) return ''
+      
+      // 格式化每个IP和代理类型
+      const formattedItems = items.map(item => {
+        const parts = item.split('|||')
+        if (parts.length === 2) {
+          const ip = parts[0].trim()
+          const proxyType = parts[1].trim()
+          return `${ip} (${proxyType})`
+        } else if (parts.length === 1) {
+          // 如果没有代理类型，只显示IP
+          return parts[0].trim()
+        }
+        return item.trim()
+      })
+      
+      return formattedItems.join('; ')
+    },
+    
+    /**
      * 将时间戳或时间字符串转换为北京时间
      */
     timestampToBeijingTime(timestamp, isDifferentTimezone = false) {
@@ -6843,6 +6894,25 @@ export default {
 }
 
 .order-content {
+  color: #333;
+  word-break: break-word;
+}
+
+/* tp6 IP代理信息样式 */
+.task-tp6-info {
+  padding: 8px 20px;
+  background: #f5f5f5;
+  border-top: 1px solid #e0e0e0;
+  font-size: 13px;
+}
+
+.tp6-label {
+  font-weight: 600;
+  color: #555;
+  margin-right: 8px;
+}
+
+.tp6-content {
   color: #333;
   word-break: break-word;
 }

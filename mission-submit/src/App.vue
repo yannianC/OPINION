@@ -272,11 +272,32 @@
             </div>
           </div>
 
+          <!-- 时间撤单设置 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cancelHours">时间超过XX小时以上的撤单</label>
+              <input
+                id="cancelHours"
+                v-model.number="cancelHours"
+                type="number"
+                min="0"
+                step="0.1"
+                placeholder="小时"
+                style="width: 120px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;"
+              />
+              <span style="margin-left: 8px; color: #666; font-size: 12px;">小时</span>
+            </div>
+          </div>
+
           <!-- 提交按钮 -->
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" :disabled="isSubmitting || isUpdatingPosition || isLooping">
               <span v-if="isSubmitting">提交中...</span>
               <span v-else>撤单并更新</span>
+            </button>
+            <button type="button" class="btn btn-primary" @click="handleSubmitWithTime" :disabled="isSubmitting || isUpdatingPosition || isLooping || !cancelHours || cancelHours <= 0">
+              <span v-if="isSubmitting">提交中...</span>
+              <span v-else>按时间撤单并更新</span>
             </button>
             <button type="button" class="btn btn-primary" @click="handlePositionUpdate" :disabled="isSubmitting || isUpdatingPosition || isLooping">
               <span v-if="isUpdatingPosition">更新中...</span>
@@ -416,6 +437,9 @@ const isLooping = ref(false) // 是否正在循环执行
 const loopTimer = ref(null) // 循环定时器
 const delayTimer = ref(null) // 延迟定时器
 const nextExecuteTime = ref('') // 下次执行时间
+
+// 时间撤单相关
+const cancelHours = ref(null) // 时间超过XX小时以上的撤单
 
 // 清除任务相关
 const cleanGroupNosInput = ref('')
@@ -796,6 +820,7 @@ const resetForm = () => {
   inputType.value = 'browser'
   delayMinutes.value = 0
   intervalMinutes.value = 5
+  cancelHours.value = null
 }
 
 /**
@@ -813,6 +838,54 @@ const submitSingleBrowser = async (browserId, groupNo, tp1, maxRetries = 3) => {
     numberList: String(browserId),
     exchangeName: 'OP',
     tp1: tp1
+  }
+  
+  let lastError = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // 重试前等待5秒
+        console.log(`浏览器ID ${browserId} 第 ${attempt} 次重试，等待5秒...`)
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+      
+      const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/add', payload)
+      
+      if (response.data && response.data.code === 0) {
+        console.log(`浏览器ID ${browserId} 提交成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+        return { success: true }
+      } else {
+        lastError = response.data?.msg || '未知错误'
+        console.error(`浏览器ID ${browserId} 提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      }
+    } catch (error) {
+      lastError = error.message || '未知错误'
+      console.error(`浏览器ID ${browserId} 提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+    }
+  }
+  
+  // 所有重试都失败
+  return { success: false, error: lastError }
+}
+
+/**
+ * 提交单个浏览器ID的任务（带重试，带tp5参数）
+ * @param {number} browserId - 浏览器ID
+ * @param {number} groupNo - 电脑组
+ * @param {string} tp1 - Trending值
+ * @param {number} tp5 - 时间超过XX小时以上的撤单
+ * @param {number} maxRetries - 最大重试次数
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+const submitSingleBrowserWithTime = async (browserId, groupNo, tp1, tp5, maxRetries = 3) => {
+  const payload = {
+    type: 4,
+    groupNo: groupNo,
+    numberList: String(browserId),
+    exchangeName: 'OP',
+    tp1: tp1,
+    tp5: tp5
   }
   
   let lastError = null
@@ -969,6 +1042,122 @@ const handleSubmit = async () => {
       }
       
       const result = await submitSingleBrowser(browserId, groupNo, tp1, 3)
+      
+      if (result.success) {
+        successCount++
+      } else {
+        failCount++
+        failedBrowserIds.value.push({
+          browserId: browserId,
+          error: result.error || '提交失败',
+          groupNo: groupNo,
+          tp1: tp1
+        })
+      }
+    }
+    
+    if (successCount > 0) {
+      showMessage(`提交完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+    } else {
+      showMessage(`提交失败：所有请求都失败了`, 'error')
+    }
+    
+    // 重置表单
+    resetForm()
+  } catch (error) {
+    console.error('提交任务失败:', error)
+    showMessage('提交任务失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+/**
+ * 按时间撤单并更新任务
+ */
+const handleSubmitWithTime = async () => {
+  if (isSubmitting.value) return
+  
+  // 验证输入
+  if (!cancelHours.value || cancelHours.value <= 0) {
+    showMessage('请设置时间超过XX小时以上的撤单', 'error')
+    return
+  }
+  
+  if (inputType.value === 'browser' && parsedBrowserIds.value.length === 0) {
+    showMessage('请正确输入浏览器ID', 'error')
+    return
+  }
+  
+  if (inputType.value === 'group' && parsedGroupNos.value.length === 0) {
+    showMessage('请正确输入电脑组', 'error')
+    return
+  }
+  
+  // 获取要提交的浏览器ID列表
+  let browserIdsToSubmit = []
+  // 建立浏览器ID到电脑组的映射（用于电脑组类型输入）
+  const browserIdToGroupNoMap = {}
+  
+  if (inputType.value === 'browser') {
+    // 直接使用解析的浏览器ID
+    browserIdsToSubmit = parsedBrowserIds.value
+  } else {
+    // 从电脑组映射到浏览器ID，同时建立浏览器ID到用户输入电脑组的映射
+    for (const groupNo of parsedGroupNos.value) {
+      const browserIds = groupToBrowserMap.value[groupNo] || []
+      browserIdsToSubmit.push(...browserIds)
+      // 建立映射：浏览器ID -> 用户输入的电脑组号
+      for (const browserId of browserIds) {
+        browserIdToGroupNoMap[browserId] = groupNo
+        browserIdToGroupNoMap[String(browserId)] = groupNo
+      }
+    }
+    
+    if (browserIdsToSubmit.length === 0) {
+      showMessage('所选电脑组没有对应的浏览器ID', 'error')
+      return
+    }
+  }
+  
+  // 去重并排序
+  browserIdsToSubmit = [...new Set(browserIdsToSubmit)].sort((a, b) => a - b)
+  
+  // 获取tp1值
+  const tp1 = selectedTrending.value === 'all' ? 'all' : selectedTrending.value
+  
+  isSubmitting.value = true
+  failedBrowserIds.value = [] // 清空之前的失败列表
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    
+    // 为每个浏览器ID提交一个请求（带重试）
+    for (const browserId of browserIdsToSubmit) {
+      // 获取对应的电脑组（根据输入类型和批次）
+      let groupNo = null
+      if (inputType.value === 'browser') {
+        // 浏览器ID类型：根据批次获取电脑组
+        groupNo = getGroupNoByBrowserIdAndBatch(browserId, browserBatchType.value)
+      } else {
+        // 电脑组类型：使用用户输入的电脑组号（而不是从映射中获取）
+        groupNo = browserIdToGroupNoMap[browserId] || browserIdToGroupNoMap[String(browserId)]
+      }
+      
+      if (!groupNo) {
+        console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过`)
+        failCount++
+        failedBrowserIds.value.push({
+          browserId: browserId,
+          error: '没有对应的电脑组',
+          groupNo: null,
+          tp1: tp1
+        })
+        continue
+      }
+      
+      const result = await submitSingleBrowserWithTime(browserId, groupNo, tp1, cancelHours.value, 3)
       
       if (result.success) {
         successCount++
