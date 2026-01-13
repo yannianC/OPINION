@@ -1385,6 +1385,11 @@ export default {
     // 加载预警监控设置
     this.loadAlertMonitorSettings()
     
+    // 如果之前保存的状态是启用，自动启动监控
+    if (this.alertMonitorEnabled) {
+      this.startAlertMonitor()
+    }
+    
     // 解析URL参数
     this.parseUrlParams()
     
