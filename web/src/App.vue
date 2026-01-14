@@ -633,6 +633,34 @@
                   @blur="saveHedgeSettings"
                 />
               </div>
+              <span>          </span>
+              <div class="trending-filter">
+                <label style="color: #000;">24小时交易量大于</label>
+                <input 
+                  v-model.number="hedgeMode.maxVolume24h" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="1"
+                  placeholder="99"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 0px;"
+                />
+                <span style="color: #000;">(万)且7天平均交易量大于</span>
+                <input 
+                  v-model.number="hedgeMode.maxVolume7dAvg" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="1"
+                  placeholder="99"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 0px;"
+                />
+                <span style="color: #000;">(万)时不交易</span>
+              </div>
               <div class="trending-filter">
                 <label style="color: #000;">订单薄不匹配时X（分钟）内不抓取:</label>
                 <input 
@@ -1092,6 +1120,24 @@
                 </span>
               </template>
             </div>
+            
+            <div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 16px;">
+              <span style="font-size: 14px; color: rgba(255, 255, 255, 0.8);">排序：</span>
+              <button 
+                :class="['btn', 'btn-sm', hedgeSortBy === 'yesAmt' ? 'btn-primary' : 'btn-secondary']"
+                @click="hedgeSortBy = hedgeSortBy === 'yesAmt' ? '' : 'yesAmt'"
+                style="padding: 4px 12px; font-size: 12px;"
+              >
+                按YES金额{{ hedgeSortBy === 'yesAmt' ? ' ✓' : '' }}
+              </button>
+              <button 
+                :class="['btn', 'btn-sm', hedgeSortBy === 'weightedAvgTime' ? 'btn-primary' : 'btn-secondary']"
+                @click="hedgeSortBy = hedgeSortBy === 'weightedAvgTime' ? '' : 'weightedAvgTime'"
+                style="padding: 4px 12px; font-size: 12px;"
+              >
+                按创建时间加权平均值{{ hedgeSortBy === 'weightedAvgTime' ? ' ✓' : '' }}
+              </button>
+            </div>
           </div>
           
           <div class="trending-list">
@@ -1150,6 +1196,13 @@
                     </button>
                     <span v-if="getPositionText(config)" :class="['position-info', shouldShowPositionGreen(config) ? 'position-info-green' : '']" style="margin-left: 8px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.8);">
                       {{ getPositionText(config) }}
+                    </span>
+                    <span class="config-stats" style="margin-left: 8px; font-size: 0.7rem; color: #4ade80;">
+                      <span style="margin-right: 6px;" title="创建时间加权平均值（小时）">加权时间:{{ config.weightedAvgTime !== undefined && config.weightedAvgTime !== null ? (config.weightedAvgTime / 3600000).toFixed(2) : '0.00' }}h</span>
+                      <span style="margin-right: 6px;" title="YES数量（万）">YES金额:{{ config.yesAmt !== undefined && config.yesAmt !== null ? (config.yesAmt / 10000).toFixed(2) : '0.00' }}万</span>
+                      <span style="margin-right: 6px;" title="最近24小时交易量（万）">24h量:{{ config.volume24h !== undefined && config.volume24h !== null ? (config.volume24h / 10000).toFixed(2) : '0.00' }}万</span>
+                      <span style="margin-right: 6px;" title="7天平均每天交易量（万）">7d均:{{ config.volume7dAvg !== undefined && config.volume7dAvg !== null ? (config.volume7dAvg / 10000).toFixed(2) : '0.00' }}万</span>
+                      <span title="本周交易量（周日早上8点开始）（万）">1周量:{{ config.volume1w !== undefined && config.volume1w !== null ? (config.volume1w / 10000).toFixed(2) : '0.00' }}万</span>
                     </span>
                     <button 
                       class="btn-test btn-sm" 
@@ -3163,6 +3216,7 @@ const activeConfigs = ref([])  // 启用的配置列表
 const lastRoundTaskCount = ref(0)  // 上一轮开出的任务总数
 const lastRoundEndTime = ref(null)  // 上一轮结束时间
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
+const configAutoRefreshInterval = ref(null)  // 配置自动刷新定时器（每小时05分）
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
@@ -3171,6 +3225,9 @@ const hedgeTasksPerTopic = ref(2)  // 一个主题同时执行的对冲任务数
 const hedgeMaxTasksPerRound = ref(2)  // 每一轮每个主题最多任务数，默认为10
 const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不等待）
 const runningHedgeGroupsCount = ref(0)  // 当前正在运行的任务组数
+
+// 自动对冲排序相关
+const hedgeSortBy = ref('')  // 排序方式: '' 默认按持仓, 'yesAmt' 按YES金额, 'weightedAvgTime' 按创建时间加权平均值
 
 // 分批执行相关
 const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
@@ -3227,6 +3284,8 @@ const hedgeMode = reactive({
   // 订单薄更新设置
   minPositionForClose: 0.2,  // 平仓模式下yes和no持仓的最小值（万），默认0.2万
   minPositionForOpen: 0.2,  // 开仓模式下yes或no持仓的最大值（万），默认0.2万
+  maxVolume24h: 99,  // 24小时交易量上限（万），默认99万
+  maxVolume7dAvg: 99,  // 7天平均交易量上限（万），默认99万
   orderbookMismatchInterval: 10,  // 订单薄不匹配时抓一轮的间隔时间（分钟），默认10分钟
   taskCountThreshold: 5,  // 每一轮任务个数阈值，默认5个
   waitTimeLessThanThreshold: 300,  // 小于阈值时的等待时间（秒），默认300秒（5分钟）
@@ -4500,6 +4559,86 @@ const fetchExchangeConfig = async () => {
   } finally {
     isLoadingConfig.value = false
   }
+}
+
+/**
+ * 静默刷新配置（不显示 loading 状态）
+ * 用于每小时05分的自动更新
+ */
+const silentRefreshExchangeConfig = async () => {
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    
+    if (response.data && response.data.code === 0) {
+      const data = response.data.data
+      
+      // 设置交易所列表
+      exchangeList.value = data.exchangeList || []
+      
+      // 设置配置列表，将 isOpen 映射为 enabled
+      // 保留现有配置的本地状态（如 tasksPerTopic, maxDepth 等用户输入的值）
+      const newConfigList = (data.configList || []).map(config => {
+        const existingConfig = configList.value.find(c => c.id === config.id)
+        return {
+          ...config,
+          enabled: config.isOpen === 1,
+          // 保留用户可能已修改的本地状态
+          tasksPerTopic: existingConfig?.tasksPerTopic ?? config.tasksPerTopic,
+          maxDepth: existingConfig?.maxDepth ?? config.maxDepth,
+          maxDailyAmount: existingConfig?.maxDailyAmount ?? config.maxDailyAmount,
+        }
+      })
+      
+      configList.value = newConfigList
+      
+      // 构建 id -> trending 的映射
+      const newIdToTrendingMap = new Map()
+      for (const config of configList.value) {
+        if (config.id && config.trending) {
+          newIdToTrendingMap.set(String(config.id), config.trending.trim())
+        }
+      }
+      idToTrendingMap.value = newIdToTrendingMap
+      
+      // 更新活动配置列表
+      updateActiveConfigs()
+      
+      console.log(`[${new Date().toLocaleTimeString()}] 配置静默刷新成功：${configList.value.length} 个Trending`)
+    }
+  } catch (error) {
+    console.error('配置静默刷新失败:', error)
+  }
+}
+
+/**
+ * 启动每小时05分自动刷新配置的定时器
+ * 每分钟检查一次，如果是xx:05分则刷新配置
+ */
+const startConfigAutoRefresh = () => {
+  // 清除旧的定时器
+  if (configAutoRefreshInterval.value) {
+    clearInterval(configAutoRefreshInterval.value)
+    configAutoRefreshInterval.value = null
+  }
+  
+  // 记录上次刷新的小时，避免同一个05分重复刷新
+  let lastRefreshedHour = -1
+  
+  // 每分钟检查一次
+  configAutoRefreshInterval.value = setInterval(() => {
+    const now = new Date()
+    const currentMinute = now.getMinutes()
+    const currentHour = now.getHours()
+    
+    // 检查是否是05分，且这个小时还没有刷新过
+    if (currentMinute === 5 && currentHour !== lastRefreshedHour) {
+      lastRefreshedHour = currentHour
+      console.log(`[${now.toLocaleTimeString()}] 到达每小时05分，开始静默刷新配置...`)
+      silentRefreshExchangeConfig()
+    }
+  }, 60000)  // 每60秒检查一次
+  
+  console.log('配置自动刷新定时器已启动（每小时05分刷新）')
 }
 
 /**
@@ -6844,16 +6983,29 @@ const submitEditConfig = async () => {
 const filteredActiveConfigs = computed(() => {
   let result = activeConfigs.value
   
-  // 按持仓yes大小排序，持仓大的排最上方
+  // 根据排序方式排序
   result = [...result].sort((a, b) => {
-    const positionDataA = positionDataMap.value.get(a.trending?.trim())
-    const positionDataB = positionDataMap.value.get(b.trending?.trim())
-    
-    const yesPositionA = positionDataA?.yesPosition || 0
-    const yesPositionB = positionDataB?.yesPosition || 0
-    
-    // 按持仓yes大小降序排序（大的在前）
-    return yesPositionB - yesPositionA
+    if (hedgeSortBy.value === 'yesAmt') {
+      // 按YES金额排序（降序，大的在前）
+      const yesAmtA = a.yesAmt || 0
+      const yesAmtB = b.yesAmt || 0
+      return yesAmtB - yesAmtA
+    } else if (hedgeSortBy.value === 'weightedAvgTime') {
+      // 按创建时间加权平均值排序（降序，大的在前）
+      const weightedAvgTimeA = a.weightedAvgTime || 0
+      const weightedAvgTimeB = b.weightedAvgTime || 0
+      return weightedAvgTimeB - weightedAvgTimeA
+    } else {
+      // 默认按持仓yes大小排序，持仓大的排最上方
+      const positionDataA = positionDataMap.value.get(a.trending?.trim())
+      const positionDataB = positionDataMap.value.get(b.trending?.trim())
+      
+      const yesPositionA = positionDataA?.yesPosition || 0
+      const yesPositionB = positionDataB?.yesPosition || 0
+      
+      // 按持仓yes大小降序排序（大的在前）
+      return yesPositionB - yesPositionA
+    }
   })
   
   // 应用筛选
@@ -7916,6 +8068,32 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
             continue
           }
         }
+      }
+      
+      // 检查24小时交易量和7天平均交易量
+      const volume24h = config.volume24h || 0
+      const volume7dAvg = config.volume7dAvg || 0
+      const maxVolume24h = hedgeMode.maxVolume24h * 10000  // 转换为实际数量（万转数量）
+      const maxVolume7dAvg = hedgeMode.maxVolume7dAvg * 10000  // 转换为实际数量（万转数量）
+      
+      // 24h交易量大于XX万 且 7天平均交易量大于XX万 时不交易
+      if (volume24h > maxVolume24h && volume7dAvg > maxVolume7dAvg) {
+        const volumeReason = `交易量过大：24h量 ${(volume24h/10000).toFixed(2)}万 > ${hedgeMode.maxVolume24h}万 且 7d均量 ${(volume7dAvg/10000).toFixed(2)}万 > ${hedgeMode.maxVolume7dAvg}万`
+        console.log(`配置 ${config.id} - ${volumeReason}，跳过本次请求`)
+        // 设置订单薄数据以显示原因
+        config.orderbookData = {
+          pollTime: Date.now(),
+          updateTime: null,
+          reason: volumeReason,
+          firstSide: null,
+          price1: null,
+          price2: null,
+          depth1: null,
+          depth2: null,
+          diff: null
+        }
+        config.isFetching = false
+        continue
       }
       
       // 开始请求订单薄
@@ -10934,6 +11112,8 @@ const saveHedgeSettings = () => {
       // 订单薄更新设置
       minPositionForClose: hedgeMode.minPositionForClose,
       minPositionForOpen: hedgeMode.minPositionForOpen,
+      maxVolume24h: hedgeMode.maxVolume24h,
+      maxVolume7dAvg: hedgeMode.maxVolume7dAvg,
       orderbookMismatchInterval: hedgeMode.orderbookMismatchInterval,
       // 模式一开仓专属设置
       posPriorityArea: hedgeMode.posPriorityArea,
@@ -11108,6 +11288,12 @@ const loadHedgeSettings = () => {
     }
     if (settings.minPositionForOpen !== undefined) {
       hedgeMode.minPositionForOpen = settings.minPositionForOpen
+    }
+    if (settings.maxVolume24h !== undefined) {
+      hedgeMode.maxVolume24h = settings.maxVolume24h
+    }
+    if (settings.maxVolume7dAvg !== undefined) {
+      hedgeMode.maxVolume7dAvg = settings.maxVolume7dAvg
     }
     if (settings.orderbookMismatchInterval !== undefined) {
       hedgeMode.orderbookMismatchInterval = settings.orderbookMismatchInterval
@@ -13212,6 +13398,32 @@ const executeAutoHedgeTasks = async () => {
         }
       }
       
+      // 检查24小时交易量和7天平均交易量
+      const volume24h = config.volume24h || 0
+      const volume7dAvg = config.volume7dAvg || 0
+      const maxVolume24h = hedgeMode.maxVolume24h * 10000  // 转换为实际数量（万转数量）
+      const maxVolume7dAvg = hedgeMode.maxVolume7dAvg * 10000  // 转换为实际数量（万转数量）
+      
+      // 24h交易量大于XX万 且 7天平均交易量大于XX万 时不交易
+      if (volume24h > maxVolume24h && volume7dAvg > maxVolume7dAvg) {
+        const volumeReason = `交易量过大：24h量 ${(volume24h/10000).toFixed(2)}万 > ${hedgeMode.maxVolume24h}万 且 7d均量 ${(volume7dAvg/10000).toFixed(2)}万 > ${hedgeMode.maxVolume7dAvg}万`
+        console.log(`配置 ${config.id} - ${volumeReason}，跳过本次请求`)
+        // 设置订单薄数据以显示原因
+        config.orderbookData = {
+          pollTime: Date.now(),
+          updateTime: null,
+          reason: volumeReason,
+          firstSide: null,
+          price1: null,
+          price2: null,
+          depth1: null,
+          depth2: null,
+          diff: null
+        }
+        config.isFetching = false
+        continue
+      }
+      
       // 开始请求订单薄
       config.isFetching = true
       config.lastRequestTime = now
@@ -14099,6 +14311,9 @@ onMounted(() => {
   hedgeStatusInterval.value = setInterval(() => {
     fetchHedgeStatus()
   }, 30000)
+  
+  // 启动配置自动刷新定时器（每小时05分刷新）
+  startConfigAutoRefresh()
 })
 
 onUnmounted(() => {
@@ -14110,6 +14325,9 @@ onUnmounted(() => {
   }
   if (hedgeStatusInterval.value) {
     clearInterval(hedgeStatusInterval.value)
+  }
+  if (configAutoRefreshInterval.value) {
+    clearInterval(configAutoRefreshInterval.value)
   }
 })
 </script>

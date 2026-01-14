@@ -567,8 +567,17 @@
                 placeholder="如: 521 或 521,522 或 500-600"
               />
             </div>
+            <div class="filter-group">
+              <label>事件名:</label>
+              <input 
+                v-model="filterTrending" 
+                type="text" 
+                class="filter-input-small"
+                placeholder="输入事件名进行模糊筛选"
+              />
+            </div>
             <button 
-              v-if="filterTaskId || filterGroupNo || filterBrowserId" 
+              v-if="filterTaskId || filterGroupNo || filterBrowserId || filterTrending" 
               class="clear-filter-btn"
               @click="clearPreciseFilters"
             >
@@ -1301,6 +1310,7 @@ export default {
       filterTaskId: '', // 任务ID筛选
       filterGroupNo: '', // 电脑组筛选
       filterBrowserId: '', // 浏览器编号筛选
+      filterTrending: '', // 事件名筛选
       filterHistory: [], // 筛选历史
       expandedGroups: {}, // 模式2中展开的分组 {trendingId: {successYes: true, successNo: true}}
       selectedGroup: 'default', // 当前选择的分组
@@ -1519,25 +1529,34 @@ export default {
         result = type1Type2Filtered
       }
       
-      // 模式1时应用精确筛选（任务ID、电脑组、浏览器编号）
+      // 模式1时应用精确筛选（任务ID、电脑组、浏览器编号、事件名）
       if (this.queryMode === 1) {
         const hasTaskIdFilter = this.filterTaskId && this.filterTaskId.trim() !== ''
         const hasGroupNoFilter = this.filterGroupNo && this.filterGroupNo.trim() !== ''
         const hasBrowserIdFilter = this.filterBrowserId && this.filterBrowserId.trim() !== ''
+        const hasTrendingFilter = this.filterTrending && this.filterTrending.trim() !== ''
         
-        if (hasTaskIdFilter || hasGroupNoFilter || hasBrowserIdFilter) {
+        if (hasTaskIdFilter || hasGroupNoFilter || hasBrowserIdFilter || hasTrendingFilter) {
           const preciseFiltered = {}
           
           // 解析筛选条件
           const taskIdSet = hasTaskIdFilter ? this.parseFilterInput(this.filterTaskId) : null
           const groupNoSet = hasGroupNoFilter ? this.parseFilterInput(this.filterGroupNo) : null
           const browserIdSet = hasBrowserIdFilter ? this.parseFilterInput(this.filterBrowserId) : null
+          const trendingKeyword = hasTrendingFilter ? this.filterTrending.trim().toLowerCase() : null
           
           Object.keys(result).forEach(groupKey => {
             const group = result[groupKey]
             
             // 检查组内是否有任务匹配筛选条件
             const hasMatch = group.tasks.some(task => {
+              // 事件名筛选（检查任务级别的 trending）
+              if (hasTrendingFilter) {
+                const taskTrending = (task.trending || '').toLowerCase()
+                if (!taskTrending.includes(trendingKeyword)) {
+                  return false
+                }
+              }
               // 任务ID筛选
               if (taskIdSet && !taskIdSet.has(String(task.id))) {
                 return false
@@ -1558,6 +1577,41 @@ export default {
             }
           })
           result = preciseFiltered
+        }
+      }
+      
+      // 模式2时也支持事件名筛选
+      if (this.queryMode === 2) {
+        const hasTrendingFilter = this.filterTrending && this.filterTrending.trim() !== ''
+        if (hasTrendingFilter) {
+          const trendingFiltered = {}
+          const trendingKeyword = this.filterTrending.trim().toLowerCase()
+          
+          Object.keys(result).forEach(groupKey => {
+            const group = result[groupKey]
+            
+            // 检查组级别的 trending
+            const groupTrending = (group.trending || '').toLowerCase()
+            const groupMatches = groupTrending.includes(trendingKeyword)
+            
+            // 检查所有任务列表中的 trending
+            const allTasks = [
+              ...(group.successYesTasks || []),
+              ...(group.successNoTasks || []),
+              ...(group.failYesTasks || []),
+              ...(group.failNoTasks || [])
+            ]
+            const taskMatches = allTasks.some(task => {
+              const taskTrending = (task.trending || '').toLowerCase()
+              return taskTrending.includes(trendingKeyword)
+            })
+            
+            // 如果组级别或任务级别匹配，则保留该组
+            if (groupMatches || taskMatches) {
+              trendingFiltered[groupKey] = group
+            }
+          })
+          result = trendingFiltered
         }
       }
       
@@ -2908,6 +2962,7 @@ export default {
       this.filterTaskId = ''
       this.filterGroupNo = ''
       this.filterBrowserId = ''
+      this.filterTrending = ''
       this.showToast('精确筛选已清除', 'info')
     },
     
