@@ -296,7 +296,7 @@
               />
             </div>
             <div class="trending-filter">
-              <label>挂单超过XX小时撤单:</label>
+              <label style="color: red;">挂单超过XX小时撤单:</label>
               <input 
                 v-model.number="hedgeMode.openOrderCancelHours" 
                 type="number" 
@@ -635,9 +635,9 @@
               </div>
               <span>          </span>
               <div class="trending-filter">
-                <label style="color: #000;">24小时交易量大于</label>
+                <label style="color: red;">最近24小时交易量小于</label>
                 <input 
-                  v-model.number="hedgeMode.maxVolume24h" 
+                  v-model.number="hedgeMode.maxVolume24hOpen" 
                   type="number" 
                   class="filter-input" 
                   min="0"
@@ -647,9 +647,9 @@
                   @blur="saveHedgeSettings"
                   style="width: 70px; margin: 0 0px;"
                 />
-                <span style="color: #000;">(万)且7天平均交易量大于</span>
+                <span style="color: red;">(万)且最近7天平均交易量小于</span>
                 <input 
-                  v-model.number="hedgeMode.maxVolume7dAvg" 
+                  v-model.number="hedgeMode.maxVolume7dAvgOpen" 
                   type="number" 
                   class="filter-input" 
                   min="0"
@@ -659,7 +659,22 @@
                   @blur="saveHedgeSettings"
                   style="width: 70px; margin: 0 0px;"
                 />
-                <span style="color: #000;">(万)时不交易</span>
+                <span style="color: red;">(万)时，才参与交易</span>
+              </div>
+              <div class="trending-filter">
+                <label style="color: red;">仓位价值(页面8-Portfolio)大于</label>
+                <input 
+                  v-model.number="hedgeMode.maxPosWorthOpen" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 0px;"
+                />
+                <span style="color: red;">(万)不开仓</span>
               </div>
               <div class="trending-filter">
                 <label style="color: #000;">订单薄不匹配时X（分钟）内不抓取:</label>
@@ -672,6 +687,21 @@
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
                 />
+              </div>
+              <div class="trending-filter">
+                <label style="color: red;">开仓模式：加权时间大于</label>
+                <input 
+                  v-model.number="hedgeMode.maxWeightedTimeHourOpen" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 5px;"
+                />
+                <span style="color: red;">(小时)不开仓</span>
               </div>
               <div class="trending-filter">
                 <label style="color: #000;">每一轮任务个数阈值</label>
@@ -3284,9 +3314,11 @@ const hedgeMode = reactive({
   // 订单薄更新设置
   minPositionForClose: 0.2,  // 平仓模式下yes和no持仓的最小值（万），默认0.2万
   minPositionForOpen: 0.2,  // 开仓模式下yes或no持仓的最大值（万），默认0.2万
-  maxVolume24h: 99,  // 24小时交易量上限（万），默认99万
-  maxVolume7dAvg: 99,  // 7天平均交易量上限（万），默认99万
+  maxVolume24hOpen: 99,  // 最近24小时交易量大于XX（万）不交易，默认99万
+  maxVolume7dAvgOpen: 99,  // 最近7天平均交易量大于XX（万）不交易，默认99万
+  maxPosWorthOpen: 99,  // 仓位价值大于XX（万）不开仓，默认0（不限制）
   orderbookMismatchInterval: 10,  // 订单薄不匹配时抓一轮的间隔时间（分钟），默认10分钟
+  maxWeightedTimeHourOpen: 0,  // 开仓模式：加权时间大于XX小时时不开仓，默认0（不限制）
   taskCountThreshold: 5,  // 每一轮任务个数阈值，默认5个
   waitTimeLessThanThreshold: 300,  // 小于阈值时的等待时间（秒），默认300秒（5分钟）
   waitTimeGreaterThanThreshold: 60,  // 大于阈值时的等待时间（秒），默认60秒（1分钟）
@@ -8070,15 +8102,26 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         }
       }
       
+      // 开仓模式下，检查加权时间是否满足条件
+      if (!hedgeMode.isClose && hedgeMode.maxWeightedTimeHourOpen > 0) {
+        const weightedAvgTime = config.weightedAvgTime || 0
+        const maxWeightedTimeMs = hedgeMode.maxWeightedTimeHourOpen * 3600000  // 小时转毫秒
+        if (weightedAvgTime > maxWeightedTimeMs) {
+          console.log(`配置 ${config.id} - 开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)，跳过本次请求`)
+          config.isFetching = false
+          continue
+        }
+      }
+      
       // 检查24小时交易量和7天平均交易量
       const volume24h = config.volume24h || 0
       const volume7dAvg = config.volume7dAvg || 0
-      const maxVolume24h = hedgeMode.maxVolume24h * 10000  // 转换为实际数量（万转数量）
-      const maxVolume7dAvg = hedgeMode.maxVolume7dAvg * 10000  // 转换为实际数量（万转数量）
+      const maxVolume24h = hedgeMode.maxVolume24hOpen * 10000  // 转换为实际数量（万转数量）
+      const maxVolume7dAvg = hedgeMode.maxVolume7dAvgOpen * 10000  // 转换为实际数量（万转数量）
       
-      // 24h交易量大于XX万 且 7天平均交易量大于XX万 时不交易
-      if (volume24h > maxVolume24h && volume7dAvg > maxVolume7dAvg) {
-        const volumeReason = `交易量过大：24h量 ${(volume24h/10000).toFixed(2)}万 > ${hedgeMode.maxVolume24h}万 且 7d均量 ${(volume7dAvg/10000).toFixed(2)}万 > ${hedgeMode.maxVolume7dAvg}万`
+      // 24h交易量大于XX万 或 7天平均交易量大于XX万 时不交易
+      if (volume24h > maxVolume24h || volume7dAvg > maxVolume7dAvg) {
+        const volumeReason = `交易量过大：24h量 ${(volume24h/10000).toFixed(2)}万 > ${hedgeMode.maxVolume24hOpen}万 或 7d均量 ${(volume7dAvg/10000).toFixed(2)}万 > ${hedgeMode.maxVolume7dAvgOpen}万`
         console.log(`配置 ${config.id} - ${volumeReason}，跳过本次请求`)
         // 设置订单薄数据以显示原因
         config.orderbookData = {
@@ -9583,6 +9626,16 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+          // 添加交易量和仓位价值限制参数（单位：万转10000）
+          if (hedgeMode.maxVolume24hOpen !== undefined && hedgeMode.maxVolume24hOpen !== null && hedgeMode.maxVolume24hOpen !== '') {
+            requestData.maxVolume24hOpen = Number(hedgeMode.maxVolume24hOpen) * 10000
+          }
+          if (hedgeMode.maxVolume7dAvgOpen !== undefined && hedgeMode.maxVolume7dAvgOpen !== null && hedgeMode.maxVolume7dAvgOpen !== '') {
+            requestData.maxVolume7dAvgOpen = Number(hedgeMode.maxVolume7dAvgOpen) * 10000
+          }
+          if (hedgeMode.maxPosWorthOpen !== undefined && hedgeMode.maxPosWorthOpen !== null && hedgeMode.maxPosWorthOpen !== '' && hedgeMode.maxPosWorthOpen > 0) {
+            requestData.maxPosWorthOpen = Number(hedgeMode.maxPosWorthOpen) * 10000
+          }
           // 如果是开仓模式，添加模式一专属设置
           if (!hedgeMode.isClose) {
             if (hedgeMode.posPriorityArea && hedgeMode.posPriorityArea !== '') {
@@ -11112,9 +11165,11 @@ const saveHedgeSettings = () => {
       // 订单薄更新设置
       minPositionForClose: hedgeMode.minPositionForClose,
       minPositionForOpen: hedgeMode.minPositionForOpen,
-      maxVolume24h: hedgeMode.maxVolume24h,
-      maxVolume7dAvg: hedgeMode.maxVolume7dAvg,
+      maxVolume24hOpen: hedgeMode.maxVolume24hOpen,
+      maxVolume7dAvgOpen: hedgeMode.maxVolume7dAvgOpen,
+      maxPosWorthOpen: hedgeMode.maxPosWorthOpen,
       orderbookMismatchInterval: hedgeMode.orderbookMismatchInterval,
+      maxWeightedTimeHourOpen: hedgeMode.maxWeightedTimeHourOpen,
       // 模式一开仓专属设置
       posPriorityArea: hedgeMode.posPriorityArea,
       maxPosLimit: hedgeMode.maxPosLimit,
@@ -11289,14 +11344,25 @@ const loadHedgeSettings = () => {
     if (settings.minPositionForOpen !== undefined) {
       hedgeMode.minPositionForOpen = settings.minPositionForOpen
     }
-    if (settings.maxVolume24h !== undefined) {
-      hedgeMode.maxVolume24h = settings.maxVolume24h
+    // 优先使用新字段名，如果没有则使用旧字段名（向后兼容）
+    if (settings.maxVolume24hOpen !== undefined) {
+      hedgeMode.maxVolume24hOpen = settings.maxVolume24hOpen
+    } else if (settings.maxVolume24h !== undefined) {位价值大于
+      hedgeMode.maxVolume24hOpen = settings.maxVolume24h
     }
-    if (settings.maxVolume7dAvg !== undefined) {
-      hedgeMode.maxVolume7dAvg = settings.maxVolume7dAvg
+    if (settings.maxVolume7dAvgOpen !== undefined) {
+      hedgeMode.maxVolume7dAvgOpen = settings.maxVolume7dAvgOpen
+    } else if (settings.maxVolume7dAvg !== undefined) {
+      hedgeMode.maxVolume7dAvgOpen = settings.maxVolume7dAvg
+    }
+    if (settings.maxPosWorthOpen !== undefined) {
+      hedgeMode.maxPosWorthOpen = settings.maxPosWorthOpen
     }
     if (settings.orderbookMismatchInterval !== undefined) {
       hedgeMode.orderbookMismatchInterval = settings.orderbookMismatchInterval
+    }
+    if (settings.maxWeightedTimeHourOpen !== undefined) {
+      hedgeMode.maxWeightedTimeHourOpen = settings.maxWeightedTimeHourOpen
     }
     
     // 模式一开仓专属设置
@@ -13398,15 +13464,26 @@ const executeAutoHedgeTasks = async () => {
         }
       }
       
+      // 开仓模式下，检查加权时间是否满足条件
+      if (!hedgeMode.isClose && hedgeMode.maxWeightedTimeHourOpen > 0) {
+        const weightedAvgTime = config.weightedAvgTime || 0
+        const maxWeightedTimeMs = hedgeMode.maxWeightedTimeHourOpen * 3600000  // 小时转毫秒
+        if (weightedAvgTime > maxWeightedTimeMs) {
+          console.log(`配置 ${config.id} - 开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)，跳过本次请求`)
+          config.isFetching = false
+          continue
+        }
+      }
+      
       // 检查24小时交易量和7天平均交易量
       const volume24h = config.volume24h || 0
       const volume7dAvg = config.volume7dAvg || 0
-      const maxVolume24h = hedgeMode.maxVolume24h * 10000  // 转换为实际数量（万转数量）
-      const maxVolume7dAvg = hedgeMode.maxVolume7dAvg * 10000  // 转换为实际数量（万转数量）
+      const maxVolume24h = hedgeMode.maxVolume24hOpen * 10000  // 转换为实际数量（万转数量）
+      const maxVolume7dAvg = hedgeMode.maxVolume7dAvgOpen * 10000  // 转换为实际数量（万转数量）
       
-      // 24h交易量大于XX万 且 7天平均交易量大于XX万 时不交易
-      if (volume24h > maxVolume24h && volume7dAvg > maxVolume7dAvg) {
-        const volumeReason = `交易量过大：24h量 ${(volume24h/10000).toFixed(2)}万 > ${hedgeMode.maxVolume24h}万 且 7d均量 ${(volume7dAvg/10000).toFixed(2)}万 > ${hedgeMode.maxVolume7dAvg}万`
+      // 24h交易量大于XX万 或 7天平均交易量大于XX万 时不交易
+      if (volume24h > maxVolume24h || volume7dAvg > maxVolume7dAvg) {
+        const volumeReason = `交易量过大：24h量 ${(volume24h/10000).toFixed(2)}万 > ${hedgeMode.maxVolume24hOpen}万 或 7d均量 ${(volume7dAvg/10000).toFixed(2)}万 > ${hedgeMode.maxVolume7dAvgOpen}万`
         console.log(`配置 ${config.id} - ${volumeReason}，跳过本次请求`)
         // 设置订单薄数据以显示原因
         config.orderbookData = {

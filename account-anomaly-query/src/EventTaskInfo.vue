@@ -3,6 +3,18 @@
     <h1 class="page-title">事件任务信息</h1>
     
     <div class="toolbar">
+      <div class="exclude-minutes-selector">
+        <label>剔除最近：</label>
+        <el-input-number 
+          v-model="excludeMinutes" 
+          :min="0" 
+          :max="10000" 
+          :precision="0"
+          controls-position="right"
+          style="width: 120px;"
+        />
+        <span class="time-unit">分钟的数据</span>
+      </div>
       <div class="time-range-selector">
         <label>时间范围（小时）：</label>
         <div class="time-inputs">
@@ -202,7 +214,8 @@ const loadTimeRangesFromStorage = () => {
       return {
         timeRange1: ranges.timeRange1 || 24,
         timeRange2: ranges.timeRange2 || 72,
-        timeRange3: ranges.timeRange3 || 168
+        timeRange3: ranges.timeRange3 || 168,
+        excludeMinutes: ranges.excludeMinutes || 0
       }
     }
   } catch (e) {
@@ -211,7 +224,8 @@ const loadTimeRangesFromStorage = () => {
   return {
     timeRange1: 24,
     timeRange2: 72,
-    timeRange3: 168
+    timeRange3: 168,
+    excludeMinutes: 0
   }
 }
 
@@ -219,6 +233,7 @@ const savedRanges = loadTimeRangesFromStorage()
 const timeRange1 = ref(savedRanges.timeRange1)
 const timeRange2 = ref(savedRanges.timeRange2)
 const timeRange3 = ref(savedRanges.timeRange3)
+const excludeMinutes = ref(savedRanges.excludeMinutes)
 
 /**
  * 格式化时间范围标签
@@ -287,10 +302,12 @@ const filteredTableData = computed(() => {
 
 /**
  * 获取时间戳（毫秒）
+ * @param {number} hoursAgo - 多少小时前
+ * @param {number} baseTime - 基准时间（可选，默认为当前时间）
  */
-const getTimestamp = (hoursAgo) => {
-  const now = Date.now()
-  return now - (hoursAgo * 60 * 60 * 1000)
+const getTimestamp = (hoursAgo, baseTime = null) => {
+  const base = baseTime !== null ? baseTime : Date.now()
+  return base - (hoursAgo * 60 * 60 * 1000)
 }
 
 /**
@@ -301,7 +318,8 @@ const saveTimeRangesToStorage = () => {
     const ranges = {
       timeRange1: timeRange1.value,
       timeRange2: timeRange2.value,
-      timeRange3: timeRange3.value
+      timeRange3: timeRange3.value,
+      excludeMinutes: excludeMinutes.value
     }
     localStorage.setItem('eventTaskInfo_timeRanges', JSON.stringify(ranges))
   } catch (e) {
@@ -355,25 +373,27 @@ const loadData = async () => {
     await loadExchangeConfig()
     
     const now = Date.now()
+    // 计算结束时间：当前时间减去剔除的分钟数
+    const endTime = now - (excludeMinutes.value * 60 * 1000)
     
     // 并行调用3次接口，根据输入的3个时间范围获取数据
     const [data1, data2, data3] = await Promise.all([
       axios.get(`${API_BASE_URL}/data/volumeSum`, {
         params: {
-          startTime: getTimestamp(timeRange1.value),
-          endTime: now
+          startTime: getTimestamp(timeRange1.value, endTime),
+          endTime: endTime
         }
       }),
       axios.get(`${API_BASE_URL}/data/volumeSum`, {
         params: {
-          startTime: getTimestamp(timeRange2.value),
-          endTime: now
+          startTime: getTimestamp(timeRange2.value, endTime),
+          endTime: endTime
         }
       }),
       axios.get(`${API_BASE_URL}/data/volumeSum`, {
         params: {
-          startTime: getTimestamp(timeRange3.value),
-          endTime: now
+          startTime: getTimestamp(timeRange3.value, endTime),
+          endTime: endTime
         }
       })
     ])
@@ -543,6 +563,18 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.exclude-minutes-selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 20px;
+}
+
+.exclude-minutes-selector > label {
+  font-weight: 500;
+  color: #333;
 }
 
 .time-range-selector {

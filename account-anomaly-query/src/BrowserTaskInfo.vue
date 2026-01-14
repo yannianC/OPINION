@@ -252,6 +252,21 @@ const range3Label = computed(() => {
 })
 
 /**
+ * 计算成功率
+ * 如果成功次数为0，则成功率为 -失败次数*100%
+ * 否则为 成功次数/(成功次数+失败次数)
+ */
+const calculateSuccessRate = (succ, fail) => {
+  if (succ === 0 || succ === null || succ === undefined) {
+    // 成功次数为0时，成功率为 -失败次数
+    return -(fail || 0)
+  }
+  const total = (succ || 0) + (fail || 0)
+  if (total === 0) return 0
+  return (succ || 0) / total
+}
+
+/**
  * 格式化百分比
  */
 const formatPercentage = (value) => {
@@ -389,16 +404,13 @@ const summaryTableData = computed(() => {
   // 转换为数组并计算成功率
   const result = Array.from(groupMap.values()).map(summary => {
     // 计算第一个区间成功率
-    const total1 = summary.succ1 + summary.fail1
-    summary.successRate1 = total1 > 0 ? summary.succ1 / total1 : 0
+    summary.successRate1 = calculateSuccessRate(summary.succ1, summary.fail1)
     
     // 计算第二个区间成功率
-    const total2 = summary.succ2 + summary.fail2
-    summary.successRate2 = total2 > 0 ? summary.succ2 / total2 : 0
+    summary.successRate2 = calculateSuccessRate(summary.succ2, summary.fail2)
     
     // 计算第三个区间成功率
-    const total3 = summary.succ3 + summary.fail3
-    summary.successRate3 = total3 > 0 ? summary.succ3 / total3 : 0
+    summary.successRate3 = calculateSuccessRate(summary.succ3, summary.fail3)
     
     return summary
   })
@@ -561,16 +573,13 @@ const loadData = async () => {
     // 转换为数组并计算成功率
     const processedData = Array.from(dataMap.values()).map(row => {
       // 计算第一个区间成功率
-      const total1 = row.succ1 + row.fail1
-      row.successRate1 = total1 > 0 ? row.succ1 / total1 : 0
+      row.successRate1 = calculateSuccessRate(row.succ1, row.fail1)
       
       // 计算第二个区间成功率
-      const total2 = row.succ2 + row.fail2
-      row.successRate2 = total2 > 0 ? row.succ2 / total2 : 0
+      row.successRate2 = calculateSuccessRate(row.succ2, row.fail2)
       
       // 计算第三个区间成功率
-      const total3 = row.succ3 + row.fail3
-      row.successRate3 = total3 > 0 ? row.succ3 / total3 : 0
+      row.successRate3 = calculateSuccessRate(row.succ3, row.fail3)
       
       return row
     })
