@@ -5464,11 +5464,167 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     
     # 第二阶段：循环等待20分钟，每隔30s获取一次自己任务id的状态
     log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：等待任务状态变为2 ==========")
-
     
+    phase2_timeout = 1200  # 20分钟
+    phase2_check_interval = 30  # 每30秒检查一次
+    phase2_start_time = time.time()
+    status_is_2 = False
+    status_is_3_or_timeout = False
+    
+    while time.time() - phase2_start_time < phase2_timeout:
+        try:
+            current_status = get_mission_status(mission_id)
+            log_print(f"[{serial_number}] [{task_label}] 当前任务状态: {current_status}")
+            
+            if current_status == 2:
+                log_print(f"[{serial_number}] [{task_label}] ✓ 任务状态变为2，继续后面的流程")
+                status_is_2 = True
+                break
+            elif current_status == 3:
+                log_print(f"[{serial_number}] [{task_label}] ✗ 任务状态变为3，需要撤单")
+                status_is_3_or_timeout = True
+                break
+            
+            time.sleep(phase2_check_interval)
+            
+        except Exception as e:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 获取任务状态时出错: {str(e)}")
+            time.sleep(phase2_check_interval)
+    
+    # 检查是否超时
+    if not status_is_2 and not status_is_3_or_timeout:
+        log_print(f"[{serial_number}] [{task_label}] ✗ 20分钟超时，任务状态未变为2")
+        status_is_3_or_timeout = True
+    
+    # 如果状态变为3或超时，执行撤单逻辑
+    if status_is_3_or_timeout:
+        log_print(f"[{serial_number}] [{task_label}] ========== 执行撤单逻辑 ==========")
+        try:
+            # 点击Open Orders按钮
+            log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
+            open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in open_orders_buttons:
+                if btn.text.strip() == "Open Orders":
+                    btn.click()
+                    time.sleep(7)
+                    break
+            
+            # 获取Open Orders数据
+            log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
+            
+            # 查找 Open Orders div
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            open_orders_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'openorders' in div_id.lower():
+                    open_orders_div = div
+                    break
+            
+            if not open_orders_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div，可能已成交")
+                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
+            
+            # 获取 tbody 和 tr
+            try:
+                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            except:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
+                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
+            
+            if not tr_list or len(tr_list) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
+                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
+            
+            # 找到第一个tr的最后一个td下的svg并点击
+            first_tr = tr_list[0]
+            tds = first_tr.find_elements(By.TAG_NAME, "td")
+            if len(tds) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
+                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
+            
+            last_td = tds[-1]  # 最后一个td
+            svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
+            
+            if not svg_elements or len(svg_elements) == 0:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
+                return False, "[16]任务状态异常或超时,尝试取消自己挂单,挂单取消失败,可能已成交"
+            
+            log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
+            svg_elements[0].click()
+            time.sleep(2)
+            
+            # 在10秒内找到"Confirm"按钮并点击
+            log_print(f"[{serial_number}] [{task_label}] 查找Confirm按钮...")
+            confirm_found = False
+            confirm_timeout = 10
+            confirm_start_time = time.time()
+            
+            while time.time() - confirm_start_time < confirm_timeout:
+                try:
+                    all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for btn in all_buttons:
+                        if btn.text.strip() == "Confirm":
+                            log_print(f"[{serial_number}] [{task_label}] ✓ 找到Confirm按钮，点击...")
+                            btn.click()
+                            confirm_found = True
+                            break
+                    
+                    if confirm_found:
+                        break
+                    
+                    time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 查找Confirm按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not confirm_found:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
+                return False, "[16]任务状态异常或超时,尝试取消自己挂单,挂单取消失败,可能已成交"
+            
+            # 等待10秒
+            log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
+            time.sleep(10)
+            
+            # 重新获取open_orders_div
+            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+            open_orders_div = None
+            for div in tabs_divs:
+                div_id = div.get_attribute('id')
+                if div_id and 'openorders' in div_id.lower():
+                    open_orders_div = div
+                    break
+            
+            if not open_orders_div:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 重新获取时未找到Open Orders div")
+                return False, "[17]任务状态异常或超时，有挂单，已成功取消挂单"
+            
+            # 重新获取tbody和tr
+            try:
+                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+            except:
+                # 没有tbody或tr，说明挂单已取消
+                log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tbody/tr）")
+                return False, "[17]任务状态异常或超时，有挂单，已成功取消挂单"
+            
+            if not tr_list or len(tr_list) == 0:
+                # 没有tr，说明挂单已取消
+                log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tr）")
+                return False, "[17]任务状态异常或超时，有挂单，已成功取消挂单"
+            else:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
+                return False, "[18]任务状态异常或超时,尝试取消自己挂单,但取消挂单失败"
+                
+        except Exception as e:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
+            import traceback
+            log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
+            return False, "[18]任务状态异常或超时,尝试取消自己挂单,且取消挂单出错"
 
     # 如果状态变为2，继续后面的流程（跟type==5的 wait_for_type5_order_and_collect_data 后面一样）
-    if change_detected:
+    if status_is_2:
         log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
         # 复用type==5的收集数据逻辑（4278-4704行）
         try:

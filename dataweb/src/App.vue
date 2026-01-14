@@ -343,6 +343,24 @@
             clearable
           />
         </div>
+        <div class="filter-item">
+          <label>显示无此时间区间积分:</label>
+          <el-select 
+            v-model="filters.selectedPointsPeriod" 
+            placeholder="选择时间区间"
+            size="small"
+            style="width: 250px; margin-left: 8px"
+            clearable
+            @change="applyFilters"
+          >
+            <el-option 
+              v-for="item in pointsSummary.byDescription" 
+              :key="item.originalDescription"
+              :label="item.description" 
+              :value="item.originalDescription" 
+            />
+          </el-select>
+        </div>
         <el-button type="primary" size="small" @click="applyFilters">应用筛选</el-button>
         <el-button size="small" @click="clearFilters">清除筛选</el-button>
         <el-button type="warning" size="small" @click="parseAllRows" :loading="parsingAll">
@@ -1629,7 +1647,8 @@ const filters = ref({
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
-  positionTimeValue: null  // 仓位抓取时间值（时间戳）
+  positionTimeValue: null,  // 仓位抓取时间值（时间戳）
+  selectedPointsPeriod: ''  // 选中的积分时间区间（原始描述）
 })
 
 const activeFilters = ref({
@@ -1654,7 +1673,8 @@ const activeFilters = ref({
   openTimeOperator: '>',  // 打开时间比较操作符：> 或 <
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
-  positionTimeValue: null  // 仓位抓取时间值（时间戳）
+  positionTimeValue: null,  // 仓位抓取时间值（时间戳）
+  selectedPointsPeriod: ''  // 选中的积分时间区间（原始描述）
 })
 
 /**
@@ -1749,7 +1769,8 @@ const applyFilters = () => {
     openTimeOperator: openTimeOperator,
     openTimeValue: openTimeValue,
     positionTimeOperator: positionTimeOperator,
-    positionTimeValue: positionTimeValue
+    positionTimeValue: positionTimeValue,
+    selectedPointsPeriod: filters.value.selectedPointsPeriod || ''
   }
   ElMessage.success('筛选已应用')
 }
@@ -1780,7 +1801,8 @@ const clearFilters = () => {
     openTimeOperator: '>',
     openTimeValue: null,
     positionTimeOperator: '>',
-    positionTimeValue: null
+    positionTimeValue: null,
+    selectedPointsPeriod: ''
   }
   activeFilters.value = {
     computeGroup: [],
@@ -1804,7 +1826,8 @@ const clearFilters = () => {
     openTimeOperator: '>',
     openTimeValue: null,
     positionTimeOperator: '>',
-    positionTimeValue: null
+    positionTimeValue: null,
+    selectedPointsPeriod: ''
   }
   ElMessage.info('筛选已清除')
 }
@@ -1846,7 +1869,8 @@ const filteredTableData = computed(() => {
                     filters.showBalanceGreaterThanZeroButAvailableZero ||
                     filters.showOpenTimeGreaterThanPositionTime ||
                     (filters.openTimeValue !== null && filters.openTimeValue !== undefined) ||
-                    (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined)
+                    (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined) ||
+                    (filters.selectedPointsPeriod && filters.selectedPointsPeriod.trim() !== '')
   
   let result = data
   
@@ -2052,6 +2076,21 @@ const filteredTableData = computed(() => {
         }
       }
       
+      // 积分时间区间筛选：显示没有选中时间区间积分的浏览器
+      if (filters.selectedPointsPeriod) {
+        if (row.k && row.k.trim()) {
+          const periods = parsePoints(row.k)
+          // 检查是否有匹配的时间区间
+          const hasPeriod = periods.some(period => period.description === filters.selectedPointsPeriod)
+          if (hasPeriod) {
+            return false  // 有这个时间区间的积分，不显示
+          }
+        }
+        // 如果没有积分数据，也显示（因为没有这个时间区间的积分）
+      } else {
+        // 如果没有选择时间区间，不进行筛选
+      }
+      
       return true
     })
   }
@@ -2218,6 +2257,7 @@ const pointsSummary = computed(() => {
       const sortKey = getSortKeyFromNumericFormat(numericFormat)
       return { 
         description: numericFormat,  // 显示转换后的格式
+        originalDescription: description,  // 保存原始描述用于匹配
         total,
         sortKey  // 用于排序
       }

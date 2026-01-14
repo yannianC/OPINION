@@ -218,6 +218,18 @@
                 @blur="saveHedgeSettings"
               />
             </div>
+            <div class="trending-filter">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.preferLowerDepth"
+                  :disabled="autoHedgeRunning"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                  @change="saveHedgeSettings"
+                />
+                <span style="cursor: pointer;">价差等于0.1时，选择深度小的一方</span>
+              </label>
+            </div>
             <!-- 账号选择设置 -->
             <div class="trending-filter">
               <label>账号选择:</label>
@@ -2540,6 +2552,7 @@ const hedgeMode = reactive({
   priceRangeMax: 85,  // 先挂方价格区间最大值
   minTotalDepth: 2000,  // 最小累计深度
   maxDepth: 100,  // 最大允许深度
+  preferLowerDepth: true,  // 价差小于0.15时，选择深度小的一方
   // 账号选择设置（新参数）
   singleCloseAmtMax: 500,  // 每个小仓位平仓时间的最大持仓(小于这个的才去平)
   closeAmtSumMin: 0,  // 这一轮最少平仓数量
@@ -2947,7 +2960,19 @@ const handleQuery = async () => {
       
       // 检查价差
       if (priceInfo.diff <= 0.15) {
-        if (!hedgeMode.isClose) {
+        if (hedgeMode.preferLowerDepth) {
+          // 深度优选模式：选择深度小的一方
+          const bidDepth = priceInfo.depth1
+          const askDepth = priceInfo.depth2
+          const minDepth = Math.min(bidDepth, askDepth)
+          const minDepthType = bidDepth <= askDepth ? '买一' : '卖一'
+          
+          if (minDepth >= hedgeMode.maxDepth) {
+            reason = `深度优选：${minDepthType}深度 ${minDepth.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
+          } else {
+            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
+          }
+        } else if (!hedgeMode.isClose) {
           // 开仓模式：检查买一深度
           if (priceInfo.depth1 >= hedgeMode.maxDepth) {
             reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
@@ -3451,93 +3476,93 @@ const fetchTopicsByYesCount = async () => {
 const fetchMissionList = async () => {
   isLoadingList.value = true
   
-  try {
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
-      params: {
-        limit: 200
-      }
-    })
+  // try {
+  //   const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
+  //     params: {
+  //       limit: 200
+  //     }
+  //   })
     
-    if (response.data && response.data.code === 0) {
-      const allMissions = response.data.data.list || []
+  //   if (response.data && response.data.code === 0) {
+  //     const allMissions = response.data.data.list || []
       
-      // 显示所有任务（不再过滤type=3，因为不再使用type=3任务）
-      missionList.value = allMissions
+  //     // 显示所有任务（不再过滤type=3，因为不再使用type=3任务）
+  //     missionList.value = allMissions
       
-      // 更新对冲任务状态（使用新接口）
-      for (const config of activeConfigs.value) {
-        if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-          const hedgeRecord = config.currentHedge
+  //     // 更新对冲任务状态（使用新接口）
+  //     for (const config of activeConfigs.value) {
+  //       if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
+  //         const hedgeRecord = config.currentHedge
           
-          // 通过新接口获取任务状态
-          if (hedgeRecord.yesTaskId) {
-            const yesTaskData = await fetchMissionStatus(hedgeRecord.yesTaskId)
-            if (yesTaskData) {
-              const oldStatus = hedgeRecord.yesStatus
-              hedgeRecord.yesStatus = yesTaskData.status
-              if (oldStatus !== yesTaskData.status) {
-                console.log(`[fetchMissionList] YES任务 ${hedgeRecord.yesTaskId} 状态变化: ${oldStatus} -> ${yesTaskData.status}`)
-              }
-            }
-          }
+  //         // 通过新接口获取任务状态
+  //         if (hedgeRecord.yesTaskId) {
+  //           const yesTaskData = await fetchMissionStatus(hedgeRecord.yesTaskId)
+  //           if (yesTaskData) {
+  //             const oldStatus = hedgeRecord.yesStatus
+  //             hedgeRecord.yesStatus = yesTaskData.status
+  //             if (oldStatus !== yesTaskData.status) {
+  //               console.log(`[fetchMissionList] YES任务 ${hedgeRecord.yesTaskId} 状态变化: ${oldStatus} -> ${yesTaskData.status}`)
+  //             }
+  //           }
+  //         }
           
-          if (hedgeRecord.noTaskId) {
-            const noTaskData = await fetchMissionStatus(hedgeRecord.noTaskId)
-            if (noTaskData) {
-              const oldStatus = hedgeRecord.noStatus
-              hedgeRecord.noStatus = noTaskData.status
-              if (oldStatus !== noTaskData.status) {
-                console.log(`[fetchMissionList] NO任务 ${hedgeRecord.noTaskId} 状态变化: ${oldStatus} -> ${noTaskData.status}`)
-              }
-            }
-          }
+  //         if (hedgeRecord.noTaskId) {
+  //           const noTaskData = await fetchMissionStatus(hedgeRecord.noTaskId)
+  //           if (noTaskData) {
+  //             const oldStatus = hedgeRecord.noStatus
+  //             hedgeRecord.noStatus = noTaskData.status
+  //             if (oldStatus !== noTaskData.status) {
+  //               console.log(`[fetchMissionList] NO任务 ${hedgeRecord.noTaskId} 状态变化: ${oldStatus} -> ${noTaskData.status}`)
+  //             }
+  //           }
+  //         }
           
-          // 检查对冲任务状态并触发完成逻辑
-          const firstSide = hedgeRecord.firstSide
-          const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
-          const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
+  //         // 检查对冲任务状态并触发完成逻辑
+  //         const firstSide = hedgeRecord.firstSide
+  //         const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
+  //         const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
           
-          console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} - 第一个任务(${firstSide})状态: ${firstStatus}, 第二个任务已提交: ${hedgeRecord.secondTaskSubmitted}`)
+  //         console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} - 第一个任务(${firstSide})状态: ${firstStatus}, 第二个任务已提交: ${hedgeRecord.secondTaskSubmitted}`)
           
-          // 检查第一个任务是否失败
-          if (firstStatus === 3) {
-            console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
-            hedgeRecord.finalStatus = 'failed'
-            finishHedge(config, hedgeRecord)
-          }
-          // 第一个任务成功，提交第二个任务
-          else if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
-            console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
-            hedgeRecord.secondTaskSubmitted = true
-            submitSecondHedgeTask(config, hedgeRecord)
-          }
-          // 第二个任务已提交，检查第二个任务状态
-          else if (hedgeRecord.secondTaskSubmitted) {
-            // 检查第二个任务是否失败
-            if (secondStatus === 3) {
-              console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
-              hedgeRecord.finalStatus = 'failed'
-              finishHedge(config, hedgeRecord)
-            }
-            // 两个任务都成功
-            else if (firstStatus === 2 && secondStatus === 2) {
-              console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 两个任务都成功`)
-              hedgeRecord.finalStatus = 'success'
-              finishHedge(config, hedgeRecord)
-            }
-          }
-        }
-      }
+  //         // 检查第一个任务是否失败
+  //         if (firstStatus === 3) {
+  //           console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
+  //           hedgeRecord.finalStatus = 'failed'
+  //           finishHedge(config, hedgeRecord)
+  //         }
+  //         // 第一个任务成功，提交第二个任务
+  //         else if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
+  //           console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
+  //           hedgeRecord.secondTaskSubmitted = true
+  //           submitSecondHedgeTask(config, hedgeRecord)
+  //         }
+  //         // 第二个任务已提交，检查第二个任务状态
+  //         else if (hedgeRecord.secondTaskSubmitted) {
+  //           // 检查第二个任务是否失败
+  //           if (secondStatus === 3) {
+  //             console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
+  //             hedgeRecord.finalStatus = 'failed'
+  //             finishHedge(config, hedgeRecord)
+  //           }
+  //           // 两个任务都成功
+  //           else if (firstStatus === 2 && secondStatus === 2) {
+  //             console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 两个任务都成功`)
+  //             hedgeRecord.finalStatus = 'success'
+  //             finishHedge(config, hedgeRecord)
+  //           }
+  //         }
+  //       }
+  //     }
       
-      console.log(`任务列表已刷新，共 ${missionList.value.length} 条记录（已过滤 type=3）`)
-    } else {
-      console.warn(`获取任务列表失败: ${response.data?.msg || '未知错误'}`)
-    }
-  } catch (error) {
-    console.error('获取任务列表失败:', error)
-  } finally {
-    isLoadingList.value = false
-  }
+  //     console.log(`任务列表已刷新，共 ${missionList.value.length} 条记录（已过滤 type=3）`)
+  //   } else {
+  //     console.warn(`获取任务列表失败: ${response.data?.msg || '未知错误'}`)
+  //   }
+  // } catch (error) {
+  //   console.error('获取任务列表失败:', error)
+  // } finally {
+  //   isLoadingList.value = false
+  // }
 }
 
 /**
@@ -7016,35 +7041,71 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
   // depth1: 先挂方的买一深度
   // depth2: 先挂方的卖一深度
   
+  // 重置选择的价格类型
+  priceInfo.selectedPriceType = null
+  
   if (priceInfo.diff > 0.15) {
     // 先挂方的买卖价差大于0.15，可以对冲
     canHedge = true
+    priceInfo.selectedPriceType = 'average'  // 使用平均价
     console.log(`✅ 先挂方买卖价差充足 (${priceInfo.diff.toFixed(2)})，满足对冲条件`)
   } else {
-    // 差值小于等于0.15，根据开仓/平仓判断先挂方的深度
+    // 差值小于等于0.15，根据深度判断
     console.log(`⚠️ 先挂方买卖价差不足 (${priceInfo.diff.toFixed(2)})，检查深度条件`)
     
-    if (!hedgeMode.isClose) {
-      // 开仓模式：判断先挂方买一价的深度（depth1，因为开仓是买入）
-      const bidDepth = priceInfo.depth1
-      console.log(`开仓模式，先挂方买一深度: ${bidDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+    // 如果勾选了"选择深度小的一方"
+    if (hedgeMode.preferLowerDepth) {
+      const bidDepth = priceInfo.depth1  // 买一深度
+      const askDepth = priceInfo.depth2  // 卖一深度
       
-      if (bidDepth < hedgeMode.maxDepth) {
-        canHedge = true
-        console.log(`✅ 深度满足条件 (${bidDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+      console.log(`启用深度优选 - 买一深度: ${bidDepth.toFixed(2)}, 卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+      
+      // 选择深度小的一方
+      if (bidDepth <= askDepth) {
+        // 买一深度更小或相等，使用买一
+        if (bidDepth < hedgeMode.maxDepth) {
+          canHedge = true
+          priceInfo.selectedPriceType = 'bid'  // 使用买一价
+          console.log(`✅ 买一深度更小 (${bidDepth.toFixed(2)} <= ${askDepth.toFixed(2)})，且满足深度限制，使用买一价 ${priceInfo.price1}`)
+        } else {
+          console.log(`❌ 买一深度更小但超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+        }
       } else {
-        console.log(`❌ 深度超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+        // 卖一深度更小，使用卖一
+        if (askDepth < hedgeMode.maxDepth) {
+          canHedge = true
+          priceInfo.selectedPriceType = 'ask'  // 使用卖一价
+          console.log(`✅ 卖一深度更小 (${askDepth.toFixed(2)} < ${bidDepth.toFixed(2)})，且满足深度限制，使用卖一价 ${priceInfo.price2}`)
+        } else {
+          console.log(`❌ 卖一深度更小但超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+        }
       }
     } else {
-      // 平仓模式：判断先挂方卖一价的深度（depth2，因为是卖出）
-      const askDepth = priceInfo.depth2
-      console.log(`平仓模式，先挂方卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
-      
-      if (askDepth < hedgeMode.maxDepth) {
-        canHedge = true
-        console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+      // 未勾选，使用原有逻辑
+      if (!hedgeMode.isClose) {
+        // 开仓模式：判断先挂方买一价的深度（depth1，因为开仓是买入）
+        const bidDepth = priceInfo.depth1
+        console.log(`开仓模式，先挂方买一深度: ${bidDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+        
+        if (bidDepth < hedgeMode.maxDepth) {
+          canHedge = true
+          priceInfo.selectedPriceType = 'ask'  // 开仓使用卖一价
+          console.log(`✅ 深度满足条件 (${bidDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+        } else {
+          console.log(`❌ 深度超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+        }
       } else {
-        console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+        // 平仓模式：判断先挂方卖一价的深度（depth2，因为是卖出）
+        const askDepth = priceInfo.depth2
+        console.log(`平仓模式，先挂方卖一深度: ${askDepth.toFixed(2)}, 最大允许深度: ${hedgeMode.maxDepth}`)
+        
+        if (askDepth < hedgeMode.maxDepth) {
+          canHedge = true
+          priceInfo.selectedPriceType = 'ask'  // 平仓使用卖一价
+          console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
+        } else {
+          console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+        }
       }
     }
   }
@@ -7062,16 +7123,24 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
   try {
     console.log(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
     
-    // 计算订单价格（Type4固定为平仓模式）
+    // 计算订单价格（根据 selectedPriceType 决定）
     let orderPrice
-    if (priceInfo.diff > 0.15) {
-      // 先挂方买卖价差大于0.15，取平均价
+    if (priceInfo.selectedPriceType === 'average') {
+      // 价差充足，取平均价
       orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
       console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
+    } else if (priceInfo.selectedPriceType === 'bid') {
+      // 选择了买一价（深度小的一方）
+      orderPrice = priceInfo.price1.toFixed(1)
+      console.log(`深度优选，订单价格（买一价）: ${orderPrice}`)
+    } else if (priceInfo.selectedPriceType === 'ask') {
+      // 选择了卖一价（深度小的一方或原有逻辑）
+      orderPrice = priceInfo.price2.toFixed(1)
+      console.log(`订单价格（卖一价）: ${orderPrice}`)
     } else {
-      // 差值小于等于0.15，平仓模式取较大的价格（卖一价）
+      // 兜底：使用较大的价格
       orderPrice = priceInfo.maxPrice.toFixed(1)
-      console.log(`平仓模式，订单价格（卖一价）: ${orderPrice}`)
+      console.log(`兜底，订单价格（maxPrice）: ${orderPrice}`)
     }
     
     // 获取当前打开显示的所有主题ID
@@ -9098,6 +9167,29 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
   let secondTaskStartTime = null  // 后挂方任务开始时间（用于15分钟超时）
   let retryCount = 0  // 后挂方失败重试次数（最多5次）
   
+  // 辅助函数：将先挂方所有任务状态改为3（后挂方失败时调用）
+  const setFirstSideTasksToFailed = async () => {
+    if (hedgeRecord.closeTasks && hedgeRecord.closeTasks.length > 0) {
+      console.log(`Type4 - 后挂方失败，将先挂方所有任务状态改为3`)
+      for (const task of hedgeRecord.closeTasks) {
+        if (task.taskId && (task.status === 20 || task.status === 2)) {
+          console.log(`Type4 - 更新先挂方任务 ${task.taskId} 状态: ${task.status} -> 3`)
+          task.status = 3
+          // 保存状态到服务器
+          try {
+            await axios.post('https://sg.bicoin.com.cn/99l/mission/saveResult', {
+              id: task.taskId,
+              status: 3
+            })
+            console.log(`Type4 - 保存先挂方任务 ${task.taskId} 状态3到服务器成功`)
+          } catch (error) {
+            console.error(`Type4 - 保存先挂方任务 ${task.taskId} 状态3到服务器失败:`, error)
+          }
+        }
+      }
+    }
+  }
+  
   const checkStatus = async () => {
     // 检查是否已完成
     if (hedgeRecord.finalStatus !== 'running') {
@@ -9133,19 +9225,20 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
         return
       }
       
-      const allFirstCompleted = firstSideTasks.every(t => t.status === 20 || t.status === 3)
+      const allFirstCompleted = firstSideTasks.every(t => t.status === 20 || t.status === 2 || t.status === 3)
       
       if (allFirstCompleted || elapsed >= 15) {
-        // 先挂方任务完成或超时，获取状态为20的任务，请求后挂方
-        const successTasks = firstSideTasks.filter(t => t.status === 20)
+        // 先挂方任务完成或超时，获取状态为20或2的任务，请求后挂方
+        const successTasks = firstSideTasks.filter(t => t.status === 20 || t.status === 2)
         
         if (successTasks.length > 0 && hedgeRecord.missionId) {
-          console.log(`Type4 - 先挂方任务完成，成功（状态20） ${successTasks.length} 个，开始请求后挂方任务`)
+          console.log(`Type4 - 先挂方任务完成，成功（状态20或2） ${successTasks.length} 个，开始请求后挂方任务`)
           
           const secondSideList = await requestSecondSideData(successTasks)
           
           if (!secondSideList || secondSideList.length === 0) {
             console.error(`Type4 - 后挂方列表为空`)
+            await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
             hedgeRecord.finalStatus = 'failed'
             hedgeRecord.errorMsg = '后挂方列表为空'
             finishHedge(config, hedgeRecord)
@@ -9160,7 +9253,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
           await trySubmitSecondTask(config, hedgeRecord, secondSideList, successTasks)
         } else {
           // 没有成功的先挂方任务或没有missionId
-          const successTasksCount = firstSideTasks.filter(t => t.status === 20).length
+          const successTasksCount = firstSideTasks.filter(t => t.status === 20 || t.status === 2).length
           console.log(`Type4 - 先挂方任务完成，但没有成功的任务（成功: ${successTasksCount}，missionId: ${hedgeRecord.missionId}）`)
           hedgeRecord.finalStatus = 'failed'
           hedgeRecord.errorMsg = '先挂方任务无成功项'
@@ -9170,7 +9263,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
       } else {
         // 先挂方任务还未完成，继续监控
         const runningTasks = firstSideTasks.filter(t => t.status === 9 || t.status === 0)
-        const completedTasks = firstSideTasks.filter(t => t.status === 20 || t.status === 3)
+        const completedTasks = firstSideTasks.filter(t => t.status === 20 || t.status === 2 || t.status === 3)
         console.log(`[Type4-monitorHedgeStatus] 对冲 ${hedgeRecord.id} 先挂方任务进度: ${completedTasks.length}/${firstSideTasks.length} 完成，${runningTasks.length} 个运行中`)
         setTimeout(checkStatus, 5000)
         return
@@ -9197,14 +9290,14 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
           const secondSideList = hedgeRecord.secondLimitList || []
           currentSecondTaskIndex++
           if (currentSecondTaskIndex < secondSideList.length) {
-            const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20)
+            const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2)
             secondTaskStartTime = new Date()
             await trySubmitSecondTask(config, hedgeRecord, secondSideList, successTasks)
             setTimeout(checkStatus, 5000)
             return
           } else {
             // 所有后挂方都失败，检查是否可以重试
-            const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20)
+            const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2)
             if (retryCount < 5) {
               retryCount++
               console.log(`Type4 - 所有后挂方都失败，重试第 ${retryCount} 次，重新请求后挂方数据`)
@@ -9220,6 +9313,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
               } else {
                 console.error(`Type4 - 重试第 ${retryCount} 次，获取后挂方数据失败`)
                 if (retryCount >= 5) {
+                  await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
                   hedgeRecord.finalStatus = 'failed'
                   hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
                   finishHedge(config, hedgeRecord)
@@ -9227,6 +9321,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                 }
               }
             } else {
+              await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
               hedgeRecord.finalStatus = 'failed'
               hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
               finishHedge(config, hedgeRecord)
@@ -9276,10 +9371,10 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                 if (hedgeRecord.closeTasks && hedgeRecord.closeTasks.length > 0) {
                   console.log(`Type4 - 先挂方任务状态列表:`, hedgeRecord.closeTasks.map(t => ({ taskId: t.taskId, status: t.status })))
                 }
-                const successTasks = hedgeRecord.closeTasks ? hedgeRecord.closeTasks.filter(t => t.status === 20) : []
-                console.log(`Type4 - 找到 ${successTasks.length} 个状态为20的先挂方任务，开始更新状态`)
+                const successTasks = hedgeRecord.closeTasks ? hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2) : []
+                console.log(`Type4 - 找到 ${successTasks.length} 个状态为20或2的先挂方任务，开始更新状态`)
                 if (successTasks.length === 0) {
-                  console.warn(`Type4 - 警告：没有找到状态为20的先挂方任务！先挂方任务状态可能是:`, hedgeRecord.closeTasks?.map(t => t.status) || [])
+                  console.warn(`Type4 - 警告：没有找到状态为20或2的先挂方任务！先挂方任务状态可能是:`, hedgeRecord.closeTasks?.map(t => t.status) || [])
                 } else {
                   for (const firstTask of successTasks) {
                     console.log(`Type4 - 更新先挂方任务 ${firstTask.taskId} 状态: 20 -> 2`)
@@ -9307,7 +9402,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                 // 不移除失败的任务，让它继续显示在对冲信息中（任务ID会显示为红色）
                 currentSecondTaskIndex++
                 if (currentSecondTaskIndex < secondSideList.length) {
-                  const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20)
+                  const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2)
                   secondTaskStartTime = new Date()
                   await trySubmitSecondTask(config, hedgeRecord, secondSideList, successTasks)
                   setTimeout(checkStatus, 5000)
@@ -9315,7 +9410,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                 } else {
                   // 所有后挂方都失败，检查是否可以重试
                   console.log(`Type4 - 所有后挂方任务都失败，尝试重试`)
-                  const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20)
+                  const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2)
                   if (retryCount < 5) {
                     retryCount++
                     console.log(`Type4 - 所有后挂方都失败，重试第 ${retryCount} 次，重新请求后挂方数据`)
@@ -9331,6 +9426,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                     } else {
                       console.error(`Type4 - 重试第 ${retryCount} 次，获取后挂方数据失败`)
                       if (retryCount >= 5) {
+                        await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
                         hedgeRecord.finalStatus = 'failed'
                         hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
                         finishHedge(config, hedgeRecord)
@@ -9338,6 +9434,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                       }
                     }
                   } else {
+                    await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
                     hedgeRecord.finalStatus = 'failed'
                     hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
                     finishHedge(config, hedgeRecord)
@@ -9353,7 +9450,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
         const secondSideList = hedgeRecord.secondLimitList || []
         if (secondSideList.length > 0 && currentSecondTaskIndex >= secondSideList.length) {
           console.log(`Type4 - 没有后挂方任务且已尝试完所有后挂方，尝试重试`)
-          const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20)
+          const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2)
           if (retryCount < 5) {
             retryCount++
             console.log(`Type4 - 所有后挂方都失败，重试第 ${retryCount} 次，重新请求后挂方数据`)
@@ -9369,6 +9466,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
             } else {
               console.error(`Type4 - 重试第 ${retryCount} 次，获取后挂方数据失败`)
               if (retryCount >= 5) {
+                await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
                 hedgeRecord.finalStatus = 'failed'
                 hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
                 finishHedge(config, hedgeRecord)
@@ -9376,6 +9474,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
               }
             }
           } else {
+            await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
             hedgeRecord.finalStatus = 'failed'
             hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
             finishHedge(config, hedgeRecord)
@@ -9394,7 +9493,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
           const allFailed = hedgeRecord.secondTasks.every(t => t.status === 3)
           if (allFailed) {
             console.log(`Type4 - 检测到所有后挂方都失败，尝试重试`)
-            const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20)
+            const successTasks = hedgeRecord.closeTasks.filter(t => t.status === 20 || t.status === 2)
             if (retryCount < 5) {
               retryCount++
               console.log(`Type4 - 所有后挂方都失败，重试第 ${retryCount} 次，重新请求后挂方数据`)
@@ -9411,6 +9510,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
               } else {
                 console.error(`Type4 - 重试第 ${retryCount} 次，获取后挂方数据失败`)
                 if (retryCount >= 5) {
+                  await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
                   hedgeRecord.finalStatus = 'failed'
                   hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
                   finishHedge(config, hedgeRecord)
@@ -9418,6 +9518,7 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
                 }
               }
             } else {
+              await setFirstSideTasksToFailed()  // 将先挂方任务状态改为3
               hedgeRecord.finalStatus = 'failed'
               hedgeRecord.errorMsg = '后挂方任务失败，已达到最大重试次数（5次）'
               finishHedge(config, hedgeRecord)
