@@ -563,6 +563,16 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="总资产" width="120" align="center" sortable :sort-method="(a, b) => {
+        const totalA = (parseFloat(a.balance) || 0) + (parseFloat(a.c) || 0)
+        const totalB = (parseFloat(b.balance) || 0) + (parseFloat(b.c) || 0)
+        return totalA - totalB
+      }">
+        <template #default="scope">
+          <span>{{ formatNumber((parseFloat(scope.row.balance) || 0) + (parseFloat(scope.row.c) || 0)) }}</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="余额 (Balance)" width="120" align="center" sortable :sort-method="(a, b) => sortByNumber(a.balance, b.balance)">
         <template #default="scope">
           <el-input 

@@ -993,11 +993,19 @@
               />
               <button 
                 class="btn btn-success btn-sm" 
-                @click="randomGetAvailableTopic"
+                @click="randomGetAvailableTopic(flase)"
                 :disabled="isRandomGetting"
                 title="随机获取可用的主题"
               >
                 {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
+              </button>
+              <button 
+                class="btn btn-warning btn-sm" 
+                @click="randomGetAvailableTopic(true)"
+                :disabled="isRandomGetting || !failedTopics || failedTopics.length === 0"
+                title="在上一轮失败的主题中再次获取"
+              >
+                {{ isRandomGetting ? '🔄 获取中...' : `🔄 重试失败主题 (${failedTopics?.length || 0})` }}
               </button>
               <label style="font-size: 14px; margin-left: 8px;">一个主题同时任务个数：</label>
               <input 
@@ -3158,6 +3166,7 @@ const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
+const failedTopics = ref([])  // 请求失败的主题列表（API rate limit exceeded）
 const hedgeTasksPerTopic = ref(2)  // 一个主题同时执行的对冲任务数量，默认为2
 const hedgeMaxTasksPerRound = ref(2)  // 每一轮每个主题最多任务数，默认为10
 const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不等待）
@@ -8132,6 +8141,12 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           priceInfo.reason = orderbookReason
           
         } catch (error) {
+          // 如果是深度区间开关未开启的错误，直接抛出，不回退到基本数据
+          if (error.message && error.message.includes('深度区间开关未开启')) {
+            console.error(`配置 ${config.id} - 深度区间开关未开启，直接失败:`, error.message)
+            throw error
+          }
+          
           // parseOrderbookData失败，尝试获取基本订单薄数据
           console.warn(`配置 ${config.id} - 完整订单薄检查失败，尝试获取基本数据:`, error.message)
           
@@ -8275,25 +8290,48 @@ const fetchOrderbook = async (tokenId) => {
       }
     })
     
+    // 检查是否是 API rate limit exceeded 错误
+    const errorMsg = response.data?.errmsg || response.data?.msg || response.data?.message || ''
+    if (errorMsg === 'API rate limit exceeded') {
+      const rateLimitError = new Error('API rate limit exceeded')
+      rateLimitError.isRateLimit = true
+      throw rateLimitError
+    }
+    
     // errno = 0 表示请求成功，即使 result 为空也应该返回
     if (response.data && response.data.errno === 0) {
       return response.data.result || {}
     }
     
     // errno !== 0 表示接口返回错误，需要重试
-    const errorMsg = response.data?.errmsg || response.data?.msg || '订单薄接口返回错误'
-    throw new Error(`订单薄接口错误: ${errorMsg} (errno: ${response.data?.errno})`)
+    const finalErrorMsg = errorMsg || '订单薄接口返回错误'
+    throw new Error(`订单薄接口错误: ${finalErrorMsg} (errno: ${response.data?.errno})`)
   } catch (error) {
     // 如果是 axios 错误（网络错误等），需要重试
     if (error.response) {
       // HTTP 错误响应
+      const errorMsg = error.response.data?.errmsg || error.response.data?.msg || error.response.data?.message || ''
+      
+      // 检查是否是 API rate limit exceeded 错误
+      if (errorMsg === 'API rate limit exceeded') {
+        const rateLimitError = new Error('API rate limit exceeded')
+        rateLimitError.isRateLimit = true
+        throw rateLimitError
+      }
+      
       const errno = error.response.data?.errno
       if (errno !== undefined && errno !== 0) {
         // 接口返回 errno !== 0，需要重试
-        const errorMsg = error.response.data?.errmsg || error.response.data?.msg || '订单薄接口返回错误'
-        throw new Error(`订单薄接口错误: ${errorMsg} (errno: ${errno})`)
+        const finalErrorMsg = errorMsg || '订单薄接口返回错误'
+        throw new Error(`订单薄接口错误: ${finalErrorMsg} (errno: ${errno})`)
       }
     }
+    
+    // 如果已经是 rate limit 错误，直接抛出
+    if (error.isRateLimit) {
+      throw error
+    }
+    
     console.error('获取订单薄失败:', error)
     throw error
   }
@@ -8608,10 +8646,26 @@ const subtractLimitOrdersFromOrderbook = (orderbook, limitOrders) => {
 const parseOrderbookData = async (config, isClose) => {
   try {
     // 获取yes和no的订单薄数据
-    const [yesOrderbook, noOrderbook] = await Promise.all([
-      fetchOrderbook(config.trendingPart1),
-      fetchOrderbook(config.trendingPart2)
-    ])
+    let yesOrderbook, noOrderbook
+    try {
+      yesOrderbook = await fetchOrderbook(config.trendingPart1)
+    } catch (error) {
+      // 如果是 rate limit 错误，直接抛出
+      if (error.isRateLimit) {
+        throw error
+      }
+      throw error
+    }
+    
+    try {
+      noOrderbook = await fetchOrderbook(config.trendingPart2)
+    } catch (error) {
+      // 如果是 rate limit 错误，直接抛出
+      if (error.isRateLimit) {
+        throw error
+      }
+      throw error
+    }
     
     // 获取YES的买一价和卖一价
     let yesBids = yesOrderbook.bids || []
@@ -8778,20 +8832,24 @@ const parseOrderbookData = async (config, isClose) => {
     const priceMax = hedgeMode.priceRangeMax
     const avgPrice = (price1 + price2) / 2  // 买一价和卖一价的平均值
     
+    // 平仓和开仓模式都需要检查平均价格是否在区间内（大于最小值且小于最大值）
     if (isClose) {
-      // 平仓模式：检查平均价格是否小于最大区间
-      console.log(`平仓模式 - 平均价格: ${avgPrice.toFixed(2)}, 最大价格要求: ${priceMax}`)
-      
-      if (avgPrice >= priceMax) {
-        throw new Error(`平仓模式，平均价格 ${avgPrice.toFixed(2)} 不小于最大价格 ${priceMax}`)
-      }
+      // 平仓模式：检查平均价格是否在区间内
+      console.log(`平仓模式 - 平均价格: ${avgPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
     } else {
-      // 开仓模式：检查平均价格是否大于最小区间
-      console.log(`开仓模式 - 平均价格: ${avgPrice.toFixed(2)}, 最小价格要求: ${priceMin}`)
-      
-      if (avgPrice <= priceMin) {
-        throw new Error(`开仓模式，平均价格 ${avgPrice.toFixed(2)} 不大于最小价格 ${priceMin}`)
-      }
+      // 开仓模式：检查平均价格是否在区间内
+      console.log(`开仓模式 - 平均价格: ${avgPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
+    }
+    
+    // 统一检查：平均价格必须在区间内
+    if (avgPrice <= priceMin) {
+      const mode = isClose ? '平仓' : '开仓'
+      throw new Error(`${mode}模式，平均价格 ${avgPrice.toFixed(2)} 不大于最小价格 ${priceMin}`)
+    }
+    
+    if (avgPrice >= priceMax) {
+      const mode = isClose ? '平仓' : '开仓'
+      throw new Error(`${mode}模式，平均价格 ${avgPrice.toFixed(2)} 不小于最大价格 ${priceMax}`)
     }
     
     // === 深度差计算和价格计算逻辑 ===
@@ -8992,10 +9050,7 @@ const parseOrderbookData = async (config, isClose) => {
       console.log(`深度差 0.1 - 最终价格: ${finalPrice.toFixed(2)}`)
       
     } else {
-      // 其他深度差范围，使用原来的逻辑
-      finalPrice = (price1 + price2) / 2
-      tp2 = null
-      console.log(`深度差 ${depthDiff.toFixed(2)} - 使用平均价格: ${finalPrice.toFixed(2)}`)
+      throw new Error(`该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
     }
     
     // 确定深度差范围标识（用于判断使用哪个开关）
@@ -9560,6 +9615,12 @@ const updateOrderbookForConfig = async (config) => {
         priceInfo.reason = orderbookReason
       }
     } catch (error) {
+      // 如果是深度区间开关未开启的错误，直接抛出，不回退到基本数据
+      if (error.message && error.message.includes('深度区间开关未开启')) {
+        console.error(`配置 ${config.id} - 深度区间开关未开启，直接失败:`, error.message)
+        throw error
+      }
+      
       // parseOrderbookData失败，尝试获取基本订单薄数据
       console.warn(`配置 ${config.id} - 完整订单薄检查失败，尝试获取基本数据:`, error.message)
       
@@ -9766,15 +9827,29 @@ const closeConfigTask = async (config) => {
 
 /**
  * 随机获取可用主题
+ * @param {Array} useFailedTopics - 是否使用失败的主题列表，如果为true，则从失败列表中获取
  */
-const randomGetAvailableTopic = async () => {
+const randomGetAvailableTopic = async (useFailedTopics = false) => {
   if (isRandomGetting.value) return
   
   // 获取目标数量，确保至少为1
   const targetCount = Math.max(1, Math.floor(randomGetCount.value) || 1)
   
   isRandomGetting.value = true
-  showToast(`正在随机获取 ${targetCount} 个可用主题...`, 'info')
+  
+  // 清空当前轮次的失败主题列表（如果是从失败列表获取，则不清空，而是更新）
+  const currentRoundFailedTopics = []
+  
+  if (useFailedTopics) {
+    if (failedTopics.value.length === 0) {
+      showToast('没有失败的主题可以重试', 'warning')
+      isRandomGetting.value = false
+      return
+    }
+    showToast(`正在从失败列表中获取 ${targetCount} 个可用主题（共 ${failedTopics.value.length} 个失败主题）...`, 'info')
+  } else {
+    showToast(`正在随机获取 ${targetCount} 个可用主题...`, 'info')
+  }
   
   try {
     // 如果是平仓模式，先获取持仓数据
@@ -9790,43 +9865,63 @@ const randomGetAvailableTopic = async () => {
       }
     }
     
-    // 1. 请求配置列表
-    const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+    let closedConfigs = []
     
-    if (configResponse.data?.code !== 0) {
-      throw new Error('获取配置数据失败')
+    if (useFailedTopics) {
+      // 从失败的主题列表中获取
+      closedConfigs = failedTopics.value.filter(config => {
+        // 确保配置仍然有效
+        return config.trendingPart1 && 
+               config.trendingPart2 &&
+               config.trending && 
+               !config.trending.includes('undefined')
+      })
+      
+      if (closedConfigs.length === 0) {
+        showToast('失败的主题列表中没有有效主题', 'warning')
+        return
+      }
+      
+      console.log(`从失败列表中获取到 ${closedConfigs.length} 个主题`)
+    } else {
+      // 1. 请求配置列表
+      const configResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
+      
+      if (configResponse.data?.code !== 0) {
+        throw new Error('获取配置数据失败')
+      }
+      
+      const allConfigs = configResponse.data.data.configList || []
+      
+      console.log(`获取到 ${allConfigs.length} 个配置`)
+      
+      // 统计各种状态
+      const openCount = allConfigs.filter(c => c.isOpen === 1).length
+      const closedCount = allConfigs.filter(c => c.isOpen === 0).length
+      const hasTokenCount = allConfigs.filter(c => c.trendingPart1 && c.trendingPart2).length
+      
+      console.log(`- isOpen=1 (打开): ${openCount} 个`)
+      console.log(`- isOpen=0 (关闭): ${closedCount} 个`)
+      console.log(`- 有tokenId: ${hasTokenCount} 个`)
+      
+      // 2. 筛选出isOpen=0且有tokenId的主题，且trending不包含"undefined"
+      closedConfigs = allConfigs.filter(config => 
+        config.isOpen === 0 && 
+        config.trendingPart1 && 
+        config.trendingPart2 &&
+        config.trending && 
+        !config.trending.includes('undefined')
+      )
+      
+      console.log(`符合条件的主题: ${closedConfigs.length} 个`)
+      
+      if (closedConfigs.length === 0) {
+        showToast(`没有可用的关闭主题 (总配置:${allConfigs.length}, 关闭:${closedCount}, 有token:${hasTokenCount})`, 'warning')
+        return
+      }
     }
     
-    const allConfigs = configResponse.data.data.configList || []
-    
-    console.log(`获取到 ${allConfigs.length} 个配置`)
-    
-    // 统计各种状态
-    const openCount = allConfigs.filter(c => c.isOpen === 1).length
-    const closedCount = allConfigs.filter(c => c.isOpen === 0).length
-    const hasTokenCount = allConfigs.filter(c => c.trendingPart1 && c.trendingPart2).length
-    
-    console.log(`- isOpen=1 (打开): ${openCount} 个`)
-    console.log(`- isOpen=0 (关闭): ${closedCount} 个`)
-    console.log(`- 有tokenId: ${hasTokenCount} 个`)
-    
-    // 2. 筛选出isOpen=0且有tokenId的主题，且trending不包含"undefined"
-    const closedConfigs = allConfigs.filter(config => 
-      config.isOpen === 0 && 
-      config.trendingPart1 && 
-      config.trendingPart2 &&
-      config.trending && 
-      !config.trending.includes('undefined')
-    )
-    
-    console.log(`符合条件的主题: ${closedConfigs.length} 个`)
-    
-    if (closedConfigs.length === 0) {
-      showToast(`没有可用的关闭主题 (总配置:${allConfigs.length}, 关闭:${closedCount}, 有token:${hasTokenCount})`, 'warning')
-      return
-    }
-    
-    console.log(`找到 ${closedConfigs.length} 个关闭的主题，开始随机测试...`)
+    console.log(`找到 ${closedConfigs.length} 个主题，开始测试...`)
     
     // 3. 打乱顺序（测试所有主题，直到找到指定数量的符合条件的）
     const shuffled = [...closedConfigs].sort(() => Math.random() - 0.5)
@@ -9885,11 +9980,37 @@ const randomGetAvailableTopic = async () => {
         }
       } catch (error) {
         console.error(`测试主题 ${config.trending} 失败:`, error)
+        
+        // 检查是否是 API rate limit exceeded 错误
+        if (error.isRateLimit || error.message === 'API rate limit exceeded') {
+          console.log(`⚠️ 主题 ${config.trending} 遇到 API rate limit exceeded，记录到失败列表`)
+          // 记录到当前轮次的失败主题列表
+          if (!currentRoundFailedTopics.find(c => c.id === config.id)) {
+            currentRoundFailedTopics.push(config)
+          }
+        }
         // 继续测试下一个
       }
       
-      // 添加小延迟，避免请求过快
-      await new Promise(resolve => setTimeout(resolve, 300))
+      // 每个主题之间间隔5秒钟
+      if (testedCount < shuffled.length && foundCount < targetCount) {
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+    }
+    
+    // 更新失败主题列表
+    if (useFailedTopics) {
+      // 如果是从失败列表获取，则更新为当前轮次失败的主题
+      failedTopics.value = currentRoundFailedTopics
+      console.log(`更新失败主题列表，当前有 ${failedTopics.value.length} 个失败主题`)
+    } else {
+      // 如果是随机获取，则添加当前轮次失败的主题到列表
+      currentRoundFailedTopics.forEach(config => {
+        if (!failedTopics.value.find(c => c.id === config.id)) {
+          failedTopics.value.push(config)
+        }
+      })
+      console.log(`当前轮次有 ${currentRoundFailedTopics.length} 个失败主题，总失败主题数: ${failedTopics.value.length}`)
     }
     
     // 显示最终结果
@@ -9897,6 +10018,10 @@ const randomGetAvailableTopic = async () => {
       showToast(`✅ 成功获取 ${foundCount}/${targetCount} 个可用主题`, 'success')
     } else {
       showToast(`测试了所有 ${testedCount} 个主题，未找到满足对冲条件的主题`, 'warning')
+    }
+    
+    if (currentRoundFailedTopics.length > 0) {
+      showToast(`⚠️ 本轮有 ${currentRoundFailedTopics.length} 个主题因 API rate limit 失败，已记录`, 'warning')
     }
     
   } catch (error) {
@@ -13310,6 +13435,12 @@ const executeAutoHedgeTasks = async () => {
           priceInfo.reason = orderbookReason
           
         } catch (error) {
+          // 如果是深度区间开关未开启的错误，直接抛出，不回退到基本数据
+          if (error.message && error.message.includes('深度区间开关未开启')) {
+            console.error(`配置 ${config.id} - 深度区间开关未开启，直接失败:`, error.message)
+            throw error
+          }
+          
           // parseOrderbookData失败，尝试获取基本订单薄数据
           console.warn(`配置 ${config.id} - 完整订单薄检查失败，尝试获取基本数据:`, error.message)
           
