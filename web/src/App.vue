@@ -567,74 +567,126 @@
             </div>
           </div>
           
-          <!-- 总任务数控制设置 -->
-          <div class="total-task-control-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
-            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">总任务数控制设置</h3>
-            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+          <!-- 订单薄更新设置 -->
+          <div class="orderbook-update-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
+            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">订单薄更新设置</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px 20px; align-items: center;">
               <div class="trending-filter">
-                <label style="color: #000;">总任务数阈值:</label>
+                <label style="color: #000;">事件yes持仓</label>
+                <select 
+                  v-model="hedgeMode.yesPositionCompareType" 
+                  class="filter-input" 
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                >
+                  <option value="less">小于</option>
+                  <option value="greater">大于</option>
+                </select>
                 <input 
-                  v-model.number="hedgeMode.maxTotalTaskCount" 
+                  v-model.number="hedgeMode.yesPositionThreshold" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0.2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                />
+                <span style="color: #000;">(万)时，才交易</span>
+              </div>
+             
+              <div class="trending-filter">
+                <label style="color: #000;">总任务数:</label>
+                <select 
+                  v-model="hedgeMode.totalTaskCountOperator" 
+                  class="filter-input" 
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                  style="width: 80px;"
+                >
+                  <option value="gt">大于</option>
+                  <option value="lt">小于</option>
+                </select>
+                <input 
+                  v-model.number="hedgeMode.totalTaskCountThreshold" 
                   type="number" 
                   class="filter-input" 
                   min="0"
                   placeholder="999"
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
-                  style="width: 120px;"
+                  style="width: 100px; margin: 0 5px;"
                 />
-                <span style="margin-left: 8px; color: #666; font-size: 0.875rem;">超过此值不分任务</span>
+                <span style="color: #000;">时才分配任务</span>
               </div>
+
               <div class="trending-filter">
-                <label style="color: #000;">休息时间(分钟):</label>
+                <label style="color: red;">账号仓位价值(页面8-Portfolio)小于</label>
                 <input 
-                  v-model.number="hedgeMode.waitIntervalMinutes" 
-                  type="number" 
-                  class="filter-input" 
-                  min="1"
-                  step="1"
-                  placeholder="2"
-                  :disabled="autoHedgeRunning"
-                  @blur="saveHedgeSettings"
-                  style="width: 120px;"
-                />
-                <span style="margin-left: 8px; color: #666; font-size: 0.875rem;">超过阈值时休息</span>
-              </div>
-            </div>
-          </div>
-          
-          <!-- 订单薄更新设置 -->
-          <div class="orderbook-update-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
-            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">订单薄更新设置</h3>
-            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
-              <div class="trending-filter">
-                <label style="color: #000;">平仓模式：yes和no持仓小于（万）时不更新:</label>
-                <input 
-                  v-model.number="hedgeMode.minPositionForClose" 
+                  v-model.number="hedgeMode.maxPosWorthOpen" 
                   type="number" 
                   class="filter-input" 
                   min="0"
                   step="0.1"
-                  placeholder="0.2"
+                  placeholder="0"
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 0px;"
                 />
+                <span style="color: red;">(万)才开仓</span>
               </div>
-              <div class="trending-filter">
-                <label style="color: #000;">开仓模式：yes或no持仓大于（万）时不更新:</label>
+             
+              <div class="trending-filter" style="grid-column: 1 / -1;">
+                <label style="color: red;">加权时间</label>
+                <select 
+                  v-model="hedgeMode.weightedTimeCompareType" 
+                  class="filter-input" 
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                >
+                  <option value="less">小于</option>
+                  <option value="greater">大于</option>
+                </select>
                 <input 
-                  v-model.number="hedgeMode.minPositionForOpen" 
+                  v-model.number="hedgeMode.weightedTimeHourOpen" 
                   type="number" 
                   class="filter-input" 
                   min="0"
                   step="0.1"
-                  placeholder="0.2"
+                  placeholder="0"
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 5px;"
                 />
+                <span style="color: red;">(小时)且事件yes持仓</span>
+                <select 
+                  v-model="hedgeMode.weightedTimeYesPositionCompareType" 
+                  class="filter-input" 
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                >
+                  <option value="less">小于</option>
+                  <option value="greater">大于</option>
+                </select>
+                <input 
+                  v-model.number="hedgeMode.weightedTimeYesPositionThreshold" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 70px; margin: 0 5px;"
+                />
+                <span style="color: red;">(万)不交易</span>
               </div>
-              <span>          </span>
-              <div class="trending-filter">
+
+              <div class="trending-filter" style="grid-column: 1 / -1;">
                 <label style="color: red;">最近24小时交易量小于</label>
                 <input 
                   v-model.number="hedgeMode.maxVolume24hOpen" 
@@ -661,21 +713,7 @@
                 />
                 <span style="color: red;">(万)时，才参与交易</span>
               </div>
-              <div class="trending-filter">
-                <label style="color: red;">仓位价值(页面8-Portfolio)大于</label>
-                <input 
-                  v-model.number="hedgeMode.maxPosWorthOpen" 
-                  type="number" 
-                  class="filter-input" 
-                  min="0"
-                  step="0.1"
-                  placeholder="0"
-                  :disabled="autoHedgeRunning"
-                  @blur="saveHedgeSettings"
-                  style="width: 70px; margin: 0 0px;"
-                />
-                <span style="color: red;">(万)不开仓</span>
-              </div>
+
               <div class="trending-filter">
                 <label style="color: #000;">订单薄不匹配时X（分钟）内不抓取:</label>
                 <input 
@@ -688,21 +726,7 @@
                   @blur="saveHedgeSettings"
                 />
               </div>
-              <div class="trending-filter">
-                <label style="color: red;">开仓模式：加权时间大于</label>
-                <input 
-                  v-model.number="hedgeMode.maxWeightedTimeHourOpen" 
-                  type="number" 
-                  class="filter-input" 
-                  min="0"
-                  step="0.1"
-                  placeholder="0"
-                  :disabled="autoHedgeRunning"
-                  @blur="saveHedgeSettings"
-                  style="width: 70px; margin: 0 5px;"
-                />
-                <span style="color: red;">(小时)不开仓</span>
-              </div>
+
               <div class="trending-filter">
                 <label style="color: #000;">每一轮任务个数阈值</label>
                 <input 
@@ -739,6 +763,7 @@
                 />
                 <span style="color: #000;">秒）</span>
               </div>
+         
             </div>
           </div>
           
@@ -1166,6 +1191,20 @@
                 style="padding: 4px 12px; font-size: 12px;"
               >
                 按创建时间加权平均值{{ hedgeSortBy === 'weightedAvgTime' ? ' ✓' : '' }}
+              </button>
+              <button 
+                :class="['btn', 'btn-sm', hedgeSortBy === 'volume24h' ? 'btn-primary' : 'btn-secondary']"
+                @click="hedgeSortBy = hedgeSortBy === 'volume24h' ? '' : 'volume24h'"
+                style="padding: 4px 12px; font-size: 12px;"
+              >
+                按24h量{{ hedgeSortBy === 'volume24h' ? ' ✓' : '' }}
+              </button>
+              <button 
+                :class="['btn', 'btn-sm', hedgeSortBy === 'volume7dAvg' ? 'btn-primary' : 'btn-secondary']"
+                @click="hedgeSortBy = hedgeSortBy === 'volume7dAvg' ? '' : 'volume7dAvg'"
+                style="padding: 4px 12px; font-size: 12px;"
+              >
+                按7天平均量{{ hedgeSortBy === 'volume7dAvg' ? ' ✓' : '' }}
               </button>
             </div>
           </div>
@@ -3257,7 +3296,7 @@ const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不
 const runningHedgeGroupsCount = ref(0)  // 当前正在运行的任务组数
 
 // 自动对冲排序相关
-const hedgeSortBy = ref('')  // 排序方式: '' 默认按持仓, 'yesAmt' 按YES金额, 'weightedAvgTime' 按创建时间加权平均值
+const hedgeSortBy = ref('')  // 排序方式: '' 默认按持仓, 'yesAmt' 按YES金额, 'weightedAvgTime' 按创建时间加权平均值, 'volume24h' 按24h量, 'volume7dAvg' 按7天平均量
 
 // 分批执行相关
 const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
@@ -3312,13 +3351,16 @@ const hedgeMode = reactive({
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
   balancePriority: 2000,  // 资产优先级校验值
   // 订单薄更新设置
-  minPositionForClose: 0.2,  // 平仓模式下yes和no持仓的最小值（万），默认0.2万
-  minPositionForOpen: 0.2,  // 开仓模式下yes或no持仓的最大值（万），默认0.2万
+  yesPositionThreshold: 0.2,  // yes持仓阈值（万），默认0.2万
+  yesPositionCompareType: 'less',  // yes持仓比较类型：'less'（小于）或'greater'（大于），默认'less'
   maxVolume24hOpen: 99,  // 最近24小时交易量大于XX（万）不交易，默认99万
   maxVolume7dAvgOpen: 99,  // 最近7天平均交易量大于XX（万）不交易，默认99万
   maxPosWorthOpen: 99,  // 仓位价值大于XX（万）不开仓，默认0（不限制）
   orderbookMismatchInterval: 10,  // 订单薄不匹配时抓一轮的间隔时间（分钟），默认10分钟
-  maxWeightedTimeHourOpen: 0,  // 开仓模式：加权时间大于XX小时时不开仓，默认0（不限制）
+  weightedTimeHourOpen: 0,  // 加权时间阈值（小时），默认0（不限制），适用于开仓和平仓模式
+  weightedTimeCompareType: 'greater',  // 加权时间比较类型：'less'（小于）或'greater'（大于），默认'greater'
+  weightedTimeYesPositionThreshold: 0,  // 加权时间条件中的yes持仓阈值（万），默认0（不限制）
+  weightedTimeYesPositionCompareType: 'greater',  // 加权时间条件中的yes持仓比较类型：'less'（小于）或'greater'（大于），默认'greater'
   taskCountThreshold: 5,  // 每一轮任务个数阈值，默认5个
   waitTimeLessThanThreshold: 300,  // 小于阈值时的等待时间（秒），默认300秒（5分钟）
   waitTimeGreaterThanThreshold: 60,  // 大于阈值时的等待时间（秒），默认60秒（1分钟）
@@ -3351,8 +3393,8 @@ const hedgeMode = reactive({
   enableDepthDiffParams: false,  // 是否在mission/add请求中传递tp2和tp4参数（默认关闭）- 已废弃，使用各区间独立开关
   maxPriceVolatility: 10,  // 先挂方价格最大波动（买卖深度差的百分比）- 已废弃，使用各区间独立配置
   // 总任务数控制设置
-  maxTotalTaskCount: 999,  // 总任务数阈值，超过此值不分任务（默认999）
-  waitIntervalMinutes: 2,  // 等待间隔（分钟），超过阈值时每隔此时间检查一次（默认2分钟）
+  totalTaskCountOperator: 'lt',  // 总任务数比较操作符：gt=大于，lt=小于
+  totalTaskCountThreshold: 999,  // 总任务数阈值
   openOrderCancelHours: 72  // 挂单超过XX小时撤单（默认72小时）
 })
 
@@ -7027,6 +7069,16 @@ const filteredActiveConfigs = computed(() => {
       const weightedAvgTimeA = a.weightedAvgTime || 0
       const weightedAvgTimeB = b.weightedAvgTime || 0
       return weightedAvgTimeB - weightedAvgTimeA
+    } else if (hedgeSortBy.value === 'volume24h') {
+      // 按24h量排序（降序，大的在前）
+      const volume24hA = a.volume24h || 0
+      const volume24hB = b.volume24h || 0
+      return volume24hB - volume24hA
+    } else if (hedgeSortBy.value === 'volume7dAvg') {
+      // 按7天平均量排序（降序，大的在前）
+      const volume7dAvgA = a.volume7dAvg || 0
+      const volume7dAvgB = b.volume7dAvg || 0
+      return volume7dAvgB - volume7dAvgA
     } else {
       // 默认按持仓yes大小排序，持仓大的排最上方
       const positionDataA = positionDataMap.value.get(a.trending?.trim())
@@ -7761,50 +7813,34 @@ const getTotalTaskCount = async () => {
 }
 
 /**
- * 等待总任务数降至阈值以下
- * 在30分钟内每隔waitIntervalMinutes分钟检查一次
- * 如果总任务数小于阈值或30分钟结束，返回true继续执行；否则返回false
+ * 检查总任务数是否满足分配条件
+ * @returns {Promise<boolean>} true=满足条件，可以分配；false=不满足条件，不能分配
  */
-const waitForTaskCountBelowThreshold = async () => {
-  const maxWaitTime = 30 * 60 * 1000 // 30分钟（毫秒）
-  const waitIntervalMs = hedgeMode.waitIntervalMinutes * 60 * 1000 // 等待间隔（毫秒）
-  const threshold = hedgeMode.maxTotalTaskCount
-
-  const startTime = Date.now()
-  console.log(`开始检查总任务数，阈值: ${threshold}，等待间隔: ${hedgeMode.waitIntervalMinutes}分钟，最大等待时间: 30分钟`)
-
-  while (Date.now() - startTime < maxWaitTime) {
-    // 检查是否还在运行状态
-    if (!autoHedgeRunning.value) {
-      console.log('自动对冲已停止，退出等待')
-      return false
-    }
-
-    const totalCount = await getTotalTaskCount()
-    
-    if (totalCount === null) {
-      // 获取失败，继续等待
-      console.log('获取总任务数失败，继续等待...')
-    } else {
-      console.log(`当前总任务数: ${totalCount}，阈值: ${threshold}`)
-      
-      if (totalCount < threshold) {
-        console.log(`总任务数(${totalCount})已低于阈值(${threshold})，继续执行`)
-        return true
-      } else {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000 / 60)
-        const remaining = 30 - elapsed
-        console.log(`总任务数(${totalCount})超过阈值(${threshold})，等待${hedgeMode.waitIntervalMinutes}分钟后再次检查（剩余最大等待时间: ${remaining}分钟）`)
-      }
-    }
-
-    // 等待指定间隔时间
-    await new Promise(resolve => setTimeout(resolve, waitIntervalMs))
+const checkTaskCountCondition = async () => {
+  const totalCount = await getTotalTaskCount()
+  
+  if (totalCount === null) {
+    // 获取失败，允许继续执行
+    console.log('获取总任务数失败，允许继续执行')
+    return true
   }
-
-  // 30分钟时间到，继续执行
-  console.log('已等待30分钟，继续执行后续流程')
-  return true
+  
+  const operator = hedgeMode.totalTaskCountOperator
+  const threshold = hedgeMode.totalTaskCountThreshold
+  
+  let canAllocate = false
+  
+  if (operator === 'gt') {
+    // 大于阈值才分配
+    canAllocate = totalCount > threshold
+    console.log(`总任务数控制检查: 当前总任务数=${totalCount}, 需要大于${threshold}, ${canAllocate ? '满足条件' : '不满足条件'}`)
+  } else {
+    // 小于阈值才分配
+    canAllocate = totalCount < threshold
+    console.log(`总任务数控制检查: 当前总任务数=${totalCount}, 需要小于${threshold}, ${canAllocate ? '满足条件' : '不满足条件'}`)
+  }
+  
+  return canAllocate
 }
 
 /**
@@ -7927,15 +7963,11 @@ const moveToNextBatch = () => {
 const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   console.log(`执行批次任务，包含 ${batchConfigs.length} 个主题`)
   
-  // 检查总任务数是否超过阈值
-  const totalCount = await getTotalTaskCount()
-  if (totalCount !== null && totalCount >= hedgeMode.maxTotalTaskCount) {
-    console.log(`总任务数(${totalCount})超过阈值(${hedgeMode.maxTotalTaskCount})，等待任务数降低...`)
-    const shouldContinue = await waitForTaskCountBelowThreshold()
-    if (!shouldContinue) {
-      console.log('等待过程中自动对冲已停止，退出执行')
-      return
-    }
+  // 检查总任务数是否满足分配条件
+  const canAllocateByTaskCount = await checkTaskCountCondition()
+  if (!canAllocateByTaskCount) {
+    console.log('总任务数不满足分配条件，跳过本次任务分配')
+    return
   }
   
   // 检查是否可以下发新的对冲任务
@@ -8065,62 +8097,81 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         continue
       }
       
-      // 平仓模式下，先检查持仓是否满足条件
-      if (hedgeMode.isClose) {
-        const positionData = positionDataMap.value.get(config.trending?.trim())
-        if (positionData) {
-          const minPosition = hedgeMode.minPositionForClose * 10000  // 转换为实际数量（万转数量）
-          const yesPosition = positionData.yesPosition || 0
-          const noPosition = positionData.noPosition || 0
-          
-          if (yesPosition < minPosition || noPosition < minPosition) {
-            console.log(`配置 ${config.id} - 平仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: >= ${hedgeMode.minPositionForClose}万)，跳过本次请求`)
-            config.isFetching = false
-            continue
-          }
+      // 检查yes持仓是否满足条件（才交易）
+      const positionData = positionDataMap.value.get(config.trending?.trim())
+      if (positionData) {
+        const thresholdPosition = hedgeMode.yesPositionThreshold * 10000  // 转换为实际数量（万转数量）
+        const yesPosition = positionData.yesPosition || 0
+        const yesPositionWan = yesPosition / 10000  // 转换为万
+        
+        let shouldTrade = false
+        if (hedgeMode.yesPositionCompareType === 'less') {
+          shouldTrade = yesPosition < thresholdPosition
         } else {
-          console.log(`配置 ${config.id} - 平仓模式：未获取到持仓数据，跳过本次请求`)
+          shouldTrade = yesPosition > thresholdPosition
+        }
+        
+        if (!shouldTrade) {
+          const compareText = hedgeMode.yesPositionCompareType === 'less' ? '小于' : '大于'
+          const positionReason = `yes持仓${compareText}${hedgeMode.yesPositionThreshold}万时才交易 (YES: ${yesPositionWan.toFixed(2)}万, 要求: ${compareText} ${hedgeMode.yesPositionThreshold}万)`
+          console.log(`配置 ${config.id} - ${positionReason}，跳过本次请求`)
+          // 设置订单薄数据以显示原因
+          config.orderbookData = {
+            pollTime: Date.now(),
+            updateTime: null,
+            reason: positionReason,
+            firstSide: null,
+            price1: null,
+            price2: null,
+            depth1: null,
+            depth2: null,
+            diff: null
+          }
           config.isFetching = false
           continue
         }
+      } else {
+        console.log(`配置 ${config.id} - 未获取到持仓数据，跳过本次请求`)
+        config.isFetching = false
+        continue
       }
       
-      // 开仓模式下，检查持仓是否满足条件
-      if (!hedgeMode.isClose) {
+      // 检查加权时间和yes持仓组合条件（不交易）- 适用于开仓和平仓模式
+      // 如果加权时间满足条件 且 yes持仓满足条件，则不交易
+      if (hedgeMode.weightedTimeHourOpen > 0 && hedgeMode.weightedTimeYesPositionThreshold > 0) {
+        const weightedAvgTime = config.weightedAvgTime || 0
+        const weightedTimeHour = weightedAvgTime / 3600000  // 转换为小时
+        const thresholdTimeMs = hedgeMode.weightedTimeHourOpen * 3600000  // 小时转毫秒
+        
+        // 检查加权时间条件
+        let weightedTimeMatch = false
+        if (hedgeMode.weightedTimeCompareType === 'less') {
+          weightedTimeMatch = weightedAvgTime < thresholdTimeMs
+        } else {
+          weightedTimeMatch = weightedAvgTime > thresholdTimeMs
+        }
+        
+        // 检查yes持仓条件
         const positionData = positionDataMap.value.get(config.trending?.trim())
+        let yesPositionMatch = false
         if (positionData) {
-          const maxPosition = hedgeMode.minPositionForOpen * 10000  // 转换为实际数量（万转数量）
           const yesPosition = positionData.yesPosition || 0
-          const noPosition = positionData.noPosition || 0
+          const yesPositionWan = yesPosition / 10000  // 转换为万
+          const thresholdPosition = hedgeMode.weightedTimeYesPositionThreshold * 10000  // 转换为实际数量
           
-          // 开仓模式下，yes或no任一一个大于了这个值，就不更新订单薄
-          if (yesPosition > maxPosition || noPosition > maxPosition) {
-            const positionReason = `开仓模式：yes或no持仓大于（万）时不更新 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)`
-            console.log(`配置 ${config.id} - ${positionReason}，跳过本次请求`)
-            // 设置订单薄数据以显示原因
-            config.orderbookData = {
-              pollTime: Date.now(),
-              updateTime: null,
-              reason: positionReason,
-              firstSide: null,
-              price1: null,
-              price2: null,
-              depth1: null,
-              depth2: null,
-              diff: null
-            }
-            config.isFetching = false
-            continue
+          if (hedgeMode.weightedTimeYesPositionCompareType === 'less') {
+            yesPositionMatch = yesPosition < thresholdPosition
+          } else {
+            yesPositionMatch = yesPosition > thresholdPosition
           }
         }
-      }
-      
-      // 开仓模式下，检查加权时间是否满足条件
-      if (!hedgeMode.isClose && hedgeMode.maxWeightedTimeHourOpen > 0) {
-        const weightedAvgTime = config.weightedAvgTime || 0
-        const maxWeightedTimeMs = hedgeMode.maxWeightedTimeHourOpen * 3600000  // 小时转毫秒
-        if (weightedAvgTime > maxWeightedTimeMs) {
-          const weightedTimeReason = `开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)`
+        
+        // 如果两个条件都满足，则不交易
+        if (weightedTimeMatch && yesPositionMatch) {
+          const timeCompareText = hedgeMode.weightedTimeCompareType === 'less' ? '小于' : '大于'
+          const positionCompareText = hedgeMode.weightedTimeYesPositionCompareType === 'less' ? '小于' : '大于'
+          const yesPositionWan = positionData ? (positionData.yesPosition || 0) / 10000 : 0
+          const weightedTimeReason = `加权时间${timeCompareText}${hedgeMode.weightedTimeHourOpen}小时且事件yes持仓${positionCompareText}${hedgeMode.weightedTimeYesPositionThreshold}万不交易 (加权时间: ${weightedTimeHour.toFixed(2)}h, yes持仓: ${yesPositionWan.toFixed(2)}万)`
           console.log(`配置 ${config.id} - ${weightedTimeReason}，跳过本次请求`)
           // 设置订单薄数据以显示原因
           config.orderbookData = {
@@ -11194,13 +11245,16 @@ const saveHedgeSettings = () => {
       waitTimeLessThanThreshold: hedgeMode.waitTimeLessThanThreshold,
       waitTimeGreaterThanThreshold: hedgeMode.waitTimeGreaterThanThreshold,
       // 订单薄更新设置
-      minPositionForClose: hedgeMode.minPositionForClose,
-      minPositionForOpen: hedgeMode.minPositionForOpen,
+      yesPositionThreshold: hedgeMode.yesPositionThreshold,
+      yesPositionCompareType: hedgeMode.yesPositionCompareType,
       maxVolume24hOpen: hedgeMode.maxVolume24hOpen,
       maxVolume7dAvgOpen: hedgeMode.maxVolume7dAvgOpen,
       maxPosWorthOpen: hedgeMode.maxPosWorthOpen,
       orderbookMismatchInterval: hedgeMode.orderbookMismatchInterval,
-      maxWeightedTimeHourOpen: hedgeMode.maxWeightedTimeHourOpen,
+      weightedTimeHourOpen: hedgeMode.weightedTimeHourOpen,
+      weightedTimeCompareType: hedgeMode.weightedTimeCompareType,
+      weightedTimeYesPositionThreshold: hedgeMode.weightedTimeYesPositionThreshold,
+      weightedTimeYesPositionCompareType: hedgeMode.weightedTimeYesPositionCompareType,
       // 模式一开仓专属设置
       posPriorityArea: hedgeMode.posPriorityArea,
       maxPosLimit: hedgeMode.maxPosLimit,
@@ -11229,8 +11283,8 @@ const saveHedgeSettings = () => {
       // 兼容旧配置（保留但不使用）
       maxPriceVolatility: hedgeMode.maxPriceVolatility,
       // 总任务数控制设置
-      maxTotalTaskCount: hedgeMode.maxTotalTaskCount,
-      waitIntervalMinutes: hedgeMode.waitIntervalMinutes,
+      totalTaskCountOperator: hedgeMode.totalTaskCountOperator,
+      totalTaskCountThreshold: hedgeMode.totalTaskCountThreshold,
       // 挂单超时撤单设置
       openOrderCancelHours: hedgeMode.openOrderCancelHours,
       // yes数量大于、模式选择、账户选择
@@ -11369,11 +11423,15 @@ const loadHedgeSettings = () => {
     }
     
     // 订单薄更新设置
-    if (settings.minPositionForClose !== undefined) {
-      hedgeMode.minPositionForClose = settings.minPositionForClose
+    if (settings.yesPositionThreshold !== undefined) {
+      hedgeMode.yesPositionThreshold = settings.yesPositionThreshold
+    } else if (settings.minPositionForClose !== undefined) {
+      // 向后兼容：如果存在旧字段，使用旧字段值
+      hedgeMode.yesPositionThreshold = settings.minPositionForClose
+      hedgeMode.yesPositionCompareType = 'less'
     }
-    if (settings.minPositionForOpen !== undefined) {
-      hedgeMode.minPositionForOpen = settings.minPositionForOpen
+    if (settings.yesPositionCompareType !== undefined) {
+      hedgeMode.yesPositionCompareType = settings.yesPositionCompareType
     }
     // 优先使用新字段名，如果没有则使用旧字段名（向后兼容）
     if (settings.maxVolume24hOpen !== undefined) {
@@ -11392,8 +11450,21 @@ const loadHedgeSettings = () => {
     if (settings.orderbookMismatchInterval !== undefined) {
       hedgeMode.orderbookMismatchInterval = settings.orderbookMismatchInterval
     }
-    if (settings.maxWeightedTimeHourOpen !== undefined) {
-      hedgeMode.maxWeightedTimeHourOpen = settings.maxWeightedTimeHourOpen
+    if (settings.weightedTimeHourOpen !== undefined) {
+      hedgeMode.weightedTimeHourOpen = settings.weightedTimeHourOpen
+    } else if (settings.maxWeightedTimeHourOpen !== undefined) {
+      // 向后兼容：如果存在旧字段，使用旧字段值
+      hedgeMode.weightedTimeHourOpen = settings.maxWeightedTimeHourOpen
+      hedgeMode.weightedTimeCompareType = 'greater'
+    }
+    if (settings.weightedTimeCompareType !== undefined) {
+      hedgeMode.weightedTimeCompareType = settings.weightedTimeCompareType
+    }
+    if (settings.weightedTimeYesPositionThreshold !== undefined) {
+      hedgeMode.weightedTimeYesPositionThreshold = settings.weightedTimeYesPositionThreshold
+    }
+    if (settings.weightedTimeYesPositionCompareType !== undefined) {
+      hedgeMode.weightedTimeYesPositionCompareType = settings.weightedTimeYesPositionCompareType
     }
     
     // 模式一开仓专属设置
@@ -11466,11 +11537,15 @@ const loadHedgeSettings = () => {
     }
     
     // 总任务数控制设置
-    if (settings.maxTotalTaskCount !== undefined) {
-      hedgeMode.maxTotalTaskCount = settings.maxTotalTaskCount
+    if (settings.totalTaskCountOperator !== undefined) {
+      hedgeMode.totalTaskCountOperator = settings.totalTaskCountOperator
     }
-    if (settings.waitIntervalMinutes !== undefined) {
-      hedgeMode.waitIntervalMinutes = settings.waitIntervalMinutes
+    if (settings.totalTaskCountThreshold !== undefined) {
+      hedgeMode.totalTaskCountThreshold = settings.totalTaskCountThreshold
+    }
+    // 兼容旧字段名
+    if (settings.maxTotalTaskCount !== undefined && settings.totalTaskCountThreshold === undefined) {
+      hedgeMode.totalTaskCountThreshold = settings.maxTotalTaskCount
     }
     
     // 挂单超时撤单设置
@@ -13458,62 +13533,81 @@ const executeAutoHedgeTasks = async () => {
         continue
       }
       
-      // 平仓模式下，先检查持仓是否满足条件
-      if (hedgeMode.isClose) {
-        const positionData = positionDataMap.value.get(config.trending?.trim())
-        if (positionData) {
-          const minPosition = hedgeMode.minPositionForClose * 10000  // 转换为实际数量（万转数量）
-          const yesPosition = positionData.yesPosition || 0
-          const noPosition = positionData.noPosition || 0
-          
-          if (yesPosition < minPosition || noPosition < minPosition) {
-            console.log(`配置 ${config.id} - 平仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: >= ${hedgeMode.minPositionForClose}万)，跳过本次请求`)
-            config.isFetching = false
-            continue
-          }
+      // 检查yes持仓是否满足条件（才交易）
+      const positionData = positionDataMap.value.get(config.trending?.trim())
+      if (positionData) {
+        const thresholdPosition = hedgeMode.yesPositionThreshold * 10000  // 转换为实际数量（万转数量）
+        const yesPosition = positionData.yesPosition || 0
+        const yesPositionWan = yesPosition / 10000  // 转换为万
+        
+        let shouldTrade = false
+        if (hedgeMode.yesPositionCompareType === 'less') {
+          shouldTrade = yesPosition < thresholdPosition
         } else {
-          console.log(`配置 ${config.id} - 平仓模式：未获取到持仓数据，跳过本次请求`)
+          shouldTrade = yesPosition > thresholdPosition
+        }
+        
+        if (!shouldTrade) {
+          const compareText = hedgeMode.yesPositionCompareType === 'less' ? '小于' : '大于'
+          const positionReason = `yes持仓${compareText}${hedgeMode.yesPositionThreshold}万时才交易 (YES: ${yesPositionWan.toFixed(2)}万, 要求: ${compareText} ${hedgeMode.yesPositionThreshold}万)`
+          console.log(`配置 ${config.id} - ${positionReason}，跳过本次请求`)
+          // 设置订单薄数据以显示原因
+          config.orderbookData = {
+            pollTime: Date.now(),
+            updateTime: null,
+            reason: positionReason,
+            firstSide: null,
+            price1: null,
+            price2: null,
+            depth1: null,
+            depth2: null,
+            diff: null
+          }
           config.isFetching = false
           continue
         }
+      } else {
+        console.log(`配置 ${config.id} - 未获取到持仓数据，跳过本次请求`)
+        config.isFetching = false
+        continue
       }
       
-      // 开仓模式下，检查持仓是否满足条件
-      if (!hedgeMode.isClose) {
+      // 检查加权时间和yes持仓组合条件（不交易）- 适用于开仓和平仓模式
+      // 如果加权时间满足条件 且 yes持仓满足条件，则不交易
+      if (hedgeMode.weightedTimeHourOpen > 0 && hedgeMode.weightedTimeYesPositionThreshold > 0) {
+        const weightedAvgTime = config.weightedAvgTime || 0
+        const weightedTimeHour = weightedAvgTime / 3600000  // 转换为小时
+        const thresholdTimeMs = hedgeMode.weightedTimeHourOpen * 3600000  // 小时转毫秒
+        
+        // 检查加权时间条件
+        let weightedTimeMatch = false
+        if (hedgeMode.weightedTimeCompareType === 'less') {
+          weightedTimeMatch = weightedAvgTime < thresholdTimeMs
+        } else {
+          weightedTimeMatch = weightedAvgTime > thresholdTimeMs
+        }
+        
+        // 检查yes持仓条件
         const positionData = positionDataMap.value.get(config.trending?.trim())
+        let yesPositionMatch = false
         if (positionData) {
-          const maxPosition = hedgeMode.minPositionForOpen * 10000  // 转换为实际数量（万转数量）
           const yesPosition = positionData.yesPosition || 0
-          const noPosition = positionData.noPosition || 0
+          const yesPositionWan = yesPosition / 10000  // 转换为万
+          const thresholdPosition = hedgeMode.weightedTimeYesPositionThreshold * 10000  // 转换为实际数量
           
-          // 开仓模式下，yes或no任一一个大于了这个值，就不更新订单薄
-          if (yesPosition > maxPosition || noPosition > maxPosition) {
-            const positionReason = `开仓模式：yes或no持仓大于（万）时不更新 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)`
-            console.log(`配置 ${config.id} - ${positionReason}，跳过本次请求`)
-            // 设置订单薄数据以显示原因
-            config.orderbookData = {
-              pollTime: Date.now(),
-              updateTime: null,
-              reason: positionReason,
-              firstSide: null,
-              price1: null,
-              price2: null,
-              depth1: null,
-              depth2: null,
-              diff: null
-            }
-            config.isFetching = false
-            continue
+          if (hedgeMode.weightedTimeYesPositionCompareType === 'less') {
+            yesPositionMatch = yesPosition < thresholdPosition
+          } else {
+            yesPositionMatch = yesPosition > thresholdPosition
           }
         }
-      }
-      
-      // 开仓模式下，检查加权时间是否满足条件
-      if (!hedgeMode.isClose && hedgeMode.maxWeightedTimeHourOpen > 0) {
-        const weightedAvgTime = config.weightedAvgTime || 0
-        const maxWeightedTimeMs = hedgeMode.maxWeightedTimeHourOpen * 3600000  // 小时转毫秒
-        if (weightedAvgTime > maxWeightedTimeMs) {
-          const weightedTimeReason = `开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)`
+        
+        // 如果两个条件都满足，则不交易
+        if (weightedTimeMatch && yesPositionMatch) {
+          const timeCompareText = hedgeMode.weightedTimeCompareType === 'less' ? '小于' : '大于'
+          const positionCompareText = hedgeMode.weightedTimeYesPositionCompareType === 'less' ? '小于' : '大于'
+          const yesPositionWan = positionData ? (positionData.yesPosition || 0) / 10000 : 0
+          const weightedTimeReason = `加权时间${timeCompareText}${hedgeMode.weightedTimeHourOpen}小时且事件yes持仓${positionCompareText}${hedgeMode.weightedTimeYesPositionThreshold}万不交易 (加权时间: ${weightedTimeHour.toFixed(2)}h, yes持仓: ${yesPositionWan.toFixed(2)}万)`
           console.log(`配置 ${config.id} - ${weightedTimeReason}，跳过本次请求`)
           // 设置订单薄数据以显示原因
           config.orderbookData = {
