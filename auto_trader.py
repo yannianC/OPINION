@@ -5449,7 +5449,6 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     phase2_check_interval = 30  # 每30秒检查一次
     phase2_start_time = time.time()
     status_is_2 = False
-    status_is_3_or_timeout = False
     
     while time.time() - phase2_start_time < phase2_timeout:
         try:
@@ -5457,12 +5456,11 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
             log_print(f"[{serial_number}] [{task_label}] 当前任务状态: {current_status}")
             
             if current_status == 2:
-                log_print(f"[{serial_number}] [{task_label}] ✓ 任务状态变为2，继续后面的流程")
+                log_print(f"[{serial_number}] [{task_label}] ✓ 任务状态变为2，退出循环")
                 status_is_2 = True
                 break
             elif current_status == 3:
-                log_print(f"[{serial_number}] [{task_label}] ✗ 任务状态变为3，需要撤单")
-                status_is_3_or_timeout = True
+                log_print(f"[{serial_number}] [{task_label}] ✗ 任务状态变为3，退出循环")
                 break
             
             time.sleep(phase2_check_interval)
@@ -5472,325 +5470,267 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
             time.sleep(phase2_check_interval)
     
     # 检查是否超时
-    if not status_is_2 and not status_is_3_or_timeout:
-        log_print(f"[{serial_number}] [{task_label}] ✗ 20分钟超时，任务状态未变为2")
-        status_is_3_or_timeout = True
+    if not status_is_2:
+        elapsed = int(time.time() - phase2_start_time)
+        if elapsed >= phase2_timeout:
+            log_print(f"[{serial_number}] [{task_label}] ✗ 20分钟超时，任务状态未变为2")
+        else:
+            log_print(f"[{serial_number}] [{task_label}] ✗ 任务状态为3，退出循环")
     
-    # 如果状态变为3或超时，执行撤单逻辑
-    if status_is_3_or_timeout:
-        log_print(f"[{serial_number}] [{task_label}] ========== 执行撤单逻辑 ==========")
-        try:
-            # 点击Open Orders按钮
-            log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
-            open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
-            for btn in open_orders_buttons:
-                if btn.text.strip() == "Open Orders":
-                    btn.click()
-                    time.sleep(7)
-                    break
-            
-            # 获取Open Orders数据
-            log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
-            
-            # 查找 Open Orders div
-            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
-            open_orders_div = None
-            for div in tabs_divs:
-                div_id = div.get_attribute('id')
-                if div_id and 'openorders' in div_id.lower():
-                    open_orders_div = div
-                    break
-            
-            if not open_orders_div:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div，可能已成交")
-                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
-            
+    # 无论什么状态退出，都要执行撤单逻辑（不直接返回，只记录状态）
+    log_print(f"[{serial_number}] [{task_label}] ========== 执行撤单逻辑 ==========")
+    cancel_status = "无挂单"  # 默认值：有挂单取消失败、有挂单取消成功、无挂单
+    
+    try:
+        # 点击Open Orders按钮
+        log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
+        open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
+        for btn in open_orders_buttons:
+            if btn.text.strip() == "Open Orders":
+                btn.click()
+                time.sleep(7)
+                break
+        
+        # 获取Open Orders数据
+        log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
+        
+        # 查找 Open Orders div
+        tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+        open_orders_div = None
+        for div in tabs_divs:
+            div_id = div.get_attribute('id')
+            if div_id and 'openorders' in div_id.lower():
+                open_orders_div = div
+                break
+        
+        if not open_orders_div:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div，可能已成交")
+            cancel_status = "无挂单"
+        else:
             # 获取 tbody 和 tr
             try:
                 tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
                 tr_list = tbody.find_elements(By.TAG_NAME, "tr")
             except:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到tbody或tr，可能没有挂单")
-                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
+                cancel_status = "无挂单"
+                tr_list = []
             
             if not tr_list or len(tr_list) == 0:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 没有挂单")
-                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
-            
-            # 找到第一个tr的最后一个td下的svg并点击
-            first_tr = tr_list[0]
-            tds = first_tr.find_elements(By.TAG_NAME, "td")
-            if len(tds) == 0:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
-                return False, "[16]任务状态异常或超时,尝试取消自己挂单,未找到挂单,可能已成交"
-            
-            last_td = tds[-1]  # 最后一个td
-            svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
-            
-            if not svg_elements or len(svg_elements) == 0:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
-                return False, "[16]任务状态异常或超时,尝试取消自己挂单,挂单取消失败,可能已成交"
-            
-            log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
-            svg_elements[0].click()
-            time.sleep(2)
-            
-            # 在10秒内找到"Confirm"按钮并点击
-            log_print(f"[{serial_number}] [{task_label}] 查找Confirm按钮...")
-            confirm_found = False
-            confirm_timeout = 10
-            confirm_start_time = time.time()
-            
-            while time.time() - confirm_start_time < confirm_timeout:
+                cancel_status = "无挂单"
+            else:
+                # 有挂单，尝试取消
+                log_print(f"[{serial_number}] [{task_label}] 发现挂单，尝试取消...")
                 try:
-                    all_buttons = driver.find_elements(By.TAG_NAME, "button")
-                    for btn in all_buttons:
-                        if btn.text.strip() == "Confirm":
-                            log_print(f"[{serial_number}] [{task_label}] ✓ 找到Confirm按钮，点击...")
+                    # 找到第一个tr的最后一个td下的svg并点击
+                    first_tr = tr_list[0]
+                    tds = first_tr.find_elements(By.TAG_NAME, "td")
+                    if len(tds) == 0:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到td")
+                        cancel_status = "有挂单取消失败"
+                    else:
+                        last_td = tds[-1]  # 最后一个td
+                        svg_elements = last_td.find_elements(By.TAG_NAME, "svg")
+                        
+                        if not svg_elements or len(svg_elements) == 0:
+                            log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到svg元素")
+                            cancel_status = "有挂单取消失败"
+                        else:
+                            log_print(f"[{serial_number}] [{task_label}] 点击svg取消按钮...")
+                            svg_elements[0].click()
+                            time.sleep(2)
+                            
+                            # 在10秒内找到"Confirm"按钮并点击
+                            log_print(f"[{serial_number}] [{task_label}] 查找Confirm按钮...")
+                            confirm_found = False
+                            confirm_timeout = 10
+                            confirm_start_time = time.time()
+                            
+                            while time.time() - confirm_start_time < confirm_timeout:
+                                try:
+                                    all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                                    for btn in all_buttons:
+                                        if btn.text.strip() == "Confirm":
+                                            log_print(f"[{serial_number}] [{task_label}] ✓ 找到Confirm按钮，点击...")
+                                            btn.click()
+                                            confirm_found = True
+                                            break
+                                    
+                                    if confirm_found:
+                                        break
+                                    
+                                    time.sleep(0.5)
+                                except Exception as e:
+                                    log_print(f"[{serial_number}] [{task_label}] ⚠ 查找Confirm按钮时出错: {str(e)}")
+                                    time.sleep(0.5)
+                            
+                            if not confirm_found:
+                                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
+                                cancel_status = "有挂单取消失败"
+                            else:
+                                # 等待10秒后重新检查挂单
+                                log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
+                                time.sleep(10)
+                                
+                                # 重新获取open_orders_div
+                                tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+                                open_orders_div = None
+                                for div in tabs_divs:
+                                    div_id = div.get_attribute('id')
+                                    if div_id and 'openorders' in div_id.lower():
+                                        open_orders_div = div
+                                        break
+                                
+                                if not open_orders_div:
+                                    log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无Open Orders div）")
+                                    cancel_status = "有挂单取消成功"
+                                else:
+                                    # 重新获取tbody和tr
+                                    try:
+                                        tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                                        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                                    except:
+                                        log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tbody/tr）")
+                                        cancel_status = "有挂单取消成功"
+                                        tr_list = []
+                                    
+                                    if not tr_list or len(tr_list) == 0:
+                                        log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tr）")
+                                        cancel_status = "有挂单取消成功"
+                                    else:
+                                        log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
+                                        cancel_status = "有挂单取消失败"
+                except Exception as e:
+                    log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单操作时出错: {str(e)}")
+                    cancel_status = "有挂单取消失败"
+                    
+    except Exception as e:
+        log_print(f"[{serial_number}] [{task_label}] ⚠ 撤单逻辑执行时出错: {str(e)}")
+        import traceback
+        log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
+        cancel_status = "无挂单"  # 异常情况视为无挂单
+    
+    log_print(f"[{serial_number}] [{task_label}] 撤单状态: {cancel_status}")
+
+    # 第三阶段：无论什么状态都要执行收集数据逻辑
+    log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
+    
+    time.sleep(120)
+    # 初始化数据变量
+    current_position_amount = None
+    position_change_value = None
+    progress = ""
+    has_error = False
+    error_msg = ""
+    
+    try:
+        # 第一步：获取当前仓位数据，计算仓位变化值
+        log_print(f"[{serial_number}] [{task_label}] 第一步：获取当前仓位数据...")
+        
+        # 尝试使用链上数据
+        if trending:
+            current_position_amount = get_position_from_api(serial_number, trending, option_type)
+            if current_position_amount is not None:
+                log_print(f"[{serial_number}] [{task_label}] 链上仓位数量: {current_position_amount}")
+        
+        # 如果链上数据获取失败，使用本地数据
+        if current_position_amount is None:
+            try:
+                if trade_type == "Buy":
+                    # Buy类型：使用check_position_count获取tr数量
+                    log_print(f"[{serial_number}] [{task_label}] Buy类型，使用check_position_count获取tr数量...")
+                    position_count = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
+                    if position_count >= 0:
+                        current_position_amount = float(position_count)
+                        log_print(f"[{serial_number}] [{task_label}] 本地tr数量: {current_position_amount}")
+                else:
+                    # Sell类型：从Position获取已成交数量
+                    log_print(f"[{serial_number}] [{task_label}] Sell类型，从Position获取已成交数量...")
+                    # 点击Position
+                    position_buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for btn in position_buttons:
+                        if btn.text.strip() == "Position":
                             btn.click()
-                            confirm_found = True
+                            time.sleep(7)
                             break
                     
-                    if confirm_found:
-                        break
+                    # 获取Position数据
+                    tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
+                    position_div = None
+                    for div in tabs_divs:
+                        div_id = div.get_attribute('id')
+                        if div_id and 'content-position' in div_id.lower():
+                            position_div = div
+                            break
                     
-                    time.sleep(0.5)
-                except Exception as e:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 查找Confirm按钮时出错: {str(e)}")
-                    time.sleep(0.5)
-            
-            if not confirm_found:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Confirm按钮")
-                return False, "[16]任务状态异常或超时,尝试取消自己挂单,挂单取消失败,可能已成交"
-            
-            # 等待10秒
-            log_print(f"[{serial_number}] [{task_label}] 等待10秒后重新检查挂单...")
-            time.sleep(10)
-            
-            # 重新获取open_orders_div
-            tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
-            open_orders_div = None
-            for div in tabs_divs:
-                div_id = div.get_attribute('id')
-                if div_id and 'openorders' in div_id.lower():
-                    open_orders_div = div
-                    break
-            
-            if not open_orders_div:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 重新获取时未找到Open Orders div")
-                return False, "[17]任务状态异常或超时，有挂单，已成功取消挂单"
-            
-            # 重新获取tbody和tr
-            try:
-                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-            except:
-                # 没有tbody或tr，说明挂单已取消
-                log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tbody/tr）")
-                return False, "[17]任务状态异常或超时，有挂单，已成功取消挂单"
-            
-            if not tr_list or len(tr_list) == 0:
-                # 没有tr，说明挂单已取消
-                log_print(f"[{serial_number}] [{task_label}] ✓ 挂单已取消（无tr）")
-                return False, "[17]任务状态异常或超时，有挂单，已成功取消挂单"
-            else:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 挂单仍然存在")
-                return False, "[18]任务状态异常或超时,尝试取消自己挂单,但取消挂单失败"
-                
-        except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 取消挂单时出错: {str(e)}")
-            import traceback
-            log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-            return False, "[18]任务状态异常或超时,尝试取消自己挂单,且取消挂单出错"
-
-    # 如果状态变为2，继续后面的流程（跟type==5的 wait_for_type5_order_and_collect_data 后面一样）
-    if status_is_2:
-        log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
-        # 复用type==5的收集数据逻辑（4278-4704行）
-        try:
-            filled_amount = ""
-            filled_price = ""
-            
-            # 如果前面是链上数据先检测到变化，直接使用链上数据，跳过本地抓取
-            if use_api_data and trending:
-                log_print(f"[{serial_number}] [{task_label}] 前面链上数据先检测到变化，直接使用链上数据...")
-                api_position_amount = get_position_from_api(serial_number, trending, option_type)
-                if api_position_amount is not None:
-                    filled_amount = str(api_position_amount)
-                    filled_price = "--"
-                    log_print(f"[{serial_number}] [{task_label}] 链上数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
-                else:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 获取链上数据失败，改用本地抓取")
-                    use_api_data = False
-            
-            # 如果使用本地数据，进行本地抓取
-            if not use_api_data:
-                # 点击Position
-                log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
-                position_buttons = driver.find_elements(By.TAG_NAME, "button")
-                for btn in position_buttons:
-                    if btn.text.strip() == "Position":
-                        btn.click()
-                        time.sleep(7)
-                        break
-                
-                # 获取Position数据
-                log_print(f"[{serial_number}] [{task_label}] 获取Position数据...")
-                
-                # 查找 Position div
-                tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
-                position_div = None
-                for div in tabs_divs:
-                    div_id = div.get_attribute('id')
-                    if div_id and 'content-position' in div_id.lower():
-                        position_div = div
-                        break
-                
-                if not position_div:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Position div")
-                    return False, "未找到Position数据"
-                
-                # 获取 tbody 和 tr
-                tbody = position_div.find_element(By.TAG_NAME, "tbody")
-                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-                
-                if not tr_list or len(tr_list) == 0:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ Position中没有tr")
-                    return False, "Position中没有数据"
-                
-                # 等待tr中的内容完全加载
-                log_print(f"[{serial_number}] [{task_label}] 等待tr内容加载...")
-                time.sleep(3)
-                if trending_part1:
-                    # 有子标题：找到包含子标题的tr
-                    log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的行...")
-                    for tr in tr_list:
-                        try:
-                            tds = tr.find_elements(By.TAG_NAME, "td")
-                            if len(tds) > 0:
-                                first_td_ps = tds[0].find_elements(By.TAG_NAME, "p")
-                                first_td_text = " ".join([p.text.strip() for p in first_td_ps])
-                                if trending_part1 in first_td_text:
-                                    log_print(f"[{serial_number}] [{task_label}] ✓ 找到包含子标题的行")
-                                    # 第2个td（index=1）：已成交数量
+                    if position_div:
+                        tbody = position_div.find_element(By.TAG_NAME, "tbody")
+                        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                        
+                        if tr_list and len(tr_list) > 0:
+                            time.sleep(3)
+                            if trending_part1:
+                                # 有子标题：找到包含子标题的tr
+                                for tr in tr_list:
+                                    try:
+                                        tds = tr.find_elements(By.TAG_NAME, "td")
+                                        if len(tds) > 0:
+                                            first_td_ps = tds[0].find_elements(By.TAG_NAME, "p")
+                                            first_td_text = " ".join([p.text.strip() for p in first_td_ps])
+                                            if trending_part1 in first_td_text:
+                                                if len(tds) > 1:
+                                                    td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                                                    filled_amount_str = td2_ps[0].text.strip() if td2_ps else ""
+                                                    try:
+                                                        filled_amount_str_clean = ''.join(c for c in filled_amount_str if c.isdigit() or c == '.')
+                                                        if filled_amount_str_clean:
+                                                            current_position_amount = float(filled_amount_str_clean)
+                                                    except:
+                                                        pass
+                                                break
+                                    except:
+                                        continue
+                            else:
+                                # 无子标题：第一个tr
+                                try:
+                                    first_tr = tr_list[0]
+                                    tds = first_tr.find_elements(By.TAG_NAME, "td")
                                     if len(tds) > 1:
                                         td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
-                                        filled_amount = td2_ps[0].text.strip() if td2_ps else ""
-                                    # 第4个td（index=3）：价格
-                                    if len(tds) > 3:
-                                        td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
-                                        filled_price = td4_ps[0].text.strip() if td4_ps else ""
-                                    break
-                        except Exception as e:
-                            log_print(f"[{serial_number}] [{task_label}] ⚠ 解析Position行失败: {str(e)}")
-                            continue
-                else:
-                    # 无子标题：第一个tr
-                    log_print(f"[{serial_number}] [{task_label}] 无子标题，获取第一行数据...")
-                    try:
-                        first_tr = tr_list[0]
-                        tds = first_tr.find_elements(By.TAG_NAME, "td")
-                        # 第2个td（index=1）：已成交数量
-                        if len(tds) > 1:
-                            td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
-                            filled_amount = td2_ps[0].text.strip() if td2_ps else ""
-                        # 第4个td（index=3）：价格
-                        if len(tds) > 3:
-                            td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
-                            filled_price = td4_ps[0].text.strip() if td4_ps else ""
-                    except Exception as e:
-                        log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Position数据失败: {str(e)}")
-            
-            # 如果提供了trending参数（前面使用了链上数据），重新获取链上数据
-            if trending:
-                log_print(f"[{serial_number}] [{task_label}] 检测到使用链上数据，重新获取链上仓位数据...")
-                api_position_amount = get_position_from_api(serial_number, trending, option_type)
-                if api_position_amount is not None:
-                    filled_amount = str(api_position_amount)
-                    filled_price = "--"
-                    log_print(f"[{serial_number}] [{task_label}] 链上数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
-                else:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 获取链上数据失败，使用本地数据")
-            
-            log_print(f"[{serial_number}] [{task_label}] Position数据 - 已成交数量: {filled_amount}, 价格: {filled_price}")
-            
-            # 计算差额，如果差额绝对值小于5，跳过获取Open Orders数据
-            skip_open_orders = False
-            if amount is not None and filled_amount:
-                try:
-                    filled_amount_str = str(filled_amount).replace(',', '').strip()
-                    if '<' in filled_amount_str:
-                        filled_amount_float = 0.0
-                    else:
-                        filled_amount_float = float(filled_amount_str)
-                    
-                    position_change = filled_amount_float - float(initial_position_count)
-                    position_change_abs = abs(position_change)
-                    
-                    difference = float(amount) - position_change_abs
-                    difference_abs = abs(difference)
-                    
-                    log_print(f"[{serial_number}] [{task_label}] 差额计算:")
-                    log_print(f"[{serial_number}] [{task_label}]   下单数量: {amount}")
-                    log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount_float}")
-                    log_print(f"[{serial_number}] [{task_label}]   初始数量: {initial_position_count}")
-                    log_print(f"[{serial_number}] [{task_label}]   变化值: {position_change} (绝对值: {position_change_abs})")
-                    log_print(f"[{serial_number}] [{task_label}]   差额: {difference} (绝对值: {difference_abs})")
-                    
-                    amount_threshold = float(amount) * 0.4
-                    log_print(f"[{serial_number}] [{task_label}]   下单数量的40%: {amount_threshold}")
-                    
-                    if difference_abs < amount_threshold:
-                        log_print(f"[{serial_number}] [{task_label}] ✓ 差额绝对值 ({difference_abs}) < 下单数量的40% ({amount_threshold})，跳过获取Open Orders数据")
-                        skip_open_orders = True
-                    else:
-                        log_print(f"[{serial_number}] [{task_label}] 差额绝对值 ({difference_abs}) >= 下单数量的40% ({amount_threshold})，继续获取Open Orders数据")
-                except (ValueError, TypeError) as e:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 计算差额时出错: {str(e)}，继续获取Open Orders数据")
-            
-            # 如果跳过Open Orders，直接返回成功
-            if skip_open_orders:
-                transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
-                
-                import json
-                msg_data = {
-                    "type": "TYPE6_SUCCESS",
-                    "filled_amount": filled_amount,
-                    "filled_price": filled_price,
-                    "transaction_fee": transaction_fee
-                }
-                
-                if trade_type == "Sell":
-                    msg_data["initial_filled_amount"] = str(initial_position_count)
-                
-                msg = json.dumps(msg_data, ensure_ascii=False)
-                
-                log_print(f"[{serial_number}] [{task_label}] 结果详情:")
-                if trade_type == "Sell":
-                    log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
-                log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
-                log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
-                
-                if fee_check_success:
-                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 差额检查通过且交易费检查通过，任务成功！")
-                    return True, msg
-                else:
-                    log_print(f"[{serial_number}] [{task_label}] ✗ 差额检查通过但交易费检查失败，任务失败")
-                    return True, msg
-            
-            # 点击Open Orders
-            log_print(f"[{serial_number}] [{task_label}] 点击Open Orders按钮...")
+                                        filled_amount_str = td2_ps[0].text.strip() if td2_ps else ""
+                                        try:
+                                            filled_amount_str_clean = ''.join(c for c in filled_amount_str if c.isdigit() or c == '.')
+                                            if filled_amount_str_clean:
+                                                current_position_amount = float(filled_amount_str_clean)
+                                        except:
+                                            pass
+                                except:
+                                    pass
+            except Exception as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 获取本地仓位数据失败: {str(e)}")
+        
+        # 计算仓位变化值
+        if current_position_amount is not None:
+            try:
+                initial_amount = float(initial_position_count)
+                position_change_value = current_position_amount - initial_amount
+                log_print(f"[{serial_number}] [{task_label}] 仓位变化值: {position_change_value} (当前: {current_position_amount}, 初始: {initial_amount})")
+            except (ValueError, TypeError) as e:
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 计算仓位变化值失败: {str(e)}")
+        else:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前仓位数据")
+        
+        # 第二步：获取挂单进度（如果有）
+        log_print(f"[{serial_number}] [{task_label}] 第二步：获取挂单进度...")
+        try:
+            # 点击Open Orders按钮
             open_orders_buttons = driver.find_elements(By.TAG_NAME, "button")
             for btn in open_orders_buttons:
                 if btn.text.strip() == "Open Orders":
                     btn.click()
                     time.sleep(7)
                     break
-            
-            # 获取Open Orders数据
-            log_print(f"[{serial_number}] [{task_label}] 获取Open Orders数据...")
             
             # 查找 Open Orders div
             tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
@@ -5801,189 +5741,71 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
                     open_orders_div = div
                     break
             
-            if not open_orders_div:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 未找到Open Orders div")
-                transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
-                
-                import json
-                msg_data = {
-                    "type": "TYPE6_SUCCESS",
-                    "filled_amount": filled_amount,
-                    "filled_price": filled_price,
-                    "transaction_fee": transaction_fee
-                }
-                
-                if trade_type == "Sell":
-                    msg_data["initial_filled_amount"] = str(initial_position_count)
-                
-                msg = json.dumps(msg_data, ensure_ascii=False)
-                
-                log_print(f"[{serial_number}] [{task_label}] 结果详情:")
-                if trade_type == "Sell":
-                    log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
-                log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
-                log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
-                
-                if fee_check_success:
-                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 无挂单且交易费检查通过，任务成功！")
-                    return True, msg
-                else:
-                    log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                    return True, msg
-            
-            # 获取 tbody 和 tr
-            try:
-                tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-                tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-            except:
-                # 没有tbody或tr，说明没有挂单
-                transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
-                
-                import json
-                msg_data = {
-                    "type": "TYPE6_SUCCESS",
-                    "filled_amount": filled_amount,
-                    "filled_price": filled_price,
-                    "transaction_fee": transaction_fee
-                }
-                
-                if trade_type == "Sell":
-                    msg_data["initial_filled_amount"] = str(initial_position_count)
-                
-                msg = json.dumps(msg_data, ensure_ascii=False)
-                
-                log_print(f"[{serial_number}] [{task_label}] 结果详情:")
-                if trade_type == "Sell":
-                    log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
-                log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
-                log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
-                
-                if fee_check_success:
-                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 无挂单且交易费检查通过，任务成功！")
-                    return True, msg
-                else:
-                    log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                    return True, msg
-            
-            if not tr_list or len(tr_list) == 0:
-                # 没有tr，说明没有挂单
-                transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
-                
-                import json
-                msg_data = {
-                    "type": "TYPE6_SUCCESS",
-                    "filled_amount": filled_amount,
-                    "filled_price": filled_price,
-                    "transaction_fee": transaction_fee
-                }
-                
-                if trade_type == "Sell":
-                    msg_data["initial_filled_amount"] = str(initial_position_count)
-                
-                msg = json.dumps(msg_data, ensure_ascii=False)
-                
-                log_print(f"[{serial_number}] [{task_label}] 结果详情:")
-                if trade_type == "Sell":
-                    log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
-                log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
-                log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
-                log_print(f"[{serial_number}] [{task_label}]   交易费检查: {'✓ 通过' if fee_check_success else '✗ 失败'}")
-                
-                if fee_check_success:
-                    log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 无挂单且交易费检查通过，任务成功！")
-                    return True, msg
-                else:
-                    log_print(f"[{serial_number}] [{task_label}] ✗ 无挂单但交易费检查失败，任务失败")
-                    return True, msg
-            
-            # 有Open Orders，任务失败，需要获取挂单价格和进度
-            pending_price = ""
-            progress = ""
-            
-            if trending_part1:
-                # 有子标题：找到包含子标题的tr
-                log_print(f"[{serial_number}] [{task_label}] 有子标题，查找包含 '{trending_part1}' 的挂单...")
-                for tr in tr_list:
-                    try:
-                        tds = tr.find_elements(By.TAG_NAME, "td")
-                        if len(tds) > 1:
-                            second_td_ps = tds[1].find_elements(By.TAG_NAME, "p")
-                            second_td_text = " ".join([p.text.strip() for p in second_td_ps])
-                            if trending_part1 in second_td_text:
-                                log_print(f"[{serial_number}] [{task_label}] ✓ 找到包含子标题的挂单")
-                                # 第4个td（index=3）：挂单价格
-                                if len(tds) > 3:
-                                    td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
-                                    pending_price = td4_ps[0].text.strip() if td4_ps else ""
+            if open_orders_div:
+                try:
+                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
+                    tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                    
+                    if tr_list and len(tr_list) > 0:
+                        # 有挂单，获取进度
+                        if trending_part1:
+                            # 有子标题：找到包含子标题的tr
+                            for tr in tr_list:
+                                try:
+                                    tds = tr.find_elements(By.TAG_NAME, "td")
+                                    if len(tds) > 1:
+                                        second_td_ps = tds[1].find_elements(By.TAG_NAME, "p")
+                                        second_td_text = " ".join([p.text.strip() for p in second_td_ps])
+                                        if trending_part1 in second_td_text:
+                                            # 第6个td（index=5）：进度
+                                            if len(tds) > 5:
+                                                td6_ps = tds[5].find_elements(By.TAG_NAME, "p")
+                                                progress = " ".join([p.text.strip() for p in td6_ps])
+                                            break
+                                except:
+                                    continue
+                        else:
+                            # 无子标题：第一个tr
+                            try:
+                                first_tr = tr_list[0]
+                                tds = first_tr.find_elements(By.TAG_NAME, "td")
                                 # 第6个td（index=5）：进度
                                 if len(tds) > 5:
                                     td6_ps = tds[5].find_elements(By.TAG_NAME, "p")
                                     progress = " ".join([p.text.strip() for p in td6_ps])
-                                break
-                    except Exception as e:
-                        log_print(f"[{serial_number}] [{task_label}] ⚠ 解析Open Orders行失败: {str(e)}")
-                        continue
-            else:
-                # 无子标题：第一个tr
-                log_print(f"[{serial_number}] [{task_label}] 无子标题，获取第一行挂单数据...")
-                try:
-                    first_tr = tr_list[0]
-                    tds = first_tr.find_elements(By.TAG_NAME, "td")
-                    # 第4个td（index=3）：挂单价格
-                    if len(tds) > 3:
-                        td4_ps = tds[3].find_elements(By.TAG_NAME, "p")
-                        pending_price = td4_ps[0].text.strip() if td4_ps else ""
-                    # 第6个td（index=5）：进度
-                    if len(tds) > 5:
-                        td6_ps = tds[5].find_elements(By.TAG_NAME, "p")
-                        progress = " ".join([p.text.strip() for p in td6_ps])
-                except Exception as e:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 获取Open Orders数据失败: {str(e)}")
+                            except:
+                                pass
+                        
+                        if progress:
+                            log_print(f"[{serial_number}] [{task_label}] 挂单进度: {progress}")
+                except:
+                    pass
             
-            log_print(f"[{serial_number}] [{task_label}] Open Orders数据 - 挂单价格: {pending_price}, 进度: {progress}")
-            
-            # 有挂单，获取交易费
-            transaction_fee, filled_price, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
-            
-            # 有挂单，任务失败
-            import json
-            msg_data = {
-                "type": "TYPE6_PARTIAL",
-                "filled_amount": filled_amount,
-                "filled_price": filled_price,
-                "pending_price": pending_price,
-                "progress": progress,
-                "transaction_fee": transaction_fee
-            }
-            
-            # Sell类型添加原数量
-            if trade_type == "Sell":
-                msg_data["initial_filled_amount"] = str(initial_position_count)
-            
-            msg = json.dumps(msg_data, ensure_ascii=False)
-            log_print(f"[{serial_number}] [{task_label}] 结果详情:")
-            if trade_type == "Sell":
-                log_print(f"[{serial_number}] [{task_label}]   原数量: {initial_position_count}")
-            log_print(f"[{serial_number}] [{task_label}]   已成交数量: {filled_amount}")
-            log_print(f"[{serial_number}] [{task_label}]   成交价格: {filled_price}")
-            log_print(f"[{serial_number}] [{task_label}]   挂单价格: {pending_price}")
-            log_print(f"[{serial_number}] [{task_label}]   挂单进度: {progress}")
-            log_print(f"[{serial_number}] [{task_label}]   交易费: {transaction_fee}")
-            return True, msg
-            
+            if not progress:
+                log_print(f"[{serial_number}] [{task_label}] 无挂单或无法获取进度")
         except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ✗ 收集数据失败: {str(e)}")
-            import traceback
-            log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
-            return False, f"收集数据失败: {str(e)}"
-    
-    # 如果既没有变为2，也没有变为3或超时（理论上不会到这里）
-    return False, "未知错误"
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 获取挂单进度失败: {str(e)}")
+        
+        # 构建返回消息
+        position_change_str = str(position_change_value) if position_change_value is not None else "未知"
+        progress_str = progress if progress else "无"
+        
+        msg = f"{cancel_status},仓位变化值为:{position_change_str}, 挂单:{progress_str}"
+        log_print(f"[{serial_number}] [{task_label}] 最终结果: {msg}")
+        
+        # 返回成功+已有数据
+        return True, msg
+        
+    except Exception as e:
+        log_print(f"[{serial_number}] [{task_label}] ✗ 收集数据时发生异常: {str(e)}")
+        import traceback
+        log_print(f"[{serial_number}] [{task_label}] 错误详情:\n{traceback.format_exc()}")
+        
+        # 异常情况：返回失败+已有数据
+        position_change_str = str(position_change_value) if position_change_value is not None else "未知"
+        progress_str = progress if progress else "无"
+        msg = f"{cancel_status},仓位变化值为:{position_change_str}, 挂单:{progress_str}"
+        return False, msg
 
 def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', option_type='YES', timeout=600, trending='', amount=None, initial_closed_orders_time=''):
     """

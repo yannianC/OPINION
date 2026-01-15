@@ -11797,8 +11797,9 @@ const getTaskStatusClass = (status, msg = null) => {
   
   const classMap = {
     0: 'task-pending',
-    2: 'task-success',
-    3: 'task-failed',
+    2: 'task-success',  // 已完成，绿色
+    20: 'task-success',  // 已完成，绿色
+    3: 'task-failed',   // 失败，红色
     9: 'task-running'
   }
   return classMap[status] || ''
