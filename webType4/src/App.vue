@@ -684,7 +684,11 @@
                           
                           <!-- 所有任务ID汇总 -->
                           <div v-if="hedge.allTaskIds && hedge.allTaskIds.length > 0" class="hedge-summary">
-                            <span>任务ID组: {{ hedge.allTaskIds.join(', ') }}</span>
+                            <span>任务ID组: </span>
+                            <template v-for="(taskId, index) in hedge.allTaskIds" :key="taskId">
+                              <span :class="getTaskStatusClassByTaskId(hedge, taskId)">{{ taskId }}</span>
+                              <span v-if="index < hedge.allTaskIds.length - 1">, </span>
+                            </template>
                           </div>
                         </template>
                         
@@ -941,7 +945,11 @@
                           
                           <!-- 所有任务ID汇总 -->
                           <div v-if="hedge.allTaskIds && hedge.allTaskIds.length > 0" class="hedge-summary">
-                            <span>任务ID组: {{ hedge.allTaskIds.join(', ') }}</span>
+                            <span>任务ID组: </span>
+                            <template v-for="(taskId, index) in hedge.allTaskIds" :key="taskId">
+                              <span :class="getTaskStatusClassByTaskId(hedge, taskId)">{{ taskId }}</span>
+                              <span v-if="index < hedge.allTaskIds.length - 1">, </span>
+                            </template>
                           </div>
                         </template>
                         
@@ -2530,7 +2538,7 @@ const currentBatchIndex = ref(0)  // 当前执行批次索引
 const batchTimer = ref(null)  // 批次定时器
 
 // 订单薄API配置
-const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
+const ORDERBOOK_API_KEY = 'LzIJAZKmFwU6IMRkq5qzwX6wr1vVpCYd '
 const ORDERBOOK_API_URL = 'https://proxy.opinion.trade:8443/openapi/token/orderbook'
 
 // 对冲状态（重命名以避免与下面的 hedgeStatus 冲突）
@@ -2897,9 +2905,9 @@ const handleQuery = async () => {
     const priceInfo = await parseOrderbookData(querySelectedConfig.value, hedgeMode.isClose)
     
     // 判断是否符合条件
-    const meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+    const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
     
-    if (meetsCondition) {
+    if (hedgeCheck.canHedge) {
       // 符合条件，添加到对冲列表
       const config = querySelectedConfig.value
       
@@ -2956,42 +2964,9 @@ const handleQuery = async () => {
       }
     } else {
       // 不符合条件，显示错误信息
-      let reason = '不符合对冲条件'
-      
-      // 检查价差
-      if (priceInfo.diff <= 0.15) {
-        if (hedgeMode.preferLowerDepth) {
-          // 深度优选模式：选择深度小的一方
-          const bidDepth = priceInfo.depth1
-          const askDepth = priceInfo.depth2
-          const minDepth = Math.min(bidDepth, askDepth)
-          const minDepthType = bidDepth <= askDepth ? '买一' : '卖一'
-          
-          if (minDepth >= hedgeMode.maxDepth) {
-            reason = `深度优选：${minDepthType}深度 ${minDepth.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
-          } else {
-            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
-          }
-        } else if (!hedgeMode.isClose) {
-          // 开仓模式：检查买一深度
-          if (priceInfo.depth1 >= hedgeMode.maxDepth) {
-            reason = `先挂方买一深度 ${priceInfo.depth1.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
-          } else {
-            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
-          }
-        } else {
-          // 平仓模式：检查卖一深度
-          if (priceInfo.depth2 >= hedgeMode.maxDepth) {
-            reason = `先挂方卖一深度 ${priceInfo.depth2.toFixed(2)} 超过最大允许深度 ${hedgeMode.maxDepth}`
-          } else {
-            reason = `先挂方买卖价差 ${priceInfo.diff.toFixed(2)} 不足（需要 > 0.15），且深度条件不满足`
-          }
-        }
-      }
-      
       queryResult.value = {
         meetsCondition: false,
-        reason: reason,
+        reason: hedgeCheck.reason || '不符合对冲条件',
         priceInfo: priceInfo
       }
     }
@@ -5272,7 +5247,8 @@ const fetchAllOrderbooks = async () => {
           try {
             const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
             if (priceInfo) {
-              meetsCondition = checkOrderbookHedgeCondition(priceInfo)
+              const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
+              meetsCondition = hedgeCheck.canHedge
             }
           } catch (error) {
             // 如果parseOrderbookData失败，说明不符合条件，但依然显示基本数据
@@ -6361,7 +6337,8 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         // 只有在可以开始新对冲时才判断是否执行对冲
         if (canStartNewHedge) {
           // 检查是否满足对冲条件
-          if (checkOrderbookHedgeCondition(priceInfo)) {
+          const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
+          if (hedgeCheck.canHedge) {
             console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
             // 清空无法对冲时间和标记
@@ -6377,7 +6354,10 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
             // 记录对冲时间
             config.lastHedgeTime = Date.now()
           } else {
-            console.log(`配置 ${config.id} - 不满足对冲条件`)
+            console.log(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
+            
+            // 设置错误信息，显示具体原因
+            config.errorMessage = hedgeCheck.reason
             
             // 记录开始无法对冲的时间
             if (!config.noHedgeSince) {
@@ -6386,7 +6366,7 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
               // 检查是否超过5分钟都无法对冲
               const noHedgeElapsed = (Date.now() - config.noHedgeSince) / 1000 / 60
               if (noHedgeElapsed >= 5) {
-                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲`
+                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲 (${hedgeCheck.reason})`
                 console.warn(`配置 ${config.id} - ${config.errorMessage}`)
               }
             }
@@ -6411,6 +6391,10 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
       } catch (error) {
         console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
         config.retryCount++
+        
+        // 设置错误信息
+        const errorMsg = error.message || String(error)
+        config.errorMessage = `订单薄错误: ${errorMsg}`
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
@@ -7030,11 +7014,13 @@ const checkHedgeCondition = (task) => {
  * 类似 App_old.vue 中的判断逻辑：
  * 1. 先挂方的买一和卖一价差值 > 0.15
  * 2. 或者根据开仓/平仓判断先挂方的深度
+ * @returns {Object} { canHedge: boolean, reason: string }
  */
 const checkOrderbookHedgeCondition = (priceInfo) => {
-  if (!priceInfo) return false
+  if (!priceInfo) return { canHedge: false, reason: '订单薄数据为空' }
   
   let canHedge = false
+  let reason = ''
   
   // price1: 先挂方的买一价
   // price2: 先挂方的卖一价
@@ -7068,7 +7054,8 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
           priceInfo.selectedPriceType = 'bid'  // 使用买一价
           console.log(`✅ 买一深度更小 (${bidDepth.toFixed(2)} <= ${askDepth.toFixed(2)})，且满足深度限制，使用买一价 ${priceInfo.price1}`)
         } else {
-          console.log(`❌ 买一深度更小但超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+          reason = `买一深度更小但超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})`
+          console.log(`❌ ${reason}，不对冲`)
         }
       } else {
         // 卖一深度更小，使用卖一
@@ -7077,7 +7064,8 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
           priceInfo.selectedPriceType = 'ask'  // 使用卖一价
           console.log(`✅ 卖一深度更小 (${askDepth.toFixed(2)} < ${bidDepth.toFixed(2)})，且满足深度限制，使用卖一价 ${priceInfo.price2}`)
         } else {
-          console.log(`❌ 卖一深度更小但超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+          reason = `卖一深度更小但超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})`
+          console.log(`❌ ${reason}，不对冲`)
         }
       }
     } else {
@@ -7092,7 +7080,8 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
           priceInfo.selectedPriceType = 'ask'  // 开仓使用卖一价
           console.log(`✅ 深度满足条件 (${bidDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
         } else {
-          console.log(`❌ 深度超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+          reason = `深度超过限制 (${bidDepth.toFixed(2)} >= ${hedgeMode.maxDepth})`
+          console.log(`❌ ${reason}，不对冲`)
         }
       } else {
         // 平仓模式：判断先挂方卖一价的深度（depth2，因为是卖出）
@@ -7104,13 +7093,18 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
           priceInfo.selectedPriceType = 'ask'  // 平仓使用卖一价
           console.log(`✅ 深度满足条件 (${askDepth.toFixed(2)} < ${hedgeMode.maxDepth})，允许对冲`)
         } else {
-          console.log(`❌ 深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})，不对冲`)
+          reason = `深度超过限制 (${askDepth.toFixed(2)} >= ${hedgeMode.maxDepth})`
+          console.log(`❌ ${reason}，不对冲`)
         }
       }
     }
   }
   
-  return canHedge
+  if (!canHedge && !reason) {
+    reason = '不满足对冲条件'
+  }
+  
+  return { canHedge, reason }
 }
 
 /**
@@ -7584,7 +7578,8 @@ const randomGetAvailableTopic = async () => {
         }
         
         // 检查是否满足对冲条件
-        if (checkOrderbookHedgeCondition(priceInfo)) {
+        const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
+        if (hedgeCheck.canHedge) {
           // 如果是平仓模式，需要检查主题是否在持仓列表中
           if (hedgeMode.isClose) {
             const isInPosition = positionTopics.value.has(config.trending)
@@ -7607,7 +7602,7 @@ const randomGetAvailableTopic = async () => {
             showToast(`✅ 已找到 ${foundCount}/${targetCount} 个可用主题，继续查找...`, 'success')
           }
         } else {
-          console.log(`❌ 主题 ${config.trending} 不满足对冲条件，继续寻找...`)
+          console.log(`❌ 主题 ${config.trending} 不满足对冲条件: ${hedgeCheck.reason}`)
         }
       } catch (error) {
         console.error(`测试主题 ${config.trending} 失败:`, error)
@@ -8295,6 +8290,47 @@ const getTaskStatusClass = (status) => {
     20: 'task-status-20'  // 浅绿色
   }
   return classMap[status] || ''
+}
+
+/**
+ * 根据任务ID获取任务状态样式类
+ */
+const getTaskStatusClassByTaskId = (hedge, taskId) => {
+  if (!taskId) return ''
+  
+  // 在closeTasks中查找
+  if (hedge.closeTasks && hedge.closeTasks.length > 0) {
+    const task = hedge.closeTasks.find(t => String(t.taskId) === String(taskId))
+    if (task) return getTaskStatusClass(task.status)
+  }
+  
+  // 在secondTasks中查找
+  if (hedge.secondTasks && hedge.secondTasks.length > 0) {
+    const task = hedge.secondTasks.find(t => String(t.taskId) === String(taskId))
+    if (task) return getTaskStatusClass(task.status)
+  }
+  
+  // 在yesTasks中查找（模式2）
+  if (hedge.yesTasks && hedge.yesTasks.length > 0) {
+    const task = hedge.yesTasks.find(t => String(t.taskId) === String(taskId))
+    if (task) return getTaskStatusClass(task.status)
+  }
+  
+  // 在noTasks中查找（模式2）
+  if (hedge.noTasks && hedge.noTasks.length > 0) {
+    const task = hedge.noTasks.find(t => String(t.taskId) === String(taskId))
+    if (task) return getTaskStatusClass(task.status)
+  }
+  
+  // 模式1：检查yesTaskId和noTaskId
+  if (String(hedge.yesTaskId) === String(taskId)) {
+    return getTaskStatusClass(hedge.yesStatus)
+  }
+  if (String(hedge.noTaskId) === String(taskId)) {
+    return getTaskStatusClass(hedge.noStatus)
+  }
+  
+  return ''
 }
 
 /**
@@ -9203,14 +9239,19 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
     if (!secondSideSubmitted) {
       // 更新先挂方任务的状态
       if (hedgeRecord.closeTasks && hedgeRecord.closeTasks.length > 0) {
-        for (const task of hedgeRecord.closeTasks) {
+        for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+          const task = hedgeRecord.closeTasks[i]
           if (task.taskId) {
             const taskData = await fetchMissionStatus(task.taskId)
             if (taskData) {
               const oldStatus = task.status
-              task.status = taskData.status
               if (oldStatus !== taskData.status) {
                 console.log(`[Type4-monitorHedgeStatus] 先挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+                // 创建新对象以确保Vue检测到变化
+                hedgeRecord.closeTasks[i] = {
+                  ...task,
+                  status: taskData.status
+                }
               }
             }
           }
@@ -9334,14 +9375,19 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
       // 更新后挂方任务的状态
       // 同时也要更新先挂方任务的状态，确保状态是最新的
       if (hedgeRecord.closeTasks && hedgeRecord.closeTasks.length > 0) {
-        for (const task of hedgeRecord.closeTasks) {
+        for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+          const task = hedgeRecord.closeTasks[i]
           if (task.taskId) {
             const taskData = await fetchMissionStatus(task.taskId)
             if (taskData) {
               const oldStatus = task.status
-              task.status = taskData.status
               if (oldStatus !== taskData.status) {
                 console.log(`[Type4-monitorHedgeStatus] 先挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+                // 创建新对象以确保Vue检测到变化
+                hedgeRecord.closeTasks[i] = {
+                  ...task,
+                  status: taskData.status
+                }
               }
             }
           }
@@ -9349,14 +9395,19 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
       }
       
       if (hedgeRecord.secondTasks && hedgeRecord.secondTasks.length > 0) {
-        for (const task of hedgeRecord.secondTasks) {
+        for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+          const task = hedgeRecord.secondTasks[i]
           if (task.taskId) {
             const taskData = await fetchMissionStatus(task.taskId)
             if (taskData) {
               const oldStatus = task.status
-              task.status = taskData.status
               if (oldStatus !== taskData.status) {
                 console.log(`[Type4-monitorHedgeStatus] 后挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+                // 创建新对象以确保Vue检测到变化
+                hedgeRecord.secondTasks[i] = {
+                  ...task,
+                  status: taskData.status
+                }
               }
               
               // 检查任务是否成功（状态=2，或状态=3但msg包含TYPE1_SUCCESS或TYPE1_PARTIAL）
@@ -9615,9 +9666,23 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
     
     try {
       // 提交后挂方任务
-      // 后挂方：买卖反向改为买，买卖的类型（YES或NO）跟先挂方一样，价格也一样
-      const secondPsSide = hedgeRecord.firstSide === 'YES' ? 1 : 2  // 跟先挂方一样
-      const secondTaskPrice = parseFloat(hedgeRecord.price)  // 价格跟先挂方一样
+      // 根据先挂方价格决定后挂方逻辑
+      const firstPrice = parseFloat(hedgeRecord.price)
+      let secondPsSide, secondTaskPrice, secondSide
+      
+      if (firstPrice < 50) {
+        // 价格小于50：后挂方YES/NO跟先挂方一样，买入开仓，价格一样
+        secondPsSide = hedgeRecord.firstSide === 'YES' ? 1 : 2  // 跟先挂方一样
+        secondTaskPrice = firstPrice
+        secondSide = 1  // 买入
+        console.log(`Type4 - 先挂方价格 ${firstPrice} < 50，后挂方逻辑：YES/NO一样，买入，价格一样`)
+      } else {
+        // 价格大于等于50：后挂方YES/NO跟先挂方相反，卖出平仓，价格为100-先挂方价格
+        secondPsSide = hedgeRecord.firstSide === 'YES' ? 2 : 1  // 跟先挂方相反（YES变NO，NO变YES）
+        secondTaskPrice = parseFloat((100 - firstPrice).toFixed(1))  // 价格为100-先挂方价格，保留一位小数
+        secondSide = 2  // 卖出
+        console.log(`Type4 - 先挂方价格 ${firstPrice} >= 50，后挂方逻辑：YES/NO相反，卖出，价格 ${secondTaskPrice}`)
+      }
       
       const secondShare = floorToTwoDecimals(secondSideData.share)
       let secondGroupNo = '1'
@@ -9633,10 +9698,10 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
         type: 1,  // 后挂方使用type1
         trendingId: config.id,
         exchangeName: 'OP',
-        side: 1,  // 买入（原来是卖出2）
-        psSide: secondPsSide,  // 跟先挂方一样（原来是相反的）
+        side: secondSide,  // 根据价格决定买入或卖出
+        psSide: secondPsSide,  // 根据价格决定YES/NO
         amt: secondShare,
-        price: secondTaskPrice,  // 价格跟先挂方一样（原来是100-先挂方价格）
+        price: secondTaskPrice,  // 根据价格决定价格
         tp3: isFastMode.value ? "1" : "0"
       }
       
@@ -10352,7 +10417,8 @@ const executeAutoHedgeTasks = async () => {
         // 只有在可以开始新对冲时才判断是否执行对冲
         if (canStartNewHedge) {
           // 检查是否满足对冲条件
-          if (checkOrderbookHedgeCondition(priceInfo)) {
+          const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
+          if (hedgeCheck.canHedge) {
             console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
             // 清空无法对冲时间和标记
@@ -10368,7 +10434,10 @@ const executeAutoHedgeTasks = async () => {
             // 记录对冲时间
             config.lastHedgeTime = Date.now()
           } else {
-            console.log(`配置 ${config.id} - 不满足对冲条件`)
+            console.log(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
+            
+            // 设置错误信息，显示具体原因
+            config.errorMessage = hedgeCheck.reason
             
             // 记录开始无法对冲的时间
             if (!config.noHedgeSince) {
@@ -10377,7 +10446,7 @@ const executeAutoHedgeTasks = async () => {
               // 检查是否超过5分钟都无法对冲
               const noHedgeElapsed = (Date.now() - config.noHedgeSince) / 1000 / 60
               if (noHedgeElapsed >= 5) {
-                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲`
+                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲 (${hedgeCheck.reason})`
                 console.warn(`配置 ${config.id} - ${config.errorMessage}`)
               }
             }
@@ -10402,6 +10471,10 @@ const executeAutoHedgeTasks = async () => {
       } catch (error) {
         console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
         config.retryCount++
+        
+        // 设置错误信息
+        const errorMsg = error.message || String(error)
+        config.errorMessage = `订单薄错误: ${errorMsg}`
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms

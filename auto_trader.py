@@ -9432,6 +9432,53 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     retry_count += 1
                     continue
                 
+                
+                # 8. 选择价格类型
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤8: 选择价格类型 {price_type}")
+                log_print(f"[{browser_id}] 步骤8: 选择价格类型 {price_type}...")
+                if not select_opinion_price_type(trade_box, price_type, browser_id):
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]选择价格类型{price_type}失败")
+                    log_print(f"[{browser_id}] ✗ 选择价格类型{price_type}失败")
+                    last_failure_step = f"[8]选择价格类型{price_type}失败"
+                    retry_count += 1
+                    continue
+                
+                
+                
+                trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
+        
+                if not trade_box_divs:
+                    log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
+                    return False, "[8]未找到 trade-box div", None
+                
+                trade_box1 = trade_box_divs[0]
+                log_print(f"[{browser_id}] ✓ 找到 trade-box div")
+                
+                # 在 trade-box 中查找 tabs content div
+                log_print(f"[{browser_id}] 查找 tabs content div...")
+                tabs_content_divs = trade_box1.find_elements(By.CSS_SELECTOR, 
+                    'div[data-scope="tabs"][data-part="content"][data-state="open"]')
+                
+                if not tabs_content_divs:
+                    log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
+                    return False, "[8]未找到 tabs content div", None
+                
+                tabs_content = tabs_content_divs[0]
+                log_print(f"[{browser_id}] ✓ 找到 tabs content div")
+                
+                
+                # 9. 选择种类
+                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤9: 选择种类 {option_type}")
+                log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
+                if not select_opinion_option_type(tabs_content, option_type, browser_id):
+                    add_bro_log_entry(bro_log_list, browser_id, f"[8]选择种类{option_type}失败")
+                    log_print(f"[{browser_id}] ✗ 选择种类{option_type}失败")
+                    last_failure_step = f"[8]选择种类{option_type}失败"
+                    retry_count += 1
+                    continue
+                
+                
+                
                 # 7.5 Type 5 任务特殊处理：订单薄检查和价格调整
                 if task_data:
                     mission = task_data.get('mission', {})
@@ -9737,52 +9784,10 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                 log_print(f"[{browser_id}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
                 
-                # 8. 选择价格类型
-                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤8: 选择价格类型 {price_type}")
-                log_print(f"[{browser_id}] 步骤8: 选择价格类型 {price_type}...")
-                if not select_opinion_price_type(trade_box, price_type, browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, f"[8]选择价格类型{price_type}失败")
-                    log_print(f"[{browser_id}] ✗ 选择价格类型{price_type}失败")
-                    last_failure_step = f"[8]选择价格类型{price_type}失败"
-                    retry_count += 1
-                    continue
                 
                 
-                trade_box_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-flag="trade-box"]')
-        
-                if not trade_box_divs:
-                    log_print(f"[{browser_id}] ⚠ 未找到 trade-box div")
-                    return False, "[8]未找到 trade-box div", None
                 
-                trade_box1 = trade_box_divs[0]
-                log_print(f"[{browser_id}] ✓ 找到 trade-box div")
-                
-                # 在 trade-box 中查找 tabs content div
-                log_print(f"[{browser_id}] 查找 tabs content div...")
-                tabs_content_divs = trade_box1.find_elements(By.CSS_SELECTOR, 
-                    'div[data-scope="tabs"][data-part="content"][data-state="open"]')
-                
-                if not tabs_content_divs:
-                    log_print(f"[{browser_id}] ⚠ 未找到 tabs content div")
-                    return False, "[8]未找到 tabs content div", None
-                
-                tabs_content = tabs_content_divs[0]
-                log_print(f"[{browser_id}] ✓ 找到 tabs content div")
-                
-                
-                # 9. 选择种类
-                add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤9: 选择种类 {option_type}")
-                log_print(f"[{browser_id}] 步骤9: 选择种类 {option_type}...")
-                if not select_opinion_option_type(tabs_content, option_type, browser_id):
-                    add_bro_log_entry(bro_log_list, browser_id, f"[8]选择种类{option_type}失败")
-                    log_print(f"[{browser_id}] ✗ 选择种类{option_type}失败")
-                    last_failure_step = f"[8]选择种类{option_type}失败"
-                    retry_count += 1
-                    continue
-                
-                
-        
-                
+                   
                 # 10. 点击 Amount 标签
                 add_bro_log_entry(bro_log_list, browser_id, "[8]步骤10: 点击 Amount 标签")
                 log_print(f"[{browser_id}] 步骤10: 点击 Amount 标签...")
