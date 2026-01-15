@@ -3002,17 +3002,14 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                 
                 while time.time() - start_time_balance < 3:
                     try:
-                        # 查找所有div标签
-                        div_tags = driver.find_elements(By.TAG_NAME, "div")
-                        for div in div_tags:
-                            div_text = div.text.strip()
-                            if "Insufficient balance" in div_text:
-                                insufficient_balance_found = True
-                                log_msg = f"[8] ✗ 检测到余额不足提示: {div_text}"
-                                log_print(f"[{serial_number}] {log_msg}")
-                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                break
-                        if insufficient_balance_found:
+                        # 使用XPath直接查找包含"Insufficient balance"文本的div元素（包括子元素文本）
+                        elements = driver.find_elements(By.XPATH, "//div[contains(., 'Insufficient balance')]")
+                        if elements:
+                            insufficient_balance_found = True
+                            div_text = elements[0].text.strip()
+                            log_msg = f"[8] ✗ 检测到余额不足提示: {div_text}"
+                            log_print(f"[{serial_number}] {log_msg}")
+                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             break
                         time.sleep(0.2)  # 短暂等待后重试
                     except Exception as e:
@@ -3047,17 +3044,14 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                 
                 while time.time() - start_time < 3:
                     try:
-                        # 查找所有h2标签
-                        h2_tags = driver.find_elements(By.TAG_NAME, "h2")
-                        for h2 in h2_tags:
-                            h2_text = h2.text.strip()
-                            if "Unusual Limit Price" in h2_text:
-                                unusual_limit_found = True
-                                log_msg = f"[8] ✗ 检测到限价提示: {h2_text}"
-                                log_print(f"[{serial_number}] {log_msg}")
-                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                break
-                        if unusual_limit_found:
+                        # 使用XPath直接查找包含"Unusual Limit Price"文本的h2元素（包括子元素文本）
+                        h2_tags = driver.find_elements(By.XPATH, "//h2[contains(., 'Unusual Limit Price')]")
+                        if h2_tags:
+                            unusual_limit_found = True
+                            h2_text = h2_tags[0].text.strip()
+                            log_msg = f"[8] ✗ 检测到限价提示: {h2_text}"
+                            log_print(f"[{serial_number}] {log_msg}")
+                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             break
                         time.sleep(0.2)  # 短暂等待后重试
                     except Exception as e:
@@ -3090,38 +3084,26 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                 
                 while time.time() - start_time_confirm < 4:
                     try:
-                        # 查找所有 h2、div、p 标签
-                        all_elements = []
-                        all_elements.extend(driver.find_elements(By.TAG_NAME, "h2"))
-                        all_elements.extend(driver.find_elements(By.TAG_NAME, "div"))
-                        all_elements.extend(driver.find_elements(By.TAG_NAME, "p"))
+                        # 使用XPath直接查找包含"Securely trade on opinion.trade on"文本的元素
+                        secure_elements = driver.find_elements(By.XPATH, 
+                            "//*[self::h2 or self::div or self::p][contains(., 'Securely trade on opinion.trade on')]")
                         
-                        found_secure_trade = False
-                        for element in all_elements:
-                            element_text = element.text.strip()
-                            if "Securely trade on opinion.trade on" in element_text:
-                                found_secure_trade = True
-                                log_msg = f"[OP8] ✓ 检测到安全交易提示"
+                        if secure_elements:
+                            log_msg = f"[OP8] ✓ 检测到安全交易提示"
+                            log_print(f"[{serial_number}] {log_msg}")
+                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                            
+                            # 使用XPath直接查找文本为"Confirm"的button
+                            confirm_buttons = driver.find_elements(By.XPATH, "//button[normalize-space(.)='Confirm']")
+                            if confirm_buttons:
+                                log_msg = f"[8] ✓ 找到 Confirm 按钮，点击..."
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                break
-                        
-                        if found_secure_trade:
-                            # 查找内容等于 "Confirm" 的 button
-                            all_buttons = driver.find_elements(By.TAG_NAME, "button")
-                            for button in all_buttons:
-                                if button.text.strip() == "Confirm":
-                                    log_msg = f"[8] ✓ 找到 Confirm 按钮，点击..."
-                                    log_print(f"[{serial_number}] {log_msg}")
-                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    button.click()
-                                    confirm_clicked = True
-                                    log_msg = f"[8] ✓ 已点击 Confirm 按钮"
-                                    log_print(f"[{serial_number}] {log_msg}")
-                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    break
-                            
-                            if confirm_clicked:
+                                confirm_buttons[0].click()
+                                confirm_clicked = True
+                                log_msg = f"[8] ✓ 已点击 Confirm 按钮"
+                                log_print(f"[{serial_number}] {log_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 break
                         
                         time.sleep(0.2)
@@ -3150,9 +3132,8 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         log_msg = f"[9] ✓ 已切换到 OKX 页面"
                         log_print(f"[{serial_number}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                        
                         # 解锁
-                        unlock_okx_wallet(driver, serial_number, browser_id)
+                        # unlock_okx_wallet(driver, serial_number, browser_id)
                         
                         # 如果之前点击了 Confirm，需要先点击两次第二个按钮（带检查逻辑）
                         if confirm_clicked:
@@ -3227,7 +3208,6 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                         log_msg = f"[9] 查找确认按钮..."
                         log_print(f"[{serial_number}] {log_msg}")
                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                        time.sleep(3)
                         buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
                         
                         if len(buttons) >= 2:

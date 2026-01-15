@@ -8095,7 +8095,20 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           
           // 开仓模式下，yes或no任一一个大于了这个值，就不更新订单薄
           if (yesPosition > maxPosition || noPosition > maxPosition) {
-            console.log(`配置 ${config.id} - 开仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)，跳过本次请求`)
+            const positionReason = `开仓模式：yes或no持仓大于（万）时不更新 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)`
+            console.log(`配置 ${config.id} - ${positionReason}，跳过本次请求`)
+            // 设置订单薄数据以显示原因
+            config.orderbookData = {
+              pollTime: Date.now(),
+              updateTime: null,
+              reason: positionReason,
+              firstSide: null,
+              price1: null,
+              price2: null,
+              depth1: null,
+              depth2: null,
+              diff: null
+            }
             config.isFetching = false
             continue
           }
@@ -8107,7 +8120,20 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         const weightedAvgTime = config.weightedAvgTime || 0
         const maxWeightedTimeMs = hedgeMode.maxWeightedTimeHourOpen * 3600000  // 小时转毫秒
         if (weightedAvgTime > maxWeightedTimeMs) {
-          console.log(`配置 ${config.id} - 开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)，跳过本次请求`)
+          const weightedTimeReason = `开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)`
+          console.log(`配置 ${config.id} - ${weightedTimeReason}，跳过本次请求`)
+          // 设置订单薄数据以显示原因
+          config.orderbookData = {
+            pollTime: Date.now(),
+            updateTime: null,
+            reason: weightedTimeReason,
+            firstSide: null,
+            price1: null,
+            price2: null,
+            depth1: null,
+            depth2: null,
+            diff: null
+          }
           config.isFetching = false
           continue
         }
@@ -10124,20 +10150,25 @@ const randomGetAvailableTopic = async (useFailedTopics = false) => {
       
       const allConfigs = configResponse.data.data.configList || []
       
-      console.log(`获取到 ${allConfigs.length} 个配置`)
+      // 加载本地的显示/隐藏状态
+      const allConfigsWithVisible = loadConfigVisibleStatus(allConfigs)
+      
+      console.log(`获取到 ${allConfigsWithVisible.length} 个配置`)
       
       // 统计各种状态
-      const openCount = allConfigs.filter(c => c.isOpen === 1).length
-      const closedCount = allConfigs.filter(c => c.isOpen === 0).length
-      const hasTokenCount = allConfigs.filter(c => c.trendingPart1 && c.trendingPart2).length
+      const openCount = allConfigsWithVisible.filter(c => c.isOpen === 1).length
+      const closedCount = allConfigsWithVisible.filter(c => c.isOpen === 0).length
+      const hasTokenCount = allConfigsWithVisible.filter(c => c.trendingPart1 && c.trendingPart2).length
+      const hiddenCount = allConfigsWithVisible.filter(c => c.visible === false).length
       
       console.log(`- isOpen=1 (打开): ${openCount} 个`)
       console.log(`- isOpen=0 (关闭): ${closedCount} 个`)
+      console.log(`- visible=false (隐藏): ${hiddenCount} 个`)
       console.log(`- 有tokenId: ${hasTokenCount} 个`)
       
-      // 2. 筛选出isOpen=0且有tokenId的主题，且trending不包含"undefined"
-      closedConfigs = allConfigs.filter(config => 
-        config.isOpen === 0 && 
+      // 2. 筛选出(isOpen=0或visible=false)且有tokenId的主题，且trending不包含"undefined"
+      closedConfigs = allConfigsWithVisible.filter(config => 
+        (config.isOpen === 0 || config.visible === false) && 
         config.trendingPart1 && 
         config.trendingPart2 &&
         config.trending && 
@@ -10147,7 +10178,7 @@ const randomGetAvailableTopic = async (useFailedTopics = false) => {
       console.log(`符合条件的主题: ${closedConfigs.length} 个`)
       
       if (closedConfigs.length === 0) {
-        showToast(`没有可用的关闭主题 (总配置:${allConfigs.length}, 关闭:${closedCount}, 有token:${hasTokenCount})`, 'warning')
+        showToast(`没有可用的主题 (总配置:${allConfigsWithVisible.length}, 关闭:${closedCount}, 隐藏:${hiddenCount}, 有token:${hasTokenCount})`, 'warning')
         return
       }
     }
@@ -13457,7 +13488,20 @@ const executeAutoHedgeTasks = async () => {
           
           // 开仓模式下，yes或no任一一个大于了这个值，就不更新订单薄
           if (yesPosition > maxPosition || noPosition > maxPosition) {
-            console.log(`配置 ${config.id} - 开仓模式：持仓不满足条件 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)，跳过本次请求`)
+            const positionReason = `开仓模式：yes或no持仓大于（万）时不更新 (YES: ${(yesPosition/10000).toFixed(2)}万, NO: ${(noPosition/10000).toFixed(2)}万, 要求: <= ${hedgeMode.minPositionForOpen}万)`
+            console.log(`配置 ${config.id} - ${positionReason}，跳过本次请求`)
+            // 设置订单薄数据以显示原因
+            config.orderbookData = {
+              pollTime: Date.now(),
+              updateTime: null,
+              reason: positionReason,
+              firstSide: null,
+              price1: null,
+              price2: null,
+              depth1: null,
+              depth2: null,
+              diff: null
+            }
             config.isFetching = false
             continue
           }
@@ -13469,7 +13513,20 @@ const executeAutoHedgeTasks = async () => {
         const weightedAvgTime = config.weightedAvgTime || 0
         const maxWeightedTimeMs = hedgeMode.maxWeightedTimeHourOpen * 3600000  // 小时转毫秒
         if (weightedAvgTime > maxWeightedTimeMs) {
-          console.log(`配置 ${config.id} - 开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)，跳过本次请求`)
+          const weightedTimeReason = `开仓模式：加权时间过大 (加权时间: ${(weightedAvgTime/3600000).toFixed(2)}h, 要求: <= ${hedgeMode.maxWeightedTimeHourOpen}h)`
+          console.log(`配置 ${config.id} - ${weightedTimeReason}，跳过本次请求`)
+          // 设置订单薄数据以显示原因
+          config.orderbookData = {
+            pollTime: Date.now(),
+            updateTime: null,
+            reason: weightedTimeReason,
+            firstSide: null,
+            price1: null,
+            price2: null,
+            depth1: null,
+            depth2: null,
+            diff: null
+          }
           config.isFetching = false
           continue
         }
