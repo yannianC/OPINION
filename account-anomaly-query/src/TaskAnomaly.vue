@@ -187,7 +187,7 @@
                     v-model.number="alertEndTimeMinutes" 
                     type="number" 
                     class="alert-input"
-                    min="1"
+                    min="0"
                     step="1"
                     @change="saveAlertMonitorSettings"
                   />
@@ -1607,6 +1607,160 @@ export default {
       return result
     },
     
+    // 用于统计的筛选结果（不含状态筛选，但包含其他所有筛选条件）
+    filteredResultsForStatistics() {
+      // 先应用关键词筛选
+      let keywordFiltered = this.results
+      if (this.filterKeyword && this.filterKeyword.trim() !== '') {
+        const keyword = this.filterKeyword.trim().toLowerCase()
+        keywordFiltered = {}
+        
+        if (this.queryMode === 1) {
+          // 模式1：过滤每个任务组：如果组内任何一个任务匹配关键词，就显示整个组
+          Object.keys(this.results).forEach(groupKey => {
+            const group = this.results[groupKey]
+            
+            // 检查组内是否有任何任务匹配关键词
+            const hasMatch = group.tasks.some(task => {
+              // 检查失败原因是否包含关键词（同时检查原始和格式化后的文本）
+              const originalMsg = (task.msg || '').toLowerCase()
+              const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
+              return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
+            })
+            
+            // 如果有匹配，返回整个组（包含所有任务）
+            if (hasMatch) {
+              keywordFiltered[groupKey] = {
+                ...group,
+                tasks: group.tasks // 返回所有任务，而不是只返回匹配的任务
+              }
+            }
+          })
+        } else {
+          // 模式2：检查所有分类的任务
+          Object.keys(this.results).forEach(groupKey => {
+            const group = this.results[groupKey]
+            
+            // 检查所有任务列表（成功YES、成功NO、失败YES、失败NO）
+            const allTasks = [
+              ...(group.successYesTasks || []),
+              ...(group.successNoTasks || []),
+              ...(group.failYesTasks || []),
+              ...(group.failNoTasks || [])
+            ]
+            
+            const hasMatch = allTasks.some(task => {
+              const originalMsg = (task.msg || '').toLowerCase()
+              const formattedMsg = this.formatTaskMsg(task.msg).toLowerCase()
+              return originalMsg.includes(keyword) || formattedMsg.includes(keyword)
+            })
+            
+            if (hasMatch) {
+              keywordFiltered[groupKey] = { ...group }
+            }
+          })
+        }
+      }
+      
+      // 模式1时应用交易方向筛选
+      let result = keywordFiltered
+      if (this.queryMode === 1 && this.sideFilter !== 'all') {
+        const sideFiltered = {}
+        Object.keys(result).forEach(groupKey => {
+          const group = result[groupKey]
+          
+          // 根据 sideFilter 筛选任务
+          const filteredTasks = group.tasks.filter(task => {
+            if (this.sideFilter === 'buy') {
+              return task.side === 1 // 买入
+            } else if (this.sideFilter === 'sell') {
+              return task.side !== 1 // 卖出
+            }
+            return true
+          })
+          
+          // 如果筛选后还有任务，则保留这个组
+          if (filteredTasks.length > 0) {
+            sideFiltered[groupKey] = {
+              ...group,
+              tasks: filteredTasks
+            }
+          }
+        })
+        result = sideFiltered
+      }
+      
+      // 注意：这里跳过了状态筛选（statusFilter），因为统计需要显示所有状态的数量
+      
+      // 模式1时过滤掉类型1和类型2的记录（当开关开启时）
+      if (this.queryMode === 1 && this.hideType1Type2) {
+        const type1Type2Filtered = {}
+        Object.keys(result).forEach(groupKey => {
+          const group = result[groupKey]
+          const analysisInfo = this.getGroupAnalysisInfo(group)
+          // 过滤掉类型1和类型2
+          if (analysisInfo && (analysisInfo.text === '类型1' || analysisInfo.text === '类型2')) {
+            return // 跳过类型1和类型2
+          }
+          type1Type2Filtered[groupKey] = group
+        })
+        result = type1Type2Filtered
+      }
+      
+      // 模式1时应用精确筛选（任务ID、电脑组、浏览器编号、事件名）
+      if (this.queryMode === 1) {
+        const hasTaskIdFilter = this.filterTaskId && this.filterTaskId.trim() !== ''
+        const hasGroupNoFilter = this.filterGroupNo && this.filterGroupNo.trim() !== ''
+        const hasBrowserIdFilter = this.filterBrowserId && this.filterBrowserId.trim() !== ''
+        const hasTrendingFilter = this.filterTrending && this.filterTrending.trim() !== ''
+        
+        if (hasTaskIdFilter || hasGroupNoFilter || hasBrowserIdFilter || hasTrendingFilter) {
+          const preciseFiltered = {}
+          
+          // 解析筛选条件
+          const taskIdSet = hasTaskIdFilter ? this.parseFilterInput(this.filterTaskId) : null
+          const groupNoSet = hasGroupNoFilter ? this.parseFilterInput(this.filterGroupNo) : null
+          const browserIdSet = hasBrowserIdFilter ? this.parseFilterInput(this.filterBrowserId) : null
+          const trendingKeyword = hasTrendingFilter ? this.filterTrending.trim().toLowerCase() : null
+          
+          Object.keys(result).forEach(groupKey => {
+            const group = result[groupKey]
+            
+            // 检查组内是否有任务匹配筛选条件
+            const hasMatch = group.tasks.some(task => {
+              // 事件名筛选（检查任务级别的 trending）
+              if (hasTrendingFilter) {
+                const taskTrending = (task.trending || '').toLowerCase()
+                if (!taskTrending.includes(trendingKeyword)) {
+                  return false
+                }
+              }
+              // 任务ID筛选
+              if (taskIdSet && !taskIdSet.has(String(task.id))) {
+                return false
+              }
+              // 电脑组筛选
+              if (groupNoSet && !groupNoSet.has(String(task.groupNo))) {
+                return false
+              }
+              // 浏览器编号筛选
+              if (browserIdSet && !browserIdSet.has(String(task.browserId))) {
+                return false
+              }
+              return true
+            })
+            
+            if (hasMatch) {
+              preciseFiltered[groupKey] = group
+            }
+          })
+          result = preciseFiltered
+        }
+      }
+      
+      return result
+    },
+    
     // 需要处理的任务组数量（排除"全部成功"和"失败无影响"）
     needProcessCount() {
       if (this.queryMode !== 1) return 0
@@ -1630,6 +1784,7 @@ export default {
     
     // 组状态统计（用于统计面板显示，使用分析后的最终状态）
     // 9个状态分类（含类型1成功、类型2失败无影响、已修复）
+    // 注意：统计基于除状态筛选外的其他筛选条件的结果
     groupStatusStatistics() {
       if (this.queryMode !== 1) return { 
         type1Success: 0, type2NoImpact: 0, success: 0, noImpact: 0, repaired: 0, problemIn30: 0, 
@@ -1641,7 +1796,8 @@ export default {
         problemOtherIn30: 0, pendingFailed: 0, confirmedProblem: 0 
       }
       
-      Object.values(this.results).forEach(group => {
+      // 使用除状态筛选外的筛选结果进行统计
+      Object.values(this.filteredResultsForStatistics).forEach(group => {
         // 使用分析后的最终状态
         const status = this.getGroupFinalStatusWithAnalysis(group)
         if (stats[status] !== undefined) {
@@ -1665,11 +1821,14 @@ export default {
           result.push({ groupNo, stats })
         }
       }
-      // 按电脑组编号排序
+      // 按成功率降序排序，成功率相同则按总任务数降序排序
       result.sort((a, b) => {
-        const numA = parseInt(a.groupNo) || 0
-        const numB = parseInt(b.groupNo) || 0
-        return numA - numB
+        // 先比较成功率（高的在前）
+        if (b.stats.successRate !== a.stats.successRate) {
+          return b.stats.successRate - a.stats.successRate
+        }
+        // 成功率相同，比较总任务数（多的在前）
+        return b.stats.totalCount - a.stats.totalCount
       })
       return result
     },
@@ -1684,11 +1843,14 @@ export default {
           result.push({ groupNo, stats })
         }
       }
-      // 按电脑组编号排序
+      // 按成功率降序排序，成功率相同则按总任务数降序排序
       result.sort((a, b) => {
-        const numA = parseInt(a.groupNo) || 0
-        const numB = parseInt(b.groupNo) || 0
-        return numA - numB
+        // 先比较成功率（高的在前）
+        if (b.stats.successRate !== a.stats.successRate) {
+          return b.stats.successRate - a.stats.successRate
+        }
+        // 成功率相同，比较总任务数（多的在前）
+        return b.stats.totalCount - a.stats.totalCount
       })
       return result
     },
@@ -1719,14 +1881,27 @@ export default {
     taskGroupsWithIndex() {
       if (this.queryMode !== 1) return []
       
-      // 对组键进行排序，确保顺序稳定
+      // 获取任务组中最新的创建时间（用于排序）
+      const getGroupLatestTime = (group) => {
+        if (!group.tasks || group.tasks.length === 0) return 0
+        let latestTime = 0
+        group.tasks.forEach(task => {
+          const taskTime = new Date(task.createTime).getTime()
+          if (taskTime > latestTime) {
+            latestTime = taskTime
+          }
+        })
+        return latestTime
+      }
+      
+      // 对组键进行排序，按时间倒序（最新的在最上面）
       const sortedKeys = Object.keys(this.filteredResults).sort((a, b) => {
-        // 先按groupId排序，确保同组任务颜色一致
-        const groupA = this.filteredResults[a].groupId
-        const groupB = this.filteredResults[b].groupId
-        if (groupA < groupB) return -1
-        if (groupA > groupB) return 1
-        return 0
+        const groupA = this.filteredResults[a]
+        const groupB = this.filteredResults[b]
+        const timeA = getGroupLatestTime(groupA)
+        const timeB = getGroupLatestTime(groupB)
+        // 时间倒序排列（最新的在前）
+        return timeB - timeA
       })
       
       // 创建internalGroupId到colorIndex的映射，确保同组任务使用相同颜色
@@ -3031,27 +3206,32 @@ export default {
         
         const successRate = localStorage.getItem('taskAnomaly_alertSuccessRateThreshold')
         if (successRate !== null) {
-          this.alertSuccessRateThreshold = parseFloat(successRate) || 50
+          const parsed = parseFloat(successRate)
+          this.alertSuccessRateThreshold = isNaN(parsed) ? 50 : parsed
         }
         
         const consecutiveFail = localStorage.getItem('taskAnomaly_alertConsecutiveFailThreshold')
         if (consecutiveFail !== null) {
-          this.alertConsecutiveFailThreshold = parseInt(consecutiveFail) || 3
+          const parsed = parseInt(consecutiveFail)
+          this.alertConsecutiveFailThreshold = isNaN(parsed) ? 3 : parsed
         }
         
         const interval = localStorage.getItem('taskAnomaly_alertMonitorInterval')
         if (interval !== null) {
-          this.alertMonitorInterval = parseInt(interval) || 5
+          const parsed = parseInt(interval)
+          this.alertMonitorInterval = isNaN(parsed) ? 5 : parsed
         }
         
         const endTimeMinutes = localStorage.getItem('taskAnomaly_alertEndTimeMinutes')
         if (endTimeMinutes !== null) {
-          this.alertEndTimeMinutes = parseInt(endTimeMinutes) || 20
+          const parsed = parseInt(endTimeMinutes)
+          this.alertEndTimeMinutes = isNaN(parsed) ? 20 : parsed
         }
         
         const startTimeMinutes = localStorage.getItem('taskAnomaly_alertStartTimeMinutes')
         if (startTimeMinutes !== null) {
-          this.alertStartTimeMinutes = parseInt(startTimeMinutes) || 80
+          const parsed = parseInt(startTimeMinutes)
+          this.alertStartTimeMinutes = isNaN(parsed) ? 80 : parsed
         }
       } catch (e) {
         console.error('加载预警监控设置失败:', e)
@@ -3175,11 +3355,33 @@ export default {
           
           // 按电脑组分组任务
           const tasksByGroup = {}
+          const now = new Date()
+          
           missions.forEach(item => {
             const mission = item.mission
             const groupNo = mission.groupNo
             
             if (!groupNo) return
+            
+            // 排除逻辑：status不等于2且不等于3，且createTime距离现在不超过30分钟的排除
+            const createTime = new Date(mission.createTime)
+            const minutesSinceCreate = (now.getTime() - createTime.getTime()) / (60 * 1000)
+            if (mission.status !== 2 && mission.status !== 3 && minutesSinceCreate <= 30) {
+              return // 排除这条任务
+            }
+            
+            // 判断是否成功：
+            // 1. status === 2 直接算成功
+            // 2. status === 3 但 msg 包含特定字符串也算成功
+            let isSuccess = mission.status === 2
+            if (mission.status === 3 && mission.msg) {
+              const msg = mission.msg
+              if (msg.includes('本任务正常') || 
+                  msg.includes('等待任务一确认订单薄') || 
+                  msg.includes('检测对方挂单超时或失败')) {
+                isSuccess = true
+              }
+            }
             
             if (!tasksByGroup[groupNo]) {
               tasksByGroup[groupNo] = []
@@ -3190,7 +3392,9 @@ export default {
               groupNo: groupNo,
               status: mission.status,
               createTime: mission.createTime,
-              updateTime: mission.updateTime
+              updateTime: mission.updateTime,
+              msg: mission.msg,
+              isSuccess: isSuccess  // 新增：标记是否成功
             })
           })
           
@@ -3208,20 +3412,20 @@ export default {
               return timeB - timeA
             })
             
-            // 统计成功数（status == 2）
+            // 统计成功数（使用 isSuccess 字段判断）
             const totalCount = tasks.length
-            const successCount = tasks.filter(t => t.status === 2).length
+            const successCount = tasks.filter(t => t.isSuccess).length
             const successRate = totalCount > 0 ? (successCount / totalCount) * 100 : 0
             
             // 检查连续失败数（从最新的任务开始）
-            // 统计 status 不等于 2 的连续任务个数
+            // 统计 isSuccess 为 false 的连续任务个数
             let consecutiveFailCount = 0
             for (const task of tasks) {
-              if (task.status === 2) {
-                // 遇到成功的任务（status === 2），停止计数
+              if (task.isSuccess) {
+                // 遇到成功的任务，停止计数
                 break
               } else {
-                // 失败的任务（status !== 2），计数加1
+                // 失败的任务，计数加1
                 consecutiveFailCount++
               }
             }
@@ -3234,16 +3438,18 @@ export default {
               successCount: successCount
             }
             
-            // 检查成功率报警（已禁用飞书消息发送）
+            // 检查成功率报警
             if (successRate < this.alertSuccessRateThreshold) {
-              console.log(`【任务预警】电脑组 ${groupNo} 成功率过低 - 成功率: ${successRate.toFixed(2)}% (阈值: ${this.alertSuccessRateThreshold}%)`)
-              // 不再发送飞书消息
+              const message = `【任务预警】电脑组 ${groupNo} 成功率过低 - 成功率: ${successRate.toFixed(2)}% (阈值: ${this.alertSuccessRateThreshold}%)`
+              console.log(message)
+              this.sendFeishuMessage(message)
             }
             
-            // 检查连续失败报警（已禁用飞书消息发送）
+            // 检查连续失败报警
             if (consecutiveFailCount >= this.alertConsecutiveFailThreshold) {
-              console.log(`【任务预警】电脑组 ${groupNo} 连续失败任务过多 - 连续失败数: ${consecutiveFailCount} (阈值: ${this.alertConsecutiveFailThreshold})`)
-              // 不再发送飞书消息
+              const message = `【任务预警】电脑组 ${groupNo} 连续失败任务过多 - 连续失败数: ${consecutiveFailCount} (阈值: ${this.alertConsecutiveFailThreshold})`
+              console.log(message)
+              this.sendFeishuMessage(message)
             }
           }
           
@@ -3264,166 +3470,41 @@ export default {
       return `${h}:${m}:${s}`
     },
     
-    // 发送飞书消息（使用fetch API避免CORS问题）
+    // 发送飞书消息（使用 Webhook 方式）
     async sendFeishuMessage(messageText) {
       try {
-        // 先获取 tenant_access_token
-        const tokenUrl = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-        const tokenPayload = {
-          "app_id": "cli_a6010dfab0b1500b",
-          "app_secret": "vwSJuuQLiPelg3QJQeQmrcTpSa2uQrW0"
-        }
-        
-        let tenant_access_token = null
-        const tokenMaxRetries = 3
-        
-        for (let tokenAttempt = 0; tokenAttempt < tokenMaxRetries; tokenAttempt++) {
-          try {
-            // 使用fetch API，设置mode为cors
-            const tokenResponse = await fetch(tokenUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(tokenPayload),
-              mode: 'cors',
-              credentials: 'omit'
-            })
-            
-            if (!tokenResponse.ok) {
-              throw new Error(`HTTP error! status: ${tokenResponse.status}`)
-            }
-            
-            const tokenData = await tokenResponse.json()
-            
-            if (tokenData.code !== 0) {
-              console.error(`获取飞书访问令牌失败: ${tokenData.msg}`)
-              if (tokenAttempt < tokenMaxRetries - 1) {
-                await new Promise(resolve => setTimeout(resolve, 2000))
-              }
-              continue
-            }
-            
-            tenant_access_token = tokenData.tenant_access_token
-            if (!tenant_access_token) {
-              console.error('获取飞书访问令牌失败: 响应中未找到 tenant_access_token')
-              if (tokenAttempt < tokenMaxRetries - 1) {
-                await new Promise(resolve => setTimeout(resolve, 2000))
-              }
-              continue
-            }
-            
-            break
-          } catch (e) {
-            // 检测CORS错误
-            const isCorsError = e.message && (
-              e.message.includes('CORS') || 
-              e.message.includes('cors') ||
-              e.message.includes('Access-Control-Allow-Origin') ||
-              e.message.includes('Failed to fetch') ||
-              e.name === 'TypeError'
-            )
-            
-            if (isCorsError) {
-              console.error('飞书API不支持跨域请求，需要通过后端代理发送消息')
-              if (tokenAttempt === 0) {
-                // 只在第一次尝试时提示，避免重复提示
-                this.showToast('飞书消息发送失败：浏览器跨域限制，需要后端代理支持', 'warning')
-              }
-              return false
-            }
-            console.error(`获取飞书访问令牌时发生错误: ${e.message}`)
-            if (tokenAttempt < tokenMaxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, 2000))
-            }
-          }
-        }
-        
-        if (!tenant_access_token) {
-          console.error('获取飞书访问令牌失败，已达到最大重试次数')
-          return false
-        }
-        
-        // 使用获取到的 token 发送消息
-        const url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
-        const headers = {
-          'Authorization': `Bearer ${tenant_access_token}`,
-          'Content-Type': 'application/json; charset=utf-8'
-        }
+        const webhookUrl = "https://open.feishu.cn/open-apis/bot/v2/hook/1caa5acd-0e96-4c02-b8b2-a3892dfa3dbc"
         
         const payload = {
-          "receive_id": "oc_ce7c949dd73b573a28063d76f0d02e24",
           "msg_type": "text",
-          "content": JSON.stringify({"text": messageText})
-        }
-        
-        const maxRetries = 3
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-          try {
-            const response = await fetch(url, {
-              method: 'POST',
-              headers: headers,
-              body: JSON.stringify(payload),
-              mode: 'cors',
-              credentials: 'omit'
-            })
-            
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`)
-            }
-            
-            const data = await response.json()
-            
-            if (data.code === 0) {
-              console.log('飞书消息发送成功')
-              return true
-            } else {
-              console.error(`飞书消息发送失败: ${data.msg}`)
-              if (attempt < maxRetries - 1) {
-                await new Promise(resolve => setTimeout(resolve, 2000))
-              }
-            }
-          } catch (e) {
-            // 检测CORS错误
-            const isCorsError = e.message && (
-              e.message.includes('CORS') || 
-              e.message.includes('cors') ||
-              e.message.includes('Access-Control-Allow-Origin') ||
-              e.message.includes('Failed to fetch') ||
-              e.name === 'TypeError'
-            )
-            
-            if (isCorsError) {
-              console.error('飞书API不支持跨域请求，需要通过后端代理发送消息')
-              if (attempt === 0) {
-                // 只在第一次尝试时提示，避免重复提示
-                this.showToast('飞书消息发送失败：浏览器跨域限制，需要后端代理支持', 'warning')
-              }
-              return false
-            }
-            console.error(`发送飞书消息时发生错误: ${e.message}`)
-            if (attempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, 2000))
-            }
+          "content": {
+            "text": messageText
           }
         }
         
-        console.error('飞书消息发送失败，已达到最大重试次数')
-        return false
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        })
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const data = await response.json()
+        
+        if (data.code === 0 || data.StatusCode === 0) {
+          console.log('飞书消息发送成功')
+          return true
+        } else {
+          console.error(`飞书消息发送失败: ${data.msg || data.StatusMessage}`)
+          return false
+        }
       } catch (error) {
         console.error('发送飞书消息异常:', error)
-        // 检测CORS错误
-        const isCorsError = error.message && (
-          error.message.includes('CORS') || 
-          error.message.includes('cors') ||
-          error.message.includes('Access-Control-Allow-Origin') ||
-          error.message.includes('Failed to fetch') ||
-          error.name === 'TypeError'
-        )
-        
-        if (isCorsError) {
-          this.showToast('飞书消息发送失败：浏览器跨域限制，需要后端代理支持', 'warning')
-        }
         return false
       }
     },
@@ -4637,9 +4718,68 @@ export default {
       const task1 = group.tasks[0]
       const task2 = group.tasks[1]
       
+      // ========== 类型2：一方status=9且开始时间不超过30分钟，另一方[X]<10或msg为空 ==========
+      // 注意：类型2的判断必须在类型1之前，因为status=9的任务可能被误判为allFilled
+      const extractBracketNum = (msg) => {
+        if (!msg) return null
+        if (msg === 'NEED_IP_RETRY') return 0
+        const match = msg.match(/^\[(\d+)\]/)
+        if (match) {
+          return parseInt(match[1])
+        }
+        return null
+      }
+      
+      // 检查任务是否是status=9且开始时间距离现在不超过30分钟
+      const isStatus9AndWithin30Min = (task) => {
+        if (task.status !== 9) return false
+        const createTime = new Date(task.createTime).getTime()
+        const now = new Date().getTime()
+        const minutesSinceCreate = (now - createTime) / (60 * 1000)
+        return minutesSinceCreate <= 30
+      }
+      
+      // 检查任务的[X]是否小于10或msg为空
+      const isBracketNumLessThan10OrEmpty = (task) => {
+        if (!task.msg || task.msg.trim() === '') return true // msg为空
+        const bracketNum = extractBracketNum(task.msg)
+        return bracketNum !== null && bracketNum < 10
+      }
+      
+      // 判断类型2：一方status=9且30分钟内，另一方[X]<10或msg为空
+      const task1IsStatus9Within30 = isStatus9AndWithin30Min(task1)
+      const task2IsStatus9Within30 = isStatus9AndWithin30Min(task2)
+      
+      // 任一方status=9且30分钟内，另一方满足条件
+      if (task1IsStatus9Within30 && isBracketNumLessThan10OrEmpty(task2)) {
+        return {
+          text: '类型2',
+          newStatus: 'type2NoImpact',
+          statusClass: 'analysis-type2-no-impact'
+        }
+      }
+      if (task2IsStatus9Within30 && isBracketNumLessThan10OrEmpty(task1)) {
+        return {
+          text: '类型2',
+          newStatus: 'type2NoImpact',
+          statusClass: 'analysis-type2-no-impact'
+        }
+      }
+      // 两边都是status=9且30分钟内，任一方msg为空或[X]<10
+      if (task1IsStatus9Within30 && task2IsStatus9Within30) {
+        if (isBracketNumLessThan10OrEmpty(task1) || isBracketNumLessThan10OrEmpty(task2)) {
+          return {
+            text: '类型2',
+            newStatus: 'type2NoImpact',
+            statusClass: 'analysis-type2-no-impact'
+          }
+        }
+      }
+      
       // ========== 类型1：两边都是"全部成交"或状态为2的（独立分类：类型1成功）==========
-      const task1IsAllFilled = task1.status === 2 || this.classifyTaskByMsg(task1.msg, task1.status) === 'allFilled'
-      const task2IsAllFilled = task2.status === 2 || this.classifyTaskByMsg(task2.msg, task2.status) === 'allFilled'
+      // 注意：status=9 的任务不算作 allFilled
+      const task1IsAllFilled = (task1.status === 2 || this.classifyTaskByMsg(task1.msg, task1.status) === 'allFilled') && task1.status !== 9
+      const task2IsAllFilled = (task2.status === 2 || this.classifyTaskByMsg(task2.msg, task2.status) === 'allFilled') && task2.status !== 9
       
       if (task1IsAllFilled && task2IsAllFilled) {
         return {
@@ -4649,22 +4789,10 @@ export default {
         }
       }
       
-      // ========== 类型2：两边状态都是3，且msg包含"[X]本任务正常"（X<10）（独立分类：类型2失败无影响）==========
+      // ========== 兼容原类型2逻辑：两边状态都是3，且两边的[X]值都小于10 ==========
       if (task1.status === 3 && task2.status === 3) {
-        console.log(`${task1.status}-${task1.msg}    ${task2.status}-${task2.msg}`);
-        const extractBracketNum = (msg) => {
-          if (!msg) return null
-          if (msg === 'NEED_IP_RETRY') return 0
-          const match = msg.match(/^\[(\d+)\]/)
-          if (match) {
-            return parseInt(match[1])
-          }
-          return null
-        }
-        
         const task1BracketNum = extractBracketNum(task1.msg)
         const task2BracketNum = extractBracketNum(task2.msg)
-        console.log(`${task1.status}-${task1BracketNum}    ${task2.status}-${task2BracketNum}`);
         // 两边的 [X] 值都小于10
         if (task1BracketNum !== null && task1BracketNum < 10 && 
             task2BracketNum !== null && task2BracketNum < 10) {
