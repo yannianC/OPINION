@@ -3236,7 +3236,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             log_print(f"[{serial_number}] {log_msg}")
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             
-                            if task_data and mission_type == 5:
+                            if task_data and (mission_type == 5 or mission_type == 9):
                                 log_msg = f"[9] Type 5 任务，启动同步机制..."
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3425,27 +3425,32 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             return False, "[9]本任务正常，任务一已失败"
                                         
                                         
-                                        time.sleep(10)
-                                    
-                                    # 任务二：设置任务一的tp9为6（通知任务一：任务二准备就绪）
-                                    log_msg = f"[9] 任务二: 设置任务一tp9=6（任务二就绪）..."
-                                    log_print(f"[{serial_number}] {log_msg}")
-                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                    tp_update_success = update_mission_tp(tp1, tp9=6)
-                                    if not tp_update_success:
-                                        time.sleep(2)
+                                    if mission_type != 9:
+                                        # 任务二：设置任务一的tp9为6（通知任务一：任务二准备就绪）
+                                        log_msg = f"[9] 任务二: 设置任务一tp9=6（任务二就绪）..."
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         tp_update_success = update_mission_tp(tp1, tp9=6)
                                         if not tp_update_success:
-                                            time.sleep(5)
+                                            time.sleep(2)
                                             tp_update_success = update_mission_tp(tp1, tp9=6)
                                             if not tp_update_success:
-                                                log_msg = f"[9] ✗ 连续3次设置tp9失败"
-                                                log_print(f"[{serial_number}] {log_msg}")
-                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                                log_msg = f"[9] [{serial_number}] 连续3次设置tp9失败，请检查网络"
-                                                send_feishu_custom_message(browser_id, log_msg)
-                                                return False, True  # 失败，可重试
+                                                time.sleep(5)
+                                                tp_update_success = update_mission_tp(tp1, tp9=6)
+                                                if not tp_update_success:
+                                                    log_msg = f"[9] ✗ 连续3次设置tp9失败"
+                                                    log_print(f"[{serial_number}] {log_msg}")
+                                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                    log_msg = f"[9] [{serial_number}] 连续3次设置tp9失败，请检查网络"
+                                                    send_feishu_custom_message(browser_id, log_msg)
+                                                    return False, True  # 失败，可重试
                                     
+
+                                    tp11 = mission.get('tp11')
+                                    if tp11:
+                                        task_sync_polling_interval = int(tp11)
+                                    else:
+                                        task_sync_polling_interval = 5
                                     # 等待任务一点击确认（状态7）
                                     log_msg = f"[9] 任务二: 等待任务一点击确认（状态7）..."
                                     log_print(f"[{serial_number}] {log_msg}")
@@ -3461,8 +3466,6 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         
                                         tp1_status = get_mission_status(tp1)
                                         if tp1_status == 7 or tp1_status == 2 or tp1_status == 8 or tp1_status == 12:
-                                            time.sleep(5)
-                                            
                                             log_msg = f"[9] ✓ 任务一已点击确认（状态{tp1_status}）"
                                             log_print(f"[{serial_number}] {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3474,8 +3477,9 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                             buttons[0].click()  # 点击取消按钮
                                             return False, "[9]本任务正常，任务一确认失败"
                                         
-                                        time.sleep(10)
+                                        time.sleep(task_sync_polling_interval)
                                     
+
                                     # 点击确认按钮
                                     log_msg = f"[11] 任务二: 点击OKX确认按钮..."
                                     log_print(f"[{serial_number}] {log_msg}")
@@ -3963,7 +3967,7 @@ def get_position_from_api(serial_number, trending, option_type):
     return None
 
 
-def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None, initial_open_orders_count=0, initial_closed_orders_time="", bro_log_list=None):
+def wait_for_type5_order_and_collect_data(driver, mission_type, initial_position_count, serial_number, trending_part1, task_data, trade_type, option_type, trending="", amount=None, initial_open_orders_count=0, initial_closed_orders_time="", bro_log_list=None):
     """
     Type 5 任务专用：等待订单成功并收集数据
     
@@ -4110,7 +4114,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     current_tp9 = get_mission_tp9(target_mission_id)
                     log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                     
-                    if is_task1:
+                    if is_task1 and mission_type == 5:
                             # 任务一检测到变化，通过tp9判断任务二的进度
                                 if current_tp9 == 13 or current_tp9 == 14:
                                     # 任务二也检测到变化了，设置状态为14
@@ -4122,7 +4126,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
-                    else:
+                    elif mission_type == 5 :
                                 # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
                                     # 任务一也检测到变化了，设置tp9为14
@@ -4158,7 +4162,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         current_status = get_mission_status(target_mission_id)
                         current_tp9 = get_mission_tp9(target_mission_id)
                         log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
-                        if is_task1:
+                        if is_task1 and mission_type == 5:
                             # 任务一检测到变化，通过tp9判断任务二的进度
                                 if current_tp9 == 13 or current_tp9 == 14:
                                     # 任务二也检测到变化了，设置状态为14
@@ -4168,7 +4172,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
-                        else:
+                        elif mission_type == 5:
                                 # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
                                     # 任务一也检测到变化了，设置tp9为14
@@ -4202,7 +4206,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             current_tp9 = get_mission_tp9(target_mission_id)
                             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                             
-                            if is_task1:
+                            if is_task1 and mission_type == 5:
                             # 任务一检测到变化，通过tp9判断任务二的进度
                                 if current_tp9 == 13 or current_tp9 == 14:
                                     # 任务二也检测到变化了，设置状态为14
@@ -4212,7 +4216,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
-                            else:
+                            elif mission_type == 5:
                                 # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
                                     # 任务一也检测到变化了，设置tp9为14
@@ -4292,7 +4296,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     current_tp9 = get_mission_tp9(target_mission_id)
                     log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                     
-                    if is_task1:
+                    if is_task1 and mission_type == 5:
                             # 任务一检测到变化，通过tp9判断任务二的进度
                                 if current_tp9 == 13 or current_tp9 == 14:
                                     # 任务二也检测到变化了，设置状态为14
@@ -4304,7 +4308,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
                                     add_bro_log_entry(bro_log_list, serial_number, f"[14][{serial_number}] 任务一检测到变化，更改状态为12...")
-                    else:
+                    elif mission_type == 5:
                                 # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
                                     # 任务一也检测到变化了，设置tp9为14
@@ -4339,7 +4343,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         current_tp9 = get_mission_tp9(target_mission_id)
                         log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                         
-                        if is_task1:
+                        if is_task1 and mission_type == 5:
                             # 任务一检测到变化，通过tp9判断任务二的进度
                                 if current_tp9 == 13 or current_tp9 == 14:
                                     # 任务二也检测到变化了，设置状态为14
@@ -4349,7 +4353,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
-                        else:
+                        elif mission_type == 5:
                                 # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
                                     # 任务一也检测到变化了，设置tp9为14
@@ -4383,7 +4387,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                             current_tp9 = get_mission_tp9(target_mission_id)
                             log_print(f"[{serial_number}] [{task_label}] 当前任务一状态: {current_status}, tp9: {current_tp9}")
                             
-                            if is_task1:
+                            if is_task1 and mission_type == 5:
                             # 任务一检测到变化，通过tp9判断任务二的进度
                                 if current_tp9 == 13 or current_tp9 == 14:
                                     # 任务二也检测到变化了，设置状态为14
@@ -4393,7 +4397,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                                     # 任务一检测到变化，设置状态为12
                                     log_print(f"[{serial_number}] [{task_label}] 任务一检测到变化，更改状态为12...")
                                     save_mission_result(target_mission_id, 12)
-                            else:
+                            elif mission_type == 5:
                                 # 任务二检测到变化，修改任务一的tp9
                                 if current_status == 12 or current_status == 14:
                                     # 任务一也检测到变化了，设置tp9为14
@@ -4434,7 +4438,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                 current_tp9 = get_mission_tp9(target_mission_id)
                 log_print(f"[{serial_number}] [{task_label}] phase2轮询: status={current_status}, tp9={current_tp9}")
                 
-                if is_task1:
+                if is_task1 and mission_type == 5:
                     # 任务一：通过tp9判断任务二的进度
                     if current_tp9 == 13 or current_tp9 == 14 or current_tp9 == 2:
                         # 任务二也检测到变化了，设置状态为14
@@ -4447,7 +4451,7 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                     elif current_tp9 == 3:
                         break;
                        
-                else:
+                elif mission_type == 5:
                     # 任务二：通过status判断任务一的进度
                     if current_status == 14 or current_status == 2 or current_status == 12:
                         both_hava_order = True
@@ -4457,6 +4461,13 @@ def wait_for_type5_order_and_collect_data(driver, initial_position_count, serial
                         break;
                     elif current_tp9 == 13:
                         continue;
+                    elif current_status == 3:
+                        break;
+                elif mission_type == 9:
+                    # 任务二：通过status判断任务一的进度
+                    if current_status == 14:
+                        both_hava_order = True
+                        break;
                     elif current_status == 3:
                         break;
                 
@@ -9308,7 +9319,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     mission_type = mission.get('type')
                     
                     
-                    if mission_type == 5:
+                    if mission_type == 5 or mission_type == 9:
                         add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.5: Type 5 任务 - 订单薄检查和价格调整")
                         log_print(f"[{browser_id}] 步骤7.5: Type 5 任务 - 订单薄检查和价格调整...")
                         
@@ -9558,8 +9569,12 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                     # 任务1状态是21或5，获取任务1的price
                                     task1_price = float(task1_info.get('price', 0))
                                     
-                                    # 计算自己的price：100 - 任务1的price（四舍五入保留1位小数）
-                                    calculated_price = round(100 - task1_price, 1)
+                                    if mission_type == 9:
+                                        # 计算自己的price：100 - 任务1的price（四舍五入保留1位小数）
+                                        calculated_price = task1_price
+                                    else:
+                                        # 计算自己的price：100 - 任务1的price（四舍五入保留1位小数）
+                                        calculated_price = round(100 - task1_price, 1)
                                     
                                     # 获取自己任务的当前price
                                     current_price = float(mission.get('price', 0))
@@ -9687,7 +9702,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         mission = task_data.get('mission', {}) if task_data else {}
         mission_type = mission.get('type')
         
-        if mission_type == 5:
+        if mission_type == 5 or mission_type == 9:
             tp3 = mission.get('tp3')
             if tp3 != "1":
                 # Type 5 任务：检查是否有 "order failed" 并进行重试
@@ -9731,6 +9746,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] 步骤13: Type 5 任务 - 等待订单确认并收集数据...")
                 success, msg = wait_for_type5_order_and_collect_data(
                 driver, 
+                mission_type,
                 initial_position_count, 
                 browser_id, 
                 trending_part1,
@@ -16450,7 +16466,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             update_browser_timestamp(browser_id)
         
         # 根据任务类型执行
-        if mission_type == 1 or mission_type == 5 or mission_type == 6:
+        if mission_type == 1 or mission_type == 5 or mission_type == 6 or mission_type == 9:
             # Type 1: 普通交易任务
             # Type 5: 自动对冲交易任务（带同步机制）
             result = process_trading_mission(task_data, keep_browser_open=True)

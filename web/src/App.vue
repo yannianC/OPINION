@@ -841,6 +841,20 @@
                   <span>是否开启后挂方价格+-0.1功能</span>
                 </label>
               </div>
+
+              <div class="trending-filter">
+                <label style="color: red;">任务同步的轮询间隔(秒):</label>
+                <input 
+                  v-model.number="hedgeMode.taskSyncPollingInterval" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  placeholder="5"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                />
+              </div>
          
             </div>
           </div>
@@ -3478,7 +3492,8 @@ const hedgeMode = reactive({
   totalTaskCountOperator: 'lt',  // 总任务数比较操作符：gt=大于，lt=小于
   totalTaskCountThreshold: 999,  // 总任务数阈值
   openOrderCancelHours: 72,  // 挂单超过XX小时撤单（默认72小时）
-  enableSecondPricePlusMinus01: false  // 是否开启后挂方价格+-0.1功能，开启后在模式1的后挂方任务中传递tp10="1"
+  enableSecondPricePlusMinus01: false,  // 是否开启后挂方价格+-0.1功能，开启后在模式1的后挂方任务中传递tp10="1"
+  taskSyncPollingInterval: 5  // 任务同步的轮询间隔（秒），默认5秒，作为tp11传递
 })
 
 // 交易费查询
@@ -11419,6 +11434,8 @@ const saveHedgeSettings = () => {
       openOrderCancelHours: hedgeMode.openOrderCancelHours,
       // 后挂方价格+-0.1功能
       enableSecondPricePlusMinus01: hedgeMode.enableSecondPricePlusMinus01,
+      // 任务同步轮询间隔
+      taskSyncPollingInterval: hedgeMode.taskSyncPollingInterval,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -11705,6 +11722,11 @@ const loadHedgeSettings = () => {
     // 后挂方价格+-0.1功能
     if (settings.enableSecondPricePlusMinus01 !== undefined) {
       hedgeMode.enableSecondPricePlusMinus01 = settings.enableSecondPricePlusMinus01
+    }
+    
+    // 任务同步轮询间隔
+    if (settings.taskSyncPollingInterval !== undefined) {
+      hedgeMode.taskSyncPollingInterval = settings.taskSyncPollingInterval
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -12113,6 +12135,10 @@ const executeHedgeTask = async (config, hedgeData) => {
       console.log(`先挂方任务添加tp10字段: ${taskData.tp10}`)
     }
     
+    // 添加tp11字段（任务同步轮询间隔）
+    taskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
+    console.log(`先挂方任务添加tp11字段: ${taskData.tp11}`)
+    
     const response = await axios.post(
       'https://sg.bicoin.com.cn/99l/mission/add',
       taskData,
@@ -12471,6 +12497,10 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
       taskData.tp10 = "1"
       console.log(`后挂方任务添加tp10字段: ${taskData.tp10}`)
     }
+    
+    // 添加tp11字段（任务同步轮询间隔）
+    taskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
+    console.log(`后挂方任务添加tp11字段: ${taskData.tp11}`)
     
     const response = await axios.post(
       'https://sg.bicoin.com.cn/99l/mission/add',
