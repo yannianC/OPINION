@@ -230,6 +230,253 @@
                 <span style="cursor: pointer;">价差等于0.1时，选择深度小的一方</span>
               </label>
             </div>
+          </div>
+          
+          <!-- 深度差相关设置 -->
+          <div class="depth-diff-settings" style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #ddd;">
+            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #000;">深度差相关设置</h3>
+            <!-- 深度差阈值配置 -->
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值1:</label>
+                <input 
+                  v-model.number="hedgeMode.depthThreshold1" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="15"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值2:</label>
+                <input 
+                  v-model.number="hedgeMode.depthThreshold2" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值3:</label>
+                <input 
+                  v-model.number="hedgeMode.depthThreshold3" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="0.2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+              </div>
+            </div>
+            <!-- 深度差>阈值1的配置 -->
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+              <div class="trending-filter">
+                <label style="display: flex; align-items: center; gap: 8px; color: #000;">
+                  <input 
+                    type="checkbox" 
+                    v-model="hedgeMode.enableDepthDiffParamsGt15"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                    style="width: 18px; height: 18px; cursor: pointer;"
+                  />
+                  <span>深度差>阈值1 </span>
+                </label>
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差>阈值1延时检测时间(秒):</label>
+                <input 
+                  v-model="hedgeMode.delayTimeGt15" 
+                  type="text" 
+                  class="filter-input" 
+                  placeholder="300,600"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 120px;"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差>阈值1价格波动(%):</label>
+                <input 
+                  v-model.number="hedgeMode.priceVolatilityGt15Min" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  placeholder="1"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+                <span style="margin: 0 5px;">-</span>
+                <input 
+                  v-model.number="hedgeMode.priceVolatilityGt15Max" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  placeholder="10"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+              </div>
+            </div>
+            <!-- 深度差阈值2-阈值1的配置 -->
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+              <div class="trending-filter">
+                <label style="display: flex; align-items: center; gap: 8px; color: #000;">
+                  <input 
+                    type="checkbox" 
+                    v-model="hedgeMode.enableDepthDiffParams2To15"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                    style="width: 18px; height: 18px; cursor: pointer;"
+                  />
+                  <span>深度差阈值2-阈值1 </span>
+                </label>
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值2-阈值1延时检测时间(秒):</label>
+                <input 
+                  v-model="hedgeMode.delayTime2To15" 
+                  type="text" 
+                  class="filter-input" 
+                  placeholder="30,60"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 120px;"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值2-阈值1价格波动(%):</label>
+                <input 
+                  v-model.number="hedgeMode.priceVolatility2To15Min" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  placeholder="1"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+                <span style="margin: 0 5px;">-</span>
+                <input 
+                  v-model.number="hedgeMode.priceVolatility2To15Max" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  placeholder="10"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+              </div>
+            </div>
+            <!-- 深度差阈值3-阈值2的配置 -->
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+              <div class="trending-filter">
+                <label style="display: flex; align-items: center; gap: 8px; color: #000;">
+                  <input 
+                    type="checkbox" 
+                    v-model="hedgeMode.enableDepthDiffParams02To2"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                    style="width: 18px; height: 18px; cursor: pointer;"
+                  />
+                  <span>深度差阈值3-阈值2 </span>
+                </label>
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值3-阈值2延时检测时间(秒):</label>
+                <input 
+                  v-model="hedgeMode.delayTime02To2" 
+                  type="text" 
+                  class="filter-input" 
+                  placeholder="0.5,0.5"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 120px;"
+                />
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差阈值3-阈值2价格波动(%):</label>
+                <input 
+                  v-model.number="hedgeMode.priceVolatility02To2Min" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  placeholder="1"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+                <span style="margin: 0 5px;">-</span>
+                <input 
+                  v-model.number="hedgeMode.priceVolatility02To2Max" 
+                  type="number" 
+                  class="filter-input" 
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  placeholder="10"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px;"
+                />
+              </div>
+            </div>
+            <!-- 深度差0.1的配置 -->
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 10px;">
+              <div class="trending-filter">
+                <label style="display: flex; align-items: center; gap: 8px; color: #000;">
+                  <input 
+                    type="checkbox" 
+                    v-model="hedgeMode.enableDepthDiffParams01"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                    style="width: 18px; height: 18px; cursor: pointer;"
+                  />
+                  <span>深度差0.1 </span>
+                </label>
+              </div>
+              <div class="trending-filter">
+                <label style="color: #000;">深度差0.1最大多吃价值(U):</label>
+                <input 
+                  v-model.number="hedgeMode.maxEatValue01" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  step="0.1"
+                  placeholder="20"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 100px;"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div class="section-header-with-filter">
             <!-- 账号选择设置 -->
             <div class="trending-filter">
               <label>账号选择:</label>
@@ -2568,7 +2815,28 @@ const hedgeMode = reactive({
   closeAmtSumMaxEnd: 0,  // 这一轮最多平仓数量 随机最大
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
-  balancePriority: 2000  // 资产优先级校验值
+  balancePriority: 2000,  // 资产优先级校验值
+  // 深度差相关设置
+  depthThreshold1: 15,  // 深度差阈值1（默认15）
+  depthThreshold2: 2,   // 深度差阈值2（默认2）
+  depthThreshold3: 0.2, // 深度差阈值3（默认0.2）
+  // 各深度区间延时检测时间（保留配置但webType4不使用）
+  delayTimeGt15: '300,600',  // 深度差15以上挂单后延时检测时间（秒）
+  delayTime2To15: '30,60',  // 深度差2-15挂单后延时检测时间（秒）
+  delayTime02To2: '0.5,0.5',  // 深度差0.2-2挂单后延时检测时间（秒）
+  maxEatValue01: 20,  // 深度差0.1时，最大多吃价值（U）
+  // 各深度区间开关
+  enableDepthDiffParamsGt15: false,  // 深度差>阈值1的开关
+  enableDepthDiffParams2To15: false, // 深度差阈值2-阈值1的开关
+  enableDepthDiffParams02To2: false, // 深度差阈值3-阈值2的开关
+  enableDepthDiffParams01: false,    // 深度差0.1的开关
+  // 各深度区间价格波动配置（百分比）
+  priceVolatilityGt15Min: 1,   // 深度差>阈值1的价格波动最小值%
+  priceVolatilityGt15Max: 10,  // 深度差>阈值1的价格波动最大值%
+  priceVolatility2To15Min: 1,  // 深度差阈值2-阈值1的价格波动最小值%
+  priceVolatility2To15Max: 10, // 深度差阈值2-阈值1的价格波动最大值%
+  priceVolatility02To2Min: 1,  // 深度差阈值3-阈值2的价格波动最小值%
+  priceVolatility02To2Max: 10  // 深度差阈值3-阈值2的价格波动最大值%
 })
 
 // 每个主题的上一次先挂方记录（用于轮换）
@@ -6922,6 +7190,157 @@ const parseOrderbookData = async (config, isClose) => {
       }
     }
     
+    // === 深度差计算和价格计算逻辑 ===
+    // 计算深度差（卖一减去买一）
+    const depthDiff = price2 - price1
+    console.log(`深度差: ${depthDiff.toFixed(2)}`)
+    
+    // 获取配置的深度差阈值
+    const threshold1 = hedgeMode.depthThreshold1  // 默认15
+    const threshold2 = hedgeMode.depthThreshold2  // 默认2
+    const threshold3 = hedgeMode.depthThreshold3  // 默认0.2
+    
+    // 辅助函数：计算价格调整值（根据配置的最小值和最大值）
+    const calculatePriceAdjustment = (diff, minPercent, maxPercent) => {
+      // 在minPercent到maxPercent之间随机选一个百分比
+      const randomPercent = Math.random() * (maxPercent - minPercent) + minPercent
+      // 深度差乘以随机百分比
+      const adjustment = diff * (randomPercent / 100)
+      // 确保结果至少为0.1
+      return Math.max(0.1, adjustment)
+    }
+    
+    // 根据深度差范围确定先挂方价格和开关状态
+    let finalPrice = null
+    let depthDiffRange = null
+    let firstShareReduction = 0  // 深度差0.1时，先挂方数量需要减少的量
+    
+    if (depthDiff > threshold1) {
+      // 深度差 > 阈值1：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParamsGt15) {
+        throw new Error(`深度差>${threshold1}时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
+      depthDiffRange = 'gt15'
+      
+      // 使用该区间的价格波动配置计算最终价格
+      const minVolatility = hedgeMode.priceVolatilityGt15Min
+      const maxVolatility = hedgeMode.priceVolatilityGt15Max
+      
+      if (isClose) {
+        // 平仓：卖一价 - 调整值
+        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
+        finalPrice = price2 - adjustment
+      } else {
+        // 开仓：买一价 + 调整值
+        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
+        finalPrice = price1 + adjustment
+      }
+      console.log(`深度差 > ${threshold1} - 计算最终价格: ${finalPrice.toFixed(2)}`)
+      
+    } else if (depthDiff >= threshold2) {
+      // 深度差 阈值2-阈值1：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParams2To15) {
+        throw new Error(`深度差在${threshold2}-${threshold1}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
+      depthDiffRange = '2to15'
+      
+      const minVolatility = hedgeMode.priceVolatility2To15Min
+      const maxVolatility = hedgeMode.priceVolatility2To15Max
+      
+      if (isClose) {
+        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
+        finalPrice = price2 - adjustment
+      } else {
+        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
+        finalPrice = price1 + adjustment
+      }
+      console.log(`深度差 ${threshold2}-${threshold1} - 计算最终价格: ${finalPrice.toFixed(2)}`)
+      
+    } else if (depthDiff >= threshold3) {
+      // 深度差 阈值3-阈值2：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParams02To2) {
+        throw new Error(`深度差在${threshold3}-${threshold2}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
+      depthDiffRange = '02to2'
+      
+      const minVolatility = hedgeMode.priceVolatility02To2Min
+      const maxVolatility = hedgeMode.priceVolatility02To2Max
+      
+      if (isClose) {
+        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
+        finalPrice = price2 - adjustment
+      } else {
+        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
+        finalPrice = price1 + adjustment
+      }
+      console.log(`深度差 ${threshold3}-${threshold2} - 计算最终价格: ${finalPrice.toFixed(2)}`)
+      
+    } else if (Math.abs(depthDiff - 0.1) < 0.01) {
+      // 深度差 0.1（允许0.09-0.11的误差）：检查开关是否打开
+      if (!hedgeMode.enableDepthDiffParams01) {
+        throw new Error(`深度差0.1时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+      }
+      depthDiffRange = '01'
+      
+      // 深度差0.1时的特殊逻辑
+      const maxEatValue = hedgeMode.maxEatValue01  // 深度差0.1最大多吃价值(U)
+      const maxDepthValue = hedgeMode.maxDepth  // 最大允许深度(U)
+      
+      if (isClose) {
+        // 【平仓逻辑】
+        // 计算 卖一价深度*卖一价/100 得到 卖一价的价值（美元）
+        const askValue = price2 * depth2 / 100
+        
+        if (askValue < maxDepthValue) {
+          // 卖一价的价值 < 最大允许深度，价格取卖一价
+          finalPrice = price2
+          console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)}U < 最大允许深度 ${maxDepthValue}U，使用卖一价: ${finalPrice.toFixed(2)}`)
+        } else {
+          // 卖一价的价值 >= 最大允许深度，查看买一价的价值
+          const bidValue = price1 * depth1 / 100
+          
+          if (bidValue >= maxEatValue) {
+            // 买一价的价值 >= 深度差0.1最大多吃价值，订单薄不符合条件
+            throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)}U >= 最大允许深度 ${maxDepthValue}U，且买一价值 ${bidValue.toFixed(2)}U >= 最大多吃价值 ${maxEatValue}U`)
+          } else {
+            // 买一价的价值 < 深度差0.1最大多吃价值，价格取买一价
+            finalPrice = price1
+            // 先挂方数量需要减少
+            firstShareReduction = (maxEatValue / price1) * 100
+            console.log(`深度差 0.1 - 平仓模式，使用买一价: ${finalPrice.toFixed(2)}，先挂方数量减少: ${firstShareReduction.toFixed(2)}`)
+          }
+        }
+      } else {
+        // 【开仓逻辑】
+        // 计算 买一价深度*买一价/100 得到 买一价的价值（美元）
+        const bidValue = price1 * depth1 / 100
+        
+        if (bidValue < maxDepthValue) {
+          // 买一价的价值 < 最大允许深度，价格取买一价
+          finalPrice = price1
+          console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)}U < 最大允许深度 ${maxDepthValue}U，使用买一价: ${finalPrice.toFixed(2)}`)
+        } else {
+          // 买一价的价值 >= 最大允许深度，查看卖一价的价值
+          const askValue = price2 * depth2 / 100
+          
+          if (askValue >= maxEatValue) {
+            // 卖一价的价值 >= 深度差0.1最大多吃价值，订单薄不符合条件
+            throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)}U >= 最大允许深度 ${maxDepthValue}U，且卖一价值 ${askValue.toFixed(2)}U >= 最大多吃价值 ${maxEatValue}U`)
+          } else {
+            // 卖一价的价值 < 深度差0.1最大多吃价值，价格取卖一价
+            finalPrice = price2
+            // 先挂方数量需要减少
+            firstShareReduction = (maxEatValue / price2) * 100
+            console.log(`深度差 0.1 - 开仓模式，使用卖一价: ${finalPrice.toFixed(2)}，先挂方数量减少: ${firstShareReduction.toFixed(2)}`)
+          }
+        }
+      }
+      
+    } else {
+      // 深度差不在任何开启的区间内
+      throw new Error(`该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+    }
+    
     return {
       firstSide,
       price1,           // 先挂方的买一价
@@ -6932,7 +7351,12 @@ const parseOrderbookData = async (config, isClose) => {
       minPrice: Math.min(price1, price2),
       maxPrice: Math.max(price1, price2),
       topNBidsDepth,    // 买1-N深度累计
-      topNAsksDepth     // 卖1-N深度累计
+      topNAsksDepth,    // 卖1-N深度累计
+      // 深度差相关返回值
+      depthDiff,        // 深度差值
+      depthDiffRange,   // 深度差区间标识
+      finalPrice,       // 最终计算的价格
+      firstShareReduction  // 先挂方数量减少值（深度差0.1时使用）
     }
   } catch (error) {
     console.error('解析订单薄数据失败:', error)
@@ -8064,6 +8488,24 @@ const saveHedgeSettings = () => {
       // 资产优先级校验设置
       needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
       balancePriority: hedgeMode.balancePriority,
+      // 深度差相关设置
+      depthThreshold1: hedgeMode.depthThreshold1,
+      depthThreshold2: hedgeMode.depthThreshold2,
+      depthThreshold3: hedgeMode.depthThreshold3,
+      delayTimeGt15: hedgeMode.delayTimeGt15,
+      delayTime2To15: hedgeMode.delayTime2To15,
+      delayTime02To2: hedgeMode.delayTime02To2,
+      maxEatValue01: hedgeMode.maxEatValue01,
+      enableDepthDiffParamsGt15: hedgeMode.enableDepthDiffParamsGt15,
+      enableDepthDiffParams2To15: hedgeMode.enableDepthDiffParams2To15,
+      enableDepthDiffParams02To2: hedgeMode.enableDepthDiffParams02To2,
+      enableDepthDiffParams01: hedgeMode.enableDepthDiffParams01,
+      priceVolatilityGt15Min: hedgeMode.priceVolatilityGt15Min,
+      priceVolatilityGt15Max: hedgeMode.priceVolatilityGt15Max,
+      priceVolatility2To15Min: hedgeMode.priceVolatility2To15Min,
+      priceVolatility2To15Max: hedgeMode.priceVolatility2To15Max,
+      priceVolatility02To2Min: hedgeMode.priceVolatility02To2Min,
+      priceVolatility02To2Max: hedgeMode.priceVolatility02To2Max,
       // 其他设置
       randomGetCount: randomGetCount.value,
       // yes数量大于、模式选择、账户选择
@@ -8133,6 +8575,59 @@ const loadHedgeSettings = () => {
     }
     if (settings.balancePriority !== undefined) {
       hedgeMode.balancePriority = settings.balancePriority
+    }
+    
+    // 深度差相关设置
+    if (settings.depthThreshold1 !== undefined) {
+      hedgeMode.depthThreshold1 = settings.depthThreshold1
+    }
+    if (settings.depthThreshold2 !== undefined) {
+      hedgeMode.depthThreshold2 = settings.depthThreshold2
+    }
+    if (settings.depthThreshold3 !== undefined) {
+      hedgeMode.depthThreshold3 = settings.depthThreshold3
+    }
+    if (settings.delayTimeGt15 !== undefined) {
+      hedgeMode.delayTimeGt15 = settings.delayTimeGt15
+    }
+    if (settings.delayTime2To15 !== undefined) {
+      hedgeMode.delayTime2To15 = settings.delayTime2To15
+    }
+    if (settings.delayTime02To2 !== undefined) {
+      hedgeMode.delayTime02To2 = settings.delayTime02To2
+    }
+    if (settings.maxEatValue01 !== undefined) {
+      hedgeMode.maxEatValue01 = settings.maxEatValue01
+    }
+    if (settings.enableDepthDiffParamsGt15 !== undefined) {
+      hedgeMode.enableDepthDiffParamsGt15 = settings.enableDepthDiffParamsGt15
+    }
+    if (settings.enableDepthDiffParams2To15 !== undefined) {
+      hedgeMode.enableDepthDiffParams2To15 = settings.enableDepthDiffParams2To15
+    }
+    if (settings.enableDepthDiffParams02To2 !== undefined) {
+      hedgeMode.enableDepthDiffParams02To2 = settings.enableDepthDiffParams02To2
+    }
+    if (settings.enableDepthDiffParams01 !== undefined) {
+      hedgeMode.enableDepthDiffParams01 = settings.enableDepthDiffParams01
+    }
+    if (settings.priceVolatilityGt15Min !== undefined) {
+      hedgeMode.priceVolatilityGt15Min = settings.priceVolatilityGt15Min
+    }
+    if (settings.priceVolatilityGt15Max !== undefined) {
+      hedgeMode.priceVolatilityGt15Max = settings.priceVolatilityGt15Max
+    }
+    if (settings.priceVolatility2To15Min !== undefined) {
+      hedgeMode.priceVolatility2To15Min = settings.priceVolatility2To15Min
+    }
+    if (settings.priceVolatility2To15Max !== undefined) {
+      hedgeMode.priceVolatility2To15Max = settings.priceVolatility2To15Max
+    }
+    if (settings.priceVolatility02To2Min !== undefined) {
+      hedgeMode.priceVolatility02To2Min = settings.priceVolatility02To2Min
+    }
+    if (settings.priceVolatility02To2Max !== undefined) {
+      hedgeMode.priceVolatility02To2Max = settings.priceVolatility02To2Max
     }
     
     // 其他设置

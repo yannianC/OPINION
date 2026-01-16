@@ -9306,12 +9306,13 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     mission = task_data.get('mission', {})
                     exchange_config = task_data.get('exchangeConfig', {})
                     mission_type = mission.get('type')
-                    # tp2 = mission.get('tp2')
+                    
                     
                     if mission_type == 5:
                         add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.5: Type 5 任务 - 订单薄检查和价格调整")
                         log_print(f"[{browser_id}] 步骤7.5: Type 5 任务 - 订单薄检查和价格调整...")
                         
+                        tp10 = mission.get('tp10')
                         tp1 = mission.get('tp1')
                         is_task1 = not tp1  # 如果tp1为空，则是任务一
                         
@@ -9605,7 +9606,14 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                 log_msg = f"[5]价格无变化，继续执行"
                                 log_print(f"[{browser_id}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
-                
+
+                            if tp10 == "1":
+                                if trade_type == "Buy":
+                                    ncalculated_price =  round(price + 0.1, 1)  
+                                else:
+                                    ncalculated_price =  round(price - 0.1, 1)  
+                                price = ncalculated_price  # 更新price变量
+                                mission['price'] = ncalculated_price
                 
                 
                 
@@ -9617,6 +9625,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 
                 
                 time.sleep(6)
+
                 # 11. 填入价格和数量
                 add_bro_log_entry(bro_log_list, browser_id, f"[8]步骤11: 填入价格和数量（模式：{price_type}）")
                 log_print(f"[{browser_id}] 步骤11: 填入价格和数量（模式：{price_type}）...")

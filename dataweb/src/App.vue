@@ -344,6 +344,16 @@
           />
         </div>
         <div class="filter-item">
+          <label>地址搜索:</label>
+          <el-input 
+            v-model="filters.addressSearch" 
+            placeholder="搜索地址(h)"
+            clearable
+            size="small"
+            style="width: 250px"
+          />
+        </div>
+        <div class="filter-item">
           <label>显示无此时间区间积分:</label>
           <el-select 
             v-model="filters.selectedPointsPeriod" 
@@ -1631,6 +1641,7 @@ const filters = ref({
   fingerprintNo: '',
   platform: '',
   positionSearch: '',  // 新增：仓位搜索
+  addressSearch: '',  // 地址搜索
   balanceMin: '',  // 余额最小值
   balanceMax: '',  // 余额最大值
   balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
@@ -1656,6 +1667,7 @@ const activeFilters = ref({
   fingerprintNo: [],
   platform: '',
   positionSearch: '',  // 新增：仓位搜索
+  addressSearch: '',  // 地址搜索
   balanceMin: null,  // 余额最小值
   balanceMax: null,  // 余额最大值
   balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
@@ -1752,6 +1764,7 @@ const applyFilters = () => {
     fingerprintNo: parseInputValues(filters.value.fingerprintNo),
     platform: filters.value.platform,
     positionSearch: filters.value.positionSearch.trim(),
+    addressSearch: filters.value.addressSearch.trim(),
     balanceMin: isNaN(balanceMin) ? null : balanceMin,
     balanceMax: isNaN(balanceMax) ? null : balanceMax,
     balancePlusPortfolioOperator: balancePlusPortfolioOperator,
@@ -1784,6 +1797,7 @@ const clearFilters = () => {
     fingerprintNo: '',
     platform: '',
     positionSearch: '',
+    addressSearch: '',
     balanceMin: '',
     balanceMax: '',
     balancePlusPortfolioOperator: '>',
@@ -1809,6 +1823,7 @@ const clearFilters = () => {
     fingerprintNo: [],
     platform: '',
     positionSearch: '',
+    addressSearch: '',
     balanceMin: null,
     balanceMax: null,
     balancePlusPortfolioOperator: '>',
@@ -1855,6 +1870,7 @@ const filteredTableData = computed(() => {
                     filters.fingerprintNo.length > 0 || 
                     filters.platform || 
                     filters.positionSearch ||
+                    filters.addressSearch ||
                     filters.balanceMin !== null ||
                     filters.balanceMax !== null ||
                     (filters.balancePlusPortfolioValue !== null && filters.balancePlusPortfolioValue !== undefined) ||
@@ -1880,6 +1896,7 @@ const filteredTableData = computed(() => {
     const computeGroupSet = new Set(filters.computeGroup)
     const fingerprintNoSet = new Set(filters.fingerprintNo)
     const searchTerm = filters.positionSearch ? filters.positionSearch.toLowerCase() : ''
+    const addressSearchTerm = filters.addressSearch ? filters.addressSearch.toLowerCase() : ''
     
     result = data.filter(row => {
       // 电脑组筛选
@@ -1904,6 +1921,14 @@ const filteredTableData = computed(() => {
                         (row.b && row.b.toLowerCase().includes(searchTerm)) ||
                         (chainInfo && chainInfo.toLowerCase().includes(searchTerm))
         if (!hasMatch) {
+          return false
+        }
+      }
+      
+      // 地址搜索筛选
+      if (addressSearchTerm) {
+        const address = row.h ? row.h.toLowerCase() : ''
+        if (!address.includes(addressSearchTerm)) {
           return false
         }
       }

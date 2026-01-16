@@ -148,11 +148,33 @@
                   ❌ 不符合订单薄条件
                   <div class="query-result-reason">{{ testResult.reason }}</div>
                 </div>
+                <!-- 显示订单薄数据（即使不符合条件也显示） -->
+                <div v-if="testResult.priceInfo" class="query-result-orderbook" style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+                  <div style="font-weight: bold; margin-bottom: 4px;">📊 订单薄数据：</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px;">
+                    <span>先挂方: {{ testResult.priceInfo.firstSide }}</span>
+                    <span v-if="testResult.priceInfo.price1 != null">先挂价格(买一): {{ testResult.priceInfo.price1.toFixed(2) }}¢</span>
+                    <span v-if="testResult.priceInfo.price2 != null">后挂价格(卖一): {{ testResult.priceInfo.price2.toFixed(2) }}¢</span>
+                    <span v-if="testResult.priceInfo.diff != null" style="color: #e74c3c; font-weight: bold;">价差: {{ testResult.priceInfo.diff.toFixed(2) }}¢</span>
+                    <span v-if="testResult.priceInfo.depth1 != null && testResult.priceInfo.depth2 != null">深度: {{ testResult.priceInfo.depth1.toFixed(2) }} / {{ testResult.priceInfo.depth2.toFixed(2) }}</span>
+                  </div>
+                </div>
               </div>
               <div v-if="queryResult && !queryResult.meetsCondition" class="query-result">
                 <div class="query-result-error">
                   ❌ 不符合订单薄条件
                   <div class="query-result-reason">{{ queryResult.reason }}</div>
+                </div>
+                <!-- 显示订单薄数据（即使不符合条件也显示） -->
+                <div v-if="queryResult.priceInfo" class="query-result-orderbook" style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+                  <div style="font-weight: bold; margin-bottom: 4px;">📊 订单薄数据：</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px;">
+                    <span>先挂方: {{ queryResult.priceInfo.firstSide }}</span>
+                    <span v-if="queryResult.priceInfo.price1 != null">先挂价格(买一): {{ queryResult.priceInfo.price1.toFixed(2) }}¢</span>
+                    <span v-if="queryResult.priceInfo.price2 != null">后挂价格(卖一): {{ queryResult.priceInfo.price2.toFixed(2) }}¢</span>
+                    <span v-if="queryResult.priceInfo.diff != null" style="color: #e74c3c; font-weight: bold;">价差: {{ queryResult.priceInfo.diff.toFixed(2) }}¢</span>
+                    <span v-if="queryResult.priceInfo.depth1 != null && queryResult.priceInfo.depth2 != null">深度: {{ queryResult.priceInfo.depth1.toFixed(2) }} / {{ queryResult.priceInfo.depth2.toFixed(2) }}</span>
+                  </div>
                 </div>
               </div>
               <div style="margin-top: 15px; text-align: right;">
@@ -806,6 +828,19 @@
                 />
                 <span style="color: #000;">秒）</span>
               </div>
+
+              <div class="trending-filter">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: red;">
+                  <input 
+                    type="checkbox" 
+                    v-model="hedgeMode.enableSecondPricePlusMinus01"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                    style="width: 18px; height: 18px; cursor: pointer;"
+                  />
+                  <span>是否开启后挂方价格+-0.1功能</span>
+                </label>
+              </div>
          
             </div>
           </div>
@@ -966,7 +1001,7 @@
             
             <!-- 最小开单设置 -->
             <div class="hedge-amount-range">
-              <span class="filter-label">最小开单:</span>
+              <span class="filter-label">最小开单(数量):</span>
               <input 
                 v-model.number="hedgeMode.minUAmt" 
                 type="number" 
@@ -980,7 +1015,7 @@
             
             <!-- 最大开单设置 -->
             <div class="hedge-amount-range">
-              <span class="filter-label">最大开单:</span>
+              <span class="filter-label">最大开单(数量):</span>
               <input 
                 v-model.number="hedgeMode.maxUAmt" 
                 type="number" 
@@ -3346,6 +3381,19 @@ const batchTimer = ref(null)  // 批次定时器
 
 // 订单薄API配置
 const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
+const ORDERBOOK_API_KEY2 = 'qymby2cA15g8W3uvSGhO3jr67nZ33hEj'
+
+// API key 数组，用于交替使用
+const ORDERBOOK_API_KEYS = [ORDERBOOK_API_KEY, ORDERBOOK_API_KEY2]
+let orderbookApiKeyIndex = 0  // 当前使用的 key 索引
+
+// 获取下一个 API key（交替使用）
+const getNextOrderbookApiKey = () => {
+  const key = ORDERBOOK_API_KEYS[orderbookApiKeyIndex]
+  orderbookApiKeyIndex = (orderbookApiKeyIndex + 1) % ORDERBOOK_API_KEYS.length
+  return key
+}
+
 const ORDERBOOK_API_URL = 'https://proxy.opinion.trade:8443/openapi/token/orderbook'
 
 // 对冲状态（重命名以避免与下面的 hedgeStatus 冲突）
@@ -3429,7 +3477,8 @@ const hedgeMode = reactive({
   // 总任务数控制设置
   totalTaskCountOperator: 'lt',  // 总任务数比较操作符：gt=大于，lt=小于
   totalTaskCountThreshold: 999,  // 总任务数阈值
-  openOrderCancelHours: 72  // 挂单超过XX小时撤单（默认72小时）
+  openOrderCancelHours: 72,  // 挂单超过XX小时撤单（默认72小时）
+  enableSecondPricePlusMinus01: false  // 是否开启后挂方价格+-0.1功能，开启后在模式1的后挂方任务中传递tp10="1"
 })
 
 // 交易费查询
@@ -3805,9 +3854,19 @@ const handleQuery = async () => {
     // 获取订单薄失败，说明不符合条件
     let reason = error.message || '获取订单薄数据失败'
     
+    // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
+    let basicInfo = null
+    try {
+      basicInfo = await fetchOrderbookBasic(querySelectedConfig.value, hedgeMode.isClose)
+      console.log('获取到基本订单薄数据:', basicInfo)
+    } catch (basicError) {
+      console.warn('获取基本订单薄数据也失败:', basicError)
+    }
+    
     queryResult.value = {
       meetsCondition: false,
-      reason: reason
+      reason: reason,
+      priceInfo: basicInfo  // 即使失败也尝试显示基本订单薄数据
     }
     console.error('插入失败:', error)
   } finally {
@@ -3852,9 +3911,20 @@ const handleTest = async () => {
         if (retryCount >= maxRetries) {
           // 达到最大重试次数，设置错误结果
           const reason = error.message || '获取订单薄数据失败（已重试5次）'
+          
+          // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
+          let basicInfo = null
+          try {
+            basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+            console.log('测试时获取到基本订单薄数据:', basicInfo)
+          } catch (basicError) {
+            console.warn('测试时获取基本订单薄数据也失败:', basicError)
+          }
+          
           testResult.value = {
             meetsCondition: false,
-            reason: reason
+            reason: reason,
+            priceInfo: basicInfo  // 即使失败也尝试显示基本订单薄数据
           }
           console.error('获取订单薄失败，已达到最大重试次数:', error)
           return
@@ -3931,8 +4001,8 @@ const handleTest = async () => {
       currentPrice: orderPrice,
       priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
       timePassMin: hedgeMode.timePassMin,
-      minUAmt: hedgeMode.minUAmt,  // 最小开单
-      maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+      minShareAmt: hedgeMode.minUAmt,  // 最小开单
+      maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
       minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
       maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
       closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
@@ -4356,8 +4426,8 @@ const handleTestForConfig = async (config) => {
       currentPrice: orderPrice,
       priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
       timePassMin: hedgeMode.timePassMin,
-      minUAmt: hedgeMode.minUAmt,  // 最小开单
-      maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+      minShareAmt: hedgeMode.minUAmt,  // 最小开单
+      maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
       minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
       maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
       closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
@@ -5933,7 +6003,7 @@ const fetchAllMarkets = async () => {
             marketType: 2
           },
           headers: {
-            'apikey': ORDERBOOK_API_KEY
+            'apikey': getNextOrderbookApiKey()
           }
         })
         
@@ -8280,8 +8350,8 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
               // currentPrice 不传
               priceOutCome: 'YES',  // 先挂方，随便传一个值
               timePassMin: hedgeMode.timePassMin,
-              minUAmt: hedgeMode.minUAmt,  // 最小开单
-              maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+              minShareAmt: hedgeMode.minUAmt,  // 最小开单
+              maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
               minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
               maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
               closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
@@ -8575,17 +8645,37 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           errorMessage = error.message
         }
         
-        // 即使请求失败，也保存轮询时间和错误信息
-        config.orderbookData = {
-          pollTime: pollTime,
-          updateTime: null,  // 请求失败，没有更新时间
-          reason: errorMessage,
-          firstSide: null,
-          price1: null,
-          price2: null,
-          depth1: null,
-          depth2: null,
-          diff: null
+        // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
+        let basicInfo = null
+        try {
+          basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+          console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
+        } catch (basicError) {
+          console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+        }
+        
+        // 保存轮询时间、错误信息和基本订单薄数据
+        if (basicInfo) {
+          // 有基本数据，显示基本订单薄信息和错误原因
+          config.orderbookData = {
+            ...basicInfo,
+            pollTime: pollTime,
+            updateTime: Date.now(),  // 有更新时间，表示有数据
+            reason: errorMessage  // 保存错误原因
+          }
+        } else {
+          // 没有基本数据，只显示错误信息
+          config.orderbookData = {
+            pollTime: pollTime,
+            updateTime: null,  // 请求失败，没有更新时间
+            reason: errorMessage,
+            firstSide: null,
+            price1: null,
+            price2: null,
+            depth1: null,
+            depth2: null,
+            diff: null
+          }
         }
         
         // 随机1-3秒后重试
@@ -8618,7 +8708,7 @@ const fetchOrderbook = async (tokenId) => {
         token_id: tokenId
       },
       headers: {
-        'apikey': ORDERBOOK_API_KEY
+        'apikey': getNextOrderbookApiKey()
       }
     })
     
@@ -9718,8 +9808,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             currentPrice: orderPrice,
             priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
             timePassMin: hedgeMode.timePassMin,
-            minUAmt: hedgeMode.minUAmt,  // 最小开单
-            maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+            minShareAmt: hedgeMode.minUAmt,  // 最小开单
+            maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
             minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
@@ -11327,6 +11417,8 @@ const saveHedgeSettings = () => {
       totalTaskCountThreshold: hedgeMode.totalTaskCountThreshold,
       // 挂单超时撤单设置
       openOrderCancelHours: hedgeMode.openOrderCancelHours,
+      // 后挂方价格+-0.1功能
+      enableSecondPricePlusMinus01: hedgeMode.enableSecondPricePlusMinus01,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -11608,6 +11700,11 @@ const loadHedgeSettings = () => {
     }
     if (settings.selectedNumberType !== undefined) {
       selectedNumberType.value = settings.selectedNumberType
+    }
+    
+    // 后挂方价格+-0.1功能
+    if (settings.enableSecondPricePlusMinus01 !== undefined) {
+      hedgeMode.enableSecondPricePlusMinus01 = settings.enableSecondPricePlusMinus01
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -12010,6 +12107,12 @@ const executeHedgeTask = async (config, hedgeData) => {
       console.log(`深度差0.1添加tp4字段: ${taskData.tp4}`)
     }
     
+    // 如果开启了后挂方价格+-0.1功能，先挂方任务也传递tp10参数
+    if (hedgeMode.enableSecondPricePlusMinus01) {
+      taskData.tp10 = "1"
+      console.log(`先挂方任务添加tp10字段: ${taskData.tp10}`)
+    }
+    
     const response = await axios.post(
       'https://sg.bicoin.com.cn/99l/mission/add',
       taskData,
@@ -12361,6 +12464,12 @@ const submitSecondHedgeTask = async (config, hedgeRecord) => {
     } else if (shouldPassTp4For01) {
       taskData.tp4 = getMaxDepth(config)  // 深度差0.1时tp4也传最大允许深度
       console.log(`深度差0.1后挂方任务添加tp4字段: ${taskData.tp4}`)
+    }
+    
+    // 如果开启了后挂方价格+-0.1功能，后挂方任务传递tp10参数
+    if (hedgeMode.enableSecondPricePlusMinus01) {
+      taskData.tp10 = "1"
+      console.log(`后挂方任务添加tp10字段: ${taskData.tp10}`)
     }
     
     const response = await axios.post(
@@ -13729,8 +13838,8 @@ const executeAutoHedgeTasks = async () => {
               // currentPrice 不传
               priceOutCome: 'YES',  // 先挂方，随便传一个值
               timePassMin: hedgeMode.timePassMin,
-              minUAmt: hedgeMode.minUAmt,  // 最小开单
-              maxUAmt: hedgeMode.maxUAmt,   // 最大开单
+              minShareAmt: hedgeMode.minUAmt,  // 最小开单
+              maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
               minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
               maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
               closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
