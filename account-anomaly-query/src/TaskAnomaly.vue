@@ -220,44 +220,120 @@
                   {{ formatTime(alertLastCheckTime) }}
                 </span>
                 <span v-else class="last-check-time no-data">暂无数据</span>
+                <button 
+                  class="toggle-display-btn"
+                  @click="toggleAlertDisplayMode"
+                >
+                  {{ alertDisplayMode === 'separate' ? '合并显示' : '分开显示' }}
+                </button>
               </div>
+              
+              <!-- 电脑组统计 -->
               <div v-if="Object.keys(alertGroupStats).length > 0" class="group-stats-text">
                 <div class="stats-description">（{{alertStartTimeMinutes}}分钟前至{{alertEndTimeMinutes}}分钟前，电脑组，总个数，成功率，连续失败次数）</div>
-                <!-- 正常的电脑组 -->
-                <template v-if="normalGroupStats.length > 0">
-                  <template v-for="(item, index) in normalGroupStats" :key="item.groupNo">
-                    <span class="group-stats-item">
-                      <span class="group-no">电脑组 {{ item.groupNo }}</span>，
-                      <span class="total-count">{{ item.stats.totalCount }}</span>，
-                      <span class="success-rate">
-                        {{ item.stats.successRate.toFixed(2) }}%
-                      </span>，
-                      <span class="consecutive-fail">
-                        {{ item.stats.consecutiveFail }}
-                      </span>；
-                    </span>
+                
+                <!-- 分开显示模式 -->
+                <template v-if="alertDisplayMode === 'separate'">
+                  <!-- 正常的电脑组 -->
+                  <template v-if="normalGroupStats.length > 0">
+                    <template v-for="(item, index) in normalGroupStats" :key="item.groupNo">
+                      <span class="group-stats-item">
+                        <span class="group-no">电脑组 {{ item.groupNo }}</span>，
+                        <span class="total-count">{{ item.stats.totalCount }}</span>，
+                        <span class="success-rate">
+                          {{ item.stats.successRate.toFixed(2) }}%
+                        </span>，
+                        <span class="consecutive-fail">
+                          {{ item.stats.consecutiveFail }}
+                        </span>；
+                      </span>
+                    </template>
+                  </template>
+                  <br>
+
+                  <!-- 异常的电脑组（成功率过低或连续失败任务过多） -->
+                  <template v-if="alertGroupStatsList.length > 0">
+                    <br v-if="normalGroupStats.length > 0" />
+                    <template v-for="(item, index) in alertGroupStatsList" :key="item.groupNo">
+                      <span class="group-stats-item alert">
+                        <span class="group-no">电脑组 {{ item.groupNo }}</span>，
+                        <span class="total-count">{{ item.stats.totalCount }}</span>，
+                        <span :class="['success-rate', item.stats.successRate < alertSuccessRateThreshold ? 'warning' : '']">
+                          {{ item.stats.successRate.toFixed(2) }}%
+                        </span>，
+                        <span :class="['consecutive-fail', item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'warning' : '']">
+                          {{ item.stats.consecutiveFail }}
+                        </span>；
+                      </span>
+                    </template>
                   </template>
                 </template>
-                <br>
+                
+                <!-- 合并显示模式 (X + 900+X) -->
+                <template v-else>
+                  <!-- 正常的合并组 -->
+                  <template v-if="normalMergedGroupStats.length > 0">
+                    <template v-for="(item, index) in normalMergedGroupStats" :key="'m' + item.groupNo">
+                      <span class="group-stats-item">
+                        <span class="group-no">电脑组 {{ item.groupNo }}+{{ parseInt(item.groupNo) + 900 }}</span>，
+                        <span class="total-count">{{ item.stats.totalCount }}</span>，
+                        <span class="success-rate">
+                          {{ item.stats.successRate.toFixed(2) }}%
+                        </span>，
+                        <span class="consecutive-fail">
+                          {{ item.stats.consecutiveFail }}
+                        </span>；
+                      </span>
+                    </template>
+                  </template>
+                  <br>
 
-                <!-- 异常的电脑组（成功率过低或连续失败任务过多） -->
-                <template v-if="alertGroupStatsList.length > 0">
-                  <br v-if="normalGroupStats.length > 0" />
-                  <template v-for="(item, index) in alertGroupStatsList" :key="item.groupNo">
-                    <span class="group-stats-item alert">
-                      <span class="group-no">电脑组 {{ item.groupNo }}</span>，
-                      <span class="total-count">{{ item.stats.totalCount }}</span>，
-                      <span :class="['success-rate', item.stats.successRate < alertSuccessRateThreshold ? 'warning' : '']">
-                        {{ item.stats.successRate.toFixed(2) }}%
-                      </span>，
-                      <span :class="['consecutive-fail', item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'warning' : '']">
-                        {{ item.stats.consecutiveFail }}
-                      </span>；
-                    </span>
+                  <!-- 异常的合并组 -->
+                  <template v-if="alertMergedGroupStatsList.length > 0">
+                    <br v-if="normalMergedGroupStats.length > 0" />
+                    <template v-for="(item, index) in alertMergedGroupStatsList" :key="'ma' + item.groupNo">
+                      <span class="group-stats-item alert">
+                        <span class="group-no">电脑组 {{ item.groupNo }}+{{ parseInt(item.groupNo) + 900 }}</span>，
+                        <span class="total-count">{{ item.stats.totalCount }}</span>，
+                        <span :class="['success-rate', item.stats.successRate < alertSuccessRateThreshold ? 'warning' : '']">
+                          {{ item.stats.successRate.toFixed(2) }}%
+                        </span>，
+                        <span :class="['consecutive-fail', item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'warning' : '']">
+                          {{ item.stats.consecutiveFail }}
+                        </span>；
+                      </span>
+                    </template>
                   </template>
                 </template>
               </div>
-              <div v-else class="no-stats-data">
+              
+              <!-- 事件统计 -->
+              <div v-if="alertEventStatsList.length > 0" class="event-stats-section">
+                <div class="event-stats-header">
+                  <span class="stats-description">（按事件统计：事件名，任务组数，成功率，连续失败次数）</span>
+                  <button class="collapse-btn" @click="toggleEventStatsCollapsed">
+                    {{ eventStatsCollapsed ? '展开' : '折叠' }}
+                  </button>
+                </div>
+                <div v-show="!eventStatsCollapsed" class="event-stats-grid">
+                  <div 
+                    v-for="(item, index) in alertEventStatsList" 
+                    :key="'e' + index"
+                    :class="['event-stats-item', item.stats.successRate < alertSuccessRateThreshold || item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'alert' : '']"
+                  >
+                    <span class="event-name">{{ item.trending }}</span>，
+                    <span class="total-count">{{ Math.floor(item.stats.totalCount ) }}</span>，
+                    <span :class="['success-rate', item.stats.successRate < alertSuccessRateThreshold ? 'warning' : '']">
+                      {{ item.stats.successRate.toFixed(2) }}%
+                    </span>，
+                    <span :class="['consecutive-fail', item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'warning' : '']">
+                      {{ item.stats.consecutiveFail }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <div v-else-if="Object.keys(alertGroupStats).length === 0" class="no-stats-data">
                 暂无统计数据
               </div>
             </div>
@@ -1371,7 +1447,10 @@ export default {
       alertEndTimeMinutes: 20,  // 预警查询结束时间（分钟前），默认20分钟前
       alertStartTimeMinutes: 80,  // 预警查询开始时间（分钟前），默认80分钟前（即1小时20分钟前）
       alertLastCheckTime: null,  // 上次检查时间
-      alertGroupStats: {}  // 每个电脑组的统计信息 {groupNo: {successRate, consecutiveFail, totalCount, successCount}}
+      alertGroupStats: {},  // 每个电脑组的统计信息 {groupNo: {successRate, consecutiveFail, totalCount, successCount}}
+      alertDisplayMode: 'separate',  // 显示模式: 'separate'=分开显示, 'merged'=合并显示 (X + 900+X)
+      alertTasksWithTrending: [],  // 保存带 trending 的任务数据用于事件统计
+      eventStatsCollapsed: false  // 事件统计是否折叠
     }
   },
   mounted() {
@@ -1383,6 +1462,9 @@ export default {
     
     // 加载预警监控设置
     this.loadAlertMonitorSettings()
+    
+    // 加载事件统计折叠状态
+    this.loadEventStatsCollapsedState()
     
     // 如果之前保存的状态是启用，自动启动监控
     if (this.alertMonitorEnabled) {
@@ -1852,6 +1934,162 @@ export default {
         // 成功率相同，比较总任务数（多的在前）
         return b.stats.totalCount - a.stats.totalCount
       })
+      return result
+    },
+    
+    // 合并电脑组统计 (X + 900+X)
+    mergedGroupStats() {
+      const merged = {}
+      for (const [groupNo, stats] of Object.entries(this.alertGroupStats)) {
+        const num = parseInt(groupNo)
+        // 确定基础组号：如果 >= 900，则减900；否则就是自身
+        const baseGroupNo = num >= 900 ? num - 900 : num
+        
+        if (!merged[baseGroupNo]) {
+          merged[baseGroupNo] = {
+            totalCount: 0,
+            successCount: 0,
+            tasks: []  // 用于计算连续失败
+          }
+        }
+        
+        merged[baseGroupNo].totalCount += stats.totalCount
+        merged[baseGroupNo].successCount += stats.successCount
+      }
+      
+      // 计算成功率和连续失败
+      // 连续失败需要从原始任务数据计算
+      const tasksByBaseGroup = {}
+      for (const task of this.alertTasksWithTrending) {
+        const num = parseInt(task.groupNo)
+        const baseGroupNo = num >= 900 ? num - 900 : num
+        if (!tasksByBaseGroup[baseGroupNo]) {
+          tasksByBaseGroup[baseGroupNo] = []
+        }
+        tasksByBaseGroup[baseGroupNo].push(task)
+      }
+      
+      // 计算每个合并组的统计
+      const result = {}
+      for (const [baseGroupNo, data] of Object.entries(merged)) {
+        const successRate = data.totalCount > 0 ? (data.successCount / data.totalCount) * 100 : 0
+        
+        // 计算连续失败：合并组的任务按时间排序
+        const tasks = tasksByBaseGroup[baseGroupNo] || []
+        tasks.sort((a, b) => {
+          const timeA = new Date(a.updateTime || a.createTime).getTime()
+          const timeB = new Date(b.updateTime || b.createTime).getTime()
+          return timeB - timeA
+        })
+        
+        let consecutiveFail = 0
+        for (const task of tasks) {
+          if (task.isSuccess) break
+          consecutiveFail++
+        }
+        
+        result[baseGroupNo] = {
+          totalCount: data.totalCount,
+          successCount: data.successCount,
+          successRate: successRate,
+          consecutiveFail: consecutiveFail
+        }
+      }
+      
+      return result
+    },
+    
+    // 正常的合并组
+    normalMergedGroupStats() {
+      const result = []
+      for (const [groupNo, stats] of Object.entries(this.mergedGroupStats)) {
+        const isNormal = stats.successRate >= this.alertSuccessRateThreshold && 
+                        stats.consecutiveFail < this.alertConsecutiveFailThreshold
+        if (isNormal) {
+          result.push({ groupNo, stats })
+        }
+      }
+      result.sort((a, b) => {
+        if (b.stats.successRate !== a.stats.successRate) {
+          return b.stats.successRate - a.stats.successRate
+        }
+        return b.stats.totalCount - a.stats.totalCount
+      })
+      return result
+    },
+    
+    // 异常的合并组
+    alertMergedGroupStatsList() {
+      const result = []
+      for (const [groupNo, stats] of Object.entries(this.mergedGroupStats)) {
+        const isAlert = stats.successRate < this.alertSuccessRateThreshold || 
+                       stats.consecutiveFail >= this.alertConsecutiveFailThreshold
+        if (isAlert) {
+          result.push({ groupNo, stats })
+        }
+      }
+      result.sort((a, b) => {
+        if (b.stats.successRate !== a.stats.successRate) {
+          return b.stats.successRate - a.stats.successRate
+        }
+        return b.stats.totalCount - a.stats.totalCount
+      })
+      return result
+    },
+    
+    // 事件统计
+    alertEventStats() {
+      const eventStats = {}
+      const tasksByEvent = {}
+      
+      // 按事件分组任务
+      for (const task of this.alertTasksWithTrending) {
+        const trending = task.trending || '未知事件'
+        if (!tasksByEvent[trending]) {
+          tasksByEvent[trending] = []
+        }
+        tasksByEvent[trending].push(task)
+      }
+      
+      // 计算每个事件的统计
+      for (const [trending, tasks] of Object.entries(tasksByEvent)) {
+        // 按时间排序
+        tasks.sort((a, b) => {
+          const timeA = new Date(a.updateTime || a.createTime).getTime()
+          const timeB = new Date(b.updateTime || b.createTime).getTime()
+          return timeB - timeA
+        })
+        
+        const totalCount = tasks.length
+        const successCount = tasks.filter(t => t.isSuccess).length
+        const successRate = totalCount > 0 ? (successCount / totalCount) * 100 : 0
+        
+        // 计算连续失败
+        let consecutiveFail = 0
+        for (const task of tasks) {
+          if (task.isSuccess) break
+          consecutiveFail++
+        }
+        
+        eventStats[trending] = {
+          totalCount,
+          successCount,
+          successRate,
+          consecutiveFail
+        }
+      }
+      
+      return eventStats
+    },
+    
+    // 事件统计列表（排序后）
+    alertEventStatsList() {
+      const result = []
+      for (const [trending, stats] of Object.entries(this.alertEventStats)) {
+        result.push({ trending, stats })
+      }
+      // 按任务数降序排序
+      result.sort((a, b) => b.stats.totalCount - a.stats.totalCount)
       return result
     },
     
@@ -3394,9 +3632,17 @@ export default {
               createTime: mission.createTime,
               updateTime: mission.updateTime,
               msg: mission.msg,
-              isSuccess: isSuccess  // 新增：标记是否成功
+              isSuccess: isSuccess,  // 标记是否成功
+              trending: item.exchangeConfig?.trending || ''  // 事件名
             })
           })
+          
+          // 保存所有任务用于事件统计
+          const allTasks = []
+          for (const groupNo in tasksByGroup) {
+            allTasks.push(...tasksByGroup[groupNo])
+          }
+          this.alertTasksWithTrending = allTasks
           
           // 重置统计信息
           const newGroupStats = {}
@@ -3461,6 +3707,38 @@ export default {
       }
     },
     
+    
+    // 切换预警统计显示模式
+    toggleAlertDisplayMode() {
+      this.alertDisplayMode = this.alertDisplayMode === 'separate' ? 'merged' : 'separate'
+    },
+    
+    // 切换事件统计折叠状态
+    toggleEventStatsCollapsed() {
+      this.eventStatsCollapsed = !this.eventStatsCollapsed
+      this.saveEventStatsCollapsedState()
+    },
+    
+    // 加载事件统计折叠状态
+    loadEventStatsCollapsedState() {
+      try {
+        const saved = localStorage.getItem('taskAnomaly_eventStatsCollapsed')
+        if (saved !== null) {
+          this.eventStatsCollapsed = saved === 'true'
+        }
+      } catch (e) {
+        console.error('加载事件统计折叠状态失败:', e)
+      }
+    },
+    
+    // 保存事件统计折叠状态
+    saveEventStatsCollapsedState() {
+      try {
+        localStorage.setItem('taskAnomaly_eventStatsCollapsed', String(this.eventStatsCollapsed))
+      } catch (e) {
+        console.error('保存事件统计折叠状态失败:', e)
+      }
+    },
     
     // 格式化时间（用于显示上次检查时间）
     formatTime(date) {
@@ -6382,6 +6660,75 @@ export default {
   background: #f8f9fa;
   border-radius: 6px;
   border: 1px solid #e0e0e0;
+}
+
+/* 切换显示模式按钮 */
+.toggle-display-btn {
+  margin-left: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggle-display-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+}
+
+/* 事件统计区域 */
+.event-stats-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed #e0e0e0;
+}
+
+.event-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+  margin-top: 8px;
+}
+
+.event-stats-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #f8f9fa;
+}
+
+.event-stats-item.alert {
+  background: rgba(231, 76, 60, 0.1);
+}
+
+.event-name {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.event-stats-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.collapse-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #e0e0e0;
+  color: #666;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.collapse-btn:hover {
+  background: #d0d0d0;
+  color: #333;
 }
 
 /* 结果区域 */

@@ -637,6 +637,48 @@
                 />
                 <span style="color: red;">(万)才开仓</span>
               </div>
+
+              <div class="trending-filter">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input 
+                    type="checkbox" 
+                    v-model="hedgeMode.needJudgeTimeRandom"
+                    :true-value="1"
+                    :false-value="0"
+                    :disabled="autoHedgeRunning"
+                    @change="saveHedgeSettings"
+                  />
+                  <span style="color: red;">账号随机8小时不交易</span>
+                </label>
+              </div>
+
+              <div class="trending-filter">
+                <label style="color: red;">持有某一事件的账号数量上限:</label>
+                <input 
+                  v-model.number="hedgeMode.ownPosNumAmtMax" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  placeholder="100"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                />
+              </div>
+
+              <div class="trending-filter">
+                <label style="color: red;">单号持有某一事件的仓位上限:</label>
+                <input 
+                  v-model.number="hedgeMode.maxPosLimit" 
+                  type="number" 
+                  class="filter-input" 
+                  min="0"
+                  placeholder="3000"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                  style="width: 80px; margin: 0 5px;"
+                />
+              </div>
              
               <div class="trending-filter" style="grid-column: 1 / -1;">
                 <label style="color: red;">加权时间</label>
@@ -686,19 +728,6 @@
                 <span style="color: red;">(万)不交易</span>
               </div>
 
-              <div class="trending-filter">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                  <input 
-                    type="checkbox" 
-                    v-model="hedgeMode.needJudgeTimeRandom"
-                    :true-value="1"
-                    :false-value="0"
-                    :disabled="autoHedgeRunning"
-                    @change="saveHedgeSettings"
-                  />
-                  <span style="color: #000;">账号随机8小时不交易</span>
-                </label>
-              </div>
 
               <div class="trending-filter" style="grid-column: 1 / -1;">
                 <label style="color: red;">最近24小时交易量小于</label>
@@ -1048,18 +1077,7 @@
                 />
               </div>
               
-              <div class="hedge-amount-range">
-                <span class="filter-label">开仓最大仓位限制:</span>
-                <input 
-                  v-model.number="hedgeMode.maxPosLimit" 
-                  type="number" 
-                  class="amount-range-input" 
-                  min="0"
-                  placeholder="3000"
-                  :disabled="autoHedgeRunning"
-                  @blur="saveHedgeSettings"
-                />
-              </div>
+
             </template>
             
             <button 
@@ -3362,6 +3380,7 @@ const hedgeMode = reactive({
   needJudgeDF: false,  // 是否过滤超时仓位
   maxDHour: 12,  // 仓位抓取时间距离现在超过的小时数（超过此时间的仓位不参与交易）
   needJudgeTimeRandom: 0,  // 账号随机8小时不交易，0-关闭 1-开启
+  ownPosNumAmtMax: 100,  // 持有一个事件的账号数量上限，默认100
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
   balancePriority: 2000,  // 资产优先级校验值
@@ -9720,6 +9739,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.balancePriority = hedgeMode.balancePriority
           // 添加账号随机8小时不交易参数
           requestData.needJudgeTimeRandom = hedgeMode.needJudgeTimeRandom || 0
+          // 添加持有一个事件的账号数量上限参数
+          requestData.ownPosNumAmtMax = hedgeMode.ownPosNumAmtMax || 100
           // 添加交易量和仓位价值限制参数（单位：万转10000）
           if (hedgeMode.maxVolume24hOpen !== undefined && hedgeMode.maxVolume24hOpen !== null && hedgeMode.maxVolume24hOpen !== '') {
             requestData.maxVolume24hOpen = Number(hedgeMode.maxVolume24hOpen) * 10000
@@ -11247,6 +11268,7 @@ const saveHedgeSettings = () => {
       needJudgeDF: hedgeMode.needJudgeDF,
       maxDHour: hedgeMode.maxDHour,
       needJudgeTimeRandom: hedgeMode.needJudgeTimeRandom,
+      ownPosNumAmtMax: hedgeMode.ownPosNumAmtMax,
       // 资产优先级校验设置
       needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
       balancePriority: hedgeMode.balancePriority,
@@ -11399,6 +11421,9 @@ const loadHedgeSettings = () => {
     }
     if (settings.needJudgeTimeRandom !== undefined) {
       hedgeMode.needJudgeTimeRandom = settings.needJudgeTimeRandom
+    }
+    if (settings.ownPosNumAmtMax !== undefined) {
+      hedgeMode.ownPosNumAmtMax = settings.ownPosNumAmtMax
     }
     
     // 资产优先级校验设置
