@@ -152,6 +152,8 @@
         <section class="section auto-hedge-section">
           <div class="section-header-with-filter">
             <h2>自动对冲</h2>
+            <!-- 执行模式选择 -->
+          
             <!-- 订单薄筛选设置 -->
             <div class="trending-filter">
               <label>订单薄至少组数:</label>
@@ -643,7 +645,28 @@
                 style="width: 60px;"
               />
             </div>
-            
+            <div class="trending-filter" style="background: #e3f2fd; padding: 8px 12px; border-radius: 4px; border: 1px solid #2196f3;">
+              <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; color: #1565c0;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.enableMove"
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                />
+                <span style="cursor: pointer;">挪仓</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; color: #1565c0; margin-left: 20px;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.enableClose"
+                  :disabled="autoHedgeRunning"
+                  @change="saveHedgeSettings"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                />
+                <span style="cursor: pointer;">平仓</span>
+              </label>
+            </div>
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -653,7 +676,7 @@
             <span v-if="autoHedgeRunning" class="status-badge status-running">运行中</span>
             
             <!-- 测试模式开关 -->
-            <div class="hedge-amount-range" style="margin-left: 10px;">
+            <!-- <div class="hedge-amount-range" style="margin-left: 10px;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input 
                   type="checkbox" 
@@ -663,7 +686,7 @@
                 />
                 <span class="filter-label" style="margin: 0; cursor: pointer;">测试模式：只请求一组任务</span>
               </label>
-            </div>
+            </div> -->
             
             <button 
               class="btn btn-info btn-sm" 
@@ -754,6 +777,15 @@
                   style="width: 200px; margin: 0;"
                   @blur="saveHedgeSettings"
                 />
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 14px; margin-left: 12px; color: #000;">
+                  <input 
+                    type="checkbox" 
+                    v-model="showOnlyWhitelist" 
+                    style="width: 16px; height: 16px;"
+                    @change="saveHedgeSettings"
+                  />
+                  只显示白名单
+                </label>
             </div>
           </div>
           
@@ -787,12 +819,29 @@
                     <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
                       ❌ 关闭任务
                     </button>
+                    <button 
+                      class="btn-position btn-sm" 
+                      @click="openPositionDetail(config)"
+                      style="margin-left: 4px;"
+                      title="查看持仓详情"
+                    >
+                      查看持仓
+                    </button>
                     <span 
                       v-if="positionDataMap.get(String(config.id))" 
                       class="position-sum-badge"
                       style="margin-left: 8px; font-size: 12px; color: #666; background: #f0f0f0; padding: 2px 6px; border-radius: 4px;"
+                      title="筛选后的持仓数据"
                     >
-                      YES: {{ positionDataMap.get(String(config.id)).yesSum.toFixed(0) }} / NO: {{ positionDataMap.get(String(config.id)).noSum.toFixed(0) }}
+                      筛选后 YES: {{ positionDataMap.get(String(config.id)).yesSum.toFixed(0) }} / NO: {{ positionDataMap.get(String(config.id)).noSum.toFixed(0) }}
+                    </span>
+                    <span 
+                      v-if="totalPositionDataMap.get(String(config.id))" 
+                      class="position-total-badge"
+                      style="margin-left: 8px; font-size: 12px; color: #2196F3; background: #E3F2FD; padding: 2px 6px; border-radius: 4px;"
+                      title="总持仓数据"
+                    >
+                      总 YES: {{ totalPositionDataMap.get(String(config.id)).yesTotal.toFixed(0) }} / NO: {{ totalPositionDataMap.get(String(config.id)).noTotal.toFixed(0) }}
                     </span>
                     <span v-if="config.errorMessage" class="error-badge">
                       {{ config.errorMessage }}
@@ -820,21 +869,32 @@
                       </div>
                       <div class="task-msg">
                         <div class="orderbook-detail">
-                          <div v-if="config.orderbookData.price1 != null" class="price-row">
-                            <span class="label">先挂价格:</span>
-                            <span class="value">{{ config.orderbookData.price1.toFixed(2) }}¢</span>
+                          <!-- YES 方价格 -->
+                          <div v-if="config.orderbookData.yesBidPrice != null" class="price-row" >
+                            <span class="label" :style="{ fontWeight: config.orderbookData.firstSide === 'YES' ? 'bold' : 'normal' }">
+                              YES{{ config.orderbookData.firstSide === 'YES' ? '(先挂方)' : '' }}:
+                            </span>
+                            <span class="value">买一 {{ config.orderbookData.yesBidPrice.toFixed(2) }}¢ / 卖一 {{ config.orderbookData.yesAskPrice.toFixed(2) }}¢</span>
                           </div>
-                          <div v-if="config.orderbookData.price2 != null" class="price-row">
-                            <span class="label">后挂价格:</span>
-                            <span class="value">{{ config.orderbookData.price2.toFixed(2) }}¢</span>
+                          <!-- NO 方价格 -->
+                          <div v-if="config.orderbookData.noBidPrice != null" class="price-row" >
+                            <span class="label" :style="{ fontWeight: config.orderbookData.firstSide === 'NO' ? 'bold' : 'normal' }">
+                              NO{{ config.orderbookData.firstSide === 'NO' ? '(先挂方)' : '' }}:
+                            </span>
+                            <span class="value">买一 {{ config.orderbookData.noBidPrice.toFixed(2) }}¢ / 卖一 {{ config.orderbookData.noAskPrice.toFixed(2) }}¢</span>
+                          </div>
+                          <!-- 先挂方信息 -->
+                          <div v-if="config.orderbookData.finalPrice != null" class="price-row" style="margin-top: 4px;">
+                            <span class="label" style="font-weight: bold;">最终价格:</span>
+                            <span class="value highlight">{{ config.orderbookData.finalPrice.toFixed(2) }}¢</span>
                           </div>
                           <div v-if="config.orderbookData.diff != null" class="price-row">
-                            <span class="label">价差:</span>
+                            <span class="label">深度差:</span>
                             <span class="value highlight">{{ config.orderbookData.diff.toFixed(2) }}¢</span>
                           </div>
                           <div v-if="config.orderbookData.depth1 != null && config.orderbookData.depth2 != null" class="price-row">
-                            <span class="label">深度:</span>
-                            <span class="value">{{ config.orderbookData.depth1.toFixed(2) }} / {{ config.orderbookData.depth2.toFixed(2) }}</span>
+                            <span class="label">先挂方深度:</span>
+                            <span class="value">买一 {{ config.orderbookData.depth1.toFixed(2) }} / 卖一 {{ config.orderbookData.depth2.toFixed(2) }}</span>
                           </div>
                         </div>
                       </div>
@@ -2818,12 +2878,14 @@ const isFastMode = ref(false)  // 模式开关：false=正常模式(tp3=0), true
 const yesCountThreshold = ref(0)  // yes数量阈值
 const isFetchingTopics = ref(false)  // 是否正在获取主题
 const isFetchingByRequirement = ref(false)  // 是否正在根据需求获取主题
-const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据 { configId: { yesSum, noSum } }
+const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据（筛选后）{ configId: { yesSum, noSum } }
+const totalPositionDataMap = ref(new Map())  // 存储每个事件的总持仓数据 { configId: { yesTotal, noTotal } }
 const idToTrendingMap = ref(new Map())  // id -> trending 映射
 
 // 导出和白名单主题相关
 const exportWhitelistInput = ref('')  // 白名单主题输入框
 const enableWhitelist = ref(false)    // 是否启用白名单
+const showOnlyWhitelist = ref(false)  // 只显示白名单（用于过滤显示）
 const whitelistedTopicIds = computed(() => {
   if (!exportWhitelistInput.value) return new Set()
   return new Set(exportWhitelistInput.value.split(',').map(id => id.trim()).filter(id => id))
@@ -2892,7 +2954,7 @@ const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
 const hedgeTasksPerTopic = ref(1)  // 一个主题同时执行的对冲任务数量，默认为2
 const hedgeTaskInterval = ref(0)  // 任务间隔（分钟），默认为0（不等待）
-const testModeSingleGroup = ref(true)  // 测试模式：只请求一组任务后停止
+const testModeSingleGroup = ref(false)  // 测试模式：只请求一组任务后停止
 
 // 分批执行相关
 const enableBatchMode = ref(false)  // 是否启用分批执行模式，默认不勾选
@@ -2915,6 +2977,9 @@ const hedgeStatus = reactive({
 const hedgeMode = reactive({
   isClose: true,  // 固定为true，只支持平仓
   timePassMin: 60,  // 最近xx分钟内有过任意操作的，不参与
+  // 执行模式开关
+  enableMove: true,  // 挪仓开关 (model4Move)
+  enableClose: true,  // 平仓开关 (model5Close)
   numberType: 1,  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
   maxIpDelay: '',  // ip最大延迟（毫秒）
   // 订单薄筛选设置
@@ -2994,12 +3059,25 @@ const getNextFirstSide = (configId, yesBidPrice, noBidPrice, yesAskPrice, noAskP
   
   let firstSide
   
-  if (lastFirstSide) {
-    // 如果存在上一次记录，则轮换到另一个方向
+  // 判断只开启了挪仓还是平仓
+  const onlyMove = hedgeMode.enableMove && !hedgeMode.enableClose  // 只开了挪仓
+  const onlyClose = !hedgeMode.enableMove && hedgeMode.enableClose  // 只开了平仓
+  const bothOpen = hedgeMode.enableMove && hedgeMode.enableClose    // 两个都开了
+  
+  if (onlyMove) {
+    // 只开了挪仓：找买一价更低的那一方作为先挂方
+    firstSide = yesBidPrice < noBidPrice ? 'YES' : 'NO'
+    console.log(`主题 ${configId} - 只开启挪仓模式，选择买一价更低的一方: ${firstSide} (YES买一: ${yesBidPrice.toFixed(2)}, NO买一: ${noBidPrice.toFixed(2)})`)
+  } else if (onlyClose) {
+    // 只开了平仓：找卖一价更高的那一方作为先挂方
+    firstSide = yesAskPrice > noAskPrice ? 'YES' : 'NO'
+    console.log(`主题 ${configId} - 只开启平仓模式，选择卖一价更高的一方: ${firstSide} (YES卖一: ${yesAskPrice.toFixed(2)}, NO卖一: ${noAskPrice.toFixed(2)})`)
+  } else if (bothOpen && lastFirstSide) {
+    // 两个都开了，使用轮换机制
     firstSide = lastFirstSide === 'YES' ? 'NO' : 'YES'
-    console.log(`主题 ${configId} - 上一次先挂方: ${lastFirstSide}, 本次轮换为: ${firstSide}`)
+    console.log(`主题 ${configId} - 挪仓和平仓都开启，上一次先挂方: ${lastFirstSide}, 本次轮换为: ${firstSide}`)
   } else {
-    // 如果不存在记录，使用原来的逻辑作为初始值
+    // 两个都开了但没有历史记录，或都不开（不应该发生），使用默认逻辑
     if (isClose) {
       // 平仓：买一价更高的为先挂方
       firstSide = yesBidPrice > noBidPrice ? 'YES' : 'NO'
@@ -3897,11 +3975,21 @@ const loadPositionDataForDisplay = async () => {
         }
       }
       
-      // 计算每个事件的筛选后 yes/no 总和
+      // 计算每个事件的筛选后 yes/no 总和 和 总的 yes/no 数量
       const singleCloseAmtMax = hedgeMode.singleCloseAmtMax || 500
       const newPositionDataMap = new Map()
+      const newTotalPositionDataMap = new Map()
       
       for (const [configId, event] of eventMap) {
+        // 计算总的 yes/no 数量
+        const yesTotal = event.yesItems.reduce((sum, amt) => sum + amt, 0)
+        const noTotal = event.noItems.reduce((sum, amt) => sum + amt, 0)
+        
+        // 存储总的持仓数据
+        if (yesTotal > 0 || noTotal > 0) {
+          newTotalPositionDataMap.set(configId, { yesTotal, noTotal })
+        }
+        
         // 筛选出小于 singleCloseAmtMax 的项
         const filteredYesItems = event.yesItems.filter(amt => amt < singleCloseAmtMax)
         const filteredNoItems = event.noItems.filter(amt => amt < singleCloseAmtMax)
@@ -3916,8 +4004,9 @@ const loadPositionDataForDisplay = async () => {
         }
       }
       
-      // 更新 positionDataMap
+      // 更新 positionDataMap 和 totalPositionDataMap
       positionDataMap.value = newPositionDataMap
+      totalPositionDataMap.value = newTotalPositionDataMap
       console.log(`[持仓数据] 持仓数据加载完成，共 ${newPositionDataMap.size} 个事件`)
     } else {
       console.warn('[持仓数据] 未获取到持仓数据')
@@ -4102,95 +4191,95 @@ const fetchTopicsByRequirement = async () => {
  * 获取任务列表
  */
 const fetchMissionList = async () => {
-  // isLoadingList.value = true
+  isLoadingList.value = true
   
-  // try {
-  //   const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
-  //     params: {
-  //       limit: 200
-  //     }
-  //   })
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
+      params: {
+        limit: 200
+      }
+    })
     
-  //   if (response.data && response.data.code === 0) {
-  //     const allMissions = response.data.data.list || []
+    if (response.data && response.data.code === 0) {
+      const allMissions = response.data.data.list || []
       
-  //     // 显示所有任务（不再过滤type=3，因为不再使用type=3任务）
-  //     missionList.value = allMissions
+      // 显示所有任务（不再过滤type=3，因为不再使用type=3任务）
+      missionList.value = allMissions
       
-  //     // 更新对冲任务状态（使用新接口）
-  //     for (const config of activeConfigs.value) {
-  //       if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
-  //         const hedgeRecord = config.currentHedge
+      // 更新对冲任务状态（使用新接口）
+      for (const config of activeConfigs.value) {
+        if (config.currentHedge && config.currentHedge.finalStatus === 'running') {
+          const hedgeRecord = config.currentHedge
           
-  //         // 通过新接口获取任务状态
-  //         if (hedgeRecord.yesTaskId) {
-  //           const yesTaskData = await fetchMissionStatus(hedgeRecord.yesTaskId)
-  //           if (yesTaskData) {
-  //             const oldStatus = hedgeRecord.yesStatus
-  //             hedgeRecord.yesStatus = yesTaskData.status
-  //             if (oldStatus !== yesTaskData.status) {
-  //               console.log(`[fetchMissionList] YES任务 ${hedgeRecord.yesTaskId} 状态变化: ${oldStatus} -> ${yesTaskData.status}`)
-  //             }
-  //           }
-  //         }
+          // 通过新接口获取任务状态
+          if (hedgeRecord.yesTaskId) {
+            const yesTaskData = await fetchMissionStatus(hedgeRecord.yesTaskId)
+            if (yesTaskData) {
+              const oldStatus = hedgeRecord.yesStatus
+              hedgeRecord.yesStatus = yesTaskData.status
+              if (oldStatus !== yesTaskData.status) {
+                console.log(`[fetchMissionList] YES任务 ${hedgeRecord.yesTaskId} 状态变化: ${oldStatus} -> ${yesTaskData.status}`)
+              }
+            }
+          }
           
-  //         if (hedgeRecord.noTaskId) {
-  //           const noTaskData = await fetchMissionStatus(hedgeRecord.noTaskId)
-  //           if (noTaskData) {
-  //             const oldStatus = hedgeRecord.noStatus
-  //             hedgeRecord.noStatus = noTaskData.status
-  //             if (oldStatus !== noTaskData.status) {
-  //               console.log(`[fetchMissionList] NO任务 ${hedgeRecord.noTaskId} 状态变化: ${oldStatus} -> ${noTaskData.status}`)
-  //             }
-  //           }
-  //         }
+          if (hedgeRecord.noTaskId) {
+            const noTaskData = await fetchMissionStatus(hedgeRecord.noTaskId)
+            if (noTaskData) {
+              const oldStatus = hedgeRecord.noStatus
+              hedgeRecord.noStatus = noTaskData.status
+              if (oldStatus !== noTaskData.status) {
+                console.log(`[fetchMissionList] NO任务 ${hedgeRecord.noTaskId} 状态变化: ${oldStatus} -> ${noTaskData.status}`)
+              }
+            }
+          }
           
-  //         // 检查对冲任务状态并触发完成逻辑
-  //         const firstSide = hedgeRecord.firstSide
-  //         const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
-  //         const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
+          // 检查对冲任务状态并触发完成逻辑
+          const firstSide = hedgeRecord.firstSide
+          const firstStatus = firstSide === 'YES' ? hedgeRecord.yesStatus : hedgeRecord.noStatus
+          const secondStatus = firstSide === 'YES' ? hedgeRecord.noStatus : hedgeRecord.yesStatus
           
-  //         console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} - 第一个任务(${firstSide})状态: ${firstStatus}, 第二个任务已提交: ${hedgeRecord.secondTaskSubmitted}`)
+          console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} - 第一个任务(${firstSide})状态: ${firstStatus}, 第二个任务已提交: ${hedgeRecord.secondTaskSubmitted}`)
           
-  //         // 检查第一个任务是否失败
-  //         if (firstStatus === 3) {
-  //           console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
-  //           hedgeRecord.finalStatus = 'failed'
-  //           finishHedge(config, hedgeRecord)
-  //         }
-  //         // 第一个任务成功，提交第二个任务
-  //         else if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
-  //           console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
-  //           hedgeRecord.secondTaskSubmitted = true
-  //           submitSecondHedgeTask(config, hedgeRecord)
-  //         }
-  //         // 第二个任务已提交，检查第二个任务状态
-  //         else if (hedgeRecord.secondTaskSubmitted) {
-  //           // 检查第二个任务是否失败
-  //           if (secondStatus === 3) {
-  //             console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
-  //             hedgeRecord.finalStatus = 'failed'
-  //             finishHedge(config, hedgeRecord)
-  //           }
-  //           // 两个任务都成功
-  //           else if (firstStatus === 2 && secondStatus === 2) {
-  //             console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 两个任务都成功`)
-  //             hedgeRecord.finalStatus = 'success'
-  //             finishHedge(config, hedgeRecord)
-  //           }
-  //         }
-  //       }
-  //     }
+          // 检查第一个任务是否失败
+          if (firstStatus === 3) {
+            console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一失败，立即停止`)
+            hedgeRecord.finalStatus = 'failed'
+            finishHedge(config, hedgeRecord)
+          }
+          // 第一个任务成功，提交第二个任务
+          else if (firstStatus === 2 && !hedgeRecord.secondTaskSubmitted) {
+            console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务一成功，开始任务二`)
+            hedgeRecord.secondTaskSubmitted = true
+            submitSecondHedgeTask(config, hedgeRecord)
+          }
+          // 第二个任务已提交，检查第二个任务状态
+          else if (hedgeRecord.secondTaskSubmitted) {
+            // 检查第二个任务是否失败
+            if (secondStatus === 3) {
+              console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 任务二失败，立即停止`)
+              hedgeRecord.finalStatus = 'failed'
+              finishHedge(config, hedgeRecord)
+            }
+            // 两个任务都成功
+            else if (firstStatus === 2 && secondStatus === 2) {
+              console.log(`[fetchMissionList] 对冲 ${hedgeRecord.id} 两个任务都成功`)
+              hedgeRecord.finalStatus = 'success'
+              finishHedge(config, hedgeRecord)
+            }
+          }
+        }
+      }
       
-  //     console.log(`任务列表已刷新，共 ${missionList.value.length} 条记录（已过滤 type=3）`)
-  //   } else {
-  //     console.warn(`获取任务列表失败: ${response.data?.msg || '未知错误'}`)
-  //   }
-  // } catch (error) {
-  //   console.error('获取任务列表失败:', error)
-  // } finally {
-  //   isLoadingList.value = false
-  // }
+      console.log(`任务列表已刷新，共 ${missionList.value.length} 条记录（已过滤 type=3）`)
+    } else {
+      console.warn(`获取任务列表失败: ${response.data?.msg || '未知错误'}`)
+    }
+  } catch (error) {
+    console.error('获取任务列表失败:', error)
+  } finally {
+    isLoadingList.value = false
+  }
 }
 
 /**
@@ -6160,6 +6249,13 @@ const submitEditConfig = async () => {
 const filteredActiveConfigs = computed(() => {
   let result = activeConfigs.value
   
+  // 只显示白名单过滤（与原有的 visible 功能区分开，这是全局过滤）
+  if (showOnlyWhitelist.value && whitelistedTopicIds.value.size > 0) {
+    result = result.filter(config => {
+      return whitelistedTopicIds.value.has(String(config.id))
+    })
+  }
+  
   if (autoHedgeFilter.value && autoHedgeFilter.value.trim()) {
     const keyword = autoHedgeFilter.value.trim().toLowerCase()
     result = result.filter(config => {
@@ -6319,6 +6415,12 @@ const toggleAutoHedge = () => {
  * 开始自动对冲
  */
 const startAutoHedge = () => {
+  // 检查是否至少选择了一种执行模式
+  if (!hedgeMode.enableMove && !hedgeMode.enableClose) {
+    alert('请至少勾选一种执行模式（挪仓或平仓）')
+    return
+  }
+  
   // 在开始自动分配时，先更新活动配置列表，过滤掉拉黑的主题
   updateActiveConfigs()
   
@@ -6857,10 +6959,8 @@ const executeAllTopics = async () => {
     return
   }
   
-  // 打乱主题顺序
-  validConfigs = [...validConfigs].sort(() => Math.random() - 0.5)
-  
-  console.log(`开始执行所有 ${validConfigs.length} 个主题（不分批模式）`)
+  // 不打乱顺序，直接使用列表顺序从上往下执行
+  console.log(`开始执行所有 ${validConfigs.length} 个主题（不分批模式，按列表顺序执行）`)
   
   // 执行所有主题的任务
   await executeAutoHedgeTasksForBatch(validConfigs)
@@ -6878,9 +6978,7 @@ const executeAllTopics = async () => {
       // 重新获取有效的主题列表（因为可能有替换）
       let currentValidConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
       
-      // 打乱主题顺序
-      currentValidConfigs = [...currentValidConfigs].sort(() => Math.random() - 0.5)
-      
+      // 不打乱顺序，直接使用列表顺序从上往下执行
       if (currentValidConfigs.length > 0) {
         await executeAutoHedgeTasksForBatch(currentValidConfigs)
         await checkAndReplaceTopics()
@@ -6987,214 +7085,233 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
     }
   }
   
-  for (const config of batchConfigs) {
+  // 顺序执行每个主题，每个主题之间间隔1秒（无论上一个主题是什么状态）
+  for (let i = 0; i < batchConfigs.length; i++) {
+    const config = batchConfigs[i]
+    
     try {
       // 检查白名单
       if (enableWhitelist.value && !whitelistedTopicIds.value.has(String(config.id))) {
         console.log(`主题 ${config.trending} (ID: ${config.id}) 不在白名单中，跳过交易`)
-        continue
-      }
-      
-      // 检查该主题是否正在执行对冲
-      const currentHedges = config.currentHedges || []
-      const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
-      
-      if (runningHedges.length > 0) {
-        // 检查是否有超时的任务
-        const now = new Date()
-        let hasTimeout = false
-        for (const hedge of runningHedges) {
-          const startTime = new Date(hedge.startTime)
-          const elapsed = (now - startTime) / 1000 / 60
-          if (elapsed >= 20) {
-            console.log(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
-            hedge.finalStatus = 'timeout'
-            finishHedge(config, hedge)
-            hasTimeout = true
-          }
-        }
-        
-        if (hasTimeout) {
-          // 清空错误信息和无法对冲时间
-          config.errorMessage = null
-          config.noHedgeSince = null
-        }
-        
-        // 检查是否还有运行中的任务，如果有且未达到最大任务数，可以继续
-        const remainingRunning = (config.currentHedges || []).filter(h => h.finalStatus === 'running').length
-        const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
-        
-        if (remainingRunning >= maxTasks) {
-          console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
-          continue
-        }
+        // 跳过，但会在循环末尾等待1秒
       } else {
-        // 没有运行中的任务，检查任务间隔
-        if (config.lastGroupFinishTime && hedgeTaskInterval.value > 0) {
-          const now = Date.now()
-          const elapsed = (now - config.lastGroupFinishTime) / 1000 / 60  // 转换为分钟
-          const intervalMinutes = hedgeTaskInterval.value
+        // 检查该主题是否正在执行对冲
+        const currentHedges = config.currentHedges || []
+        const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
+        
+        if (runningHedges.length > 0) {
+          // 检查是否有超时的任务
+          const now = new Date()
+          let hasTimeout = false
+          for (const hedge of runningHedges) {
+            const startTime = new Date(hedge.startTime)
+            const elapsed = (now - startTime) / 1000 / 60
+            if (elapsed >= 20) {
+              console.log(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
+              hedge.finalStatus = 'timeout'
+              finishHedge(config, hedge)
+              hasTimeout = true
+            }
+          }
           
-          if (elapsed < intervalMinutes) {
-            const remaining = Math.ceil((intervalMinutes - elapsed) * 60)
-            console.log(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
-            continue
-          } else {
-            // 间隔时间已过，清除记录
-            config.lastGroupFinishTime = null
-            console.log(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
-          }
-        }
-        
-        // 测试模式：如果已经请求过一组任务，则不再请求新的任务
-        if (testModeSingleGroup.value && config.hasRequestedGroup) {
-          console.log(`配置 ${config.id} - 测试模式已开启，已请求过一组任务，停止请求新任务`)
-          continue
-        }
-      }
-      
-      // 检查是否正在请求中
-      if (config.isFetching) {
-        console.log(`配置 ${config.id} - 正在请求订单薄中，跳过`)
-        continue
-      }
-      
-      // 检查是否需要请求订单薄
-      const now = Date.now()
-      const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
-      
-      if (!shouldFetch) {
-        const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
-        console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
-        continue
-      }
-      
-      // 开始请求订单薄
-      config.isFetching = true
-      config.lastRequestTime = now
-      
-      try {
-        console.log(`配置 ${config.id} - 开始请求订单薄...`)
-        
-        // 解析订单薄数据
-        const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
-        
-        if (!priceInfo) {
-          throw new Error('解析订单薄数据失败')
-        }
-        
-        // 保存订单薄数据
-        config.orderbookData = priceInfo
-        config.retryCount = 0  // 重置重试次数
-        config.errorMessage = null  // 清除错误信息
-        
-        console.log(`配置 ${config.id} - 订单薄数据:`, {
-          先挂方: priceInfo.firstSide,
-          先挂价格: priceInfo.price1,
-          后挂价格: priceInfo.price2,
-          价差: priceInfo.diff
-        })
-        
-        // 只有在可以开始新对冲时才判断是否执行对冲
-        if (canStartNewHedge) {
-          // 检查是否满足对冲条件
-          const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
-          if (hedgeCheck.canHedge) {
-            console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
-            
-            // 清空无法对冲时间和标记
+          if (hasTimeout) {
+            // 清空错误信息和无法对冲时间
+            config.errorMessage = null
             config.noHedgeSince = null
-            config.needsReplacement = false  // 清除需要替换的标记
-            
-            // 记录订单薄符合条件的时间（用于自动替换机制）
-            config.lastValidOrderbookTime = Date.now()
-            
-            // 执行对冲
-            await executeHedgeFromOrderbook(config, priceInfo)
-            
-            // 记录对冲时间
-            config.lastHedgeTime = Date.now()
-          } else {
-            console.log(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
-            
-            // 设置错误信息，显示具体原因
-            config.errorMessage = hedgeCheck.reason
-            
-            // 记录开始无法对冲的时间
-            if (!config.noHedgeSince) {
-              config.noHedgeSince = Date.now()
-            } else {
-              // 检查是否超过5分钟都无法对冲
-              const noHedgeElapsed = (Date.now() - config.noHedgeSince) / 1000 / 60
-              if (noHedgeElapsed >= 5) {
-                config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲 (${hedgeCheck.reason})`
-                console.warn(`配置 ${config.id} - ${config.errorMessage}`)
-              }
-            }
-            
-            // 检查是否超过10分钟都没有符合条件的订单薄（用于自动替换）
-            if (config.lastValidOrderbookTime) {
-              const noValidElapsed = (Date.now() - config.lastValidOrderbookTime) / 1000 / 60
-              if (noValidElapsed >= 10) {
-                config.needsReplacement = true
-                console.warn(`配置 ${config.id} - 已连续 ${Math.floor(noValidElapsed)} 分钟没有符合条件的订单薄，标记为需要替换`)
-              }
-            } else {
-              // 如果没有记录过符合条件的时间，且当前不符合条件，记录当前时间作为起始时间
-              // 但只有在自动对冲运行时才记录
-              if (autoHedgeRunning.value) {
-                config.lastValidOrderbookTime = Date.now()
-              }
-            }
           }
-        }
-        
-      } catch (error) {
-        console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
-        config.retryCount++
-        
-        // 提取错误消息
-        const errorMsg = error.message || String(error)
-        config.errorMessage = `订单薄错误: ${errorMsg}`
-        
-        // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
-        let basicInfo = null
-        try {
-          basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
-          console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
-        } catch (basicError) {
-          console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
-        }
-        
-        // 如果获取到了基本数据，保存到 orderbookData 中
-        if (basicInfo) {
-          config.orderbookData = {
-            ...basicInfo,
-            updateTime: Date.now(),  // 记录更新时间
-            reason: errorMsg  // 保存错误原因
+          
+          // 检查是否还有运行中的任务，如果有且未达到最大任务数，可以继续
+          const remainingRunning = (config.currentHedges || []).filter(h => h.finalStatus === 'running').length
+          const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
+          
+          if (remainingRunning >= maxTasks) {
+            console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
+            // 跳过，但会在循环末尾等待1秒
+          } else {
+            // 可以继续处理
+            await processConfigOrderbook(config, canStartNewHedge)
           }
         } else {
-          // 没有基本数据，清除 orderbookData
-          config.orderbookData = null
+          // 没有运行中的任务，检查任务间隔
+          if (config.lastGroupFinishTime && hedgeTaskInterval.value > 0) {
+            const now = Date.now()
+            const elapsed = (now - config.lastGroupFinishTime) / 1000 / 60  // 转换为分钟
+            const intervalMinutes = hedgeTaskInterval.value
+            
+            if (elapsed < intervalMinutes) {
+              const remaining = Math.ceil((intervalMinutes - elapsed) * 60)
+              console.log(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
+              // 跳过，但会在循环末尾等待1秒
+            } else {
+              // 间隔时间已过，清除记录
+              config.lastGroupFinishTime = null
+              console.log(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
+              // 可以继续处理
+              await processConfigOrderbook(config, canStartNewHedge)
+            }
+          } else {
+            // 测试模式：如果已经请求过一组任务，则不再请求新的任务
+            if (testModeSingleGroup.value && config.hasRequestedGroup) {
+              console.log(`配置 ${config.id} - 测试模式已开启，已请求过一组任务，停止请求新任务`)
+              // 跳过，但会在循环末尾等待1秒
+            } else {
+              // 可以继续处理
+              await processConfigOrderbook(config, canStartNewHedge)
+            }
+          }
         }
-        
-        // 随机1-3秒后重试
-        const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
-        console.log(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
-        
-        setTimeout(() => {
-          config.isFetching = false
-          config.lastRequestTime = Date.now() - 20000  // 立即允许重试
-        }, retryDelay)
-        
-        continue
-      } finally {
-        config.isFetching = false
       }
       
     } catch (error) {
       console.error(`配置 ${config.id} - 处理失败:`, error)
+    } finally {
+      // 无论上一个主题是什么状态，都只间隔1秒就执行下一个主题（最后一个主题不需要等待）
+      if (i < batchConfigs.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
     }
+  }
+}
+
+/**
+ * 处理单个配置的订单薄请求和对冲
+ */
+const processConfigOrderbook = async (config, canStartNewHedge) => {
+  // 检查是否正在请求中
+  if (config.isFetching) {
+    console.log(`配置 ${config.id} - 正在请求订单薄中，跳过`)
+    return
+  }
+  
+  // 检查是否需要请求订单薄
+  const now = Date.now()
+  const shouldFetch = !config.lastRequestTime || (now - config.lastRequestTime) >= 20000  // 20秒
+  
+  if (!shouldFetch) {
+    const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
+    console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
+    return
+  }
+  
+  // 开始请求订单薄
+  config.isFetching = true
+  config.lastRequestTime = now
+  
+  try {
+    console.log(`配置 ${config.id} - 开始请求订单薄...`)
+    
+    // 解析订单薄数据
+    const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+    
+    if (!priceInfo) {
+      throw new Error('解析订单薄数据失败')
+    }
+    
+    // 保存订单薄数据
+    config.orderbookData = priceInfo
+    config.retryCount = 0  // 重置重试次数
+    config.errorMessage = null  // 清除错误信息
+    
+    console.log(`配置 ${config.id} - 订单薄数据:`, {
+      先挂方: priceInfo.firstSide,
+      先挂价格: priceInfo.price1,
+      后挂价格: priceInfo.price2,
+      价差: priceInfo.diff
+    })
+    
+    // 只有在可以开始新对冲时才判断是否执行对冲
+    if (canStartNewHedge) {
+      // 检查是否满足对冲条件
+      const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
+      if (hedgeCheck.canHedge) {
+        console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
+        
+        // 清空无法对冲时间和标记
+        config.noHedgeSince = null
+        config.needsReplacement = false  // 清除需要替换的标记
+        
+        // 记录订单薄符合条件的时间（用于自动替换机制）
+        config.lastValidOrderbookTime = Date.now()
+        
+        // 执行对冲
+        await executeHedgeFromOrderbook(config, priceInfo)
+        
+        // 记录对冲时间
+        config.lastHedgeTime = Date.now()
+      } else {
+        console.log(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
+        
+        // 设置错误信息，显示具体原因
+        config.errorMessage = hedgeCheck.reason
+        
+        // 记录开始无法对冲的时间
+        if (!config.noHedgeSince) {
+          config.noHedgeSince = Date.now()
+        } else {
+          // 检查是否超过5分钟都无法对冲
+          const noHedgeElapsed = (Date.now() - config.noHedgeSince) / 1000 / 60
+          if (noHedgeElapsed >= 5) {
+            config.errorMessage = `已连续 ${Math.floor(noHedgeElapsed)} 分钟无法对冲 (${hedgeCheck.reason})`
+            console.warn(`配置 ${config.id} - ${config.errorMessage}`)
+          }
+        }
+        
+        // // 检查是否超过10分钟都没有符合条件的订单薄（用于自动替换）
+        // if (config.lastValidOrderbookTime) {
+        //   const noValidElapsed = (Date.now() - config.lastValidOrderbookTime) / 1000 / 60
+        //   if (noValidElapsed >= 10) {
+        //     config.needsReplacement = true
+        //     console.warn(`配置 ${config.id} - 已连续 ${Math.floor(noValidElapsed)} 分钟没有符合条件的订单薄，标记为需要替换`)
+        //   }
+        // } else {
+        //   // 如果没有记录过符合条件的时间，且当前不符合条件，记录当前时间作为起始时间
+        //   // 但只有在自动对冲运行时才记录
+        //   if (autoHedgeRunning.value) {
+        //     config.lastValidOrderbookTime = Date.now()
+        //   }
+        // }
+      }
+    }
+    
+  } catch (error) {
+    console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
+    config.retryCount++
+    
+    // 提取错误消息
+    const errorMsg = error.message || String(error)
+    config.errorMessage = `订单薄错误: ${errorMsg}`
+    
+    // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
+    let basicInfo = null
+    try {
+      basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+      console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
+    } catch (basicError) {
+      console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+    }
+    
+    // 如果获取到了基本数据，保存到 orderbookData 中
+    if (basicInfo) {
+      config.orderbookData = {
+        ...basicInfo,
+        updateTime: Date.now(),  // 记录更新时间
+        reason: errorMsg  // 保存错误原因
+      }
+    } else {
+      // 没有基本数据，清除 orderbookData
+      config.orderbookData = null
+    }
+    
+    // 随机1-3秒后重试
+    const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
+    console.log(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
+    
+    setTimeout(() => {
+      config.isFetching = false
+      config.lastRequestTime = Date.now() - 20000  // 立即允许重试
+    }, retryDelay)
+  } finally {
+    config.isFetching = false
   }
 }
 
@@ -7547,7 +7664,16 @@ const parseOrderbookData = async (config, isClose) => {
     // 深度差相关返回值
     depthDiffRange: null,
     finalPrice: null,
-    firstShareReduction: 0
+    firstShareReduction: 0,
+    // YES 和 NO 的买一卖一价格（用于显示）
+    yesBidPrice: 0,
+    yesAskPrice: 0,
+    noBidPrice: 0,
+    noAskPrice: 0,
+    yesBidDepth: 0,
+    yesAskDepth: 0,
+    noBidDepth: 0,
+    noAskDepth: 0
   }
 
   try {
@@ -7632,6 +7758,16 @@ const parseOrderbookData = async (config, isClose) => {
     const yesAskDepth = parseFloat(yesAsks[0].size)
     const noBidDepth = parseFloat(noBids[0].size)
     const noAskDepth = parseFloat(noAsks[0].size)
+    
+    // 保存 YES 和 NO 的价格信息（用于显示）
+    result.yesBidPrice = yesBidPrice
+    result.yesAskPrice = yesAskPrice
+    result.noBidPrice = noBidPrice
+    result.noAskPrice = noAskPrice
+    result.yesBidDepth = yesBidDepth
+    result.yesAskDepth = yesAskDepth
+    result.noBidDepth = noBidDepth
+    result.noAskDepth = noAskDepth
     
     // 使用轮换机制获取先挂方
     // 注意：如果数据不足，这里可能取不到准确值，但我们尽量取
@@ -8068,15 +8204,42 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
       try {
         console.log(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
         
-        // 根据价格选择接口
+        // 根据价格和执行模式开关选择接口
         const orderPriceNum = parseFloat(orderPrice)
         let apiUrl
+        let shouldExecute = false
+        
         if (orderPriceNum < 50) {
-          apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model4Move'
-          console.log(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，使用 model4Move 接口`)
+          // 价格 < 50，应该使用 model4Move（挪仓）
+          if (hedgeMode.enableMove) {
+            apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model4Move'
+            shouldExecute = true
+            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，且挪仓开关已开启，使用 model4Move 接口`)
+          } else {
+            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，但挪仓开关未开启，跳过`)
+            continue
+          }
         } else {
-          apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model5Close'
-          console.log(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，使用 model5Close 接口`)
+          // 价格 >= 50，应该使用 model5Close（平仓）
+          if (hedgeMode.enableClose) {
+            apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model5Close'
+            shouldExecute = true
+            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，且平仓开关已开启，使用 model5Close 接口`)
+          } else {
+            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，但平仓开关未开启，跳过`)
+            continue
+          }
+        }
+        
+        if (!shouldExecute) {
+          continue
+        }
+        
+        // 检查901-927任务数是否满足条件
+        const canTradeBy901To927 = await checkTask901To927Condition()
+        if (!canTradeBy901To927) {
+          console.log(`配置 ${config.id} - 901-927任务数不满足条件，跳过本次对冲任务请求`)
+          continue
         }
         
         const requestData = {
@@ -8199,6 +8362,20 @@ const showHedgeLog = (config) => {
   currentLogConfig.value = config
   hedgeLogs.value = loadHedgeLogs(config.id)
   showHedgeLogDialog.value = true
+}
+
+/**
+ * 打开持仓详情页面
+ */
+const openPositionDetail = (config) => {
+  if (!config || !config.id) {
+    showToast('配置不存在', 'warning')
+    return
+  }
+  
+  const trendingId = config.id
+  const positionDetailUrl = `https://oss.w3id.info/Opanomaly/index.html#/position-detail?id=${trendingId}`
+  window.open(positionDetailUrl, '_blank')
 }
 
 /**
@@ -8955,6 +9132,9 @@ const saveHedgeSettings = () => {
       timePassMin: hedgeMode.timePassMin,
       numberType: hedgeMode.numberType,
       maxIpDelay: hedgeMode.maxIpDelay,
+      // 执行模式开关
+      enableMove: hedgeMode.enableMove,
+      enableClose: hedgeMode.enableClose,
       // 订单薄筛选设置
       minOrderbookDepth: hedgeMode.minOrderbookDepth,
       maxPriceDiff: hedgeMode.maxPriceDiff,
@@ -9000,7 +9180,8 @@ const saveHedgeSettings = () => {
       secondSideDelayMinutes: hedgeMode.secondSideDelayMinutes,
       // 白名单设置
       enableWhitelist: enableWhitelist.value,
-      exportWhitelistInput: exportWhitelistInput.value
+      exportWhitelistInput: exportWhitelistInput.value,
+      showOnlyWhitelist: showOnlyWhitelist.value
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -9023,6 +9204,13 @@ const loadHedgeSettings = () => {
     }
     if (settings.maxIpDelay !== undefined) {
       hedgeMode.maxIpDelay = settings.maxIpDelay
+    }
+    // 执行模式开关
+    if (settings.enableMove !== undefined) {
+      hedgeMode.enableMove = settings.enableMove
+    }
+    if (settings.enableClose !== undefined) {
+      hedgeMode.enableClose = settings.enableClose
     }
     
     // 订单薄筛选设置
@@ -9152,6 +9340,9 @@ const loadHedgeSettings = () => {
     }
     if (settings.exportWhitelistInput !== undefined) {
       exportWhitelistInput.value = settings.exportWhitelistInput
+    }
+    if (settings.showOnlyWhitelist !== undefined) {
+      showOnlyWhitelist.value = settings.showOnlyWhitelist
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -10224,89 +10415,98 @@ const executeHedgeTaskV4 = async (config, hedgeData) => {
     
     console.log(`Type4 - 先挂方任务提交完成，成功: ${firstSideSuccessCount}/${closeLimitList.length}`)
     
-    // 延迟指定时间再提交后挂方任务
+    // 延迟指定时间再提交后挂方任务（使用 setTimeout 非阻塞方式，不阻塞主循环）
     const delayMinutes = hedgeMode.secondSideDelayMinutes || 5
-    console.log(`Type4 - 等待${delayMinutes}分钟后再提交后挂方任务...`)
-    await new Promise(resolve => setTimeout(resolve, delayMinutes * 60 * 1000))
+    console.log(`Type4 - 将在${delayMinutes}分钟后提交后挂方任务（非阻塞，不阻塞主循环）...`)
     
-    // 提交后挂方任务（takerNumberInfo是单个对象）
-    console.log(`Type4 - 开始提交后挂方任务`)
-    
-    let secondSideSuccessCount = 0
-    
-    try {
-      const browserNo = takerNumberInfo.number
-      const share = floorToTwoDecimals(takerNumberInfo.share)
-      // 使用takerNumberInfo.group，如果没有则使用browserToGroupMap
-      let groupNo = '1'
-      if (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '') {
-        groupNo = String(takerNumberInfo.group)
-      } else {
-        groupNo = browserToGroupMap.value[browserNo] || '1'
+    // 使用 setTimeout 而不是 await，这样不会阻塞主循环
+    setTimeout(async () => {
+      // 检查对冲记录是否还在运行中
+      if (hedgeRecord.finalStatus !== 'running') {
+        console.log(`Type4 - 对冲记录状态已变为 ${hedgeRecord.finalStatus}，取消后挂方任务提交`)
+        return
       }
       
-      const taskData = {
-        groupNo: groupNo,
-        numberList: parseInt(browserNo),
-        type: 6,  // 后挂方使用type1
-        trendingId: config.id,
-        exchangeName: 'OP',
-        side: secondSide,  // 根据价格决定买入或卖出
-        psSide: secondPsSide,  // 根据价格决定YES/NO
-        amt: share,
-        price: secondTaskPrice,  // 根据价格决定价格
-        tp3: isFastMode.value ? "1" : "0"
-      }
+      // 提交后挂方任务（takerNumberInfo是单个对象）
+      console.log(`Type4 - 开始提交后挂方任务`)
       
-      const response = await axios.post(
-        'https://sg.bicoin.com.cn/99l/mission/add',
-        taskData,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      )
+      let secondSideSuccessCount = 0
       
-      if (response.data && response.data.data) {
-        const taskData = response.data.data
-        let taskId = null
-        
-        if (typeof taskData === 'object' && taskData !== null) {
-          taskId = taskData.id
-        } else if (typeof taskData === 'number' || typeof taskData === 'string') {
-          taskId = taskData
-        }
-        
-        if (taskId === undefined || taskId === null || typeof taskId === 'object') {
-          console.error(`Type4 - 提交后挂方任务失败: 无效的任务ID`, { taskData, taskId })
+      try {
+        const browserNo = takerNumberInfo.number
+        const share = floorToTwoDecimals(takerNumberInfo.share)
+        // 使用takerNumberInfo.group，如果没有则使用browserToGroupMap
+        let groupNo = '1'
+        if (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '') {
+          groupNo = String(takerNumberInfo.group)
         } else {
-          taskId = String(Number(taskId))
-          console.log(`Type4 - 后挂方任务提交成功，浏览器: ${browserNo}, 任务ID: ${taskId}`)
+          groupNo = browserToGroupMap.value[browserNo] || '1'
+        }
+        
+        const taskData = {
+          groupNo: groupNo,
+          numberList: parseInt(browserNo),
+          type: 6,  // 后挂方使用type1
+          trendingId: config.id,
+          exchangeName: 'OP',
+          side: secondSide,  // 根据价格决定买入或卖出
+          psSide: secondPsSide,  // 根据价格决定YES/NO
+          amt: share,
+          price: secondTaskPrice,  // 根据价格决定价格
+          tp3: isFastMode.value ? "1" : "0"
+        }
+        
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/add',
+          taskData,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (response.data && response.data.data) {
+          const taskData = response.data.data
+          let taskId = null
           
-          // 保存任务信息
-          const taskInfo = {
-            number: browserNo,
-            share: share,
-            taskId: taskId,
-            status: 9,  // 初始状态为9（进行中）
-            groupNo: groupNo,
-            price: secondTaskPrice
+          if (typeof taskData === 'object' && taskData !== null) {
+            taskId = taskData.id
+          } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+            taskId = taskData
           }
           
-          hedgeRecord.secondTasks.push(taskInfo)
-          hedgeRecord.allTaskIds.push(taskId)
-          secondSideSuccessCount++
+          if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+            console.error(`Type4 - 提交后挂方任务失败: 无效的任务ID`, { taskData, taskId })
+          } else {
+            taskId = String(Number(taskId))
+            console.log(`Type4 - 后挂方任务提交成功，浏览器: ${browserNo}, 任务ID: ${taskId}`)
+            
+            // 保存任务信息
+            const taskInfo = {
+              number: browserNo,
+              share: share,
+              taskId: taskId,
+              status: 9,  // 初始状态为9（进行中）
+              groupNo: groupNo,
+              price: secondTaskPrice
+            }
+            
+            hedgeRecord.secondTasks.push(taskInfo)
+            hedgeRecord.allTaskIds.push(taskId)
+            secondSideSuccessCount++
+          }
+        } else if (response.data && response.data.msg) {
+          console.error(`Type4 - 提交后挂方任务失败（浏览器: ${browserNo}）:`, response.data.msg)
         }
-      } else if (response.data && response.data.msg) {
-        console.error(`Type4 - 提交后挂方任务失败（浏览器: ${browserNo}）:`, response.data.msg)
+      } catch (error) {
+        console.error(`Type4 - 提交后挂方任务失败（浏览器: ${takerNumberInfo.number}）:`, error)
       }
-    } catch (error) {
-      console.error(`Type4 - 提交后挂方任务失败（浏览器: ${takerNumberInfo.number}）:`, error)
-    }
+      
+      console.log(`Type4 - 后挂方任务提交完成，成功: ${secondSideSuccessCount}/1`)
+    }, delayMinutes * 60 * 1000)
     
-    console.log(`Type4 - 后挂方任务提交完成，成功: ${secondSideSuccessCount}/1`)
-    console.log(`Type4 - 所有任务提交完成，先挂方: ${firstSideSuccessCount}/${closeLimitList.length}, 后挂方: ${secondSideSuccessCount}/1`)
+    console.log(`Type4 - 所有先挂方任务提交完成，先挂方: ${firstSideSuccessCount}/${closeLimitList.length}`)
     
     // 开始监控所有任务状态（先挂方和后挂方同时监控）
     monitorHedgeStatusV4(config, hedgeRecord)
@@ -12507,6 +12707,23 @@ onUnmounted(() => {
 
 .btn-link:hover {
   background: rgba(52, 199, 89, 0.8);
+  transform: scale(1.05);
+}
+
+.btn-position {
+  padding: 0.3rem 0.6rem;
+  background: rgba(100, 181, 246, 0.6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.btn-position:hover {
+  background: rgba(100, 181, 246, 0.8);
   transform: scale(1.05);
 }
 
