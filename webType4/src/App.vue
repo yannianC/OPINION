@@ -20,6 +20,14 @@
           >
             {{ isFetchingTopics ? '获取中...' : '获取主题' }}
           </button>
+          <button 
+            class="btn-header" 
+            @click="fetchTopicsByRequirement"
+            :disabled="isFetchingByRequirement"
+            style="margin-left: 8px;"
+          >
+            {{ isFetchingByRequirement ? '获取中...' : '根据需求获取主题' }}
+          </button>
         </div>
         <div style="display: inline-flex; align-items: center; gap: 8px; margin-right: 10px;">
           <label style="font-size: 14px;">模式:</label>
@@ -229,6 +237,36 @@
                 />
                 <span style="cursor: pointer;">价差等于0.1时，选择深度小的一方</span>
               </label>
+            </div>
+            <!-- 901-927任务数控制设置 -->
+            <div class="trending-filter" style="background: #fff8e1; padding: 8px 12px; border-radius: 4px; border: 1px solid #ffc107;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.enableTask901To927Check"
+                  :disabled="autoHedgeRunning"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                  @change="saveHedgeSettings"
+                />
+                <span style="cursor: pointer; color: #856404;">901-927任务数大于</span>
+              </label>
+              <input 
+                v-model.number="hedgeMode.task901To927Threshold" 
+                type="number" 
+                class="filter-input" 
+                min="0"
+                placeholder="999"
+                :disabled="autoHedgeRunning || !hedgeMode.enableTask901To927Check"
+                @blur="saveHedgeSettings"
+                style="width: 80px; margin: 0 8px;"
+              />
+              <span style="color: #856404;">时不交易</span>
+              <span 
+                v-if="task901To927Count !== null" 
+                style="margin-left: 12px; font-size: 12px; color: #666; background: #e8e8e8; padding: 2px 8px; border-radius: 4px;"
+              >
+                当前: {{ task901To927Count }}
+              </span>
             </div>
           </div>
           
@@ -592,6 +630,19 @@
                 @blur="saveHedgeSettings"
               />
             </div>
+            <div class="hedge-amount-range">
+              <span class="filter-label">后挂方延迟(分钟):</span>
+              <input 
+                v-model.number="hedgeMode.secondSideDelayMinutes" 
+                type="number" 
+                class="amount-range-input" 
+                min="0"
+                placeholder="5"
+                :disabled="autoHedgeRunning"
+                @blur="saveHedgeSettings"
+                style="width: 60px;"
+              />
+            </div>
             
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
@@ -667,6 +718,36 @@
               />
           </div>
           
+          <!-- 导出和拉黑主题控制 -->
+          <div class="export-blacklist-controls" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px; background: #f5f5f5; border-radius: 8px;">
+            <button 
+              class="btn btn-info btn-sm" 
+              @click="exportTopicIds"
+              title="导出当前显示的所有主题ID到剪贴板"
+            >
+              📤 导出主题
+            </button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="enableBlacklist"
+                  style="width: 16px; height: 16px; cursor: pointer;"
+                />
+                <span style="font-size: 14px;color: #666;">启用拉黑:</span>
+              </label>
+              <input 
+                v-model="exportBlacklistInput"
+                type="text"
+                placeholder="输入要拉黑的主题ID，用逗号分隔"
+                style="width: 400px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+                :disabled="!enableBlacklist"
+              />
+              <span v-if="enableBlacklist && blacklistedTopicIds.size > 0" style="font-size: 12px; color: #666;">
+                (已拉黑 {{ blacklistedTopicIds.size }} 个主题)
+              </span>
+            </div>
+          </div>
           
           <div class="trending-list">
             <div v-if="filteredActiveConfigs.length === 0" class="empty-message">
@@ -681,8 +762,9 @@
                 <div class="trending-header">
                   <div class="trending-name-row">
                     <span class="trending-name">
-                      {{ config.trending }}
+                      <span style="color: #888; font-size: 12px; margin-right: 6px;">[{{ config.id }}]</span>{{ config.trending }}
                     </span>
+             
                     <button 
                       v-if="config.opUrl" 
                       class="btn-link btn-sm" 
@@ -697,6 +779,13 @@
                     <button class="btn-close-task btn-sm" @click="closeConfigTask(config)">
                       ❌ 关闭任务
                     </button>
+                    <span 
+                      v-if="positionDataMap.get(String(config.id))" 
+                      class="position-sum-badge"
+                      style="margin-left: 8px; font-size: 12px; color: #666; background: #f0f0f0; padding: 2px 6px; border-radius: 4px;"
+                    >
+                      YES: {{ positionDataMap.get(String(config.id)).yesSum.toFixed(0) }} / NO: {{ positionDataMap.get(String(config.id)).noSum.toFixed(0) }}
+                    </span>
                     <span v-if="config.errorMessage" class="error-badge">
                       {{ config.errorMessage }}
                     </span>
@@ -2715,6 +2804,20 @@ const selectedNumberType = ref('2')  // 账号类型：1-全部账户, 2-1000个
 const isFastMode = ref(false)  // 模式开关：false=正常模式(tp3=0), true=快速模式(tp3=1)
 const yesCountThreshold = ref(0)  // yes数量阈值
 const isFetchingTopics = ref(false)  // 是否正在获取主题
+const isFetchingByRequirement = ref(false)  // 是否正在根据需求获取主题
+const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据 { configId: { yesSum, noSum } }
+const idToTrendingMap = ref(new Map())  // id -> trending 映射
+
+// 导出和拉黑主题相关
+const exportBlacklistInput = ref('')  // 拉黑主题输入框
+const enableBlacklist = ref(false)    // 是否启用拉黑
+const blacklistedTopicIds = computed(() => {
+  if (!exportBlacklistInput.value) return new Set()
+  return new Set(exportBlacklistInput.value.split(',').map(id => id.trim()).filter(id => id))
+})
+
+// 901-927任务数相关
+const task901To927Count = ref(null)  // 当前901-927任务数
 
 // 分组执行相关
 const groupExecution = reactive({
@@ -2836,7 +2939,12 @@ const hedgeMode = reactive({
   priceVolatility2To15Min: 1,  // 深度差阈值2-阈值1的价格波动最小值%
   priceVolatility2To15Max: 10, // 深度差阈值2-阈值1的价格波动最大值%
   priceVolatility02To2Min: 1,  // 深度差阈值3-阈值2的价格波动最小值%
-  priceVolatility02To2Max: 10  // 深度差阈值3-阈值2的价格波动最大值%
+  priceVolatility02To2Max: 10,  // 深度差阈值3-阈值2的价格波动最大值%
+  // 901-927任务数控制设置
+  task901To927Threshold: 999,  // 901-927任务数阈值，大于此值时不交易
+  enableTask901To927Check: false,  // 是否启用901-927任务数检查
+  // 后挂方延迟设置
+  secondSideDelayMinutes: 5  // 先挂方提交后延迟多少分钟再提交后挂方，默认5分钟
 })
 
 // 每个主题的上一次先挂方记录（用于轮换）
@@ -3395,6 +3503,9 @@ const fetchExchangeConfig = async () => {
       
       // 更新活动配置列表
       updateActiveConfigs()
+      
+      // 加载持仓数据用于显示
+      loadPositionDataForDisplay()
     } else {
       console.warn(`获取配置失败: ${response.data?.msg || '未知错误'}`)
     }
@@ -3714,6 +3825,266 @@ const fetchTopicsByYesCount = async () => {
 }
 
 /**
+ * 加载持仓数据用于显示（从 getAllPosSnap 获取）
+ * 筛选出 yes 或 no 数量小于 singleCloseAmtMax 的项，分别累加
+ */
+const loadPositionDataForDisplay = async () => {
+  try {
+    console.log('[持仓数据] 开始加载持仓数据用于显示...')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnap')
+    
+    if (response.data && response.data.data && response.data.data.list) {
+      const data = response.data.data.list
+      console.log(`[持仓数据] 获取到 ${data.length} 条数据，开始解析...`)
+      
+      // 过滤掉 amt < 1 的数据
+      const filteredData = data.filter(row => {
+        const amt = parseFloat(row.amt) || 0
+        return amt >= 1
+      })
+      console.log(`[持仓数据] 过滤后剩余 ${filteredData.length} 条数据`)
+      
+      // 使用 Map 存储每个事件的持仓数据
+      // 格式: { configId: { yesItems: [], noItems: [] } }
+      const eventMap = new Map()
+      
+      // 处理每条数据
+      for (const row of filteredData) {
+        // 从 trendingKey 中提取 id（格式：id::方向）
+        if (!row.trendingKey) {
+          continue
+        }
+        
+        const parts = row.trendingKey.split('::')
+        if (parts.length < 2) {
+          continue
+        }
+        
+        const configId = parts[0].trim()
+        const direction = parts[1].trim()
+        
+        // 初始化事件数据
+        if (!eventMap.has(configId)) {
+          eventMap.set(configId, {
+            yesItems: [],
+            noItems: []
+          })
+        }
+        
+        const event = eventMap.get(configId)
+        const amount = Math.abs(parseFloat(row.amt) || 0)
+        
+        // 根据 outCome 判断方向（YES/NO）
+        const outComeUpper = (row.outCome || direction).toUpperCase()
+        if (outComeUpper === 'YES') {
+          event.yesItems.push(amount)
+        } else if (outComeUpper === 'NO') {
+          event.noItems.push(amount)
+        }
+      }
+      
+      // 计算每个事件的筛选后 yes/no 总和
+      const singleCloseAmtMax = hedgeMode.singleCloseAmtMax || 500
+      const newPositionDataMap = new Map()
+      
+      for (const [configId, event] of eventMap) {
+        // 筛选出小于 singleCloseAmtMax 的项
+        const filteredYesItems = event.yesItems.filter(amt => amt < singleCloseAmtMax)
+        const filteredNoItems = event.noItems.filter(amt => amt < singleCloseAmtMax)
+        
+        // 分别累加
+        const yesSum = filteredYesItems.reduce((sum, amt) => sum + amt, 0)
+        const noSum = filteredNoItems.reduce((sum, amt) => sum + amt, 0)
+        
+        // 只有当 yesSum 或 noSum > 0 时才存储
+        if (yesSum > 0 || noSum > 0) {
+          newPositionDataMap.set(configId, { yesSum, noSum })
+        }
+      }
+      
+      // 更新 positionDataMap
+      positionDataMap.value = newPositionDataMap
+      console.log(`[持仓数据] 持仓数据加载完成，共 ${newPositionDataMap.size} 个事件`)
+    } else {
+      console.warn('[持仓数据] 未获取到持仓数据')
+    }
+  } catch (error) {
+    console.error('[持仓数据] 加载持仓数据失败:', error)
+  }
+}
+
+/**
+ * 根据需求获取主题（基于持仓数据筛选）
+ * 筛选条件：
+ * 1. yes 或 no 的单个仓位数量小于 singleCloseAmtMax
+ * 2. 筛选后的 yesSum 和 noSum 都大于 closeAmtSumMin
+ */
+const fetchTopicsByRequirement = async () => {
+  isFetchingByRequirement.value = true
+  
+  try {
+    showToast('正在获取持仓数据，请稍候...', 'info')
+    
+    // 1. 请求 getAllPosSnap API
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnap')
+    
+    if (!response.data || !response.data.data || !response.data.data.list) {
+      throw new Error('获取持仓数据失败：未找到有效的数据')
+    }
+    
+    const data = response.data.data.list
+    console.log(`[根据需求获取主题] 获取到 ${data.length} 条持仓数据`)
+    
+    // 2. 过滤掉 amt < 1 的数据
+    const filteredData = data.filter(row => {
+      const amt = parseFloat(row.amt) || 0
+      return amt >= 1
+    })
+    console.log(`[根据需求获取主题] 过滤后剩余 ${filteredData.length} 条数据`)
+    
+    // 3. 按事件分组
+    const eventMap = new Map()
+    
+    for (const row of filteredData) {
+      if (!row.trendingKey) continue
+      
+      const parts = row.trendingKey.split('::')
+      if (parts.length < 2) continue
+      
+      const configId = parts[0].trim()
+      const direction = parts[1].trim()
+      
+      if (!eventMap.has(configId)) {
+        eventMap.set(configId, { yesItems: [], noItems: [] })
+      }
+      
+      const event = eventMap.get(configId)
+      const amount = Math.abs(parseFloat(row.amt) || 0)
+      const outComeUpper = (row.outCome || direction).toUpperCase()
+      
+      if (outComeUpper === 'YES') {
+        event.yesItems.push(amount)
+      } else if (outComeUpper === 'NO') {
+        event.noItems.push(amount)
+      }
+    }
+    
+    // 4. 筛选符合条件的事件
+    const singleCloseAmtMax = hedgeMode.singleCloseAmtMax || 500
+    const closeAmtSumMin = hedgeMode.closeAmtSumMin || 0
+    
+    const qualifiedEvents = []
+    const newPositionDataMap = new Map()
+    
+    for (const [configId, event] of eventMap) {
+      // 筛选出小于 singleCloseAmtMax 的项
+      const filteredYesItems = event.yesItems.filter(amt => amt < singleCloseAmtMax)
+      const filteredNoItems = event.noItems.filter(amt => amt < singleCloseAmtMax)
+      
+      // 分别累加
+      const yesSum = filteredYesItems.reduce((sum, amt) => sum + amt, 0)
+      const noSum = filteredNoItems.reduce((sum, amt) => sum + amt, 0)
+      
+      // 检查是否满足 closeAmtSumMin 条件
+      if (yesSum > closeAmtSumMin && noSum > closeAmtSumMin) {
+        qualifiedEvents.push({ configId, yesSum, noSum })
+        newPositionDataMap.set(configId, { yesSum, noSum })
+      }
+    }
+    
+    console.log(`[根据需求获取主题] 找到 ${qualifiedEvents.length} 个符合条件的事件`)
+    
+    if (qualifiedEvents.length === 0) {
+      showToast(`没有找到符合条件的主题（yes和no的和都需要大于${closeAmtSumMin}）`, 'warning')
+      return
+    }
+    
+    // 5. 在 configList 中查找匹配的配置
+    const matchedConfigs = []
+    for (const event of qualifiedEvents) {
+      const matchedConfig = configList.value.find(c => String(c.id) === event.configId)
+      if (matchedConfig) {
+        matchedConfigs.push({
+          config: matchedConfig,
+          yesSum: event.yesSum,
+          noSum: event.noSum
+        })
+      }
+    }
+    
+    if (matchedConfigs.length === 0) {
+      showToast(`找到 ${qualifiedEvents.length} 个符合条件的事件，但在配置中未找到匹配项`, 'warning')
+      return
+    }
+    
+    console.log(`[根据需求获取主题] 找到 ${matchedConfigs.length} 个匹配的配置`)
+    
+    // 6. 批量更新配置：启用
+    const updateData = {
+      list: matchedConfigs.map(m => ({
+        id: m.config.id,
+        trending: m.config.trending,
+        trendingPart1: m.config.trendingPart1 || null,
+        trendingPart2: m.config.trendingPart2 || null,
+        trendingPart3: m.config.trendingPart3 || null,
+        opUrl: m.config.opUrl || '',
+        polyUrl: m.config.polyUrl || '',
+        opTopicId: m.config.opTopicId || '',
+        weight: m.config.weight || 0,
+        isOpen: 1  // 启用
+      }))
+    }
+    
+    // 提交到服务器
+    const updateResponse = await axios.post(
+      'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
+      updateData,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (updateResponse.data && updateResponse.data.code === 0) {
+      // 更新本地显示状态
+      const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
+      matchedConfigs.forEach(m => {
+        visibleData[m.config.id] = true
+      })
+      localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
+      
+      // 更新本地配置列表
+      matchedConfigs.forEach(m => {
+        const configInList = configList.value.find(c => c.id === m.config.id)
+        if (configInList) {
+          configInList.isOpen = 1
+          configInList.enabled = true
+        }
+      })
+      
+      // 更新 positionDataMap
+      positionDataMap.value = newPositionDataMap
+      
+      showToast(`成功添加 ${matchedConfigs.length} 个主题到对冲列表`, 'success')
+      
+      // 异步刷新配置列表
+      fetchExchangeConfig().catch(err => {
+        console.error('刷新配置列表失败:', err)
+      })
+    } else {
+      throw new Error(updateResponse.data?.msg || '更新配置失败')
+    }
+    
+  } catch (error) {
+    console.error('根据需求获取主题失败:', error)
+    showToast('根据需求获取主题失败: ' + (error.message || '网络错误'), 'error')
+  } finally {
+    isFetchingByRequirement.value = false
+  }
+}
+
+/**
  * 获取任务列表
  */
 const fetchMissionList = async () => {
@@ -3961,6 +4332,89 @@ const showToast = (message, type = 'info') => {
   setTimeout(() => {
     toast.show = false
   }, 3000)
+}
+
+/**
+ * 导出当前显示的主题ID到剪贴板
+ */
+const exportTopicIds = async () => {
+  try {
+    const ids = filteredActiveConfigs.value.map(config => String(config.id))
+    if (ids.length === 0) {
+      showToast('没有可导出的主题', 'warning')
+      return
+    }
+    const idsText = ids.join(',')
+    await navigator.clipboard.writeText(idsText)
+    showToast(`已导出 ${ids.length} 个主题ID到剪贴板`, 'success')
+  } catch (error) {
+    console.error('导出主题ID失败:', error)
+    showToast('导出失败: ' + (error.message || '无法访问剪贴板'), 'error')
+  }
+}
+
+/**
+ * 获取901-927区间的任务数
+ * 只统计groupNo在901-927之间的任务
+ */
+const getTask901To927Count = async () => {
+  try {
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/hedge/groupStatusV2')
+    const result = response.data
+
+    if (result.code === 0 && result.data) {
+      const detail = result.data.detail || {}
+      let totalSum = 0
+
+      // 遍历901-927区间的组
+      for (let groupId = 901; groupId <= 927; groupId++) {
+        const groupIdStr = String(groupId)
+        const browserList = detail[groupIdStr] || detail[groupId] || []
+        totalSum += browserList.length
+      }
+
+      // 更新显示的值
+      task901To927Count.value = totalSum
+      return totalSum
+    } else {
+      console.error('获取901-927任务数失败:', result.msg || '无数据')
+      return null
+    }
+  } catch (error) {
+    console.error('获取901-927任务数异常:', error)
+    return null
+  }
+}
+
+/**
+ * 检查901-927任务数是否满足交易条件
+ * @returns {Promise<boolean>} true=满足条件，可以交易；false=不满足条件，不能交易
+ */
+const checkTask901To927Condition = async () => {
+  // 如果未启用检查，直接返回true
+  if (!hedgeMode.enableTask901To927Check) {
+    return true
+  }
+
+  const count = await getTask901To927Count()
+  
+  if (count === null) {
+    // 获取失败，允许继续执行
+    console.log('获取901-927任务数失败，允许继续执行')
+    return true
+  }
+  
+  const threshold = hedgeMode.task901To927Threshold
+  
+  // 大于阈值时不交易
+  const canTrade = count <= threshold
+  console.log(`901-927任务数检查: 当前任务数=${count}, 阈值=${threshold}, ${canTrade ? '可以交易' : '不能交易'}`)
+  
+  if (!canTrade) {
+    showToast(`901-927任务数(${count})大于阈值(${threshold})，暂停交易`, 'warning')
+  }
+  
+  return canTrade
 }
 
 /**
@@ -6488,6 +6942,13 @@ const moveToNextBatch = () => {
 const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   console.log(`执行批次任务，包含 ${batchConfigs.length} 个主题`)
   
+  // 检查901-927任务数是否满足条件
+  const canTradeBy901To927 = await checkTask901To927Condition()
+  if (!canTradeBy901To927) {
+    console.log('901-927任务数不满足条件，跳过本次任务分配')
+    return
+  }
+  
   // 检查是否可以下发新的对冲任务
   const canStartNewHedge = !(hedgeStatus.amtSum >= hedgeStatus.amt || hedgeStatus.amt === 0)
   if (!canStartNewHedge) {
@@ -6502,6 +6963,12 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   
   for (const config of batchConfigs) {
     try {
+      // 检查是否在拉黑列表中
+      if (enableBlacklist.value && blacklistedTopicIds.value.has(String(config.id))) {
+        console.log(`主题 ${config.trending} (ID: ${config.id}) 在拉黑列表中，跳过交易`)
+        continue
+      }
+      
       // 检查该主题是否正在执行对冲
       const currentHedges = config.currentHedges || []
       const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
@@ -8510,7 +8977,12 @@ const saveHedgeSettings = () => {
       randomGetCount: randomGetCount.value,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
-      isFastMode: isFastMode.value
+      isFastMode: isFastMode.value,
+      // 901-927任务数控制设置
+      task901To927Threshold: hedgeMode.task901To927Threshold,
+      enableTask901To927Check: hedgeMode.enableTask901To927Check,
+      // 后挂方延迟设置
+      secondSideDelayMinutes: hedgeMode.secondSideDelayMinutes
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -8641,6 +9113,19 @@ const loadHedgeSettings = () => {
     }
     if (settings.isFastMode !== undefined) {
       isFastMode.value = settings.isFastMode
+    }
+    
+    // 901-927任务数控制设置
+    if (settings.task901To927Threshold !== undefined) {
+      hedgeMode.task901To927Threshold = settings.task901To927Threshold
+    }
+    if (settings.enableTask901To927Check !== undefined) {
+      hedgeMode.enableTask901To927Check = settings.enableTask901To927Check
+    }
+    
+    // 后挂方延迟设置
+    if (settings.secondSideDelayMinutes !== undefined) {
+      hedgeMode.secondSideDelayMinutes = settings.secondSideDelayMinutes
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -9713,7 +10198,12 @@ const executeHedgeTaskV4 = async (config, hedgeData) => {
     
     console.log(`Type4 - 先挂方任务提交完成，成功: ${firstSideSuccessCount}/${closeLimitList.length}`)
     
-    // 立即提交后挂方任务（takerNumberInfo是单个对象）
+    // 延迟指定时间再提交后挂方任务
+    const delayMinutes = hedgeMode.secondSideDelayMinutes || 5
+    console.log(`Type4 - 等待${delayMinutes}分钟后再提交后挂方任务...`)
+    await new Promise(resolve => setTimeout(resolve, delayMinutes * 60 * 1000))
+    
+    // 提交后挂方任务（takerNumberInfo是单个对象）
     console.log(`Type4 - 开始提交后挂方任务`)
     
     let secondSideSuccessCount = 0

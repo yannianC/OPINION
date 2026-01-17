@@ -1109,11 +1109,12 @@
                 <option :value="1">模式1</option>
                 <option :value="2">模式2</option>
                 <option :value="3">模式3</option>
+                <option :value="9">模式9</option>
               </select>
             </div>
             
             <!-- 模式一开仓专属设置 - 仅在开仓且模式一时显示 -->
-            <template v-if="!hedgeMode.isClose && hedgeMode.hedgeMode === 1">
+            <template v-if="!hedgeMode.isClose && (hedgeMode.hedgeMode === 1 || hedgeMode.hedgeMode === 9)">
               <div class="hedge-amount-range">
                 <span class="filter-label">优先开仓区间:</span>
                 <input 
@@ -1127,6 +1128,42 @@
               </div>
               
 
+            </template>
+            
+            <!-- 模式9专属设置 - 仅在选择模式9时显示 -->
+            <template v-if="hedgeMode.hedgeMode === 9">
+              <div class="mode9-settings-group">
+                <span class="mode9-label">小账户个数:</span>
+                <input 
+                  v-model.number="hedgeMode.smallAccAmt" 
+                  type="number" 
+                  class="mode9-input" 
+                  min="0"
+                  placeholder="2"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+                <span class="mode9-label">小账户持仓数量:</span>
+                <input 
+                  v-model.number="hedgeMode.smallAccPosMinAmt" 
+                  type="number" 
+                  class="mode9-input" 
+                  min="0"
+                  placeholder="0"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+                <span class="mode9-label-small">~</span>
+                <input 
+                  v-model.number="hedgeMode.smallAccPosMaxAmt" 
+                  type="number" 
+                  class="mode9-input" 
+                  min="0"
+                  placeholder="500"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
+              </div>
             </template>
             
             <button 
@@ -1290,6 +1327,37 @@
             </div>
           </div>
           
+          <!-- 导出和拉黑主题控制 -->
+          <div class="export-blacklist-controls" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px;">
+            <button 
+              class="btn btn-info btn-sm" 
+              @click="exportTopicIds"
+              title="导出当前显示的所有主题ID到剪贴板"
+            >
+              📤 导出主题
+            </button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="enableBlacklist"
+                  style="width: 16px; height: 16px; cursor: pointer;"
+                />
+                <span style="font-size: 14px; color: rgba(255,255,255,0.8);">启用拉黑:</span>
+              </label>
+              <input 
+                v-model="exportBlacklistInput"
+                type="text"
+                placeholder="输入要拉黑的主题ID，用逗号分隔"
+                style="width: 400px; padding: 6px 10px; border: 1px solid #555; border-radius: 4px; font-size: 14px; background: rgba(255,255,255,0.1); color: #fff;"
+                :disabled="!enableBlacklist"
+              />
+              <span v-if="enableBlacklist && blacklistedTopicIds.size > 0" style="font-size: 12px; color: rgba(255,255,255,0.6);">
+                (已拉黑 {{ blacklistedTopicIds.size }} 个主题)
+              </span>
+            </div>
+          </div>
+          
           <div class="trending-list">
             <div v-if="filteredActiveConfigs.length === 0" class="empty-message">
               {{ activeConfigs.length === 0 ? '暂无启用的主题配置' : '没有匹配的主题' }}
@@ -1303,7 +1371,7 @@
                 <div class="trending-header">
                   <div class="trending-name-row">
                     <span class="trending-name">
-                      {{ config.trending }}
+                      <span style="color: rgba(255,255,255,0.5); font-size: 12px; margin-right: 6px;">[{{ config.id }}]</span>{{ config.trending }}
                     </span>
                     <button 
                       v-if="config.opUrl" 
@@ -1497,10 +1565,11 @@
                             {{ getHedgeStatusText(hedge) }}
                           </span>
                           <span v-if="hedge.isMode2" class="hedge-mode-badge">模式2</span>
+                          <span v-if="hedge.isModeV9" class="hedge-mode-badge mode9-badge">模式9</span>
                         </div>
                         
                         <!-- 模式1：原有展示方式 -->
-                        <template v-if="!hedge.isMode2">
+                        <template v-if="!hedge.isMode2 && !hedge.isModeV9">
                           <!-- 任务一 -->
                           <div class="hedge-task-section">
                             <div class="task-title">
@@ -1622,8 +1691,87 @@
                           </div>
                         </template>
                         
+                        <!-- 模式9：多对一展示方式（多个先挂方 + 1个后挂方） -->
+                        <template v-else-if="hedge.isModeV9">
+                          <!-- 先挂方任务列表 -->
+                          <div class="hedge-task-section mode9-first-tasks">
+                            <div class="task-title mode9-title">
+                              先挂方 - {{ hedge.firstSide }} ({{ hedge.closeTasks ? hedge.closeTasks.length : 0 }}个)
+                            </div>
+                            <div v-if="hedge.closeTasks && hedge.closeTasks.length > 0">
+                              <div v-for="(task, taskIndex) in hedge.closeTasks" :key="'close-' + taskIndex" class="hedge-task-item mode9-task-item">
+                                <div class="hedge-task-details-grid">
+                                  <div class="hedge-detail-row">
+                                    <span>任务ID:</span>
+                                    <span :class="getTaskStatusClass(task.status)">
+                                      {{ task.taskId || '待提交' }}
+                                      <span v-if="task.taskId === hedge.maxShareTaskId" class="max-share-badge">主</span>
+                                    </span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>浏览器:</span>
+                                    <span>{{ task.number }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>电脑组:</span>
+                                    <span>{{ task.groupNo }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>类型:</span>
+                                    <span :class="task.type === 5 ? 'type-main' : 'type-sub'">
+                                      {{ task.type === 5 ? 'type5(主)' : 'type9(从)' }}
+                                    </span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>数量:</span>
+                                    <span>{{ task.share }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-else class="no-data">暂无先挂方任务</div>
+                          </div>
+                          
+                          <!-- 后挂方任务 -->
+                          <div class="hedge-task-section mode9-second-task">
+                            <div class="task-title mode9-title-second">
+                              后挂方 - {{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }} ({{ hedge.secondTasks ? hedge.secondTasks.length : 0 }}个)
+                            </div>
+                            <div v-if="hedge.secondTasks && hedge.secondTasks.length > 0">
+                              <div v-for="(task, taskIndex) in hedge.secondTasks" :key="'second-' + taskIndex" class="hedge-task-item mode9-task-item">
+                                <div class="hedge-task-details-grid">
+                                  <div class="hedge-detail-row">
+                                    <span>任务ID:</span>
+                                    <span :class="getTaskStatusClass(task.status)">
+                                      {{ task.taskId || '待提交' }}
+                                    </span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>浏览器:</span>
+                                    <span>{{ task.number }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>电脑组:</span>
+                                    <span>{{ task.groupNo }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>数量:</span>
+                                    <span>{{ task.share }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-else class="no-data">暂无后挂方任务</div>
+                          </div>
+                          
+                          <!-- 所有任务ID汇总 -->
+                          <div v-if="hedge.allTaskIds && hedge.allTaskIds.length > 0" class="hedge-summary">
+                            <span>任务ID组: {{ hedge.allTaskIds.join(', ') }}</span>
+                          </div>
+                        </template>
+                        
                         <!-- 模式2：多任务展示方式 -->
-                        <template v-else>
+                        <template v-else-if="hedge.isMode2">
                           <!-- YES任务列表：优先显示已提交的任务，如果没有则显示计划任务 -->
                           <div v-if="(hedge.yesTasks && hedge.yesTasks.length > 0) || (hedge.yesList && hedge.yesList.length > 0)" class="hedge-task-section">
                             <div class="task-title">
@@ -2748,9 +2896,15 @@
                 </span>
                 <span class="compact-log-mode">{{ log.isClose ? '平仓' : '开仓' }}</span>
                 <span v-if="log.isMode2" class="compact-log-mode-badge">模式2</span>
+                <span v-if="log.isModeV9" class="compact-log-mode-badge mode9-log-badge">模式9</span>
                 <span class="compact-log-info">
-                  <template v-if="!log.isMode2">
+                  <template v-if="!log.isMode2 && !log.isModeV9">
                     价格:{{ log.price }} | 数量:{{ log.share }} | 先挂:{{ log.firstSide }}
+                  </template>
+                  <template v-else-if="log.isModeV9">
+                    价格:{{ log.price }} | 先挂:{{ log.firstSide }} | 
+                    先挂方:{{ log.closeTasks ? log.closeTasks.length : 0 }}个 | 
+                    后挂方:{{ log.secondTasks ? log.secondTasks.length : 0 }}个
                   </template>
                   <template v-else>
                     价格:{{ log.price }} | 先挂:{{ log.firstSide }} | 
@@ -2763,7 +2917,7 @@
               </div>
               <div class="compact-log-details">
                 <!-- 模式1：原有展示方式 -->
-                <template v-if="!log.isMode2">
+                <template v-if="!log.isMode2 && !log.isModeV9">
                   <div class="compact-task-row">
                     <span class="task-label">YES:</span>
                     <span class="task-info">
@@ -2914,8 +3068,49 @@
                   </div>
                 </template>
                 
+                <!-- 模式9：多对一展示方式 -->
+                <template v-else-if="log.isModeV9">
+                  <!-- 先挂方任务列表 -->
+                  <div v-if="log.closeTasks && log.closeTasks.length > 0" class="compact-task-row mode9-log-section">
+                    <span class="task-label mode9-label">先挂方 - {{ log.firstSide }} ({{ log.closeTasks.length }}个):</span>
+                    <span class="task-info">
+                      <template v-for="(task, taskIndex) in log.closeTasks" :key="'close-log-' + taskIndex">
+                        <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                        浏览器{{ task.number }} | 
+                        任务{{ task.taskId || '-' }}
+                        <span v-if="task.type === 5" class="type-main">(主)</span>
+                        <span v-else class="type-sub">(从)</span> | 
+                        数量{{ task.share }} | 
+                        <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
+                        <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
+                        <span v-if="taskIndex < log.closeTasks.length - 1">; </span>
+                      </template>
+                    </span>
+                  </div>
+                  <!-- 后挂方任务列表 -->
+                  <div v-if="log.secondTasks && log.secondTasks.length > 0" class="compact-task-row mode9-log-section-second">
+                    <span class="task-label mode9-label-second">后挂方 - {{ log.firstSide === 'YES' ? 'NO' : 'YES' }} ({{ log.secondTasks.length }}个):</span>
+                    <span class="task-info">
+                      <template v-for="(task, taskIndex) in log.secondTasks" :key="'second-log-' + taskIndex">
+                        <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                        浏览器{{ task.number }} | 
+                        任务{{ task.taskId || '-' }} | 
+                        数量{{ task.share }} | 
+                        <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
+                        <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
+                        <span v-if="taskIndex < log.secondTasks.length - 1">; </span>
+                      </template>
+                    </span>
+                  </div>
+                  <!-- 任务ID汇总 -->
+                  <div v-if="log.allTaskIds && log.allTaskIds.length > 0" class="compact-task-row">
+                    <span class="task-label">任务ID组:</span>
+                    <span class="task-info">{{ log.allTaskIds.join(', ') }}</span>
+                  </div>
+                </template>
+                
                 <!-- 模式2：多任务展示方式 -->
-                <template v-else>
+                <template v-else-if="log.isMode2">
                   <!-- YES任务：优先显示已提交的任务，如果没有则显示计划任务 -->
                   <div v-if="(log.yesTasks && log.yesTasks.length > 0) || (log.yesList && log.yesList.length > 0)" class="compact-task-row">
                     <span class="task-label">YES ({{ (log.yesTasks && log.yesTasks.length > 0) ? log.yesTasks.length : (log.yesList ? log.yesList.length : 0) }}个):</span>
@@ -3310,6 +3505,14 @@ const isFastMode = ref(false)  // 模式开关：false=正常模式(tp3=0), true
 const yesCountThreshold = ref(0)  // yes数量阈值
 const isFetchingTopics = ref(false)  // 是否正在获取主题
 
+// 导出和拉黑主题相关
+const exportBlacklistInput = ref('')  // 拉黑主题输入框
+const enableBlacklist = ref(false)    // 是否启用拉黑
+const blacklistedTopicIds = computed(() => {
+  if (!exportBlacklistInput.value) return new Set()
+  return new Set(exportBlacklistInput.value.split(',').map(id => id.trim()).filter(id => id))
+})
+
 // 分组执行相关
 const groupExecution = reactive({
   isRunning: false,
@@ -3493,7 +3696,11 @@ const hedgeMode = reactive({
   totalTaskCountThreshold: 999,  // 总任务数阈值
   openOrderCancelHours: 72,  // 挂单超过XX小时撤单（默认72小时）
   enableSecondPricePlusMinus01: false,  // 是否开启后挂方价格+-0.1功能，开启后在模式1的后挂方任务中传递tp10="1"
-  taskSyncPollingInterval: 5  // 任务同步的轮询间隔（秒），默认5秒，作为tp11传递
+  taskSyncPollingInterval: 5,  // 任务同步的轮询间隔（秒），默认5秒，作为tp11传递
+  // 模式9专属设置
+  smallAccAmt: 2,  // 小账户数量，默认2
+  smallAccPosMinAmt: 0,  // 小账户最少持仓，默认0
+  smallAccPosMaxAmt: 500  // 小账户最多持仓，默认500
 })
 
 // 交易费查询
@@ -5429,6 +5636,25 @@ const showToast = (message, type = 'info') => {
   setTimeout(() => {
     toast.show = false
   }, 3000)
+}
+
+/**
+ * 导出当前显示的主题ID到剪贴板
+ */
+const exportTopicIds = async () => {
+  try {
+    const ids = filteredActiveConfigs.value.map(config => String(config.id))
+    if (ids.length === 0) {
+      showToast('没有可导出的主题', 'warning')
+      return
+    }
+    const idsText = ids.join(',')
+    await navigator.clipboard.writeText(idsText)
+    showToast(`已导出 ${ids.length} 个主题ID到剪贴板`, 'success')
+  } catch (error) {
+    console.error('导出主题ID失败:', error)
+    showToast('导出失败: ' + (error.message || '无法访问剪贴板'), 'error')
+  }
 }
 
 /**
@@ -8113,6 +8339,12 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
     }
     
     try {
+      // 检查是否在拉黑列表中
+      if (enableBlacklist.value && blacklistedTopicIds.value.has(String(config.id))) {
+        console.log(`主题 ${config.trending} (ID: ${config.id}) 在拉黑列表中，跳过交易`)
+        continue
+      }
+      
       // 检查该主题是否正在执行对冲
       const currentHedges = config.currentHedges || []
       const runningHedges = currentHedges.filter(h => h.finalStatus === 'running')
@@ -8257,7 +8489,9 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
       
       // 检查加权时间和yes持仓组合条件（不交易）- 适用于开仓和平仓模式
       // 如果加权时间满足条件 且 yes持仓满足条件，则不交易
-      if (hedgeMode.weightedTimeHourOpen > 0 && hedgeMode.weightedTimeYesPositionThreshold > 0) {
+      // 只要两个阈值有值（包括0），就进行检查
+      if (hedgeMode.weightedTimeHourOpen !== null && hedgeMode.weightedTimeHourOpen !== undefined && hedgeMode.weightedTimeHourOpen !== '' &&
+          hedgeMode.weightedTimeYesPositionThreshold !== null && hedgeMode.weightedTimeYesPositionThreshold !== undefined && hedgeMode.weightedTimeYesPositionThreshold !== '') {
         const weightedAvgTime = config.weightedAvgTime || 0
         const weightedTimeHour = weightedAvgTime / 3600000  // 转换为小时
         const thresholdTimeMs = hedgeMode.weightedTimeHourOpen * 3600000  // 小时转毫秒
@@ -9264,36 +9498,10 @@ const parseOrderbookData = async (config, isClose) => {
       }
     }
     
-    // === 新增判断：先挂方价格区间检查 ===
-    const priceMin = hedgeMode.priceRangeMin
-    const priceMax = hedgeMode.priceRangeMax
-    const avgPrice = (price1 + price2) / 2  // 买一价和卖一价的平均值
-    
-    // 平仓和开仓模式都需要检查平均价格是否在区间内（大于最小值且小于最大值）
-    if (isClose) {
-      // 平仓模式：检查平均价格是否在区间内
-      console.log(`平仓模式 - 平均价格: ${avgPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
-    } else {
-      // 开仓模式：检查平均价格是否在区间内
-      console.log(`开仓模式 - 平均价格: ${avgPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
-    }
-    
-    // 统一检查：平均价格必须在区间内
-    if (avgPrice <= priceMin) {
-      const mode = isClose ? '平仓' : '开仓'
-      throw new Error(`${mode}模式，平均价格 ${avgPrice.toFixed(2)} 不大于最小价格 ${priceMin}`)
-    }
-    
-    if (avgPrice >= priceMax) {
-      const mode = isClose ? '平仓' : '开仓'
-      throw new Error(`${mode}模式，平均价格 ${avgPrice.toFixed(2)} 不小于最大价格 ${priceMax}`)
-    }
-    
     // === 深度差计算和价格计算逻辑 ===
     // 计算深度差（卖一减去买一的绝对值）
-    const depthDiff = Math.abs(price2 - price1)
-    console.log(`深度差: ${depthDiff.toFixed(2)}`)
-    
+    let depthDiff = Math.abs(price2 - price1)
+    let ndepthDiff = depthDiff.toFixed(2)
     // 获取原始数据的买一和卖一价格（不剔除挂单）
     const firstBidsRaw = firstSide === 'YES' ? yesBidsRaw : noBidsRaw
     const firstAsksRaw = firstSide === 'YES' ? yesAsksRaw : noAsksRaw
@@ -9334,7 +9542,7 @@ const parseOrderbookData = async (config, isClose) => {
       return Math.max(0.1, adjustment)
     }
     
-    if (depthDiff > threshold1) {
+    if (ndepthDiff > threshold1) {
       // 深度差 > 阈值1：检查开关是否打开
       if (!hedgeMode.enableDepthDiffParamsGt15) {
         throw new Error(`深度差>${threshold1}时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
@@ -9371,7 +9579,7 @@ const parseOrderbookData = async (config, isClose) => {
       
       console.log(`深度差 > ${threshold1} - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
       
-    } else if (depthDiff >= threshold2) {
+    } else if (ndepthDiff >= threshold2) {
       // 深度差 阈值2-阈值1：检查开关是否打开
       if (!hedgeMode.enableDepthDiffParams2To15) {
         throw new Error(`深度差在${threshold2}-${threshold1}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
@@ -9395,7 +9603,7 @@ const parseOrderbookData = async (config, isClose) => {
       
       console.log(`深度差 ${threshold2}-${threshold1} - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
       
-    } else if (depthDiff >= threshold3) {
+    } else if (ndepthDiff >= threshold3) {
       // 深度差 阈值3-阈值2：检查开关是否打开
       if (!hedgeMode.enableDepthDiffParams02To2) {
         throw new Error(`深度差在${threshold3}-${threshold2}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
@@ -9419,7 +9627,7 @@ const parseOrderbookData = async (config, isClose) => {
       
       console.log(`深度差 ${threshold3}-${threshold2} - 计算价格: ${finalPrice.toFixed(2)}, tp2: ${tp2.toFixed(2)}秒`)
       
-    } else if (Math.abs(depthDiff - 0.1) < 0.01) {
+    } else if (Math.abs(ndepthDiff - 0.1) < 0.01) {
       // 深度差 0.1（允许0.09-0.11的误差）：检查开关是否打开
       if (!hedgeMode.enableDepthDiffParams01) {
         throw new Error(`深度差0.1时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
@@ -9500,6 +9708,21 @@ const parseOrderbookData = async (config, isClose) => {
       depthDiffRange = '02to2'
     } else if (Math.abs(depthDiff - 0.1) < 0.01) {
       depthDiffRange = '01'
+    }
+    
+    // === 先挂方价格区间检查（深度差判断通过后，基于 finalPrice 检查）===
+    const priceMin = hedgeMode.priceRangeMin
+    const priceMax = hedgeMode.priceRangeMax
+    const mode = isClose ? '平仓' : '开仓'
+    
+    console.log(`${mode}模式 - 先挂方价格: ${finalPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
+    
+    if (finalPrice < priceMin) {
+      throw new Error(`${mode}模式，先挂方价格 ${finalPrice.toFixed(2)} 小于最小价格 ${priceMin}`)
+    }
+    
+    if (finalPrice > priceMax) {
+      throw new Error(`${mode}模式，先挂方价格 ${finalPrice.toFixed(2)} 大于最大价格 ${priceMax}`)
     }
     
     return {
@@ -9814,6 +10037,61 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+        } else if (currentMode === 9) {
+          // 模式9：使用 model9Close 接口，参数与模式1相同，返回多个先挂方
+          apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model9Close'
+          requestData = {
+            trendingId: config.id,
+            isClose: hedgeMode.isClose,
+            currentPrice: orderPrice,
+            priceOutCome: priceInfo.firstSide,  // 先挂方 (YES/NO)
+            timePassMin: hedgeMode.timePassMin,
+            minShareAmt: hedgeMode.minUAmt,  // 最小开单
+            maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
+            minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+            maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
+            closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
+            numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+          }
+          // 如果 maxIpDelay 有值，则添加到请求参数中
+          if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
+            requestData.maxIpDelay = Number(hedgeMode.maxIpDelay)
+          }
+          // 添加 needJudgeDF 和 maxDHour 字段
+          requestData.needJudgeDF = hedgeMode.needJudgeDF ? 1 : 0
+          requestData.maxDHour = Number(hedgeMode.maxDHour) || 12
+          // 添加 minCloseMin 字段
+          requestData.minCloseMin = Number(hedgeMode.minCloseMin) || 60
+          // 添加资产优先级校验字段
+          requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
+          requestData.balancePriority = hedgeMode.balancePriority
+          // 添加账号随机8小时不交易参数
+          requestData.needJudgeTimeRandom = hedgeMode.needJudgeTimeRandom || 0
+          // 添加持有一个事件的账号数量上限参数
+          requestData.ownPosNumAmtMax = hedgeMode.ownPosNumAmtMax || 100
+          // 添加交易量和仓位价值限制参数（单位：万转10000）
+          if (hedgeMode.maxVolume24hOpen !== undefined && hedgeMode.maxVolume24hOpen !== null && hedgeMode.maxVolume24hOpen !== '') {
+            requestData.maxVolume24hOpen = Number(hedgeMode.maxVolume24hOpen) * 10000
+          }
+          if (hedgeMode.maxVolume7dAvgOpen !== undefined && hedgeMode.maxVolume7dAvgOpen !== null && hedgeMode.maxVolume7dAvgOpen !== '') {
+            requestData.maxVolume7dAvgOpen = Number(hedgeMode.maxVolume7dAvgOpen) * 10000
+          }
+          if (hedgeMode.maxPosWorthOpen !== undefined && hedgeMode.maxPosWorthOpen !== null && hedgeMode.maxPosWorthOpen !== '' && hedgeMode.maxPosWorthOpen > 0) {
+            requestData.maxPosWorthOpen = Number(hedgeMode.maxPosWorthOpen) * 10000
+          }
+          // 如果是开仓模式，添加模式一专属设置（模式9也使用）
+          if (!hedgeMode.isClose) {
+            if (hedgeMode.posPriorityArea && hedgeMode.posPriorityArea !== '') {
+              requestData.posPriorityArea = hedgeMode.posPriorityArea
+            }
+            if (hedgeMode.maxPosLimit !== undefined && hedgeMode.maxPosLimit !== null && hedgeMode.maxPosLimit !== '') {
+              requestData.maxPosLimit = Number(hedgeMode.maxPosLimit)
+            }
+          }
+          // 模式9专属参数
+          requestData.smallAccAmt = hedgeMode.smallAccAmt !== undefined ? Number(hedgeMode.smallAccAmt) : 2
+          requestData.smallAccPosMinAmt = hedgeMode.smallAccPosMinAmt !== undefined ? Number(hedgeMode.smallAccPosMinAmt) : 0
+          requestData.smallAccPosMaxAmt = hedgeMode.smallAccPosMaxAmt !== undefined ? Number(hedgeMode.smallAccPosMaxAmt) : 500
         } else {
           // 模式1：使用原有接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/calReadyToHedgeV4'
@@ -9908,6 +10186,18 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
               priceInfo: priceInfo,   // 传递订单薄数据，用于构建 depthStr
               tp2: shouldPassTp2Tp4 ? priceInfo.tp2 : null,  // 根据开关决定是否传递 tp2
               depthDiffRange: priceInfo.depthDiffRange  // 传递深度差范围标识
+            })
+          } else if (currentMode === 9) {
+            // 模式9：多个先挂方，数量最多的用type5，其余用type9
+            await executeHedgeTaskMode9(config, {
+              closeLimitList: hedgeData.closeLimitList,
+              takerNumberInfo: hedgeData.takerNumberInfo,
+              currentPrice: orderPrice,
+              firstSide: priceInfo.firstSide,
+              missionId: missionId,  // 传递组任务id
+              priceInfo: priceInfo,   // 传递订单薄数据，用于构建 depthStr
+              tp2: shouldPassTp2Tp4 ? priceInfo.tp2 : null,
+              depthDiffRange: priceInfo.depthDiffRange
             })
           } else {
             // 模式1：使用原有逻辑
@@ -11436,6 +11726,10 @@ const saveHedgeSettings = () => {
       enableSecondPricePlusMinus01: hedgeMode.enableSecondPricePlusMinus01,
       // 任务同步轮询间隔
       taskSyncPollingInterval: hedgeMode.taskSyncPollingInterval,
+      // 模式9专属设置
+      smallAccAmt: hedgeMode.smallAccAmt,
+      smallAccPosMinAmt: hedgeMode.smallAccPosMinAmt,
+      smallAccPosMaxAmt: hedgeMode.smallAccPosMaxAmt,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -11728,6 +12022,17 @@ const loadHedgeSettings = () => {
     if (settings.taskSyncPollingInterval !== undefined) {
       hedgeMode.taskSyncPollingInterval = settings.taskSyncPollingInterval
     }
+    
+    // 模式9专属设置
+    if (settings.smallAccAmt !== undefined) {
+      hedgeMode.smallAccAmt = settings.smallAccAmt
+    }
+    if (settings.smallAccPosMinAmt !== undefined) {
+      hedgeMode.smallAccPosMinAmt = settings.smallAccPosMinAmt
+    }
+    if (settings.smallAccPosMaxAmt !== undefined) {
+      hedgeMode.smallAccPosMaxAmt = settings.smallAccPosMaxAmt
+    }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
   }
@@ -11989,6 +12294,427 @@ const getHedgeLogStatusClass = (log) => {
  */
 const floorToTwoDecimals = (value) => {
   return Math.floor(value * 100) / 100
+}
+
+/**
+ * 执行对冲任务（模式9 - 多个先挂方，数量最多的用type5，其余用type9）
+ * 返回格式：closeLimitList（先挂方数组）+ takerNumberInfo（后挂方单个对象）
+ * 数量最多的先挂方和后挂方用type=5，其余先挂方用type=9且tp1=最多先挂方任务ID
+ */
+const executeHedgeTaskMode9 = async (config, hedgeData) => {
+  const closeLimitList = hedgeData.closeLimitList || []
+  const takerNumberInfo = hedgeData.takerNumberInfo || null
+  const firstSide = hedgeData.firstSide
+  const firstPrice = parseFloat(hedgeData.currentPrice)
+  const missionId = hedgeData.missionId
+  const priceInfo = hedgeData.priceInfo
+
+  // 1. 按 share 数量排序，找到数量最多的先挂方
+  const sortedCloseLimitList = [...closeLimitList].sort((a, b) => b.share - a.share)
+  
+  if (sortedCloseLimitList.length === 0) {
+    console.error(`配置 ${config.id} - 模式9: closeLimitList为空，无法执行对冲`)
+    return
+  }
+
+  const maxShareItem = sortedCloseLimitList[0]  // 数量最多的先挂方
+  const otherItems = sortedCloseLimitList.slice(1)  // 其余先挂方
+
+  console.log(`[Mode9] 先挂方数量: ${sortedCloseLimitList.length}, 最大数量: ${maxShareItem.share}, 其余数量: ${otherItems.length}`)
+
+  const firstPsSide = firstSide === 'YES' ? 1 : 2
+  const secondPsSide = firstSide === 'YES' ? 2 : 1
+
+  // 计算后挂方参数
+  let secondPrice, secondSide
+  if (firstPrice < 50) {
+    secondPrice = firstPrice
+    secondSide = 1  // 买入
+  } else {
+    secondPrice = parseFloat((100 - firstPrice).toFixed(1))
+    secondSide = 2  // 卖出
+  }
+
+  // 2. 创建对冲记录
+  const hedgeRecord = {
+    id: Date.now(),
+    trendingId: config.id,
+    trendingName: config.trending,
+    price: hedgeData.currentPrice,
+    firstSide: firstSide,
+    side: hedgeMode.isClose ? 2 : 1,
+    isClose: hedgeMode.isClose,
+    startTime: new Date().toISOString(),
+    endTime: null,
+    duration: null,
+    finalStatus: 'running',
+    isModeV9: true,
+    missionId: missionId,
+    priceInfo: priceInfo,
+    closeTasks: [],       // 所有先挂方任务
+    secondTasks: [],      // 后挂方任务
+    maxShareTaskId: null, // 数量最多先挂方的任务ID
+    allTaskIds: [],
+    subTaskMap: {},
+    wasCounted: true
+  }
+
+  // 初始化 currentHedges 数组
+  if (!config.currentHedges) {
+    config.currentHedges = []
+  }
+  config.currentHedges.push(hedgeRecord)
+  config.currentHedge = hedgeRecord
+  runningHedgeGroupsCount.value++
+  pausedType3Tasks.value.add(config.id)
+
+  console.log(`[Mode9] 开始对冲 ${config.id}:`, hedgeRecord)
+
+  try {
+    // 获取深度差相关参数
+    const depthDiffRange = hedgeData.depthDiffRange
+    let shouldPassTp2Tp4 = false
+    let shouldPassTp4For01 = false
+    if (depthDiffRange === 'gt15' && hedgeMode.enableDepthDiffParamsGt15) {
+      shouldPassTp2Tp4 = true
+    } else if (depthDiffRange === '2to15' && hedgeMode.enableDepthDiffParams2To15) {
+      shouldPassTp2Tp4 = true
+    } else if (depthDiffRange === '02to2' && hedgeMode.enableDepthDiffParams02To2) {
+      shouldPassTp2Tp4 = true
+    } else if (depthDiffRange === '01' && hedgeMode.enableDepthDiffParams01) {
+      shouldPassTp4For01 = true
+    }
+
+    // 3. 提交数量最多的先挂方任务（type=5）
+    const maxGroupNo = (maxShareItem.group !== undefined && maxShareItem.group !== null && maxShareItem.group !== '')
+      ? String(maxShareItem.group)
+      : (browserToGroupMap.value[maxShareItem.number] || '1')
+
+    const maxTaskData = {
+      groupNo: maxGroupNo,
+      numberList: parseInt(maxShareItem.number),
+      type: 5,  // 数量最多的先挂方使用type5
+      trendingId: config.id,
+      exchangeName: 'OP',
+      side: hedgeMode.isClose ? 2 : 1,
+      psSide: firstPsSide,
+      amt: floorToTwoDecimals(maxShareItem.share),
+      price: firstPrice,
+      tp3: isFastMode.value ? "1" : "0",
+      tp5: hedgeMode.openOrderCancelHours
+    }
+
+    // 添加深度差相关参数
+    if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+      maxTaskData.tp2 = Math.round(hedgeData.tp2)
+    }
+    if (shouldPassTp2Tp4 || shouldPassTp4For01) {
+      maxTaskData.tp4 = getMaxDepth(config)
+    }
+    if (hedgeMode.enableSecondPricePlusMinus01) {
+      maxTaskData.tp10 = "1"
+    }
+    maxTaskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
+
+    console.log(`[Mode9] 提交数量最多的先挂方任务 (number: ${maxShareItem.number}, share: ${maxShareItem.share})`)
+
+    let maxTaskId = null
+    const maxRetries = 3
+
+    // 提交最大数量先挂方任务（带重试）
+    for (let retry = 0; retry < maxRetries; retry++) {
+      try {
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/add',
+          maxTaskData,
+          { headers: { 'Content-Type': 'application/json' } }
+        )
+
+        if (response.data && response.data.data) {
+          const taskData = response.data.data
+          if (typeof taskData === 'object' && taskData !== null) {
+            maxTaskId = taskData.id
+          } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+            maxTaskId = taskData
+          }
+
+          if (maxTaskId !== undefined && maxTaskId !== null && typeof maxTaskId !== 'object') {
+            maxTaskId = String(Number(maxTaskId))
+            console.log(`[Mode9] 数量最多的先挂方任务提交成功，任务ID: ${maxTaskId}`)
+            hedgeRecord.maxShareTaskId = maxTaskId
+            hedgeRecord.allTaskIds.push(maxTaskId)
+            hedgeRecord.subTaskMap[maxShareItem.number] = maxTaskId
+            hedgeRecord.closeTasks.push({
+              number: maxShareItem.number,
+              share: floorToTwoDecimals(maxShareItem.share),
+              taskId: maxTaskId,
+              status: 9,
+              groupNo: maxGroupNo,
+              price: firstPrice,
+              type: 5,  // 主任务使用type5
+              isMaxShare: true
+            })
+            break
+          }
+        }
+        throw new Error('无效的任务ID')
+      } catch (error) {
+        console.error(`[Mode9] 提交最大先挂方任务失败 (重试 ${retry + 1}/${maxRetries}):`, error)
+        if (retry < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+      }
+    }
+
+    if (!maxTaskId) {
+      console.error('[Mode9] 数量最多的先挂方任务提交失败，终止对冲')
+      hedgeRecord.finalStatus = 'failed'
+      hedgeRecord.errorMsg = '数量最多的先挂方任务提交失败'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+
+    // 4. 提交其余先挂方任务（type=9, tp1=maxTaskId）
+    console.log(`[Mode9] 开始提交其余 ${otherItems.length} 个先挂方任务 (type=9)`)
+    
+    for (const item of otherItems) {
+      const groupNo = (item.group !== undefined && item.group !== null && item.group !== '')
+        ? String(item.group)
+        : (browserToGroupMap.value[item.number] || '1')
+
+      const taskData = {
+        groupNo: groupNo,
+        numberList: parseInt(item.number),
+        type: 9,  // 其余先挂方使用type9
+        trendingId: config.id,
+        exchangeName: 'OP',
+        side: hedgeMode.isClose ? 2 : 1,
+        psSide: firstPsSide,
+        amt: floorToTwoDecimals(item.share),
+        price: firstPrice,
+        tp1: maxTaskId,  // 引用数量最多先挂方的任务ID
+        tp3: isFastMode.value ? "1" : "0",
+        tp5: hedgeMode.openOrderCancelHours
+      }
+
+      // 添加深度差相关参数
+      if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+        taskData.tp2 = Math.round(hedgeData.tp2)
+      }
+      if (shouldPassTp2Tp4 || shouldPassTp4For01) {
+        taskData.tp4 = getMaxDepth(config)
+      }
+      if (hedgeMode.enableSecondPricePlusMinus01) {
+        taskData.tp10 = "1"
+      }
+      taskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
+
+      try {
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/add',
+          taskData,
+          { headers: { 'Content-Type': 'application/json' } }
+        )
+
+        if (response.data && response.data.data) {
+          const respData = response.data.data
+          let taskId = null
+          if (typeof respData === 'object' && respData !== null) {
+            taskId = respData.id
+          } else if (typeof respData === 'number' || typeof respData === 'string') {
+            taskId = respData
+          }
+
+          if (taskId !== undefined && taskId !== null && typeof taskId !== 'object') {
+            taskId = String(Number(taskId))
+            console.log(`[Mode9] 其余先挂方任务提交成功 (number: ${item.number}, share: ${item.share}), 任务ID: ${taskId}`)
+            hedgeRecord.allTaskIds.push(taskId)
+            hedgeRecord.subTaskMap[item.number] = taskId
+            hedgeRecord.closeTasks.push({
+              number: item.number,
+              share: floorToTwoDecimals(item.share),
+              taskId: taskId,
+              status: 9,
+              groupNo: groupNo,
+              price: firstPrice,
+              type: 9,  // 从任务使用type9
+              isMaxShare: false
+            })
+          }
+        }
+      } catch (error) {
+        console.error(`[Mode9] 提交其余先挂方任务失败 (number: ${item.number}):`, error)
+      }
+    }
+
+    // 5. 提交后挂方任务（type=5, tp1=maxTaskId）
+    if (takerNumberInfo) {
+      console.log(`[Mode9] 开始提交后挂方任务 (number: ${takerNumberInfo.number}, share: ${takerNumberInfo.share})`)
+
+      const takerGroupNo = (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '')
+        ? String(takerNumberInfo.group)
+        : (browserToGroupMap.value[takerNumberInfo.number] || '1')
+
+      // 计算后挂方的psSide
+      let takerPsSide
+      if (firstPrice < 50) {
+        takerPsSide = firstPsSide  // 价格<50时，后挂方YES/NO跟先挂方一样
+      } else {
+        takerPsSide = secondPsSide  // 价格>=50时，后挂方YES/NO跟先挂方相反
+      }
+
+      const takerTaskData = {
+        groupNo: takerGroupNo,
+        numberList: parseInt(takerNumberInfo.number),
+        type: 5,  // 后挂方使用type5
+        trendingId: config.id,
+        exchangeName: 'OP',
+        side: secondSide,
+        psSide: takerPsSide,
+        amt: floorToTwoDecimals(takerNumberInfo.share),
+        price: secondPrice,
+        tp1: maxTaskId,  // 引用数量最多先挂方的任务ID
+        tp3: isFastMode.value ? "1" : "0",
+        tp5: hedgeMode.openOrderCancelHours
+      }
+
+      // 添加深度差相关参数
+      if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
+        takerTaskData.tp2 = Math.round(hedgeData.tp2)
+      }
+      if (shouldPassTp2Tp4 || shouldPassTp4For01) {
+        takerTaskData.tp4 = getMaxDepth(config)
+      }
+      if (hedgeMode.enableSecondPricePlusMinus01) {
+        takerTaskData.tp10 = "1"
+      }
+      takerTaskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
+
+      try {
+        const response = await axios.post(
+          'https://sg.bicoin.com.cn/99l/mission/add',
+          takerTaskData,
+          { headers: { 'Content-Type': 'application/json' } }
+        )
+
+        if (response.data && response.data.data) {
+          const respData = response.data.data
+          let taskId = null
+          if (typeof respData === 'object' && respData !== null) {
+            taskId = respData.id
+          } else if (typeof respData === 'number' || typeof respData === 'string') {
+            taskId = respData
+          }
+
+          if (taskId !== undefined && taskId !== null && typeof taskId !== 'object') {
+            taskId = String(Number(taskId))
+            console.log(`[Mode9] 后挂方任务提交成功，任务ID: ${taskId}`)
+            hedgeRecord.allTaskIds.push(taskId)
+            hedgeRecord.subTaskMap[takerNumberInfo.number] = taskId
+            hedgeRecord.secondTasks.push({
+              number: takerNumberInfo.number,
+              share: floorToTwoDecimals(takerNumberInfo.share),
+              taskId: taskId,
+              status: 9,
+              groupNo: takerGroupNo,
+              price: secondPrice
+            })
+          }
+        }
+      } catch (error) {
+        console.error(`[Mode9] 提交后挂方任务失败:`, error)
+      }
+    }
+
+    console.log(`[Mode9] 所有任务提交完成，先挂方: ${hedgeRecord.closeTasks.length}/${closeLimitList.length}, 后挂方: ${hedgeRecord.secondTasks.length}/1`)
+
+    // 6. 调用更新接口
+    await updateHedgeMissionStatus(hedgeRecord)
+
+    // 7. 启动状态监控
+    monitorHedgeStatusV9(config, hedgeRecord)
+
+  } catch (error) {
+    console.error('[Mode9] 执行对冲任务失败:', error)
+    hedgeRecord.finalStatus = 'failed'
+    finishHedge(config, hedgeRecord)
+  }
+}
+
+/**
+ * 监控对冲状态（模式9）
+ */
+const monitorHedgeStatusV9 = (config, hedgeRecord) => {
+  const startTime = new Date(hedgeRecord.startTime)
+
+  const checkStatus = async () => {
+    if (hedgeRecord.finalStatus !== 'running') {
+      return
+    }
+
+    const now = new Date()
+    const elapsed = (now - startTime) / 1000 / 60
+
+    // 检查20分钟超时
+    if (elapsed >= 20) {
+      console.log(`[Mode9] 对冲 ${hedgeRecord.id} 超时（${elapsed.toFixed(1)}分钟）`)
+      hedgeRecord.finalStatus = 'timeout'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+
+    // 更新所有任务状态
+    let allCompleted = true
+    let hasFailure = false
+
+    // 检查先挂方任务
+    for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+      const task = hedgeRecord.closeTasks[i]
+      if (task.taskId) {
+        const taskData = await fetchMissionStatus(task.taskId)
+        if (taskData) {
+          const oldStatus = task.status
+          hedgeRecord.closeTasks[i] = { ...task, status: taskData.status }
+          if (oldStatus !== taskData.status) {
+            console.log(`[Mode9] 先挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+          }
+          if (taskData.status === 3) hasFailure = true
+          if (taskData.status !== 2 && taskData.status !== 3 && taskData.status !== 20) allCompleted = false
+        }
+      }
+    }
+
+    // 检查后挂方任务
+    for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+      const task = hedgeRecord.secondTasks[i]
+      if (task.taskId) {
+        const taskData = await fetchMissionStatus(task.taskId)
+        if (taskData) {
+          const oldStatus = task.status
+          hedgeRecord.secondTasks[i] = { ...task, status: taskData.status }
+          if (oldStatus !== taskData.status) {
+            console.log(`[Mode9] 后挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+          }
+          if (taskData.status === 3) hasFailure = true
+          if (taskData.status !== 2 && taskData.status !== 3 && taskData.status !== 20) allCompleted = false
+        }
+      }
+    }
+
+    // 检查是否全部完成
+    if (allCompleted) {
+      console.log(`[Mode9] 对冲 ${hedgeRecord.id} 所有任务已完成`)
+      hedgeRecord.finalStatus = hasFailure ? 'partial' : 'success'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+
+    // 继续轮询
+    setTimeout(checkStatus, 2000)
+  }
+
+  // 开始轮询
+  setTimeout(checkStatus, 2000)
 }
 
 /**
@@ -13760,7 +14486,9 @@ const executeAutoHedgeTasks = async () => {
       
       // 检查加权时间和yes持仓组合条件（不交易）- 适用于开仓和平仓模式
       // 如果加权时间满足条件 且 yes持仓满足条件，则不交易
-      if (hedgeMode.weightedTimeHourOpen > 0 && hedgeMode.weightedTimeYesPositionThreshold > 0) {
+      // 只要两个阈值有值（包括0），就进行检查
+      if (hedgeMode.weightedTimeHourOpen !== null && hedgeMode.weightedTimeHourOpen !== undefined && hedgeMode.weightedTimeHourOpen !== '' &&
+          hedgeMode.weightedTimeYesPositionThreshold !== null && hedgeMode.weightedTimeYesPositionThreshold !== undefined && hedgeMode.weightedTimeYesPositionThreshold !== '') {
         const weightedAvgTime = config.weightedAvgTime || 0
         const weightedTimeHour = weightedAvgTime / 3600000  // 转换为小时
         const thresholdTimeMs = hedgeMode.weightedTimeHourOpen * 3600000  // 小时转毫秒
@@ -15459,6 +16187,53 @@ onUnmounted(() => {
   border-radius: 8px;
 }
 
+/* 模式9专属设置样式 - 橙色主题 */
+.mode9-settings-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.3) 0%, rgba(255, 87, 34, 0.3) 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 152, 0, 0.5);
+}
+
+.mode9-label {
+  color: #ff6d00;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.mode9-label-small {
+  color: #ff6d00;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.mode9-input {
+  width: 60px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 152, 0, 0.5);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #e65100;
+  font-size: 0.875rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+.mode9-input:focus {
+  outline: none;
+  border-color: #ff6d00;
+  box-shadow: 0 0 0 2px rgba(255, 109, 0, 0.2);
+}
+
+.mode9-input:disabled {
+  background: rgba(255, 255, 255, 0.5);
+  cursor: not-allowed;
+}
+
 .amount-range-input {
   width: 100px;
   padding: 0.4rem 0.6rem;
@@ -15813,6 +16588,62 @@ onUnmounted(() => {
   padding-top: 0.5rem;
 }
 
+/* 模式9专属样式 */
+.mode9-badge {
+  background: linear-gradient(135deg, #ff6d00 0%, #ff9800 100%) !important;
+  color: white !important;
+}
+
+.mode9-first-tasks {
+  border-left: 3px solid #ff6d00;
+  padding-left: 8px;
+}
+
+.mode9-second-task {
+  border-left: 3px solid #2196f3;
+  padding-left: 8px;
+  margin-top: 8px;
+}
+
+.mode9-title {
+  color: #ff9800 !important;
+}
+
+.mode9-title-second {
+  color: #42a5f5 !important;
+}
+
+.mode9-task-item {
+  background: rgba(255, 152, 0, 0.1);
+  border-radius: 4px;
+  padding: 6px;
+  margin-bottom: 6px;
+}
+
+.mode9-second-task .mode9-task-item {
+  background: rgba(33, 150, 243, 0.1);
+}
+
+.max-share-badge {
+  background: #ff6d00;
+  color: white;
+  font-size: 0.6rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.type-main {
+  color: #ff6d00;
+  font-weight: 600;
+}
+
+.type-sub {
+  color: #9e9e9e;
+}
+
+
 .task-pending {
   color: #6c757d;
 }
@@ -15966,6 +16797,48 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 0.75rem;
   font-weight: 500;
+}
+
+.compact-log-mode-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: #6c757d;
+  color: white;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.mode9-log-badge {
+  background: linear-gradient(135deg, #ff6d00 0%, #ff9800 100%) !important;
+}
+
+.mode9-log-section {
+  border-left: 3px solid #ff6d00;
+  padding-left: 8px;
+  background: rgba(255, 152, 0, 0.05);
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-radius: 0 4px 4px 0;
+}
+
+.mode9-log-section-second {
+  border-left: 3px solid #2196f3;
+  padding-left: 8px;
+  background: rgba(33, 150, 243, 0.05);
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-radius: 0 4px 4px 0;
+}
+
+.mode9-label {
+  color: #ff6d00 !important;
+  font-weight: 600;
+}
+
+.mode9-label-second {
+  color: #2196f3 !important;
+  font-weight: 600;
 }
 
 .compact-log-info {

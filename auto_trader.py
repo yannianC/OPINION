@@ -384,37 +384,46 @@ def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=
     Returns:
         bool: 成功返回True，失败返回False
     """
-    try:
-        url = f"{SERVER_BASE_URL}/mission/updateMissionTp"
-        payload = {"id": mission_id}
-        
-        if tp5 is not None:
-            payload["tp5"] = tp5
-        if tp6 is not None:
-            payload["tp6"] = tp6
-        if tp8 is not None:
-            payload["tp8"] = tp8
-        if tp9 is not None:
-            payload["tp9"] = tp9
-        if price is not None:
-            payload["price"] = price
-        
-        response = requests.post(url, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('code') == 0:
-                log_print(f"[系统] ✓ 更新任务{mission_id}数据成功")
-                return True
+    max_retries = 5
+    retry_delay = 3  # 重试间隔秒数
+    
+    url = f"{SERVER_BASE_URL}/mission/updateMissionTp"
+    payload = {"id": mission_id}
+    
+    if tp5 is not None:
+        payload["tp5"] = tp5
+    if tp6 is not None:
+        payload["tp6"] = tp6
+    if tp8 is not None:
+        payload["tp8"] = tp8
+    if tp9 is not None:
+        payload["tp9"] = tp9
+    if price is not None:
+        payload["price"] = price
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == 0:
+                    log_print(f"[系统] ✓ 更新任务{mission_id}数据成功")
+                    return True
+                else:
+                    log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败: {data.get('msg', '未知错误')} (第{attempt + 1}/{max_retries}次)")
             else:
-                log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败: {data.get('msg', '未知错误')}")
-                return False
-        else:
-            log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败，状态码: {response.status_code}")
-            return False
-    except Exception as e:
-        log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败: {str(e)}")
-        return False
+                log_print(f"[系统] ⚠ 更新任务{mission_id}数据失败，状态码: {response.status_code} (第{attempt + 1}/{max_retries}次)")
+        except Exception as e:
+            log_print(f"[系统] ⚠ 更新任务{mission_id}数据异常: {str(e)} (第{attempt + 1}/{max_retries}次)")
+        
+        # 如果不是最后一次尝试，等待后重试
+        if attempt < max_retries - 1:
+            log_print(f"[系统] 等待{retry_delay}秒后重试...")
+            time.sleep(retry_delay)
+    
+    log_print(f"[系统] ✗ 更新任务{mission_id}数据失败，已重试{max_retries}次")
+    return False
 
 
 def send_fingerprint_monitor_request(browser_id):
@@ -3304,6 +3313,90 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                         elif current_status == 9:
                                             save_mission_result(mission_id, 5)
                                         time.sleep(10)
+                                    
+                                    # 在点击确认按钮之前，先调用 updateTrendingTime 接口
+                                    log_msg = f"[10] 任务一: 开始轮询调用 updateTrendingTime 接口..."
+                                    log_print(f"[{serial_number}] {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                    
+                                    update_trending_time_success = False
+                                    update_trending_start_time = time.time()
+                                    update_trending_timeout = 300  # 5分钟超时
+                                    update_trending_interval = 20  # 每20秒请求一次
+                                    first_request = True  # 标记是否为第一次请求
+                                    
+                                    while time.time() - update_trending_start_time < update_trending_timeout:
+                                        try:
+                                            # 如果不是第一次请求，等待20秒
+                                            if not first_request:
+                                                log_msg = f"[10] 任务一: 等待{update_trending_interval}秒后重试..."
+                                                log_print(f"[{serial_number}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                time.sleep(update_trending_interval)
+                                            first_request = False
+                                            
+                                            # 获取当前时间戳（毫秒）
+                                            current_update_time = int(time.time() * 1000)
+                                            
+                                            # 构建请求
+                                            update_trending_url = f"{SERVER_BASE_URL}/hedge/updateTrendingTime"
+                                            update_trending_payload = {
+                                                "trendingId": trendingId,
+                                                "updateTime": current_update_time
+                                            }
+                                            
+                                            log_msg = f"[10] 任务一: 调用 updateTrendingTime, trendingId={trendingId}, updateTime={current_update_time}"
+                                            log_print(f"[{serial_number}] {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                            
+                                            update_trending_response = requests.post(
+                                                update_trending_url, 
+                                                json=update_trending_payload, 
+                                                timeout=20
+                                            )
+                                            
+                                            if update_trending_response.status_code == 200:
+                                                update_trending_result = update_trending_response.json()
+                                                log_msg = f"[9] 任务一: updateTrendingTime 响应: {update_trending_result}"
+                                                log_print(f"[{serial_number}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                
+                                                if update_trending_result.get('code') == 0:
+                                                    data = update_trending_result.get('data', {})
+                                                    change_succ = data.get('changeSucc', 0)
+                                                    update_time = data.get('updateTime', 0)
+                                                    
+                                                    if change_succ == 1:
+                                                        log_msg = f"[9] ✓ 任务一: updateTrendingTime 成功，changeSucc=1"
+                                                        log_print(f"[{serial_number}] {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                        update_trending_time_success = True
+                                                        break
+                                                    else:
+                                                        log_msg = f"[9] 任务一: changeSucc={change_succ} update_time={update_time}，继续等待..."
+                                                        log_print(f"[{serial_number}] {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                else:
+                                                    log_msg = f"[9] ⚠ 任务一: updateTrendingTime 返回错误, code={update_trending_result.get('code')}"
+                                                    log_print(f"[{serial_number}] {log_msg}")
+                                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                            else:
+                                                log_msg = f"[9] ⚠ 任务一: updateTrendingTime HTTP错误: {update_trending_response.status_code}"
+                                                log_print(f"[{serial_number}] {log_msg}")
+                                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                                
+                                        except Exception as update_trending_error:
+                                            log_msg = f"[9] ⚠ 任务一: updateTrendingTime 请求异常: {str(update_trending_error)}"
+                                            log_print(f"[{serial_number}] {log_msg}")
+                                            add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                    
+                                    # 检查是否超时
+                                    if not update_trending_time_success:
+                                        log_msg = f"[9] ✗ 任务一: updateTrendingTime 5分钟超时，点击取消按钮"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        buttons[0].click()  # 点击取消按钮
+                                        return False, "[9]插入事件时间超时"
                                     
                                     # 点击确认按钮
                                     log_msg = f"[11] 任务一: 点击OKX确认按钮..."
@@ -9537,9 +9630,10 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                                     log_print(f"[{browser_id}] ⚠ {log_msg}")
                                                     add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
                                             else:
-                                                log_msg = f"[5]价格更新接口调用失败，但继续执行"
+                                                log_msg = f"[5]价格更新接口调用失败"
                                                 log_print(f"[{browser_id}] ⚠ {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                                return False, fail_msg, None
                         else:
                             # 【2】任务二的逻辑
                             log_print(f"[{browser_id}] [任务二] 开始等待任务一确认订单薄...")

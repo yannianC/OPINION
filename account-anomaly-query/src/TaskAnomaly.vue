@@ -230,7 +230,15 @@
               
               <!-- 电脑组统计 -->
               <div v-if="Object.keys(alertGroupStats).length > 0" class="group-stats-text">
-                <div class="stats-description">（{{alertStartTimeMinutes}}分钟前至{{alertEndTimeMinutes}}分钟前，电脑组，总个数，成功率，连续失败次数）</div>
+                <div class="stats-description">
+                  （{{alertStartTimeMinutes}}分钟前至{{alertEndTimeMinutes}}分钟前，电脑组，总个数，成功率，连续失败次数）
+                  <button 
+                    class="sort-toggle-btn"
+                    @click="toggleGroupStatsSortMode"
+                  >
+                    {{ groupStatsSortMode === 'successRate' ? '任务数优先' : '成功率优先' }}
+                  </button>
+                </div>
                 
                 <!-- 分开显示模式 -->
                 <template v-if="alertDisplayMode === 'separate'">
@@ -310,7 +318,27 @@
               <!-- 事件统计 -->
               <div v-if="alertEventStatsList.length > 0" class="event-stats-section">
                 <div class="event-stats-header">
-                  <span class="stats-description">（按事件统计：事件名，任务组数，成功率，连续失败次数）</span>
+                  <span class="stats-description">（按事件统计：事件名，任务组数，成功率，部分成交个数）</span>
+                  <div class="event-stats-sort-btns">
+                    <button 
+                      :class="['sort-btn', eventStatsSortMode === 'taskCount' ? 'active' : '']"
+                      @click="setEventStatsSortMode('taskCount')"
+                    >
+                      任务数
+                    </button>
+                    <button 
+                      :class="['sort-btn', eventStatsSortMode === 'successRate' ? 'active' : '']"
+                      @click="setEventStatsSortMode('successRate')"
+                    >
+                      成功率
+                    </button>
+                    <button 
+                      :class="['sort-btn', eventStatsSortMode === 'partialCount' ? 'active' : '']"
+                      @click="setEventStatsSortMode('partialCount')"
+                    >
+                      部分成交
+                    </button>
+                  </div>
                   <button class="collapse-btn" @click="toggleEventStatsCollapsed">
                     {{ eventStatsCollapsed ? '展开' : '折叠' }}
                   </button>
@@ -319,15 +347,15 @@
                   <div 
                     v-for="(item, index) in alertEventStatsList" 
                     :key="'e' + index"
-                    :class="['event-stats-item', item.stats.successRate < alertSuccessRateThreshold || item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'alert' : '']"
+                    :class="['event-stats-item', item.stats.successRate < alertSuccessRateThreshold || item.stats.partialCount > 0 ? 'alert' : '']"
                   >
                     <span class="event-name">{{ item.trending }}</span>，
                     <span class="total-count">{{ Math.floor(item.stats.totalCount ) }}</span>，
                     <span :class="['success-rate', item.stats.successRate < alertSuccessRateThreshold ? 'warning' : '']">
                       {{ item.stats.successRate.toFixed(2) }}%
                     </span>，
-                    <span :class="['consecutive-fail', item.stats.consecutiveFail >= alertConsecutiveFailThreshold ? 'warning' : '']">
-                      {{ item.stats.consecutiveFail }}
+                    <span :class="['partial-count', item.stats.partialCount > 0 ? 'warning' : '']">
+                      {{ item.stats.partialCount }}
                     </span>
                   </div>
                 </div>
@@ -474,37 +502,92 @@
           </div>
           <h2>查询结果 (共 {{ Object.keys(results).length }} 个任务组)</h2>
           
-          <!-- 模式1：组状态统计区域（只有6个状态分类） -->
+          <!-- 模式1：组状态统计区域（按3个大分类显示） -->
           <div v-if="queryMode === 1" class="group-status-statistics">
-            <div class="status-stat-row">
-              <span class="status-stat-item status-type1-success" @click="setStatusFilter('type1Success')">
-                类型1成功: {{ groupStatusStatistics.type1Success }}
-              </span>
-              <span class="status-stat-item status-type2-no-impact" @click="setStatusFilter('type2NoImpact')">
-                类型2失败无影响: {{ groupStatusStatistics.type2NoImpact }}
-              </span>
-              <span class="status-stat-item status-success" @click="setStatusFilter('success')">
-                全部成功(3-1): {{ groupStatusStatistics.success }}
-              </span>
-              <span class="status-stat-item status-no-impact" @click="setStatusFilter('noImpact')">
-                失败无影响(4-1): {{ groupStatusStatistics.noImpact }}
-              </span>
-              <span class="status-stat-item status-repaired" @click="setStatusFilter('repaired')">
-                已修复: {{ groupStatusStatistics.repaired }}
-              </span>
-              <span class="status-stat-item status-problem-in-30" @click="setStatusFilter('problemIn30')">
-                有问题但不到30分钟(3-2,3-3(需要重新抓取)): {{ groupStatusStatistics.problemIn30 }}
-              </span>
-              <span class="status-stat-item status-problem-other-in-30" @click="setStatusFilter('problemOtherIn30')">
-                30分钟之内有问题其他(3-4(需要重新抓取)): {{ groupStatusStatistics.problemOtherIn30 }}
-              </span>
-              <span class="status-stat-item status-pending-failed" @click="setStatusFilter('pendingFailed')">
-                有挂单的失败(4-3,4-4(需要修复)): {{ groupStatusStatistics.pendingFailed }}
-              </span>
-              <span class="status-stat-item status-confirmed-problem" @click="setStatusFilter('confirmedProblem')">
-                确定有问题(4-2(需要修复)): {{ groupStatusStatistics.confirmedProblem }}
-              </span>
+            
+            <!-- 【1】不用处理分类 -->
+            <div class="category-group category-no-need-process">
+              <div class="category-header">
+                <span class="category-title">【1】不用处理</span>
+                <span class="category-total">总数: {{ categoryNoNeedProcess.total }}</span>
+                <span class="category-success">成功: {{ categoryNoNeedProcess.successCount }}</span>
+                <span class="category-other">其他: {{ categoryNoNeedProcess.otherCount }}</span>
+              </div>
+              <div class="category-sub-items">
+                <span class="status-stat-item status-type1-success" @click="setStatusFilter('type1Success')">
+                  类型1成功: {{ groupStatusStatistics.type1Success }}
+                </span>
+                <span class="status-stat-item status-success" @click="setStatusFilter('success')">
+                  全部成功(3-1): {{ groupStatusStatistics.success }}
+                </span>
+                <span class="status-stat-item status-type2-no-impact" @click="setStatusFilter('type2NoImpact')">
+                  类型2失败无影响: {{ groupStatusStatistics.type2NoImpact }}
+                </span>
+                <span class="status-stat-item status-no-impact" @click="setStatusFilter('noImpact')">
+                  失败无影响(4-1): {{ groupStatusStatistics.noImpact }}
+                </span>
+                <span class="status-stat-item status-repaired" @click="setStatusFilter('repaired')">
+                  已修复: {{ groupStatusStatistics.repaired }}
+                </span>
+              </div>
             </div>
+            
+            <!-- 【2】要重抓分类 -->
+            <div class="category-group category-need-refetch">
+              <div class="category-header">
+                <span class="category-title">【2】要重抓</span>
+                <span class="category-total">总数: {{ categoryNeedRefetch.total }}</span>
+                <button 
+                  class="batch-action-btn"
+                  @click="batchSubmitPositionUpdateNeedRefetch"
+                  :disabled="isBatchSubmittingNeedRefetch || categoryNeedRefetch.total === 0"
+                >
+                  {{ isBatchSubmittingNeedRefetch ? `一键抓取(${batchNeedRefetchProgress.current}/${batchNeedRefetchProgress.total})` : '一键抓取' }}
+                </button>
+                <button 
+                  class="batch-action-btn"
+                  @click="batchFetchServerDataNeedRefetch"
+                  :disabled="isBatchFetchingNeedRefetch || categoryNeedRefetch.total === 0"
+                >
+                  {{ isBatchFetchingNeedRefetch ? `一键处理(${batchNeedRefetchProgress.current}/${batchNeedRefetchProgress.total})` : '一键处理' }}
+                </button>
+                <button 
+                  class="batch-action-btn batch-action-btn-warning"
+                  @click="batchFetchAfter30MinServerData"
+                  :disabled="isBatchFetchingAfter30Min || categoryNeedRefetch.total === 0"
+                >
+                  {{ isBatchFetchingAfter30Min ? `抓后30分钟处理(${batchNeedRefetchProgress.current}/${batchNeedRefetchProgress.total})` : '抓后30分钟处理' }}
+                </button>
+              </div>
+              <div class="category-sub-items">
+                <span class="status-stat-item status-problem-in-30" @click="setStatusFilter('problemIn30')">
+                  有问题但不到30分钟(3-2,3-3): {{ groupStatusStatistics.problemIn30 }}
+                </span>
+                <span class="status-stat-item status-problem-other-in-30" @click="setStatusFilter('problemOtherIn30')">
+                  30分钟之内有问题其他(3-4): {{ groupStatusStatistics.problemOtherIn30 }}
+                </span>
+                <span class="status-stat-item status-pending-failed" @click="setStatusFilter('pendingFailed')">
+                  有挂单的失败(4-3,4-4): {{ groupStatusStatistics.pendingFailed }}
+                </span>
+              </div>
+            </div>
+            
+            <!-- 【3】要处理分类 -->
+            <div class="category-group category-need-process">
+              <div class="category-header">
+                <span class="category-title">【3】要处理</span>
+                <span class="category-total">总数: {{ categoryNeedProcess.total }}</span>
+              </div>
+              <div class="category-sub-items">
+                <span class="status-stat-item status-pending-failed" @click="setStatusFilter('pendingFailed')">
+                  有挂单的失败(4-3,4-4): {{ groupStatusStatistics.pendingFailed }}
+                </span>
+                <span class="status-stat-item status-confirmed-problem" @click="setStatusFilter('confirmedProblem')">
+                  确定有问题(4-2): {{ groupStatusStatistics.confirmedProblem }}
+                </span>
+              </div>
+            </div>
+            
           </div>
           
           <!-- 模式1：仓位统计区域（需处理的状态） -->
@@ -1450,7 +1533,14 @@ export default {
       alertGroupStats: {},  // 每个电脑组的统计信息 {groupNo: {successRate, consecutiveFail, totalCount, successCount}}
       alertDisplayMode: 'separate',  // 显示模式: 'separate'=分开显示, 'merged'=合并显示 (X + 900+X)
       alertTasksWithTrending: [],  // 保存带 trending 的任务数据用于事件统计
-      eventStatsCollapsed: false  // 事件统计是否折叠
+      eventStatsCollapsed: false,  // 事件统计是否折叠
+      groupStatsSortMode: 'successRate',  // 电脑组排序模式: 'successRate'=成功率优先, 'taskCount'=任务数优先
+      eventStatsSortMode: 'taskCount',  // 事件统计排序模式: 'taskCount'=任务组数, 'successRate'=成功率, 'partialCount'=部分成交个数
+      // 要重抓分类的批量处理状态
+      isBatchFetchingNeedRefetch: false,  // 是否正在批量获取要重抓分类的服务数据
+      isBatchSubmittingNeedRefetch: false,  // 是否正在批量抓取要重抓分类的仓位
+      isBatchFetchingAfter30Min: false,  // 是否正在执行抓后30分钟处理
+      batchNeedRefetchProgress: { current: 0, total: 0, success: 0, failed: 0 }  // 要重抓分类的批量处理进度
     }
   },
   mounted() {
@@ -1893,6 +1983,29 @@ export default {
       return stats
     },
     
+    // 【1】不用处理分类统计（type1Success + success + type2NoImpact + noImpact + repaired）
+    categoryNoNeedProcess() {
+      const stats = this.groupStatusStatistics
+      const successCount = stats.type1Success + stats.success  // 成功数量
+      const otherCount = stats.type2NoImpact + stats.noImpact + stats.repaired  // 其他数量
+      const total = successCount + otherCount
+      return { total, successCount, otherCount }
+    },
+    
+    // 【2】要重抓分类统计（problemIn30 + problemOtherIn30 + pendingFailed）
+    categoryNeedRefetch() {
+      const stats = this.groupStatusStatistics
+      const total = stats.problemIn30 + stats.problemOtherIn30 + stats.pendingFailed
+      return { total }
+    },
+    
+    // 【3】要处理分类统计（pendingFailed + confirmedProblem）
+    categoryNeedProcess() {
+      const stats = this.groupStatusStatistics
+      const total = stats.pendingFailed + stats.confirmedProblem
+      return { total }
+    },
+    
     // 预警监控：正常的电脑组（成功率 >= 阈值 且 连续失败数 < 阈值）
     normalGroupStats() {
       const result = []
@@ -1903,15 +2016,24 @@ export default {
           result.push({ groupNo, stats })
         }
       }
-      // 按成功率降序排序，成功率相同则按总任务数降序排序
-      result.sort((a, b) => {
-        // 先比较成功率（高的在前）
-        if (b.stats.successRate !== a.stats.successRate) {
+      // 根据排序模式进行排序
+      if (this.groupStatsSortMode === 'taskCount') {
+        // 任务数优先：先按任务数降序，再按成功率降序
+        result.sort((a, b) => {
+          if (b.stats.totalCount !== a.stats.totalCount) {
+            return b.stats.totalCount - a.stats.totalCount
+          }
           return b.stats.successRate - a.stats.successRate
-        }
-        // 成功率相同，比较总任务数（多的在前）
-        return b.stats.totalCount - a.stats.totalCount
-      })
+        })
+      } else {
+        // 成功率优先（默认）：先按成功率降序，再按任务数降序
+        result.sort((a, b) => {
+          if (b.stats.successRate !== a.stats.successRate) {
+            return b.stats.successRate - a.stats.successRate
+          }
+          return b.stats.totalCount - a.stats.totalCount
+        })
+      }
       return result
     },
     
@@ -1925,15 +2047,24 @@ export default {
           result.push({ groupNo, stats })
         }
       }
-      // 按成功率降序排序，成功率相同则按总任务数降序排序
-      result.sort((a, b) => {
-        // 先比较成功率（高的在前）
-        if (b.stats.successRate !== a.stats.successRate) {
+      // 根据排序模式进行排序
+      if (this.groupStatsSortMode === 'taskCount') {
+        // 任务数优先：先按任务数降序，再按成功率降序
+        result.sort((a, b) => {
+          if (b.stats.totalCount !== a.stats.totalCount) {
+            return b.stats.totalCount - a.stats.totalCount
+          }
           return b.stats.successRate - a.stats.successRate
-        }
-        // 成功率相同，比较总任务数（多的在前）
-        return b.stats.totalCount - a.stats.totalCount
-      })
+        })
+      } else {
+        // 成功率优先（默认）：先按成功率降序，再按任务数降序
+        result.sort((a, b) => {
+          if (b.stats.successRate !== a.stats.successRate) {
+            return b.stats.successRate - a.stats.successRate
+          }
+          return b.stats.totalCount - a.stats.totalCount
+        })
+      }
       return result
     },
     
@@ -2009,12 +2140,24 @@ export default {
           result.push({ groupNo, stats })
         }
       }
-      result.sort((a, b) => {
-        if (b.stats.successRate !== a.stats.successRate) {
+      // 根据排序模式进行排序
+      if (this.groupStatsSortMode === 'taskCount') {
+        // 任务数优先：先按任务数降序，再按成功率降序
+        result.sort((a, b) => {
+          if (b.stats.totalCount !== a.stats.totalCount) {
+            return b.stats.totalCount - a.stats.totalCount
+          }
           return b.stats.successRate - a.stats.successRate
-        }
-        return b.stats.totalCount - a.stats.totalCount
-      })
+        })
+      } else {
+        // 成功率优先（默认）：先按成功率降序，再按任务数降序
+        result.sort((a, b) => {
+          if (b.stats.successRate !== a.stats.successRate) {
+            return b.stats.successRate - a.stats.successRate
+          }
+          return b.stats.totalCount - a.stats.totalCount
+        })
+      }
       return result
     },
     
@@ -2028,12 +2171,24 @@ export default {
           result.push({ groupNo, stats })
         }
       }
-      result.sort((a, b) => {
-        if (b.stats.successRate !== a.stats.successRate) {
+      // 根据排序模式进行排序
+      if (this.groupStatsSortMode === 'taskCount') {
+        // 任务数优先：先按任务数降序，再按成功率降序
+        result.sort((a, b) => {
+          if (b.stats.totalCount !== a.stats.totalCount) {
+            return b.stats.totalCount - a.stats.totalCount
+          }
           return b.stats.successRate - a.stats.successRate
-        }
-        return b.stats.totalCount - a.stats.totalCount
-      })
+        })
+      } else {
+        // 成功率优先（默认）：先按成功率降序，再按任务数降序
+        result.sort((a, b) => {
+          if (b.stats.successRate !== a.stats.successRate) {
+            return b.stats.successRate - a.stats.successRate
+          }
+          return b.stats.totalCount - a.stats.totalCount
+        })
+      }
       return result
     },
     
@@ -2064,18 +2219,17 @@ export default {
         const successCount = tasks.filter(t => t.isSuccess).length
         const successRate = totalCount > 0 ? (successCount / totalCount) * 100 : 0
         
-        // 计算连续失败
-        let consecutiveFail = 0
-        for (const task of tasks) {
-          if (task.isSuccess) break
-          consecutiveFail++
-        }
+        // 计算部分成交个数（msg中包含PARTIAL的任务数量）
+        const partialCount = tasks.filter(t => {
+          const msg = t.msg || ''
+          return msg.includes('PARTIAL') || msg.includes('部分成交')
+        }).length
         
         eventStats[trending] = {
           totalCount,
           successCount,
           successRate,
-          consecutiveFail
+          partialCount
         }
       }
       
@@ -2088,8 +2242,17 @@ export default {
       for (const [trending, stats] of Object.entries(this.alertEventStats)) {
         result.push({ trending, stats })
       }
-      // 按任务数降序排序
-      result.sort((a, b) => b.stats.totalCount - a.stats.totalCount)
+      // 根据排序模式进行排序
+      if (this.eventStatsSortMode === 'successRate') {
+        // 按成功率降序排序
+        result.sort((a, b) => b.stats.successRate - a.stats.successRate)
+      } else if (this.eventStatsSortMode === 'partialCount') {
+        // 按部分成交个数降序排序
+        result.sort((a, b) => b.stats.partialCount - a.stats.partialCount)
+      } else {
+        // 按任务组数降序排序（默认）
+        result.sort((a, b) => b.stats.totalCount - a.stats.totalCount)
+      }
       return result
     },
     
@@ -3713,6 +3876,16 @@ export default {
       this.alertDisplayMode = this.alertDisplayMode === 'separate' ? 'merged' : 'separate'
     },
     
+    // 切换电脑组统计排序模式
+    toggleGroupStatsSortMode() {
+      this.groupStatsSortMode = this.groupStatsSortMode === 'successRate' ? 'taskCount' : 'successRate'
+    },
+    
+    // 设置事件统计排序模式
+    setEventStatsSortMode(mode) {
+      this.eventStatsSortMode = mode
+    },
+    
     // 切换事件统计折叠状态
     toggleEventStatsCollapsed() {
       this.eventStatsCollapsed = !this.eventStatsCollapsed
@@ -4524,6 +4697,205 @@ export default {
       } finally {
         this.isBatchFetchingServerData = false
         this.batchFetchProgress = { current: 0, total: 0 }
+      }
+    },
+    
+    /**
+     * 【要重抓分类】批量抓取仓位（并发5个一组）
+     * 状态：problemIn30, problemOtherIn30, pendingFailed, confirmedProblem
+     */
+    async batchSubmitPositionUpdateNeedRefetch() {
+      if (this.isBatchSubmittingNeedRefetch) return
+      
+      // 收集要重抓分类下的所有浏览器
+      const needRefetchStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed']
+      const tasksToUpdate = []
+      
+      Object.values(this.results).forEach(group => {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (!needRefetchStatuses.includes(status)) return
+        
+        group.tasks.forEach(task => {
+          if (task.status === 2) return
+          if (this.isTaskRepairedSuccess(task)) return
+          if (!task.browserId || !task.groupNo) return
+          
+          tasksToUpdate.push({
+            browserId: task.browserId,
+            groupNo: task.groupNo,
+            taskId: task.id
+          })
+        })
+      })
+      
+      if (tasksToUpdate.length === 0) {
+        this.showToast('要重抓分类中没有需要抓取仓位的浏览器', 'info')
+        return
+      }
+      
+      // 去重
+      const uniqueTasks = []
+      const seenBrowserIds = new Set()
+      for (const task of tasksToUpdate) {
+        if (!seenBrowserIds.has(task.browserId)) {
+          seenBrowserIds.add(task.browserId)
+          uniqueTasks.push(task)
+        }
+      }
+      
+      this.isBatchSubmittingNeedRefetch = true
+      this.batchNeedRefetchProgress = { current: 0, total: uniqueTasks.length, success: 0, failed: 0 }
+      
+      const concurrency = 5
+      
+      try {
+        for (let i = 0; i < uniqueTasks.length; i += concurrency) {
+          const batch = uniqueTasks.slice(i, i + concurrency)
+          
+          const promises = batch.map(async (task) => {
+            const result = await this.submitSinglePositionUpdate(task.browserId, task.groupNo)
+            return { task, result }
+          })
+          
+          const results = await Promise.all(promises)
+          
+          for (const { result } of results) {
+            if (result.success) {
+              this.batchNeedRefetchProgress.success++
+            } else {
+              this.batchNeedRefetchProgress.failed++
+            }
+          }
+          
+          this.batchNeedRefetchProgress.current = Math.min(i + concurrency, uniqueTasks.length)
+          
+          if (i + concurrency < uniqueTasks.length) {
+            await new Promise(resolve => setTimeout(resolve, 300))
+          }
+        }
+        this.showToast(`要重抓分类抓取完成，成功: ${this.batchNeedRefetchProgress.success}，失败: ${this.batchNeedRefetchProgress.failed}`, 'success')
+      } catch (error) {
+        console.error('批量抓取仓位失败:', error)
+        this.showToast('批量抓取仓位失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchSubmittingNeedRefetch = false
+        this.batchNeedRefetchProgress = { current: 0, total: 0, success: 0, failed: 0 }
+      }
+    },
+    
+    /**
+     * 【要重抓分类】批量获取服务器数据（并发5个一组）
+     */
+    async batchFetchServerDataNeedRefetch() {
+      if (this.isBatchFetchingNeedRefetch) return
+      
+      const needRefetchStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed']
+      const groups = []
+      Object.values(this.results).forEach(group => {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (needRefetchStatuses.includes(status)) {
+          groups.push(group)
+        }
+      })
+      
+      if (groups.length === 0) {
+        this.showToast('要重抓分类中没有需要处理的组', 'info')
+        return
+      }
+      
+      this.isBatchFetchingNeedRefetch = true
+      this.batchNeedRefetchProgress = { current: 0, total: groups.length, success: 0, failed: 0 }
+      
+      const concurrency = 5
+      
+      try {
+        for (let i = 0; i < groups.length; i += concurrency) {
+          const batch = groups.slice(i, i + concurrency)
+          const promises = batch.map(group => this.fetchServerDataForGroup(group, true))
+          
+          await Promise.all(promises)
+          
+          this.batchNeedRefetchProgress.current = Math.min(i + concurrency, groups.length)
+          
+          if (i + concurrency < groups.length) {
+            await new Promise(resolve => setTimeout(resolve, 200))
+          }
+        }
+        this.showToast(`要重抓分类处理完成，共处理 ${groups.length} 个组`, 'success')
+      } catch (error) {
+        console.error('批量获取服务器数据失败:', error)
+        this.showToast('批量获取服务器数据失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchFetchingNeedRefetch = false
+        this.batchNeedRefetchProgress = { current: 0, total: 0, success: 0, failed: 0 }
+      }
+    },
+    
+    /**
+     * 【要重抓分类】抓后30分钟处理
+     * 只处理仓位更新时间超过30分钟的组
+     */
+    async batchFetchAfter30MinServerData() {
+      if (this.isBatchFetchingAfter30Min) return
+      
+      const needRefetchStatuses = ['problemIn30', 'problemOtherIn30', 'pendingFailed']
+      const now = Date.now()
+      const thirtyMinutesAgo = now - 30 * 60 * 1000  // 30分钟前的时间戳
+      
+      const groups = []
+      Object.values(this.results).forEach(group => {
+        const status = this.getGroupFinalStatusWithAnalysis(group)
+        if (!needRefetchStatuses.includes(status)) return
+        
+        // 检查组内任务的仓位更新时间是否超过30分钟
+        let hasValidTask = false
+        for (const task of group.tasks) {
+          // 获取仓位更新时间（使用positionUpdateTime字段或updateTime字段）
+          const posUpdateTime = task.positionUpdateTime || task.updateTime
+          if (!posUpdateTime) continue
+          
+          const updateTimestamp = new Date(posUpdateTime).getTime()
+          if (updateTimestamp < thirtyMinutesAgo) {
+            hasValidTask = true
+            break
+          }
+        }
+        
+        if (hasValidTask) {
+          groups.push(group)
+        }
+      })
+      
+      if (groups.length === 0) {
+        this.showToast('没有仓位更新时间超过30分钟的组', 'info')
+        return
+      }
+      
+      this.isBatchFetchingAfter30Min = true
+      this.batchNeedRefetchProgress = { current: 0, total: groups.length, success: 0, failed: 0 }
+      
+      const concurrency = 5
+      
+      try {
+        for (let i = 0; i < groups.length; i += concurrency) {
+          const batch = groups.slice(i, i + concurrency)
+          const promises = batch.map(group => this.fetchServerDataForGroup(group, true))
+          
+          await Promise.all(promises)
+          
+          this.batchNeedRefetchProgress.current = Math.min(i + concurrency, groups.length)
+          
+          if (i + concurrency < groups.length) {
+            await new Promise(resolve => setTimeout(resolve, 200))
+          }
+        }
+        this.showToast(`抓后30分钟处理完成，共处理 ${groups.length} 个组`, 'success')
+      } catch (error) {
+        console.error('抓后30分钟处理失败:', error)
+        this.showToast('抓后30分钟处理失败: ' + (error.message || '未知错误'), 'error')
+      } finally {
+        this.isBatchFetchingAfter30Min = false
+        this.batchNeedRefetchProgress = { current: 0, total: 0, success: 0, failed: 0 }
       }
     },
     
@@ -6680,6 +7052,62 @@ export default {
   box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
 }
 
+/* 排序切换按钮 */
+.sort-toggle-btn {
+  margin-left: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sort-toggle-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(76, 175, 80, 0.4);
+}
+
+/* 事件统计排序按钮组 */
+.event-stats-sort-btns {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.sort-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  background: #e0e0e0;
+  color: #666;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sort-btn:hover {
+  background: #d0d0d0;
+}
+
+.sort-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: #667eea;
+}
+
+/* 部分成交样式 */
+.partial-count {
+  color: #666;
+}
+
+.partial-count.warning {
+  color: #e65100;
+  font-weight: bold;
+}
+
 /* 事件统计区域 */
 .event-stats-section {
   margin-top: 16px;
@@ -7902,6 +8330,112 @@ export default {
   padding: 15px 20px;
   margin-bottom: 15px;
   border: 1px solid #dee2e6;
+}
+
+/* 分类组样式 */
+.category-group {
+  margin-bottom: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+}
+
+.category-group:last-child {
+  margin-bottom: 0;
+}
+
+.category-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #e0e0e0;
+}
+
+.category-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #333;
+}
+
+.category-total {
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  background: #f0f0f0;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.category-success {
+  font-size: 14px;
+  font-weight: 600;
+  color: #27ae60;
+  background: rgba(39, 174, 96, 0.1);
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.category-other {
+  font-size: 14px;
+  font-weight: 600;
+  color: #7f8c8d;
+  background: rgba(127, 140, 141, 0.1);
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.category-sub-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* 分类组颜色 */
+.category-no-need-process {
+  border-left: 4px solid #27ae60;
+}
+
+.category-need-refetch {
+  border-left: 4px solid #e67e22;
+}
+
+.category-need-process {
+  border-left: 4px solid #e74c3c;
+}
+
+/* 批量操作按钮 */
+.batch-action-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.batch-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(52, 152, 219, 0.4);
+}
+
+.batch-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.batch-action-btn-warning {
+  background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+}
+
+.batch-action-btn-warning:hover:not(:disabled) {
+  box-shadow: 0 2px 6px rgba(230, 126, 34, 0.4);
 }
 
 .status-stat-row {
