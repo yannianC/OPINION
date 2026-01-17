@@ -716,6 +716,15 @@
                 :disabled="autoHedgeRunning"
                 title="一组任务结束后，等待多少分钟再请求分配新任务"
               />
+              
+              <button 
+                class="btn btn-sm btn-outline-primary"
+                :class="{ 'active': sortByYesDesc }"
+                style="margin-left: 10px;"
+                @click="sortByYesDesc = !sortByYesDesc"
+              >
+                {{ sortByYesDesc ? '▼ 已按YES数量排序' : '按YES数量排序' }}
+              </button>
           </div>
           
           <!-- 导出和拉黑主题控制 -->
@@ -728,24 +737,23 @@
               📤 导出主题
             </button>
             <div style="display: flex; align-items: center; gap: 8px;">
-              <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 14px; margin: 0 8px;color: #000;">
+                  <input 
+                    type="checkbox" 
+                    v-model="enableWhitelist" 
+                    style="width: 16px; height: 16px;"
+                    @change="saveHedgeSettings"
+                  />
+                  只启用白名单:
+                </label>
                 <input 
-                  type="checkbox" 
-                  v-model="enableBlacklist"
-                  style="width: 16px; height: 16px; cursor: pointer;"
+                  type="text" 
+                  v-model="exportWhitelistInput" 
+                  placeholder="只启用白名单中的ID (逗号分隔)" 
+                  class="filter-input" 
+                  style="width: 200px; margin: 0;"
+                  @blur="saveHedgeSettings"
                 />
-                <span style="font-size: 14px;color: #666;">启用拉黑:</span>
-              </label>
-              <input 
-                v-model="exportBlacklistInput"
-                type="text"
-                placeholder="输入要拉黑的主题ID，用逗号分隔"
-                style="width: 400px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                :disabled="!enableBlacklist"
-              />
-              <span v-if="enableBlacklist && blacklistedTopicIds.size > 0" style="font-size: 12px; color: #666;">
-                (已拉黑 {{ blacklistedTopicIds.size }} 个主题)
-              </span>
             </div>
           </div>
           
@@ -762,7 +770,7 @@
                 <div class="trending-header">
                   <div class="trending-name-row">
                     <span class="trending-name">
-                      <span style="color: #888; font-size: 12px; margin-right: 6px;">[{{ config.id }}]</span>{{ config.trending }}
+                      <span style="color: #fff; font-size: 12px; margin-right: 6px;">[{{ config.id }}]</span>{{ config.trending }}
                     </span>
              
                     <button 
@@ -799,27 +807,32 @@
                     <div class="section-title">订单薄数据</div>
                     <div v-if="config.orderbookData" class="type3-task-info">
                       <div class="task-status-row">
-                        <span class="task-label">先挂方: {{ config.orderbookData.firstSide }}</span>
-                        <span class="task-status-badge status-success">已更新</span>
+                        <span class="task-label">先挂方: {{ config.orderbookData.firstSide || '未知' }}</span>
+                        <span class="task-status-badge" :class="config.orderbookData.reason ? 'status-error' : 'status-success'">
+                          {{ config.orderbookData.reason ? '不符合条件' : '已更新' }}
+                        </span>
+                      </div>
+                      <div v-if="config.orderbookData.reason" class="task-error-reason" style="color: #e74c3c; font-size: 12px; margin-top: 4px;">
+                        {{ config.orderbookData.reason }}
                       </div>
                       <div v-if="config.lastRequestTime" class="task-time">
                         {{ formatTime(config.lastRequestTime) }}
                       </div>
                       <div class="task-msg">
                         <div class="orderbook-detail">
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.price1 != null" class="price-row">
                             <span class="label">先挂价格:</span>
                             <span class="value">{{ config.orderbookData.price1.toFixed(2) }}¢</span>
                           </div>
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.price2 != null" class="price-row">
                             <span class="label">后挂价格:</span>
                             <span class="value">{{ config.orderbookData.price2.toFixed(2) }}¢</span>
                           </div>
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.diff != null" class="price-row">
                             <span class="label">价差:</span>
                             <span class="value highlight">{{ config.orderbookData.diff.toFixed(2) }}¢</span>
                           </div>
-                          <div class="price-row">
+                          <div v-if="config.orderbookData.depth1 != null && config.orderbookData.depth2 != null" class="price-row">
                             <span class="label">深度:</span>
                             <span class="value">{{ config.orderbookData.depth1.toFixed(2) }} / {{ config.orderbookData.depth2.toFixed(2) }}</span>
                           </div>
@@ -2808,13 +2821,14 @@ const isFetchingByRequirement = ref(false)  // 是否正在根据需求获取主
 const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据 { configId: { yesSum, noSum } }
 const idToTrendingMap = ref(new Map())  // id -> trending 映射
 
-// 导出和拉黑主题相关
-const exportBlacklistInput = ref('')  // 拉黑主题输入框
-const enableBlacklist = ref(false)    // 是否启用拉黑
-const blacklistedTopicIds = computed(() => {
-  if (!exportBlacklistInput.value) return new Set()
-  return new Set(exportBlacklistInput.value.split(',').map(id => id.trim()).filter(id => id))
+// 导出和白名单主题相关
+const exportWhitelistInput = ref('')  // 白名单主题输入框
+const enableWhitelist = ref(false)    // 是否启用白名单
+const whitelistedTopicIds = computed(() => {
+  if (!exportWhitelistInput.value) return new Set()
+  return new Set(exportWhitelistInput.value.split(',').map(id => id.trim()).filter(id => id))
 })
+const sortByYesDesc = ref(false)  // 是否按yes数量倒序排序
 
 // 901-927任务数相关
 const task901To927Count = ref(null)  // 当前901-927任务数
@@ -3831,7 +3845,7 @@ const fetchTopicsByYesCount = async () => {
 const loadPositionDataForDisplay = async () => {
   try {
     console.log('[持仓数据] 开始加载持仓数据用于显示...')
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnap')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnapHasPos')
     
     if (response.data && response.data.data && response.data.data.list) {
       const data = response.data.data.list
@@ -3926,7 +3940,7 @@ const fetchTopicsByRequirement = async () => {
     showToast('正在获取持仓数据，请稍候...', 'info')
     
     // 1. 请求 getAllPosSnap API
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnap')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnapHasPos')
     
     if (!response.data || !response.data.data || !response.data.data.list) {
       throw new Error('获取持仓数据失败：未找到有效的数据')
@@ -4088,7 +4102,7 @@ const fetchTopicsByRequirement = async () => {
  * 获取任务列表
  */
 const fetchMissionList = async () => {
-  isLoadingList.value = true
+  // isLoadingList.value = true
   
   // try {
   //   const response = await axios.get('https://sg.bicoin.com.cn/99l/mission/list', {
@@ -6144,15 +6158,27 @@ const submitEditConfig = async () => {
  * 筛选后的活动配置列表（用于自动对冲功能块显示）
  */
 const filteredActiveConfigs = computed(() => {
-  if (!autoHedgeFilter.value || !autoHedgeFilter.value.trim()) {
-    return activeConfigs.value
+  let result = activeConfigs.value
+  
+  if (autoHedgeFilter.value && autoHedgeFilter.value.trim()) {
+    const keyword = autoHedgeFilter.value.trim().toLowerCase()
+    result = result.filter(config => {
+      const trending = (config.trending || '').toLowerCase()
+      return trending.includes(keyword)
+    })
+  }
+
+  // 排序逻辑：如果开启了按yes数量倒序排序
+  if (sortByYesDesc.value) {
+    // 创建新数组进行排序，避免修改原数组顺序
+    result = [...result].sort((a, b) => {
+      const yesA = positionDataMap.value.get(String(a.id))?.yesSum || 0
+      const yesB = positionDataMap.value.get(String(b.id))?.yesSum || 0
+      return yesB - yesA // 降序：大到小
+    })
   }
   
-  const keyword = autoHedgeFilter.value.trim().toLowerCase()
-  return activeConfigs.value.filter(config => {
-    const trending = (config.trending || '').toLowerCase()
-    return trending.includes(keyword)
-  })
+  return result
 })
 
 /**
@@ -6963,9 +6989,9 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
   
   for (const config of batchConfigs) {
     try {
-      // 检查是否在拉黑列表中
-      if (enableBlacklist.value && blacklistedTopicIds.value.has(String(config.id))) {
-        console.log(`主题 ${config.trending} (ID: ${config.id}) 在拉黑列表中，跳过交易`)
+      // 检查白名单
+      if (enableWhitelist.value && !whitelistedTopicIds.value.has(String(config.id))) {
+        console.log(`主题 ${config.trending} (ID: ${config.id}) 不在白名单中，跳过交易`)
         continue
       }
       
@@ -7127,9 +7153,30 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
         console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
         config.retryCount++
         
-        // 设置错误信息
+        // 提取错误消息
         const errorMsg = error.message || String(error)
         config.errorMessage = `订单薄错误: ${errorMsg}`
+        
+        // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
+        let basicInfo = null
+        try {
+          basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+          console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
+        } catch (basicError) {
+          console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+        }
+        
+        // 如果获取到了基本数据，保存到 orderbookData 中
+        if (basicInfo) {
+          config.orderbookData = {
+            ...basicInfo,
+            updateTime: Date.now(),  // 记录更新时间
+            reason: errorMsg  // 保存错误原因
+          }
+        } else {
+          // 没有基本数据，清除 orderbookData
+          config.orderbookData = null
+        }
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
@@ -7483,8 +7530,29 @@ const subtractLimitOrdersFromOrderbook = (orderbook, limitOrders) => {
  * 新增：从订单薄中减去 calLimitOrder 返回的挂单数量
  */
 const parseOrderbookData = async (config, isClose) => {
+  // 初始化结果对象
+  const result = {
+    isValid: false,
+    failReason: null,
+    firstSide: 'YES', // 默认值
+    price1: 0,
+    price2: 0,
+    diff: 0,
+    depth1: 0,
+    depth2: 0,
+    minPrice: 0,
+    maxPrice: 0,
+    topNBidsDepth: 0,
+    topNAsksDepth: 0,
+    // 深度差相关返回值
+    depthDiffRange: null,
+    finalPrice: null,
+    firstShareReduction: 0
+  }
+
   try {
     // 获取yes和no的订单薄数据
+    // 如果获取失败，fetchOrderbook应该会抛出异常，被catch捕获
     const [yesOrderbook, noOrderbook] = await Promise.all([
       fetchOrderbook(config.trendingPart1),
       fetchOrderbook(config.trendingPart2)
@@ -7502,7 +7570,7 @@ const parseOrderbookData = async (config, isClose) => {
       console.log(`配置 ${config.id} - 获取到挂单数据:`, limitOrderData)
       
       if (isClose) {
-        // 平仓模式：将买入转换为卖出，汇合卖出挂单
+        // 平仓：将买入转换为卖出，汇合卖出挂单
         const convertedAsks = convertLimitOrdersForClose(limitOrderData)
         
         // 从订单薄中减去对应的卖出挂单
@@ -7515,7 +7583,7 @@ const parseOrderbookData = async (config, isClose) => {
           console.log(`配置 ${config.id} - 从NO卖单中减去 ${convertedAsks.no.length} 个挂单`)
         }
       } else {
-        // 开仓模式：将卖出转换为买入，汇合买入挂单
+        // 开仓：将卖出转换为买入，汇合买入挂单
         const convertedBids = convertLimitOrdersForOpen(limitOrderData)
         
         // 从订单薄中减去对应的买入挂单
@@ -7536,298 +7604,237 @@ const parseOrderbookData = async (config, isClose) => {
     // 基本数据检查
     if (yesBids.length === 0 || yesAsks.length === 0 || 
         noBids.length === 0 || noAsks.length === 0) {
-      throw new Error('订单薄数据不足')
+      result.failReason = '订单薄数据不足(为空)'
+      return result
     }
     
     // 检查数据数量：asks和bids每个都至少要有指定组数据
     const minDepth = hedgeMode.minOrderbookDepth
     if (yesBids.length < minDepth || yesAsks.length < minDepth || 
         noBids.length < minDepth || noAsks.length < minDepth) {
-      throw new Error(`订单薄数据不足${minDepth}组`)
+       // 标记失败但不立即返回，尝试继续获取价格用于显示
+       if (!result.failReason) result.failReason = `订单薄数据不足${minDepth}组`
     }
     
     // 对 bids 和 asks 进行排序（确保顺序正确）
-    // bids 按价格从高到低排序
     yesBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
     noBids.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
-    // asks 按价格从低到高排序
     yesAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
     noAsks.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
     
-    // 获取YES方的买一和卖一
-    const yesBid = yesBids[0]
-    const yesAsk = yesAsks[0]
+    // 转换为百分比格式
+    const yesBidPrice = parseFloat(yesBids[0].price) * 100
+    const yesAskPrice = parseFloat(yesAsks[0].price) * 100
+    const noBidPrice = parseFloat(noBids[0].price) * 100
+    const noAskPrice = parseFloat(noAsks[0].price) * 100
     
-    // 获取NO方的买一和卖一  
-    const noBid = noBids[0]
-    const noAsk = noAsks[0]
-    
-    // 转换为百分比格式（API返回的是小数，需要乘以100）
-    const yesBidPrice = parseFloat(yesBid.price) * 100
-    const yesAskPrice = parseFloat(yesAsk.price) * 100
-    const noBidPrice = parseFloat(noBid.price) * 100
-    const noAskPrice = parseFloat(noAsk.price) * 100
-    
-    const yesBidDepth = parseFloat(yesBid.size)
-    const yesAskDepth = parseFloat(yesAsk.size)
-    const noBidDepth = parseFloat(noBid.size)
-    const noAskDepth = parseFloat(noAsk.size)
-    
-    // 确定先挂方：使用轮换机制（一个主题一次YES一次NO轮着来）
-    let firstSide, price1, price2, depth1, depth2
-    let firstBids, firstAsks
+    const yesBidDepth = parseFloat(yesBids[0].size)
+    const yesAskDepth = parseFloat(yesAsks[0].size)
+    const noBidDepth = parseFloat(noBids[0].size)
+    const noAskDepth = parseFloat(noAsks[0].size)
     
     // 使用轮换机制获取先挂方
-    firstSide = getNextFirstSide(config.id, yesBidPrice, noBidPrice, yesAskPrice, noAskPrice, isClose)
-    firstBids = firstSide === 'YES' ? yesBids : noBids
-    firstAsks = firstSide === 'YES' ? yesAsks : noAsks
+    // 注意：如果数据不足，这里可能取不到准确值，但我们尽量取
+    result.firstSide = getNextFirstSide(config.id, yesBidPrice, noBidPrice, yesAskPrice, noAskPrice, isClose)
+    
+    const firstBids = result.firstSide === 'YES' ? yesBids : noBids
+    const firstAsks = result.firstSide === 'YES' ? yesAsks : noAsks
     
     // 获取先挂方的买一价和卖一价
-    if (firstSide === 'YES') {
-      price1 = yesBidPrice  // 先挂方的买一价
-      price2 = yesAskPrice  // 先挂方的卖一价
-      depth1 = yesBidDepth  // 先挂方的买一深度
-      depth2 = yesAskDepth  // 先挂方的卖一深度
+    if (result.firstSide === 'YES') {
+      result.price1 = yesBidPrice
+      result.price2 = yesAskPrice
+      result.depth1 = yesBidDepth
+      result.depth2 = yesAskDepth
     } else {
-      price1 = noBidPrice   // 先挂方的买一价
-      price2 = noAskPrice   // 先挂方的卖一价
-      depth1 = noBidDepth   // 先挂方的买一深度
-      depth2 = noAskDepth   // 先挂方的卖一深度
+      result.price1 = noBidPrice
+      result.price2 = noAskPrice
+      result.depth1 = noBidDepth
+      result.depth2 = noAskDepth
     }
     
-    // === 新增判断：深度检查 ===
-    // 累加 bids 价格最高的N组数据的 size
+    // 基础计算
+    result.diff = result.price2 - result.price1
+    console.log(`深度差: ${result.diff.toFixed(2)}`)
+    result.minPrice = Math.min(result.price1, result.price2)
+    result.maxPrice = Math.max(result.price1, result.price2)
+
+    // === 深度检查 ===
+    // 即使前面 depth check 失败，也计算一下累计深度用于返回
     const depthCount = hedgeMode.minOrderbookDepth
-    const topNBidsDepth = firstBids.slice(0, depthCount).reduce((sum, bid) => sum + parseFloat(bid.size), 0)
-    // 累加 asks 价格最低的N组数据的 size
-    const topNAsksDepth = firstAsks.slice(0, depthCount).reduce((sum, ask) => sum + parseFloat(ask.size), 0)
+    // 防止 slice 出错
+    const safeFirstBids = firstBids.slice(0, Math.min(firstBids.length, depthCount))
+    const safeFirstAsks = firstAsks.slice(0, Math.min(firstAsks.length, depthCount))
     
-    console.log(`先挂方 ${firstSide} - 买1-${depthCount}深度累计: ${topNBidsDepth.toFixed(2)}, 卖1-${depthCount}深度累计: ${topNAsksDepth.toFixed(2)}`)
+    result.topNBidsDepth = safeFirstBids.reduce((sum, bid) => sum + parseFloat(bid.size), 0)
+    result.topNAsksDepth = safeFirstAsks.reduce((sum, ask) => sum + parseFloat(ask.size), 0)
+    
+    console.log(`先挂方 ${result.firstSide} - 买1-${depthCount}深度累计: ${result.topNBidsDepth.toFixed(2)}, 卖1-${depthCount}深度累计: ${result.topNAsksDepth.toFixed(2)}`)
     
     const minTotalDepth = hedgeMode.minTotalDepth
-    if (topNBidsDepth < minTotalDepth || topNAsksDepth < minTotalDepth) {
-      throw new Error(`深度不足：买1-${depthCount}累计=${topNBidsDepth.toFixed(2)}, 卖1-${depthCount}累计=${topNAsksDepth.toFixed(2)}, 要求>=${minTotalDepth}`)
+    if (!result.failReason && (result.topNBidsDepth < minTotalDepth || result.topNAsksDepth < minTotalDepth)) {
+      result.failReason = `深度不足：买1-${depthCount}累计=${result.topNBidsDepth.toFixed(2)}, 卖1-${depthCount}累计=${result.topNAsksDepth.toFixed(2)}, 要求>=${minTotalDepth}`
     }
     
-    // === 新增判断：价差检查 ===
-    const maxPriceDiff = hedgeMode.maxPriceDiff
-    const depthIndex = hedgeMode.minOrderbookDepth - 1  // 转为索引（0-based）
-    
-    if (isClose) {
-      // 平仓：检查先挂方 bids 中买1和买N的价差
-      const bid1Price = parseFloat(firstBids[0].price) * 100
-      const bidNPrice = parseFloat(firstBids[depthIndex].price) * 100
-      const bidsPriceDiff = bid1Price - bidNPrice
-      
-      console.log(`平仓模式 - 先挂方买1价格: ${bid1Price.toFixed(2)}, 买${hedgeMode.minOrderbookDepth}价格: ${bidNPrice.toFixed(2)}, 差值: ${bidsPriceDiff.toFixed(2)}`)
-      
-      if (bidsPriceDiff >= maxPriceDiff) {
-        throw new Error(`买1-买${hedgeMode.minOrderbookDepth}价差过大: ${bidsPriceDiff.toFixed(2)} >= ${maxPriceDiff}`)
-      }
-    } else {
-      // 开仓：检查先挂方 asks 中卖1和卖N的价差
-      const ask1Price = parseFloat(firstAsks[0].price) * 100
-      const askNPrice = parseFloat(firstAsks[depthIndex].price) * 100
-      const asksPriceDiff = askNPrice - ask1Price
-      
-      console.log(`开仓模式 - 先挂方卖1价格: ${ask1Price.toFixed(2)}, 卖${hedgeMode.minOrderbookDepth}价格: ${askNPrice.toFixed(2)}, 差值: ${asksPriceDiff.toFixed(2)}`)
-      
-      if (asksPriceDiff >= maxPriceDiff) {
-        throw new Error(`卖1-卖${hedgeMode.minOrderbookDepth}价差过大: ${asksPriceDiff.toFixed(2)} >= ${maxPriceDiff}`)
-      }
+    // === 价差检查 ===
+    if (!result.failReason) {
+        const maxPriceDiff = hedgeMode.maxPriceDiff
+        const depthIndex = hedgeMode.minOrderbookDepth - 1
+        
+        // 确保有足够数据进行价差检查
+        if (firstBids.length > depthIndex && firstAsks.length > depthIndex) {
+            if (isClose) {
+                const bid1Price = parseFloat(firstBids[0].price) * 100
+                const bidNPrice = parseFloat(firstBids[depthIndex].price) * 100
+                const bidsPriceDiff = bid1Price - bidNPrice
+                
+                console.log(`平仓模式 - 先挂方买1价格: ${bid1Price.toFixed(2)}, 买${hedgeMode.minOrderbookDepth}价格: ${bidNPrice.toFixed(2)}, 差值: ${bidsPriceDiff.toFixed(2)}`)
+                
+                if (bidsPriceDiff >= maxPriceDiff) {
+                    result.failReason = `买1-买${hedgeMode.minOrderbookDepth}价差过大: ${bidsPriceDiff.toFixed(2)} >= ${maxPriceDiff}`
+                }
+            } else {
+                const ask1Price = parseFloat(firstAsks[0].price) * 100
+                const askNPrice = parseFloat(firstAsks[depthIndex].price) * 100
+                const asksPriceDiff = askNPrice - ask1Price
+                
+                console.log(`开仓模式 - 先挂方卖1价格: ${ask1Price.toFixed(2)}, 卖${hedgeMode.minOrderbookDepth}价格: ${askNPrice.toFixed(2)}, 差值: ${asksPriceDiff.toFixed(2)}`)
+                
+                if (asksPriceDiff >= maxPriceDiff) {
+                    result.failReason = `卖1-卖${hedgeMode.minOrderbookDepth}价差过大: ${asksPriceDiff.toFixed(2)} >= ${maxPriceDiff}`
+                }
+            }
+        } else {
+             // 如果数据不足，已经在前面设置了failReason，这里忽略或者是次要错误
+        }
     }
     
-    // === 新增判断：先挂方价格区间检查 ===
-    const priceMin = hedgeMode.priceRangeMin
-    const priceMax = hedgeMode.priceRangeMax
+    // === 深度差阈值与计算逻辑 ===
+    // 注意：价格区间检查移到深度差计算完成后，基于 finalPrice 进行检查
+    const threshold1 = hedgeMode.depthThreshold1
+    const threshold2 = hedgeMode.depthThreshold2
+    const threshold3 = hedgeMode.depthThreshold3
     
-    if (isClose) {
-      // 平仓模式：检查先挂方买一价格是否在区间内
-      console.log(`平仓模式 - 先挂方买一价格: ${price1.toFixed(2)}, 允许区间: [${priceMin}, ${priceMax}]`)
-      
-      if (price1 < priceMin || price1 > priceMax) {
-        throw new Error(`先挂方买一价格 ${price1.toFixed(2)} 不在允许区间 [${priceMin}, ${priceMax}] 内`)
-      }
-    } else {
-      // 开仓模式：检查先挂方卖一价格是否在区间内
-      console.log(`开仓模式 - 先挂方卖一价格: ${price2.toFixed(2)}, 允许区间: [${priceMin}, ${priceMax}]`)
-      
-      if (price2 < priceMin || price2 > priceMax) {
-        throw new Error(`先挂方卖一价格 ${price2.toFixed(2)} 不在允许区间 [${priceMin}, ${priceMax}] 内`)
-      }
-    }
-    
-    // === 深度差计算和价格计算逻辑 ===
-    // 计算深度差（卖一减去买一）
-    const depthDiff = price2 - price1
-    console.log(`深度差: ${depthDiff.toFixed(2)}`)
-    
-    // 获取配置的深度差阈值
-    const threshold1 = hedgeMode.depthThreshold1  // 默认15
-    const threshold2 = hedgeMode.depthThreshold2  // 默认2
-    const threshold3 = hedgeMode.depthThreshold3  // 默认0.2
-    
-    // 辅助函数：计算价格调整值（根据配置的最小值和最大值）
     const calculatePriceAdjustment = (diff, minPercent, maxPercent) => {
-      // 在minPercent到maxPercent之间随机选一个百分比
       const randomPercent = Math.random() * (maxPercent - minPercent) + minPercent
-      // 深度差乘以随机百分比
       const adjustment = diff * (randomPercent / 100)
-      // 确保结果至少为0.1
       return Math.max(0.1, adjustment)
     }
     
-    // 根据深度差范围确定先挂方价格和开关状态
-    let finalPrice = null
-    let depthDiffRange = null
-    let firstShareReduction = 0  // 深度差0.1时，先挂方数量需要减少的量
-    
-    if (depthDiff > threshold1) {
-      // 深度差 > 阈值1：检查开关是否打开
-      if (!hedgeMode.enableDepthDiffParamsGt15) {
-        throw new Error(`深度差>${threshold1}时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
-      }
-      depthDiffRange = 'gt15'
-      
-      // 使用该区间的价格波动配置计算最终价格
-      const minVolatility = hedgeMode.priceVolatilityGt15Min
-      const maxVolatility = hedgeMode.priceVolatilityGt15Max
-      
-      if (isClose) {
-        // 平仓：卖一价 - 调整值
-        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = price2 - adjustment
-      } else {
-        // 开仓：买一价 + 调整值
-        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = price1 + adjustment
-      }
-      console.log(`深度差 > ${threshold1} - 计算最终价格: ${finalPrice.toFixed(2)}`)
-      
-    } else if (depthDiff >= threshold2) {
-      // 深度差 阈值2-阈值1：检查开关是否打开
-      if (!hedgeMode.enableDepthDiffParams2To15) {
-        throw new Error(`深度差在${threshold2}-${threshold1}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
-      }
-      depthDiffRange = '2to15'
-      
-      const minVolatility = hedgeMode.priceVolatility2To15Min
-      const maxVolatility = hedgeMode.priceVolatility2To15Max
-      
-      if (isClose) {
-        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = price2 - adjustment
-      } else {
-        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = price1 + adjustment
-      }
-      console.log(`深度差 ${threshold2}-${threshold1} - 计算最终价格: ${finalPrice.toFixed(2)}`)
-      
-    } else if (depthDiff >= threshold3) {
-      // 深度差 阈值3-阈值2：检查开关是否打开
-      if (!hedgeMode.enableDepthDiffParams02To2) {
-        throw new Error(`深度差在${threshold3}-${threshold2}区间时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
-      }
-      depthDiffRange = '02to2'
-      
-      const minVolatility = hedgeMode.priceVolatility02To2Min
-      const maxVolatility = hedgeMode.priceVolatility02To2Max
-      
-      if (isClose) {
-        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = price2 - adjustment
-      } else {
-        const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = price1 + adjustment
-      }
-      console.log(`深度差 ${threshold3}-${threshold2} - 计算最终价格: ${finalPrice.toFixed(2)}`)
-      
-    } else if (Math.abs(depthDiff - 0.1) < 0.01) {
-      // 深度差 0.1（允许0.09-0.11的误差）：检查开关是否打开
-      if (!hedgeMode.enableDepthDiffParams01) {
-        throw new Error(`深度差0.1时，该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
-      }
-      depthDiffRange = '01'
-      
-      // 深度差0.1时的特殊逻辑
-      const maxEatValue = hedgeMode.maxEatValue01  // 深度差0.1最大多吃价值(U)
-      const maxDepthValue = hedgeMode.maxDepth  // 最大允许深度(U)
-      
-      if (isClose) {
-        // 【平仓逻辑】
-        // 计算 卖一价深度*卖一价/100 得到 卖一价的价值（美元）
-        const askValue = price2 * depth2 / 100
-        
-        if (askValue < maxDepthValue) {
-          // 卖一价的价值 < 最大允许深度，价格取卖一价
-          finalPrice = price2
-          console.log(`深度差 0.1 - 平仓模式，卖一价值 ${askValue.toFixed(2)}U < 最大允许深度 ${maxDepthValue}U，使用卖一价: ${finalPrice.toFixed(2)}`)
-        } else {
-          // 卖一价的价值 >= 最大允许深度，查看买一价的价值
-          const bidValue = price1 * depth1 / 100
-          
-          if (bidValue >= maxEatValue) {
-            // 买一价的价值 >= 深度差0.1最大多吃价值，订单薄不符合条件
-            throw new Error(`深度差0.1时，平仓模式不满足条件：卖一价值 ${askValue.toFixed(2)}U >= 最大允许深度 ${maxDepthValue}U，且买一价值 ${bidValue.toFixed(2)}U >= 最大多吃价值 ${maxEatValue}U`)
-          } else {
-            // 买一价的价值 < 深度差0.1最大多吃价值，价格取买一价
-            finalPrice = price1
-            // 先挂方数量需要减少
-            firstShareReduction = (maxEatValue / price1) * 100
-            console.log(`深度差 0.1 - 平仓模式，使用买一价: ${finalPrice.toFixed(2)}，先挂方数量减少: ${firstShareReduction.toFixed(2)}`)
-          }
+    if (result.diff > threshold1 - 0.00001) {
+        if (!hedgeMode.enableDepthDiffParamsGt15) {
+            if (!result.failReason) result.failReason = `深度差>${threshold1}时，开关未开启（当前: ${result.diff.toFixed(2)}）`
         }
-      } else {
-        // 【开仓逻辑】
-        // 计算 买一价深度*买一价/100 得到 买一价的价值（美元）
-        const bidValue = price1 * depth1 / 100
-        
-        if (bidValue < maxDepthValue) {
-          // 买一价的价值 < 最大允许深度，价格取买一价
-          finalPrice = price1
-          console.log(`深度差 0.1 - 开仓模式，买一价值 ${bidValue.toFixed(2)}U < 最大允许深度 ${maxDepthValue}U，使用买一价: ${finalPrice.toFixed(2)}`)
-        } else {
-          // 买一价的价值 >= 最大允许深度，查看卖一价的价值
-          const askValue = price2 * depth2 / 100
-          
-          if (askValue >= maxEatValue) {
-            // 卖一价的价值 >= 深度差0.1最大多吃价值，订单薄不符合条件
-            throw new Error(`深度差0.1时，开仓模式不满足条件：买一价值 ${bidValue.toFixed(2)}U >= 最大允许深度 ${maxDepthValue}U，且卖一价值 ${askValue.toFixed(2)}U >= 最大多吃价值 ${maxEatValue}U`)
-          } else {
-            // 卖一价的价值 < 深度差0.1最大多吃价值，价格取卖一价
-            finalPrice = price2
-            // 先挂方数量需要减少
-            firstShareReduction = (maxEatValue / price2) * 100
-            console.log(`深度差 0.1 - 开仓模式，使用卖一价: ${finalPrice.toFixed(2)}，先挂方数量减少: ${firstShareReduction.toFixed(2)}`)
-          }
+        result.depthDiffRange = 'gt15'
+        if (!result.failReason) {
+            const minVolatility = hedgeMode.priceVolatilityGt15Min
+            const maxVolatility = hedgeMode.priceVolatilityGt15Max
+            const adjustment = calculatePriceAdjustment(result.diff, minVolatility, maxVolatility)
+            result.finalPrice = isClose ? result.price2 - adjustment : result.price1 + adjustment
+            console.log(`深度差 > ${threshold1} - 计算最终价格: ${result.finalPrice.toFixed(2)}`)
         }
-      }
-      
+    } else if (result.diff >= threshold2 - 0.00001) {
+        if (!hedgeMode.enableDepthDiffParams2To15) {
+            if (!result.failReason) result.failReason = `深度差在${threshold2}-${threshold1}区间时，开关未开启（当前: ${result.diff.toFixed(2)}）`
+        }
+        result.depthDiffRange = '2to15'
+        if (!result.failReason) {
+            const minVolatility = hedgeMode.priceVolatility2To15Min
+            const maxVolatility = hedgeMode.priceVolatility2To15Max
+            const adjustment = calculatePriceAdjustment(result.diff, minVolatility, maxVolatility)
+            result.finalPrice = isClose ? result.price2 - adjustment : result.price1 + adjustment
+            console.log(`深度差 ${threshold2}-${threshold1} - 计算最终价格: ${result.finalPrice.toFixed(2)}`)
+        }
+    } else if (result.diff >= threshold3 - 0.00001) {
+        if (!hedgeMode.enableDepthDiffParams02To2) {
+            if (!result.failReason) result.failReason = `深度差在${threshold3}-${threshold2}区间时，开关未开启（当前: ${result.diff.toFixed(2)}）`
+        }
+        result.depthDiffRange = '02to2'
+        if (!result.failReason) {
+            const minVolatility = hedgeMode.priceVolatility02To2Min
+            const maxVolatility = hedgeMode.priceVolatility02To2Max
+            const adjustment = calculatePriceAdjustment(result.diff, minVolatility, maxVolatility)
+            result.finalPrice = isClose ? result.price2 - adjustment : result.price1 + adjustment
+            console.log(`深度差 ${threshold3}-${threshold2} - 计算最终价格: ${result.finalPrice.toFixed(2)}`)
+        }
+    } else if (Math.abs(result.diff - 0.1) < 0.01) {
+        if (!hedgeMode.enableDepthDiffParams01) {
+            if (!result.failReason) result.failReason = `深度差0.1时，开关未开启（当前: ${result.diff.toFixed(2)}）`
+        }
+        result.depthDiffRange = '01'
+        if (!result.failReason) {
+            const maxEatValue = hedgeMode.maxEatValue01
+            const maxDepthValue = hedgeMode.maxDepth
+            
+            if (isClose) {
+                // 平仓
+                const askValue = result.price2 * result.depth2 / 100
+                if (askValue < maxDepthValue) {
+                     result.finalPrice = result.price2
+                     console.log(`深度差0.1平仓，卖一价值<最大深度，使用卖一价: ${result.finalPrice.toFixed(2)}`)
+                } else {
+                     const bidValue = result.price1 * result.depth1 / 100
+                     if (bidValue >= maxEatValue) {
+                         result.failReason = `深度差0.1平仓，卖一价值${askValue.toFixed(2)}>=${maxDepthValue}且买一价值${bidValue.toFixed(2)}>=${maxEatValue}`
+                     } else {
+                         result.finalPrice = result.price1
+                         result.firstShareReduction = (maxEatValue / result.price1) * 100
+                         console.log(`深度差0.1平仓，使用买一价: ${result.finalPrice.toFixed(2)}, 减少: ${result.firstShareReduction.toFixed(2)}`)
+                     }
+                }
+            } else {
+                // 开仓
+                // 计算 买一价深度*买一价/100
+                const bidValue = result.price1 * result.depth1 / 100
+                if (bidValue < maxDepthValue) {
+                    result.finalPrice = result.price1
+                    console.log(`深度差0.1开仓，买一价值<最大深度，使用买一价: ${result.finalPrice.toFixed(2)}`)
+                } else {
+                    const askValue = result.price2 * result.depth2 / 100
+                    if (askValue >= maxEatValue) {
+                        result.failReason = `深度差0.1开仓，买一价值${bidValue.toFixed(2)}>=${maxDepthValue}且卖一价值${askValue.toFixed(2)}>=${maxEatValue}`
+                    } else {
+                        result.finalPrice = result.price2
+                        result.firstShareReduction = (maxEatValue / result.price2) * 100
+                        console.log(`深度差0.1开仓，使用卖一价: ${result.finalPrice.toFixed(2)}, 减少: ${result.firstShareReduction.toFixed(2)}`)
+                    }
+                }
+            }
+        }
     } else {
-      // 深度差不在任何开启的区间内
-      throw new Error(`该深度区间开关未开启，订单薄不符合条件（当前深度差: ${depthDiff.toFixed(2)}）`)
+        if (!result.failReason) result.failReason = `深度差过小: ${result.diff.toFixed(2)} < ${threshold3}`
     }
     
-    return {
-      firstSide,
-      price1,           // 先挂方的买一价
-      price2,           // 先挂方的卖一价
-      depth1,           // 先挂方的买一深度
-      depth2,           // 先挂方的卖一深度
-      diff: Math.abs(price1 - price2),  // 先挂方买卖价差
-      minPrice: Math.min(price1, price2),
-      maxPrice: Math.max(price1, price2),
-      topNBidsDepth,    // 买1-N深度累计
-      topNAsksDepth,    // 卖1-N深度累计
-      // 深度差相关返回值
-      depthDiff,        // 深度差值
-      depthDiffRange,   // 深度差区间标识
-      finalPrice,       // 最终计算的价格
-      firstShareReduction  // 先挂方数量减少值（深度差0.1时使用）
+    // === 先挂方价格区间检查（深度差判断通过后，基于 finalPrice 检查）===
+    if (!result.failReason && result.finalPrice !== null) {
+        const priceMin = hedgeMode.priceRangeMin
+        const priceMax = hedgeMode.priceRangeMax
+        const mode = isClose ? '平仓' : '开仓'
+        
+        console.log(`${mode}模式 - 先挂方价格: ${result.finalPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
+        
+        if (result.finalPrice < priceMin) {
+            result.failReason = `${mode}模式，先挂方价格 ${result.finalPrice.toFixed(2)} 小于最小价格 ${priceMin}`
+        }
+        
+        if (result.finalPrice > priceMax) {
+            result.failReason = `${mode}模式，先挂方价格 ${result.finalPrice.toFixed(2)} 大于最大价格 ${priceMax}`
+        }
     }
+    
+    // 如果没有任何 failure，则 valid = true
+    if (!result.failReason) {
+        result.isValid = true
+    }
+    
+    return result
+
   } catch (error) {
-    console.error('解析订单薄数据失败:', error)
-    throw error
+    console.error(`配置 ${config.id} - 解析订单薄数据出错:`, error)
+    if (!result.failReason) {
+       result.failReason = error.message || '系统错误'
+    }
+    return result
   }
 }
 
@@ -7909,6 +7916,14 @@ const checkHedgeCondition = (task) => {
  */
 const checkOrderbookHedgeCondition = (priceInfo) => {
   if (!priceInfo) return { canHedge: false, reason: '订单薄数据为空' }
+  
+  // 检查 parseOrderbookData 返回的 isValid 和 failReason
+  if (priceInfo.failReason) {
+    return { canHedge: false, reason: priceInfo.failReason }
+  }
+  if (priceInfo.isValid === false) {
+    return { canHedge: false, reason: '订单薄数据校验未通过' }
+  }
   
   let canHedge = false
   let reason = ''
@@ -8982,7 +8997,10 @@ const saveHedgeSettings = () => {
       task901To927Threshold: hedgeMode.task901To927Threshold,
       enableTask901To927Check: hedgeMode.enableTask901To927Check,
       // 后挂方延迟设置
-      secondSideDelayMinutes: hedgeMode.secondSideDelayMinutes
+      secondSideDelayMinutes: hedgeMode.secondSideDelayMinutes,
+      // 白名单设置
+      enableWhitelist: enableWhitelist.value,
+      exportWhitelistInput: exportWhitelistInput.value
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -9126,6 +9144,14 @@ const loadHedgeSettings = () => {
     // 后挂方延迟设置
     if (settings.secondSideDelayMinutes !== undefined) {
       hedgeMode.secondSideDelayMinutes = settings.secondSideDelayMinutes
+    }
+    
+    // 白名单设置
+    if (settings.enableWhitelist !== undefined) {
+      enableWhitelist.value = settings.enableWhitelist
+    }
+    if (settings.exportWhitelistInput !== undefined) {
+      exportWhitelistInput.value = settings.exportWhitelistInput
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -11179,9 +11205,30 @@ const executeAutoHedgeTasks = async () => {
         console.error(`配置 ${config.id} - 请求订单薄失败:`, error)
         config.retryCount++
         
-        // 设置错误信息
+        // 提取错误消息
         const errorMsg = error.message || String(error)
         config.errorMessage = `订单薄错误: ${errorMsg}`
+        
+        // 尝试获取基本订单薄数据，即使完整检查失败也能显示订单薄信息
+        let basicInfo = null
+        try {
+          basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
+          console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
+        } catch (basicError) {
+          console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
+        }
+        
+        // 如果获取到了基本数据，保存到 orderbookData 中
+        if (basicInfo) {
+          config.orderbookData = {
+            ...basicInfo,
+            updateTime: Date.now(),  // 记录更新时间
+            reason: errorMsg  // 保存错误原因
+          }
+        } else {
+          // 没有基本数据，清除 orderbookData
+          config.orderbookData = null
+        }
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
@@ -11577,7 +11624,7 @@ const formatTaskMsg = (msg) => {
     }
   } catch (e) {
     // 不是JSON格式，返回原始消息
-    console.warn('formatTaskMsg: JSON解析失败', e, '消息内容:', msg)
+    // console.warn('formatTaskMsg: JSON解析失败', e, '消息内容:', msg)
   }
   
   // 返回原始消息（如果JSON解析失败或type不匹配）

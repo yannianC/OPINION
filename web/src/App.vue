@@ -4821,7 +4821,7 @@ const handleQuickSelectOrderAcc = async () => {
 const loadPositionData = async () => {
   try {
     console.log('[持仓数据] 开始加载持仓数据...')
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnap')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/getAllPosSnapHasPos')
     
     if (response.data && response.data.data && response.data.data.list) {
       const data = response.data.data.list
