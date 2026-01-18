@@ -3570,6 +3570,7 @@ const lastRoundTaskCount = ref(0)  // 上一轮开出的任务总数
 const lastRoundEndTime = ref(null)  // 上一轮结束时间
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const configAutoRefreshInterval = ref(null)  // 配置自动刷新定时器（每小时05分）
+const statsRefreshInterval = ref(null)  // 统计数据刷新定时器（每30分钟）
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
 const randomGetCount = ref(1)  // 一次性获取的主题数量
 const positionTopics = ref(new Set())  // 持仓主题列表（用于平仓时判断）
@@ -4986,6 +4987,12 @@ const silentRefreshExchangeConfig = async () => {
           tasksPerTopic: existingConfig?.tasksPerTopic ?? config.tasksPerTopic,
           maxDepth: existingConfig?.maxDepth ?? config.maxDepth,
           maxDailyAmount: existingConfig?.maxDailyAmount ?? config.maxDailyAmount,
+          // 更新统计数据字段（如果接口返回）
+          weightedAvgTime: config.weightedAvgTime ?? existingConfig?.weightedAvgTime,
+          yesAmt: config.yesAmt ?? existingConfig?.yesAmt,
+          volume24h: config.volume24h ?? existingConfig?.volume24h,
+          volume7dAvg: config.volume7dAvg ?? existingConfig?.volume7dAvg,
+          volume1w: config.volume1w ?? existingConfig?.volume1w,
         }
       })
       
@@ -5039,6 +5046,47 @@ const startConfigAutoRefresh = () => {
   }, 60000)  // 每60秒检查一次
   
   console.log('配置自动刷新定时器已启动（每小时05分刷新）')
+}
+
+/**
+ * 静默刷新持仓数据和统计数据（每30分钟）
+ * 调用 getAllPosSnapHasPos 和 exchangeConfig 接口更新持仓yes/no、加权时间、yes金额等数据
+ */
+const silentRefreshStatsAndPositions = async () => {
+  try {
+    console.log(`[${new Date().toLocaleTimeString()}] 开始静默刷新持仓数据和统计数据...`)
+    
+    // 1. 更新持仓数据
+    await loadPositionData()
+    
+    // 2. 更新配置数据（包括加权时间、yes金额等统计字段）
+    await silentRefreshExchangeConfig()
+    
+    console.log(`[${new Date().toLocaleTimeString()}] 持仓数据和统计数据静默刷新成功`)
+  } catch (error) {
+    console.error('静默刷新持仓数据和统计数据失败:', error)
+  }
+}
+
+/**
+ * 启动统计数据自动刷新定时器（每30分钟）
+ */
+const startStatsAutoRefresh = () => {
+  // 清除旧的定时器
+  if (statsRefreshInterval.value) {
+    clearInterval(statsRefreshInterval.value)
+    statsRefreshInterval.value = null
+  }
+  
+  // 每30分钟（1800000毫秒）刷新一次
+  statsRefreshInterval.value = setInterval(() => {
+    silentRefreshStatsAndPositions()
+  }, 30 * 60 * 1000)  // 30分钟 = 1800000毫秒
+  
+  console.log('统计数据自动刷新定时器已启动（每30分钟刷新）')
+  
+  // 立即执行一次（可选，如果需要立即更新）
+  // silentRefreshStatsAndPositions()
 }
 
 /**
@@ -6213,6 +6261,16 @@ watch(
       // 切换到分组模式，加载对应分组的配置
       loadGroupConfig(newGroup)
     }
+  }
+)
+
+/**
+ * 监听拉黑设置变化，自动保存到本地
+ */
+watch(
+  () => [enableBlacklist.value, exportBlacklistInput.value],
+  () => {
+    saveHedgeSettings()
   }
 )
 
@@ -11733,7 +11791,10 @@ const saveHedgeSettings = () => {
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
-      selectedNumberType: selectedNumberType.value
+      selectedNumberType: selectedNumberType.value,
+      // 拉黑设置
+      enableBlacklist: enableBlacklist.value,
+      exportBlacklistInput: exportBlacklistInput.value
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -12011,6 +12072,14 @@ const loadHedgeSettings = () => {
     }
     if (settings.selectedNumberType !== undefined) {
       selectedNumberType.value = settings.selectedNumberType
+    }
+    
+    // 拉黑设置
+    if (settings.enableBlacklist !== undefined) {
+      enableBlacklist.value = settings.enableBlacklist
+    }
+    if (settings.exportBlacklistInput !== undefined) {
+      exportBlacklistInput.value = settings.exportBlacklistInput
     }
     
     // 后挂方价格+-0.1功能
@@ -15456,6 +15525,9 @@ onMounted(() => {
   
   // 启动配置自动刷新定时器（每小时05分刷新）
   startConfigAutoRefresh()
+  
+  // 启动统计数据自动刷新定时器（每30分钟刷新）
+  startStatsAutoRefresh()
 })
 
 onUnmounted(() => {
@@ -15470,6 +15542,9 @@ onUnmounted(() => {
   }
   if (configAutoRefreshInterval.value) {
     clearInterval(configAutoRefreshInterval.value)
+  }
+  if (statsRefreshInterval.value) {
+    clearInterval(statsRefreshInterval.value)
   }
 })
 </script>
