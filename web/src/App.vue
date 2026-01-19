@@ -1166,6 +1166,20 @@
               </div>
             </template>
             
+            <div style="margin-right: 10px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.needJudgeDepth"
+                  :disabled="autoHedgeRunning"
+                  :true-value="1"
+                  :false-value="0"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                />
+                <span style="color: red; cursor: pointer;">是否需要校验深度</span>
+              </label>
+            </div>
+            
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -1717,14 +1731,26 @@
                                     <span>{{ task.groupNo }}</span>
                                   </div>
                                   <div class="hedge-detail-row">
-                                    <span>类型:</span>
-                                    <span :class="task.type === 5 ? 'type-main' : 'type-sub'">
-                                      {{ task.type === 5 ? 'type5(主)' : 'type9(从)' }}
-                                    </span>
+                                    <span>价格:</span>
+                                    <span>{{ task.price }}¢</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>买/卖:</span>
+                                    <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>方向:</span>
+                                    <span>{{ hedge.firstSide }}</span>
                                   </div>
                                   <div class="hedge-detail-row">
                                     <span>数量:</span>
                                     <span>{{ task.share }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>类型:</span>
+                                    <span :class="task.type === 5 ? 'type-main' : 'type-sub'">
+                                      {{ task.type === 5 ? '(主)' : '(从)' }}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
@@ -1753,6 +1779,18 @@
                                   <div class="hedge-detail-row">
                                     <span>电脑组:</span>
                                     <span>{{ task.groupNo }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>价格:</span>
+                                    <span>{{ task.price }}¢</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>买/卖:</span>
+                                    <span>{{ hedge.side === 1 ? '买入' : '卖出' }}</span>
+                                  </div>
+                                  <div class="hedge-detail-row">
+                                    <span>方向:</span>
+                                    <span>{{ hedge.firstSide === 'YES' ? 'NO' : 'YES' }}</span>
                                   </div>
                                   <div class="hedge-detail-row">
                                     <span>数量:</span>
@@ -3107,6 +3145,114 @@
                     <span class="task-label">任务ID组:</span>
                     <span class="task-info">{{ log.allTaskIds.join(', ') }}</span>
                   </div>
+                  <!-- 先挂方任务服务器数据 -->
+                  <template v-if="log.closeTasks && log.closeTasks.length > 0">
+                    <template v-for="(task, taskIndex) in log.closeTasks" :key="`close-server-${taskIndex}`">
+                      <div v-if="task && task.serverData" class="server-data-section mode9-log-section">
+                        <div class="server-data-task-label">先挂方 浏览器{{ task.number }} 服务器数据:</div>
+                        <div v-if="(!task.serverData.openOrderList || task.serverData.openOrderList.length === 0) && (!task.serverData.closedOrderList || task.serverData.closedOrderList.length === 0)" class="server-data-empty">
+                          暂无服务器数据
+                        </div>
+                        <div v-else>
+                          <!-- 挂单数据 -->
+                          <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
+                            <div class="server-data-title">挂单数据:</div>
+                            <div v-for="(order, idx) in task.serverData.openOrderList" :key="idx" class="server-data-item">
+                              <span>
+                                创建时间: {{ timestampToBeijingTime(order.ctime) }} | 
+                                方向: {{ formatSide(order.side) }} | 
+                                结果: {{ order.outCome }} | 
+                                价格: {{ order.price }} | 
+                                进度: {{ ((order.amt - order.restAmt) / order.amt * 100).toFixed(2) }}% ({{ (order.amt - order.restAmt).toFixed(2) }}/{{ order.amt }})
+                              </span>
+                              <button 
+                                class="btn-save-success" 
+                                @click="saveTaskAsSuccess(log, task.taskId, formatOpenOrderMsg(order), 'mode9')"
+                                :disabled="task.status === 2"
+                              >
+                                保存为成功
+                              </button>
+                            </div>
+                          </div>
+                          <!-- 已成交数据 -->
+                          <div v-if="task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0" class="server-data-group">
+                            <div class="server-data-title">已成交数据:</div>
+                            <div v-for="(order, idx) in task.serverData.closedOrderList" :key="idx" class="server-data-item">
+                              <span>
+                                时间: {{ order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true) }}{{ !order.convertTime ? ' (不同时区)' : '' }} | 
+                                方向: {{ formatSide(order.side) }} | 
+                                结果: {{ order.outCome }} | 
+                                价格: {{ order.price }} | 
+                                进度: {{ ((order.fillAmt / order.amt) * 100).toFixed(2) }}% ({{ order.fillAmt }}/{{ order.amt }}) | 
+                                状态: {{ order.status }}
+                              </span>
+                              <button 
+                                class="btn-save-success" 
+                                @click="saveTaskAsSuccess(log, task.taskId, formatClosedOrderMsg(order), 'mode9')"
+                                :disabled="task.status === 2"
+                              >
+                                保存为成功
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </template>
+                  <!-- 后挂方任务服务器数据 -->
+                  <template v-if="log.secondTasks && log.secondTasks.length > 0">
+                    <template v-for="(task, taskIndex) in log.secondTasks" :key="`second-server-${taskIndex}`">
+                      <div v-if="task && task.serverData" class="server-data-section mode9-log-section-second">
+                        <div class="server-data-task-label">后挂方 浏览器{{ task.number }} 服务器数据:</div>
+                        <div v-if="(!task.serverData.openOrderList || task.serverData.openOrderList.length === 0) && (!task.serverData.closedOrderList || task.serverData.closedOrderList.length === 0)" class="server-data-empty">
+                          暂无服务器数据
+                        </div>
+                        <div v-else>
+                          <!-- 挂单数据 -->
+                          <div v-if="task.serverData.openOrderList && task.serverData.openOrderList.length > 0" class="server-data-group">
+                            <div class="server-data-title">挂单数据:</div>
+                            <div v-for="(order, idx) in task.serverData.openOrderList" :key="idx" class="server-data-item">
+                              <span>
+                                创建时间: {{ timestampToBeijingTime(order.ctime) }} | 
+                                方向: {{ formatSide(order.side) }} | 
+                                结果: {{ order.outCome }} | 
+                                价格: {{ order.price }} | 
+                                进度: {{ ((order.amt - order.restAmt) / order.amt * 100).toFixed(2) }}% ({{ (order.amt - order.restAmt).toFixed(2) }}/{{ order.amt }})
+                              </span>
+                              <button 
+                                class="btn-save-success" 
+                                @click="saveTaskAsSuccess(log, task.taskId, formatOpenOrderMsg(order), 'mode9')"
+                                :disabled="task.status === 2"
+                              >
+                                保存为成功
+                              </button>
+                            </div>
+                          </div>
+                          <!-- 已成交数据 -->
+                          <div v-if="task.serverData.closedOrderList && task.serverData.closedOrderList.length > 0" class="server-data-group">
+                            <div class="server-data-title">已成交数据:</div>
+                            <div v-for="(order, idx) in task.serverData.closedOrderList" :key="idx" class="server-data-item">
+                              <span>
+                                时间: {{ order.convertTime ? timestampToBeijingTime(order.convertTime) : timestampToBeijingTime(order.time, true) }}{{ !order.convertTime ? ' (不同时区)' : '' }} | 
+                                方向: {{ formatSide(order.side) }} | 
+                                结果: {{ order.outCome }} | 
+                                价格: {{ order.price }} | 
+                                进度: {{ ((order.fillAmt / order.amt) * 100).toFixed(2) }}% ({{ order.fillAmt }}/{{ order.amt }}) | 
+                                状态: {{ order.status }}
+                              </span>
+                              <button 
+                                class="btn-save-success" 
+                                @click="saveTaskAsSuccess(log, task.taskId, formatClosedOrderMsg(order), 'mode9')"
+                                :disabled="task.status === 2"
+                              >
+                                保存为成功
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </template>
                 </template>
                 
                 <!-- 模式2：多任务展示方式 -->
@@ -3650,6 +3796,8 @@ const hedgeMode = reactive({
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
   balancePriority: 2000,  // 资产优先级校验值
+  // 深度校验设置
+  needJudgeDepth: 0,  // 是否需要校验深度 0不要 1要
   // 订单薄更新设置
   yesPositionThreshold: 0.2,  // yes持仓阈值（万），默认0.2万
   yesPositionCompareType: 'less',  // yes持仓比较类型：'less'（小于）或'greater'（大于），默认'less'
@@ -9600,6 +9748,10 @@ const parseOrderbookData = async (config, isClose) => {
       return Math.max(0.1, adjustment)
     }
     
+    // 提前获取价格区间配置（在深度差判断逻辑中需要使用）
+    const priceMin = hedgeMode.priceRangeMin
+    const priceMax = hedgeMode.priceRangeMax
+    
     if (ndepthDiff > threshold1) {
       // 深度差 > 阈值1：检查开关是否打开
       if (!hedgeMode.enableDepthDiffParamsGt15) {
@@ -9769,8 +9921,6 @@ const parseOrderbookData = async (config, isClose) => {
     }
     
     // === 先挂方价格区间检查（深度差判断通过后，基于 finalPrice 检查）===
-    const priceMin = hedgeMode.priceRangeMin
-    const priceMax = hedgeMode.priceRangeMax
     const mode = isClose ? '平仓' : '开仓'
     
     console.log(`${mode}模式 - 先挂方价格: ${finalPrice.toFixed(2)}, 价格区间要求: ${priceMin}-${priceMax}`)
@@ -10069,6 +10219,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+          // 添加深度校验字段
+          requestData.needJudgeDepth = hedgeMode.needJudgeDepth
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
@@ -10095,6 +10247,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+          // 添加深度校验字段
+          requestData.needJudgeDepth = hedgeMode.needJudgeDepth
         } else if (currentMode === 9) {
           // 模式9：使用 model9Close 接口，参数与模式1相同，返回多个先挂方
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model9Close'
@@ -10123,6 +10277,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+          // 添加深度校验字段
+          requestData.needJudgeDepth = hedgeMode.needJudgeDepth
           // 添加账号随机8小时不交易参数
           requestData.needJudgeTimeRandom = hedgeMode.needJudgeTimeRandom || 0
           // 添加持有一个事件的账号数量上限参数
@@ -10178,6 +10334,8 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           // 添加资产优先级校验字段
           requestData.needJudgeBalancePriority = hedgeMode.needJudgeBalancePriority
           requestData.balancePriority = hedgeMode.balancePriority
+          // 添加深度校验字段
+          requestData.needJudgeDepth = hedgeMode.needJudgeDepth
           // 添加账号随机8小时不交易参数
           requestData.needJudgeTimeRandom = hedgeMode.needJudgeTimeRandom || 0
           // 添加持有一个事件的账号数量上限参数
@@ -11035,8 +11193,54 @@ const loadCurrentPageTaskStatus = async () => {
       }
     }
     
-    // 模式2：获取所有任务的详情
-    if (log.isMode2) {
+    // 模式9：获取所有任务的详情
+    if (log.isModeV9) {
+      // 更新先挂方任务 (closeTasks)
+      if (log.closeTasks && log.closeTasks.length > 0) {
+        for (let i = 0; i < log.closeTasks.length; i++) {
+          const task = log.closeTasks[i]
+          if (task.taskId) {
+            try {
+              const taskData = await fetchMissionStatus(task.taskId)
+              if (taskData) {
+                allHedgeLogs.value[actualIndex].closeTasks[i].status = taskData.status
+                allHedgeLogs.value[actualIndex].closeTasks[i].msg = taskData.msg || ''
+              }
+            } catch (e) {
+              console.error(`获取先挂方任务 ${task.taskId} 详情失败:`, e)
+            }
+          }
+        }
+      }
+      
+      // 更新后挂方任务 (secondTasks)
+      if (log.secondTasks && log.secondTasks.length > 0) {
+        for (let i = 0; i < log.secondTasks.length; i++) {
+          const task = log.secondTasks[i]
+          if (task.taskId) {
+            try {
+              const taskData = await fetchMissionStatus(task.taskId)
+              if (taskData) {
+                allHedgeLogs.value[actualIndex].secondTasks[i].status = taskData.status
+                allHedgeLogs.value[actualIndex].secondTasks[i].msg = taskData.msg || ''
+              }
+            } catch (e) {
+              console.error(`获取后挂方任务 ${task.taskId} 详情失败:`, e)
+            }
+          }
+        }
+      }
+      
+      // 重新判断整组任务是否成功（使用新的判断逻辑）
+      const allTasks = [...(allHedgeLogs.value[actualIndex].closeTasks || []), ...(allHedgeLogs.value[actualIndex].secondTasks || [])]
+      if (allTasks.length > 0) {
+        const allSuccess = allTasks.every(t => isTaskSuccess(t.status, t.msg))
+        if (allSuccess) {
+          allHedgeLogs.value[actualIndex].finalStatus = 'success'
+        }
+      }
+    } else if (log.isMode2) {
+      // 模式2：获取所有任务的详情
       // 更新YES任务
       if (log.yesTasks && log.yesTasks.length > 0) {
         for (let i = 0; i < log.yesTasks.length; i++) {
@@ -11182,55 +11386,8 @@ const fetchServerData = async (log) => {
     return
   }
   
-  // 确定先挂方和后挂方的number参数
-  let firstSideNumber = null  // 先挂方的number
-  let secondSideNumber = null  // 后挂方的number
-  
-  if (!log.isMode2) {
-    // 模式1：根据firstSide确定先挂方和后挂方
-    if (log.firstSide === 'YES') {
-      firstSideNumber = log.yesNumber
-      secondSideNumber = log.noNumber
-    } else if (log.firstSide === 'NO') {
-      firstSideNumber = log.noNumber
-      secondSideNumber = log.yesNumber
-    } else {
-      // 如果无法确定，使用可用的number
-      firstSideNumber = log.yesNumber || log.noNumber
-      secondSideNumber = log.yesNumber && log.noNumber ? 
-        (firstSideNumber === log.yesNumber ? log.noNumber : log.yesNumber) : null
-    }
-  } else {
-    // 模式2：使用第一个任务的number
-    if (log.firstSide === 'YES') {
-      if (log.yesTasks && log.yesTasks.length > 0) {
-        firstSideNumber = log.yesTasks[0].number
-      } else if (log.yesList && log.yesList.length > 0) {
-        firstSideNumber = log.yesList[0].number
-      }
-      if (log.noTasks && log.noTasks.length > 0) {
-        secondSideNumber = log.noTasks[0].number
-      } else if (log.noList && log.noList.length > 0) {
-        secondSideNumber = log.noList[0].number
-      }
-    } else if (log.firstSide === 'NO') {
-      if (log.noTasks && log.noTasks.length > 0) {
-        firstSideNumber = log.noTasks[0].number
-      } else if (log.noList && log.noList.length > 0) {
-        firstSideNumber = log.noList[0].number
-      }
-      if (log.yesTasks && log.yesTasks.length > 0) {
-        secondSideNumber = log.yesTasks[0].number
-      } else if (log.yesList && log.yesList.length > 0) {
-        secondSideNumber = log.yesList[0].number
-      }
-    }
-  }
-  
-  if (!firstSideNumber) {
-    showToast('无法获取先挂方浏览器编号', 'error')
-    return
-  }
+  // 标记为正在获取
+  fetchingServerDataLogs.value.add(log.id)
   
   // 确定side参数：1=开仓（买入），2=平仓（卖出）
   const side = log.side || (log.isClose ? 2 : 1)
@@ -11239,10 +11396,162 @@ const fetchServerData = async (log) => {
   const firstSidePrice = Math.round(parseFloat(log.price) * 100) / 100
   const secondSidePrice = Math.round((100 - parseFloat(log.price)) * 100) / 100
   
-  // 标记为正在获取
-  fetchingServerDataLogs.value.add(log.id)
-  
   try {
+    // 模式9：为每个任务分别获取服务器数据
+    if (log.isModeV9) {
+      const requests = []
+      const taskMapping = []  // 记录请求与任务的对应关系
+      
+      // 为先挂方任务构建请求
+      if (log.closeTasks && log.closeTasks.length > 0) {
+        for (const task of log.closeTasks) {
+          if (task.number && task.taskId) {
+            // 获取任务的updateTime
+            let taskTime = null
+            try {
+              const taskData = await fetchMissionStatus(task.taskId)
+              if (taskData && taskData.updateTime) {
+                taskTime = new Date(taskData.updateTime).getTime()
+              }
+            } catch (e) {
+              console.error(`获取先挂方任务 ${task.taskId} 详情失败:`, e)
+            }
+            
+            const requestData = {
+              number: task.number,
+              trending: log.trendingName,
+              side: side == 1 ? "buy" : "sell",
+              price: task.price || firstSidePrice,
+              amt: task.share || log.share
+            }
+            if (taskTime) {
+              requestData.time = taskTime
+            }
+            
+            requests.push(axios.post(
+              'https://sg.bicoin.com.cn/99l/hedge/filterOrder',
+              requestData,
+              { headers: { 'Content-Type': 'application/json' } }
+            ))
+            taskMapping.push({ type: 'close', task: task })
+          }
+        }
+      }
+      
+      // 为后挂方任务构建请求
+      if (log.secondTasks && log.secondTasks.length > 0) {
+        for (const task of log.secondTasks) {
+          if (task.number && task.taskId) {
+            // 获取任务的updateTime
+            let taskTime = null
+            try {
+              const taskData = await fetchMissionStatus(task.taskId)
+              if (taskData && taskData.updateTime) {
+                taskTime = new Date(taskData.updateTime).getTime()
+              }
+            } catch (e) {
+              console.error(`获取后挂方任务 ${task.taskId} 详情失败:`, e)
+            }
+            
+            const requestData = {
+              number: task.number,
+              trending: log.trendingName,
+              side: side == 1 ? "buy" : "sell",
+              price: task.price || secondSidePrice,
+              amt: task.share || log.share
+            }
+            if (taskTime) {
+              requestData.time = taskTime
+            }
+            
+            requests.push(axios.post(
+              'https://sg.bicoin.com.cn/99l/hedge/filterOrder',
+              requestData,
+              { headers: { 'Content-Type': 'application/json' } }
+            ))
+            taskMapping.push({ type: 'second', task: task })
+          }
+        }
+      }
+      
+      if (requests.length === 0) {
+        showToast('没有可获取数据的任务', 'error')
+        return
+      }
+      
+      // 并行发送所有请求
+      const responses = await Promise.all(requests)
+      
+      console.log('模式9获取服务器数据成功:', responses)
+      showToast(`获取服务器数据成功（${responses.length}个请求）`, 'success')
+      
+      // 处理返回的数据
+      responses.forEach((response, index) => {
+        if (response.data && response.data.code === 0 && response.data.data) {
+          const serverData = response.data.data.hist || {}
+          const mapping = taskMapping[index]
+          if (mapping && mapping.task) {
+            mapping.task.serverData = serverData
+          }
+        }
+      })
+      
+      // 保存到localStorage
+      saveHedgeLogToStorage(log)
+      return
+    }
+    
+    // 模式1和模式2的原有逻辑
+    // 确定先挂方和后挂方的number参数
+    let firstSideNumber = null  // 先挂方的number
+    let secondSideNumber = null  // 后挂方的number
+    
+    if (!log.isMode2) {
+      // 模式1：根据firstSide确定先挂方和后挂方
+      if (log.firstSide === 'YES') {
+        firstSideNumber = log.yesNumber
+        secondSideNumber = log.noNumber
+      } else if (log.firstSide === 'NO') {
+        firstSideNumber = log.noNumber
+        secondSideNumber = log.yesNumber
+      } else {
+        // 如果无法确定，使用可用的number
+        firstSideNumber = log.yesNumber || log.noNumber
+        secondSideNumber = log.yesNumber && log.noNumber ? 
+          (firstSideNumber === log.yesNumber ? log.noNumber : log.yesNumber) : null
+      }
+    } else {
+      // 模式2：使用第一个任务的number
+      if (log.firstSide === 'YES') {
+        if (log.yesTasks && log.yesTasks.length > 0) {
+          firstSideNumber = log.yesTasks[0].number
+        } else if (log.yesList && log.yesList.length > 0) {
+          firstSideNumber = log.yesList[0].number
+        }
+        if (log.noTasks && log.noTasks.length > 0) {
+          secondSideNumber = log.noTasks[0].number
+        } else if (log.noList && log.noList.length > 0) {
+          secondSideNumber = log.noList[0].number
+        }
+      } else if (log.firstSide === 'NO') {
+        if (log.noTasks && log.noTasks.length > 0) {
+          firstSideNumber = log.noTasks[0].number
+        } else if (log.noList && log.noList.length > 0) {
+          firstSideNumber = log.noList[0].number
+        }
+        if (log.yesTasks && log.yesTasks.length > 0) {
+          secondSideNumber = log.yesTasks[0].number
+        } else if (log.yesList && log.yesList.length > 0) {
+          secondSideNumber = log.yesList[0].number
+        }
+      }
+    }
+    
+    if (!firstSideNumber) {
+      showToast('无法获取先挂方浏览器编号', 'error')
+      return
+    }
+    
     // 获取任务的updateTime（用于time字段）
     let firstSideTime = null
     let secondSideTime = null
@@ -11725,6 +12034,8 @@ const saveHedgeSettings = () => {
       // 资产优先级校验设置
       needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
       balancePriority: hedgeMode.balancePriority,
+      // 深度校验设置
+      needJudgeDepth: hedgeMode.needJudgeDepth,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
       hedgeMaxTasksPerRound: hedgeMaxTasksPerRound.value,
@@ -11896,6 +12207,11 @@ const loadHedgeSettings = () => {
     }
     if (settings.balancePriority !== undefined) {
       hedgeMode.balancePriority = settings.balancePriority
+    }
+    
+    // 深度校验设置
+    if (settings.needJudgeDepth !== undefined) {
+      hedgeMode.needJudgeDepth = settings.needJudgeDepth
     }
     
     // 其他设置

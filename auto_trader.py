@@ -5591,7 +5591,6 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     # 第三阶段：无论什么状态都要执行收集数据逻辑
     log_print(f"[{serial_number}] [{task_label}] ========== 第三阶段：收集数据 ==========")
     
-    time.sleep(120)
     # 初始化数据变量
     current_position_amount = None
     position_change_value = None
@@ -5600,29 +5599,41 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     error_msg = ""
     
     try:
-        # 第一步：获取当前仓位数据，计算仓位变化值
-        log_print(f"[{serial_number}] [{task_label}] 第一步：获取当前仓位数据...")
+        # === 15分钟内循环检测仓位变化 ===
+        log_print(f"[{serial_number}] [{task_label}] 开始15分钟仓位变化检测（每30秒检测一次，每90秒刷新页面）...")
         
-        # 尝试使用链上数据
-        if trending:
-            current_position_amount = get_position_from_api(serial_number, trending, option_type)
-            if current_position_amount is not None:
-                log_print(f"[{serial_number}] [{task_label}] 链上仓位数量: {current_position_amount}")
+        phase3_timeout = 900  # 15分钟
+        phase3_check_interval = 30  # 30秒检测一次
+        phase3_refresh_interval = 90  # 90秒刷新一次页面
+        phase3_start_time = time.time()
+        phase3_last_refresh_time = time.time()
+        phase3_position_change_detected = False
+        phase3_change_value = None
         
-        # 如果链上数据获取失败，使用本地数据
-        if current_position_amount is None:
+        while time.time() - phase3_start_time < phase3_timeout:
             try:
+                elapsed = int(time.time() - phase3_start_time)
+                log_print(f"[{serial_number}] [{task_label}] 第三阶段检测仓位（已用时 {elapsed}秒）...")
+                
+                # 检查是否需要刷新页面（每90秒刷新一次）
+                if time.time() - phase3_last_refresh_time >= phase3_refresh_interval:
+                    log_print(f"[{serial_number}] [{task_label}] 90秒已到，刷新页面...")
+                    refresh_page_with_opinion_check(driver, serial_number)
+                    phase3_last_refresh_time = time.time()
+                    time.sleep(5)  # 等待页面加载
+                
+                # 记录本次检测的变化量
+                local_change_amount = 0
+                api_change_amount = 0
+                local_position_valid = False
+                api_position_valid = False
+                current_position_local = None
+                current_position_api = None
+                
                 if trade_type == "Buy":
-                    # Buy类型：使用check_position_count获取tr数量
-                    log_print(f"[{serial_number}] [{task_label}] Buy类型，使用check_position_count获取tr数量...")
-                    position_count = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
-                    if position_count >= 0:
-                        current_position_amount = float(position_count)
-                        log_print(f"[{serial_number}] [{task_label}] 本地tr数量: {current_position_amount}")
-                else:
-                    # Sell类型：从Position获取已成交数量
-                    log_print(f"[{serial_number}] [{task_label}] Sell类型，从Position获取已成交数量...")
-                    # 点击Position
+                    # Buy类型：检查Position数量变化
+                    # 方式1：本地抓取
+                    log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
                     position_buttons = driver.find_elements(By.TAG_NAME, "button")
                     for btn in position_buttons:
                         if btn.text.strip() == "Position":
@@ -5630,60 +5641,107 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
                             time.sleep(7)
                             break
                     
-                    # 获取Position数据
-                    tabs_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="tabs"]')
-                    position_div = None
-                    for div in tabs_divs:
-                        div_id = div.get_attribute('id')
-                        if div_id and 'content-position' in div_id.lower():
-                            position_div = div
+                    current_position_count_local = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
+                    
+                    if current_position_count_local >= 0 and current_position_count_local != -2:
+                        local_change_amount = abs(current_position_count_local - float(initial_position_count))
+                        local_position_valid = True
+                        current_position_local = current_position_count_local
+                        log_print(f"[{serial_number}] [{task_label}] 本地仓位数量: {current_position_count_local} (初始: {initial_position_count}), 变化量: {local_change_amount}")
+                    
+                    # 方式2：链上API
+                    if trending:
+                        current_position_count_api = get_position_from_api(serial_number, trending, option_type)
+                        if current_position_count_api is not None:
+                            api_change_amount = abs(current_position_count_api - float(initial_position_count))
+                            api_position_valid = True
+                            current_position_api = current_position_count_api
+                            log_print(f"[{serial_number}] [{task_label}] 链上仓位数量: {current_position_count_api} (初始: {initial_position_count}), 变化量: {api_change_amount}")
+                
+                else:
+                    # Sell类型：检查已成交数量变化
+                    # 方式1：本地抓取
+                    log_print(f"[{serial_number}] [{task_label}] 点击Position按钮...")
+                    position_buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for btn in position_buttons:
+                        if btn.text.strip() == "Position":
+                            btn.click()
+                            time.sleep(7)
                             break
                     
-                    if position_div:
-                        tbody = position_div.find_element(By.TAG_NAME, "tbody")
-                        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
+                    current_filled_amount_local = get_position_filled_amount(driver, serial_number, trending_part1)
+                    
+                    if current_filled_amount_local:
+                        try:
+                            amount_str = ''.join(c for c in current_filled_amount_local if c.isdigit() or c == '.')
+                            if amount_str:
+                                current_filled_amount_float = float(amount_str)
+                                local_change_amount = abs(current_filled_amount_float - float(initial_position_count))
+                                local_position_valid = True
+                                current_position_local = current_filled_amount_float
+                                log_print(f"[{serial_number}] [{task_label}] 本地已成交数量: {current_filled_amount_float} (初始: {initial_position_count}), 变化量: {local_change_amount}")
+                        except (ValueError, TypeError) as e:
+                            log_print(f"[{serial_number}] [{task_label}] ⚠ 本地数量转换失败: {str(e)}")
+                    
+                    # 方式2：链上API
+                    if trending:
+                        current_filled_amount_api = get_position_from_api(serial_number, trending, option_type)
+                        if current_filled_amount_api is not None:
+                            api_change_amount = abs(current_filled_amount_api - float(initial_position_count))
+                            api_position_valid = True
+                            current_position_api = current_filled_amount_api
+                            log_print(f"[{serial_number}] [{task_label}] 链上已成交数量: {current_filled_amount_api} (初始: {initial_position_count}), 变化量: {api_change_amount}")
+                
+                # 检查变化量是否满足条件（>=60%）
+                if amount is not None:
+                    amount_threshold = float(amount) * 0.6  # 下单量的60%
+                    log_print(f"[{serial_number}] [{task_label}] 下单数量: {amount}, 60%阈值: {amount_threshold}")
+                    log_print(f"[{serial_number}] [{task_label}] 本地变化量: {local_change_amount if local_position_valid else 'N/A'}")
+                    log_print(f"[{serial_number}] [{task_label}] 链上变化量: {api_change_amount if api_position_valid else 'N/A'}")
+                    
+                    # 判断哪个数据源满足条件
+                    local_meets_threshold = local_position_valid and local_change_amount >= amount_threshold
+                    api_meets_threshold = api_position_valid and api_change_amount >= amount_threshold
+                    
+                    if local_meets_threshold or api_meets_threshold:
+                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 仓位变化量满足条件（>=60%）！")
                         
-                        if tr_list and len(tr_list) > 0:
-                            time.sleep(3)
-                            if trending_part1:
-                                # 有子标题：找到包含子标题的tr
-                                for tr in tr_list:
-                                    try:
-                                        tds = tr.find_elements(By.TAG_NAME, "td")
-                                        if len(tds) > 0:
-                                            first_td_ps = tds[0].find_elements(By.TAG_NAME, "p")
-                                            first_td_text = " ".join([p.text.strip() for p in first_td_ps])
-                                            if trending_part1 in first_td_text:
-                                                if len(tds) > 1:
-                                                    td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
-                                                    filled_amount_str = td2_ps[0].text.strip() if td2_ps else ""
-                                                    try:
-                                                        filled_amount_str_clean = ''.join(c for c in filled_amount_str if c.isdigit() or c == '.')
-                                                        if filled_amount_str_clean:
-                                                            current_position_amount = float(filled_amount_str_clean)
-                                                    except:
-                                                        pass
-                                                break
-                                    except:
-                                        continue
-                            else:
-                                # 无子标题：第一个tr
-                                try:
-                                    first_tr = tr_list[0]
-                                    tds = first_tr.find_elements(By.TAG_NAME, "td")
-                                    if len(tds) > 1:
-                                        td2_ps = tds[1].find_elements(By.TAG_NAME, "p")
-                                        filled_amount_str = td2_ps[0].text.strip() if td2_ps else ""
-                                        try:
-                                            filled_amount_str_clean = ''.join(c for c in filled_amount_str if c.isdigit() or c == '.')
-                                            if filled_amount_str_clean:
-                                                current_position_amount = float(filled_amount_str_clean)
-                                        except:
-                                            pass
-                                except:
-                                    pass
+                        # 选择使用哪个数据源（优先使用满足条件的，都满足则优先链上）
+                        if api_meets_threshold:
+                            current_position_amount = current_position_api
+                            phase3_change_value = api_change_amount
+                            log_print(f"[{serial_number}] [{task_label}] 使用链上数据: {current_position_amount}")
+                        elif local_meets_threshold:
+                            current_position_amount = current_position_local
+                            phase3_change_value = local_change_amount
+                            log_print(f"[{serial_number}] [{task_label}] 使用本地数据: {current_position_amount}")
+                        
+                        phase3_position_change_detected = True
+                        break
+                    else:
+                        log_print(f"[{serial_number}] [{task_label}] 仓位变化量未达到60%阈值，继续检测...")
+                else:
+                    # 未提供下单数量，直接检查是否有变化
+                    has_change = (local_position_valid and local_change_amount > 1) or (api_position_valid and api_change_amount > 1)
+                    if has_change:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 未提供下单数量，但检测到仓位变化")
+                        if api_position_valid:
+                            current_position_amount = current_position_api
+                            phase3_change_value = api_change_amount
+                        elif local_position_valid:
+                            current_position_amount = current_position_local
+                            phase3_change_value = local_change_amount
+                        phase3_position_change_detected = True
+                        break
+                    else:
+                        log_print(f"[{serial_number}] [{task_label}] ⚠ 未提供下单数量，仓位无明显变化，继续检测...")
+                
+                # 等待下一次检测
+                time.sleep(phase3_check_interval)
+                
             except Exception as e:
-                log_print(f"[{serial_number}] [{task_label}] ⚠ 获取本地仓位数据失败: {str(e)}")
+                log_print(f"[{serial_number}] [{task_label}] ⚠ 第三阶段检测仓位时出错: {str(e)}")
+                time.sleep(phase3_check_interval)
         
         # 计算仓位变化值
         if current_position_amount is not None:
@@ -5694,7 +5752,7 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
             except (ValueError, TypeError) as e:
                 log_print(f"[{serial_number}] [{task_label}] ⚠ 计算仓位变化值失败: {str(e)}")
         else:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前仓位数据")
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 15分钟超时，无法获取满足条件的仓位数据")
         
         # 第二步：获取挂单进度（如果有）
         log_print(f"[{serial_number}] [{task_label}] 第二步：获取挂单进度...")
@@ -5761,11 +5819,21 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
         except Exception as e:
             log_print(f"[{serial_number}] [{task_label}] ⚠ 获取挂单进度失败: {str(e)}")
         
+        # 第三步：获取交易费
+        log_print(f"[{serial_number}] [{task_label}] 第三步：获取交易费...")
+        transaction_fee = "未知"
+        try:
+            transaction_fee, price_from_fee, fee_check_success = check_transaction_fee(driver, serial_number, task_label, False, trade_type)
+            log_print(f"[{serial_number}] [{task_label}] 交易费: {transaction_fee}, 检查结果: {'✓ 通过' if fee_check_success else '✗ 失败'}")
+        except Exception as e:
+            log_print(f"[{serial_number}] [{task_label}] ⚠ 获取交易费失败: {str(e)}")
+        
         # 构建返回消息
         position_change_str = str(position_change_value) if position_change_value is not None else "未知"
         progress_str = progress if progress else "无"
+        transaction_fee_str = transaction_fee if transaction_fee else "未知"
         
-        msg = f"{cancel_status},仓位变化值为:{position_change_str}, 挂单:{progress_str}"
+        msg = f"{cancel_status},仓位变化值为:{position_change_str}, 挂单:{progress_str}, 手续费:{transaction_fee_str}"
         log_print(f"[{serial_number}] [{task_label}] 最终结果: {msg}")
         
         # 返回成功+已有数据
@@ -5779,7 +5847,7 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
         # 异常情况：返回失败+已有数据
         position_change_str = str(position_change_value) if position_change_value is not None else "未知"
         progress_str = progress if progress else "无"
-        msg = f"{cancel_status},仓位变化值为:{position_change_str}, 挂单:{progress_str}"
+        msg = f"{cancel_status},仓位变化值为:{position_change_str}, 挂单:{progress_str}, 手续费:未知"
         return False, msg
 
 def wait_for_opinion_order_success(driver, initial_open_orders_count, initial_position_count, trade_type, serial_number, trending_part1='', option_type='YES', timeout=600, trending='', amount=None, initial_closed_orders_time=''):
@@ -8978,7 +9046,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 # send_feishu_custom_message(browser_id, message_text)
                 return False, "[4]Position按钮未出现，页面加载可能失败", None
         
-        time.sleep(10)
+        time.sleep(7)
         # 6.1.3 再次检查钱包是否已连接
         add_bro_log_entry(bro_log_list, browser_id, "[6]步骤6.1.5.1: 再次检查钱包是否已连接")
         log_print(f"[{browser_id}] 步骤6.1.3: 再次检查钱包是否已连接...")
@@ -16303,7 +16371,7 @@ def check_and_submit_completed_missions():
             if task_type == 3:
                 # Type 3任务的结果在单浏览器处理时已提交
                 log_print(f"[系统] ✓ Type 3 任务 {mission_id} 已完成")
-            elif task_type == 5 or task_type == 1 or task_type == 6:
+            elif task_type == 5 or task_type == 1 or task_type == 6 or task_type == 9:
                 # Type 1/5/6任务的结果已在单浏览器处理时直接上传，这里只做清理
                 log_print(f"[系统] ✓ Type {task_type} 任务 {mission_id} 已完成（结果已直接上传）")
             else:

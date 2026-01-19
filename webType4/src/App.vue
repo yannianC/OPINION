@@ -679,6 +679,19 @@
                 <span style="cursor: pointer;">平仓</span>
               </label>
             </div>
+            <div style="margin-right: 10px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input 
+                  type="checkbox" 
+                  v-model="hedgeMode.needJudgeDepth"
+                  :disabled="autoHedgeRunning"
+                  :true-value="1"
+                  :false-value="0"
+                  style="width: 18px; height: 18px; cursor: pointer;"
+                />
+                <span style="color: red; cursor: pointer;">是否需要校验深度</span>
+              </label>
+            </div>
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -2515,17 +2528,21 @@
                 <template v-else-if="log.isModeV4">
                   <!-- 先挂方任务：优先显示已提交的任务，如果没有则显示计划任务 -->
                   <div v-if="(log.closeTasks && log.closeTasks.length > 0) || (log.closeLimitList && log.closeLimitList.length > 0)" class="compact-task-row">
-                    <span class="task-label">先挂方 ({{ (log.closeTasks && log.closeTasks.length > 0) ? log.closeTasks.length : (log.closeLimitList ? log.closeLimitList.length : 0) }}个) 卖:</span>
+                    <span class="task-label">先挂方 ({{ (log.closeTasks && log.closeTasks.length > 0) ? log.closeTasks.length : (log.closeLimitList ? log.closeLimitList.length : 0) }}个) 卖:
+                      <span v-if="log.closeTasks && log.closeTasks.length > 0" class="position-change-sum" :class="getPositionChangeStatusClass(log.positionChangeStatus)">仓位变化: {{ calculatePositionChangeSum(log.closeTasks).toFixed(2) }}</span>
+                    </span>
                     <span class="task-info">
                       <template v-if="log.closeTasks && log.closeTasks.length > 0">
                         <!-- 显示已提交的任务 -->
                         <template v-for="(task, taskIndex) in log.closeTasks" :key="taskIndex">
-                          <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
-                          浏览器{{ task.number }} | 
-                          任务{{ task.taskId || '-' }} | 
-                          数量{{ task.share }} | 
+                          <span :class="{ 'fetch-pending': !task.fetchSuccess }">
+                            <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                            浏览器{{ task.number }} | 
+                            任务{{ task.taskId || '-' }} | 
+                            数量{{ task.share }}
+                          </span> | 
                           <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
-                          <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
+                          <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': isPositionChangeUnknown(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
                           <button 
                             v-if="task.number"
                             class="btn-view-log" 
@@ -2552,17 +2569,21 @@
                   </div>
                   <!-- 后挂方任务：优先显示已提交的任务，如果没有则显示计划任务 -->
                   <div v-if="(log.secondTasks && log.secondTasks.length > 0) || (log.secondLimitList && log.secondLimitList.length > 0)" class="compact-task-row">
-                    <span class="task-label">后挂方 ({{ (log.secondTasks && log.secondTasks.length > 0) ? log.secondTasks.length : (log.secondLimitList ? log.secondLimitList.length : 0) }}个) 买:</span>
+                    <span class="task-label">后挂方 ({{ (log.secondTasks && log.secondTasks.length > 0) ? log.secondTasks.length : (log.secondLimitList ? log.secondLimitList.length : 0) }}个) 买:
+                      <span v-if="log.secondTasks && log.secondTasks.length > 0" class="position-change-sum" :class="getPositionChangeStatusClass(log.positionChangeStatus)">仓位变化: {{ calculatePositionChangeSum(log.secondTasks).toFixed(2) }}</span>
+                    </span>
                     <span class="task-info">
                       <template v-if="log.secondTasks && log.secondTasks.length > 0">
                         <!-- 显示已提交的任务 -->
                         <template v-for="(task, taskIndex) in log.secondTasks" :key="taskIndex">
-                          <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
-                          浏览器{{ task.number }} | 
-                          任务{{ task.taskId || '-' }} | 
-                          数量{{ task.share }} | 
+                          <span :class="{ 'fetch-pending': !task.fetchSuccess }">
+                            <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
+                            浏览器{{ task.number }} | 
+                            任务{{ task.taskId || '-' }} | 
+                            数量{{ task.share }}
+                          </span> | 
                           <span :class="getTaskStatusClass(task.status)">{{ getStatusText(task.status) }}</span>
-                          <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
+                          <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': isPositionChangeUnknown(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
                           <button 
                             v-if="task.number"
                             class="btn-view-log" 
@@ -2589,7 +2610,7 @@
                   </div>
                 </template>
                 
-                <!-- Type4：先挂方和后挂方多任务展示方式 -->
+                <!-- Type4：先挂方和后挂方多任务展示方式 - 重复代码保留备用 -->
                 <template v-else-if="log.isModeV4">
                   <!-- 先挂方任务：优先显示已提交的任务，如果没有则显示计划任务 -->
                   <div v-if="(log.closeTasks && log.closeTasks.length > 0) || (log.closeLimitList && log.closeLimitList.length > 0)" class="compact-task-row">
@@ -3013,6 +3034,8 @@ const hedgeMode = reactive({
   // 资产优先级校验设置
   needJudgeBalancePriority: 0,  // 是否需要校验资产优先级 0不要 1要
   balancePriority: 2000,  // 资产优先级校验值
+  // 深度校验设置
+  needJudgeDepth: 0,  // 是否需要校验深度 0不要 1要
   // 深度差相关设置
   depthThreshold1: 15,  // 深度差阈值1（默认15）
   depthThreshold2: 2,   // 深度差阈值2（默认2）
@@ -8174,24 +8197,30 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
   try {
     console.log(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
     
-    // 计算订单价格（根据 selectedPriceType 决定）
+    // 使用计算出的最终价格，如果没有则使用原来的逻辑
     let orderPrice
-    if (priceInfo.selectedPriceType === 'average') {
-      // 价差充足，取平均价
-      orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
-      console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
-    } else if (priceInfo.selectedPriceType === 'bid') {
-      // 选择了买一价（深度小的一方）
-      orderPrice = priceInfo.price1.toFixed(1)
-      console.log(`深度优选，订单价格（买一价）: ${orderPrice}`)
-    } else if (priceInfo.selectedPriceType === 'ask') {
-      // 选择了卖一价（深度小的一方或原有逻辑）
-      orderPrice = priceInfo.price2.toFixed(1)
-      console.log(`订单价格（卖一价）: ${orderPrice}`)
+    if (priceInfo.finalPrice !== null && priceInfo.finalPrice !== undefined) {
+      orderPrice = priceInfo.finalPrice.toFixed(1)
+      console.log(`使用计算出的最终价格（根据深度差相关设置）: ${orderPrice}`)
     } else {
-      // 兜底：使用较大的价格
-      orderPrice = priceInfo.maxPrice.toFixed(1)
-      console.log(`兜底，订单价格（maxPrice）: ${orderPrice}`)
+      // 兼容旧逻辑（根据 selectedPriceType 决定）
+      if (priceInfo.selectedPriceType === 'average') {
+        // 价差充足，取平均价
+        orderPrice = ((priceInfo.price1 + priceInfo.price2) / 2).toFixed(1)
+        console.log(`差值充足，订单价格（买卖均价）: ${orderPrice}`)
+      } else if (priceInfo.selectedPriceType === 'bid') {
+        // 选择了买一价（深度小的一方）
+        orderPrice = priceInfo.price1.toFixed(1)
+        console.log(`深度优选，订单价格（买一价）: ${orderPrice}`)
+      } else if (priceInfo.selectedPriceType === 'ask') {
+        // 选择了卖一价（深度小的一方或原有逻辑）
+        orderPrice = priceInfo.price2.toFixed(1)
+        console.log(`订单价格（卖一价）: ${orderPrice}`)
+      } else {
+        // 兜底：使用较大的价格
+        orderPrice = priceInfo.maxPrice.toFixed(1)
+        console.log(`兜底，订单价格（maxPrice）: ${orderPrice}`)
+      }
     }
     
     // 获取当前打开显示的所有主题ID
@@ -8269,6 +8298,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd,  // 这一轮最多平仓数量 随机最大
           needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,  // 是否需要校验资产优先级 0不要 1要
           balancePriority: hedgeMode.balancePriority,  // 资产优先级校验值
+          needJudgeDepth: hedgeMode.needJudgeDepth,  // 是否需要校验深度 0不要 1要
           blackGroupList:[],
           blackNumberList:[]
         }
@@ -8939,22 +8969,26 @@ const loadCurrentPageTaskStatus = async () => {
     
     // Type4：获取先挂方和后挂方任务详情
     if (log.isModeV4) {
+      let closeTasksAllSuccess = true  // 先挂方任务是否全部获取成功
+      let secondTasksAllSuccess = true  // 后挂方任务是否全部获取成功
+      
       // 获取先挂方任务详情
       if (log.closeTasks && log.closeTasks.length > 0) {
         for (let i = 0; i < log.closeTasks.length; i++) {
           const task = log.closeTasks[i]
           if (task.taskId) {
-            try {
-              const taskData = await fetchMissionStatus(task.taskId)
-              if (taskData) {
-                if (!allHedgeLogs.value[actualIndex].closeTasks) {
-                  allHedgeLogs.value[actualIndex].closeTasks = [...log.closeTasks]
-                }
-                allHedgeLogs.value[actualIndex].closeTasks[i].status = taskData.status
-                allHedgeLogs.value[actualIndex].closeTasks[i].msg = taskData.msg || ''
-              }
-            } catch (e) {
-              console.error(`获取先挂方任务 ${task.taskId} 详情失败:`, e)
+            const taskData = await fetchMissionStatus(task.taskId)
+            if (!allHedgeLogs.value[actualIndex].closeTasks) {
+              allHedgeLogs.value[actualIndex].closeTasks = [...log.closeTasks]
+            }
+            if (taskData) {
+              allHedgeLogs.value[actualIndex].closeTasks[i].status = taskData.status
+              allHedgeLogs.value[actualIndex].closeTasks[i].msg = taskData.msg || ''
+              allHedgeLogs.value[actualIndex].closeTasks[i].fetchSuccess = true  // 标记请求成功
+            } else {
+              closeTasksAllSuccess = false
+              allHedgeLogs.value[actualIndex].closeTasks[i].fetchSuccess = false  // 标记请求失败
+              console.error(`获取先挂方任务 ${task.taskId} 详情失败（重试3次后仍失败）`)
             }
           }
         }
@@ -8965,19 +8999,42 @@ const loadCurrentPageTaskStatus = async () => {
         for (let i = 0; i < log.secondTasks.length; i++) {
           const task = log.secondTasks[i]
           if (task.taskId) {
-            try {
-              const taskData = await fetchMissionStatus(task.taskId)
-              if (taskData) {
-                if (!allHedgeLogs.value[actualIndex].secondTasks) {
-                  allHedgeLogs.value[actualIndex].secondTasks = [...log.secondTasks]
-                }
-                allHedgeLogs.value[actualIndex].secondTasks[i].status = taskData.status
-                allHedgeLogs.value[actualIndex].secondTasks[i].msg = taskData.msg || ''
-              }
-            } catch (e) {
-              console.error(`获取后挂方任务 ${task.taskId} 详情失败:`, e)
+            const taskData = await fetchMissionStatus(task.taskId)
+            if (!allHedgeLogs.value[actualIndex].secondTasks) {
+              allHedgeLogs.value[actualIndex].secondTasks = [...log.secondTasks]
+            }
+            if (taskData) {
+              allHedgeLogs.value[actualIndex].secondTasks[i].status = taskData.status
+              allHedgeLogs.value[actualIndex].secondTasks[i].msg = taskData.msg || ''
+              allHedgeLogs.value[actualIndex].secondTasks[i].fetchSuccess = true  // 标记请求成功
+            } else {
+              secondTasksAllSuccess = false
+              allHedgeLogs.value[actualIndex].secondTasks[i].fetchSuccess = false  // 标记请求失败
+              console.error(`获取后挂方任务 ${task.taskId} 详情失败（重试3次后仍失败）`)
             }
           }
+        }
+      }
+      
+      // 当所有任务状态都获取成功后，计算仓位变化差异并标记状态
+      if (closeTasksAllSuccess && secondTasksAllSuccess) {
+        const closeTasks = allHedgeLogs.value[actualIndex].closeTasks || []
+        const secondTasks = allHedgeLogs.value[actualIndex].secondTasks || []
+        
+        // 计算先挂方和后挂方的仓位变化值之和
+        const closePositionChange = calculatePositionChangeSum(closeTasks)
+        const secondPositionChange = calculatePositionChangeSum(secondTasks)
+        
+        // 计算差值的绝对值：先取各自绝对值，再相减，再取绝对值
+        const diff = Math.abs(Math.abs(closePositionChange) - Math.abs(secondPositionChange))
+        
+        // 如果差值绝对值 > 后挂方仓位变化值的10%，标记为异常(红色)，否则正常(绿色)
+        const threshold = Math.abs(secondPositionChange) * 0.1
+        if (diff > threshold && Math.abs(secondPositionChange) > 0) {
+          allHedgeLogs.value[actualIndex].positionChangeStatus = 'abnormal'  // 红色
+          console.warn(`对冲日志 ${actualIndex} 仓位变化异常: 先挂方=${closePositionChange.toFixed(2)}, 后挂方=${secondPositionChange.toFixed(2)}, 差值=${diff.toFixed(2)}, 阈值(10%)=${threshold.toFixed(2)}`)
+        } else {
+          allHedgeLogs.value[actualIndex].positionChangeStatus = 'normal'  // 绿色
         }
       }
     }
@@ -9170,6 +9227,8 @@ const saveHedgeSettings = () => {
       // 资产优先级校验设置
       needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,
       balancePriority: hedgeMode.balancePriority,
+      // 深度校验设置
+      needJudgeDepth: hedgeMode.needJudgeDepth,
       // 深度差相关设置
       depthThreshold1: hedgeMode.depthThreshold1,
       depthThreshold2: hedgeMode.depthThreshold2,
@@ -9276,6 +9335,11 @@ const loadHedgeSettings = () => {
     }
     if (settings.balancePriority !== undefined) {
       hedgeMode.balancePriority = settings.balancePriority
+    }
+    
+    // 深度校验设置
+    if (settings.needJudgeDepth !== undefined) {
+      hedgeMode.needJudgeDepth = settings.needJudgeDepth
     }
     
     // 深度差相关设置
@@ -9745,9 +9809,12 @@ const executeHedgeTask = async (config, hedgeData) => {
 }
 
 /**
- * 获取单个任务状态
+ * 获取单个任务状态（带重试机制，最多重试3次）
+ * @param {number|string} taskId - 任务ID
+ * @param {number} maxRetries - 最大重试次数，默认3次
+ * @returns {object|null} - 任务状态对象或null
  */
-const fetchMissionStatus = async (taskId) => {
+const fetchMissionStatus = async (taskId, maxRetries = 3) => {
   // 验证taskId是否有效
   if (taskId === undefined || taskId === null || taskId === '' || typeof taskId === 'object') {
     console.error(`获取任务状态失败: 无效的任务ID`, { taskId, type: typeof taskId })
@@ -9761,19 +9828,30 @@ const fetchMissionStatus = async (taskId) => {
     return null
   }
   
-  try {
-    const url = `https://sg.bicoin.com.cn/99l/mission/status?id=${validTaskId}`
-    console.log(`正在获取任务状态: ${url}`)
-    const response = await axios.get(url)
-    if (response.data && response.data.code === 0 && response.data.data) {
-      // 返回 mission 对象，而不是整个 data
-      return response.data.data.mission
+  const url = `https://sg.bicoin.com.cn/99l/mission/status?id=${validTaskId}`
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`正在获取任务状态 (尝试 ${attempt}/${maxRetries}): ${url}`)
+      const response = await axios.get(url)
+      if (response.data && response.data.code === 0 && response.data.data) {
+        // 返回 mission 对象，而不是整个 data
+        return response.data.data.mission
+      }
+      // 如果返回格式不对，视为失败，继续重试
+      console.warn(`获取任务 ${validTaskId} 状态失败: 返回数据格式不正确 (尝试 ${attempt}/${maxRetries})`)
+    } catch (error) {
+      console.error(`获取任务 ${validTaskId} 状态失败 (尝试 ${attempt}/${maxRetries}):`, error.message)
     }
-    return null
-  } catch (error) {
-    console.error(`获取任务 ${validTaskId} 状态失败:`, error)
-    return null
+    
+    // 如果还有重试机会，等待500ms后重试
+    if (attempt < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
   }
+  
+  console.error(`获取任务 ${validTaskId} 状态失败: 已达到最大重试次数 ${maxRetries}`)
+  return null
 }
 
 /**
@@ -12007,6 +12085,65 @@ const formatTaskMsg = (msg) => {
   return typeof msg === 'string' ? msg.trim() : String(msg)
 }
 
+/**
+ * 从任务消息中提取仓位变化值
+ * @param {string} msg - 任务消息字符串，格式如："无挂单,仓位变化值为:0.003826239999995096, 挂单:无"
+ * @returns {number} - 仓位变化值，如果无法提取则返回0
+ */
+const extractPositionChangeValue = (msg) => {
+  if (!msg) return 0
+  
+  const msgStr = typeof msg === 'string' ? msg : String(msg)
+  
+  // 使用正则表达式匹配 "仓位变化值为:" 后面的数字
+  const match = msgStr.match(/仓位变化值为[：:]?\s*(-?[\d.]+)/)
+  if (match && match[1]) {
+    return parseFloat(match[1]) || 0
+  }
+  
+  return 0
+}
+
+/**
+ * 计算任务列表的仓位变化值之和
+ * @param {Array} tasks - 任务列表，每个任务对象包含msg字段
+ * @returns {number} - 仓位变化值之和
+ */
+const calculatePositionChangeSum = (tasks) => {
+  if (!tasks || !Array.isArray(tasks) || tasks.length === 0) return 0
+  
+  let sum = 0
+  for (const task of tasks) {
+    if (task && task.msg) {
+      sum += extractPositionChangeValue(task.msg)
+    }
+  }
+  return sum
+}
+
+/**
+ * 根据仓位变化状态返回对应的CSS类名
+ * @param {string} status - 状态值：'pending'(默认/黄色), 'normal'(正常/绿色), 'abnormal'(异常/红色)
+ * @returns {string} - CSS类名
+ */
+const getPositionChangeStatusClass = (status) => {
+  if (status === 'normal') return 'status-normal'
+  if (status === 'abnormal') return 'status-abnormal'
+  return 'status-pending'  // 默认黄色
+}
+
+/**
+ * 检测msg中仓位变化值是否为"未知"
+ * @param {string} msg - 任务消息字符串
+ * @returns {boolean} - 如果仓位变化值为"未知"返回true
+ */
+const isPositionChangeUnknown = (msg) => {
+  if (!msg) return false
+  const msgStr = typeof msg === 'string' ? msg : String(msg)
+  // 匹配 "仓位变化值为:未知" 或 "仓位变化值为：未知"
+  return /仓位变化值为[：:]\s*未知/.test(msgStr)
+}
+
 // 定时刷新
 let refreshInterval = null
 
@@ -12549,6 +12686,43 @@ onUnmounted(() => {
 .task-label {
   font-weight: 600;
   color: rgba(255, 255, 255, 0.9);
+}
+
+.position-change-sum {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
+/* 默认/请求中状态 - 背景灰色，字体黑色 */
+.position-change-sum.status-pending {
+  background: rgba(128, 128, 128, 0.3);
+  color: #333;
+}
+
+/* 正常状态 - 背景和字体都是绿色 */
+.position-change-sum.status-normal {
+  background: rgba(40, 167, 69, 0.3);
+  color: #28a745;
+  font-weight: 600;
+}
+
+/* 异常状态 - 背景和字体都是红色 */
+.position-change-sum.status-abnormal {
+  background: rgba(220, 53, 69, 0.3);
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.fetch-pending {
+  color: #ffc107 !important;
+}
+
+/* 仓位变化值为"未知"时的msg样式 - 黑色 */
+.task-msg.msg-unknown {
+  color: #333 !important;
 }
 
 .task-browser {
