@@ -1484,7 +1484,7 @@ def get_mission_from_server():
     """
     try:
         url = f"{SERVER_BASE_URL}/mission/getOneMission"
-        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6]}
+        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6,9]}
         
         log_print(f"\n[系统] 请求任务: {url}")
         log_print(f"[系统] 请求参数: {payload}")
@@ -3593,6 +3593,67 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     return True, True  # 成功
+                            
+                            elif  mission_type == 6:
+                                mission_id = mission.get('id')
+                                
+                                # 先将自己的状态改为 20
+                                log_msg = f"[9] Type 6 任务: 设置状态为20..."
+                                log_print(f"[{serial_number}] {log_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                save_result_success = save_mission_result(mission_id, 20)
+                                
+                                
+                                # 在10分钟内，每隔5秒请求一次自己的状态
+                                max_wait_time = 600  # 10分钟
+                                polling_interval = 5  # 每隔5秒
+                                start_time = time.time()
+                                
+                                while True:
+                                    # 检查是否超时
+                                    if time.time() - start_time > max_wait_time:
+                                        log_msg = f"[9] ✗ Type 6 任务等待超时（10分钟）"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        buttons[0].click()
+                                        return False, "[9]等待超时或已被通知失败，取消点击确认按钮"
+                                    
+                                    # 请求自己的状态
+                                    current_status = get_mission_status(mission_id)
+                                    log_msg = f"[9] Type 6 任务: 当前状态={current_status}"
+                                    log_print(f"[{serial_number}] {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                    
+                                    if current_status == 9 or current_status == 0:
+                                        # 如果状态为 9 或 0，改状态为 20
+                                        log_msg = f"[9] Type 6 任务: 状态为{current_status}，重新设置为20..."
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        save_mission_result(mission_id, 20)
+                                    elif current_status == 21:
+                                        # 如果状态为 21，执行 buttons[1].click()，返回 True
+                                        log_msg = f"[9] ✓ Type 6 任务: 状态为21，点击确认按钮"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        buttons[1].click()
+                                        log_msg = f"[11] ✓ Type 6 任务已点击 OKX 确认按钮"
+                                        update_browser_timestamp_q(browser_id, trendingId)
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        log_msg = f"[11] ✓ Type 6 任务提交订单成功"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        return True, True  # 成功
+                                    elif current_status == 3:
+                                        # 如果状态为 3，执行 buttons[2].click()，返回 False
+                                        log_msg = f"[9] ✗ Type 6 任务: 状态为3（已被通知失败）"
+                                        log_print(f"[{serial_number}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, log_msg)
+                                        buttons[0].click()
+                                        return False, "[9]等待超时或已被通知失败，没有点击确认按钮"
+                                    
+                                    # 等待下一次轮询
+                                    time.sleep(polling_interval)
                             else:
                                 # 普通任务（Type 1），直接点击确认
                                 buttons[1].click()
@@ -5358,11 +5419,22 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     mission_id = mission.get('id')
     task_label = "Type6"
     
+    # 获取 tp2 值（取消挂单延迟时间，秒），如果没有则默认 60 秒
+    tp2 = mission.get('tp2')
+    if tp2 is not None:
+        try:
+            tp2_time = int(tp2) if isinstance(tp2, (int, str)) and str(tp2).isdigit() else 60
+        except:
+            tp2_time = 60
+    else:
+        tp2_time = 60
+    
     log_print(f"[{serial_number}] [{task_label}] Type 6 专用等待流程开始...")
     log_print(f"[{serial_number}] [{task_label}] 交易类型: {trade_type}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Position 数量: {initial_position_count}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Open Orders 数量: {initial_open_orders_count}")
     log_print(f"[{serial_number}] [{task_label}] 初始 Closed Orders 最新时间: {initial_closed_orders_time}")
+    log_print(f"[{serial_number}] [{task_label}] 取消挂单延迟时间: {tp2_time} 秒")
     
     # 切换回主页面
     try:
@@ -5377,210 +5449,9 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
         log_print(f"[{serial_number}] [{task_label}] ⚠ 切换回主页面失败: {str(e)}")
         return False, "[11]切换页面失败"
     
-    # 第一阶段：在5分钟内循环判断 position、openorder、Closed Orders 是否有变化
-    if trade_type == "Buy":
-        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position数量增加 ==========")
-    else:
-        log_print(f"[{serial_number}] [{task_label}] ========== 第一阶段：检测Position已成交数量变化 ==========")
-    
-    phase1_timeout = 300  # 5分钟
-    refresh_interval = 90  # 每1分半刷新一次
-    check_interval = 20 if trade_type == "Sell" else 60  # Sell每20秒检查，Buy每60秒检查
-    
-    phase1_start_time = time.time()
-    last_refresh_time = phase1_start_time
-    change_detected = False
-    use_api_data = False  # 标记是否使用链上数据
-    
-    # 对于Buy类型，如果使用链上数据，需要记录初始链上仓位数量
-    initial_position_count_api = None
-    if trade_type == "Buy" and trending:
-        initial_position_count_api = get_position_from_api(serial_number, trending, option_type)
-        if initial_position_count_api is not None:
-            log_print(f"[{serial_number}] [{task_label}] 初始链上仓位数量: {initial_position_count_api}")
-    
-    while time.time() - phase1_start_time < phase1_timeout:
-        try:
-            elapsed = int(time.time() - phase1_start_time)
-            log_print(f"[{serial_number}] [{task_label}] 检查变化（已用时 {elapsed}秒）...")
-            
-            # 每1分半刷新页面
-            if time.time() - last_refresh_time >= refresh_interval:
-                log_print(f"[{serial_number}] [{task_label}] 1分半无变化，刷新页面...")
-                refresh_page_with_opinion_check(driver, serial_number)
-                time.sleep(5)
-                last_refresh_time = time.time()
-            
-            change_detected_in_this_round = False
-            
-            if trade_type == "Buy":
-                # Buy类型：检查Position数量是否增加
-                current_position_count_local = check_position_count(driver, serial_number, trending_part1, trade_type, option_type)
-                
-                current_position_count_api = None
-                if trending:
-                    current_position_count_api = get_position_from_api(serial_number, trending, option_type)
-                    if current_position_count_api is not None:
-                        log_print(f"[{serial_number}] [{task_label}] 链上仓位数量: {current_position_count_api}")
-                
-                # 检查本地数据（tr数量）
-                if current_position_count_local == -2:
-                    log_print(f"[{serial_number}] [{task_label}] ⚠ 检测到对向仓位，跳过本次检查")
-                elif current_position_count_local >= 0:
-                    log_print(f"[{serial_number}] [{task_label}] 本地持仓数量(tr): {current_position_count_local} (初始: {initial_position_count})")
-                    if current_position_count_local > initial_position_count + 1:
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 本地数据检测到持仓数量增加！")
-                        change_detected_in_this_round = True
-                
-                # 检查链上数据
-                if current_position_count_api is not None and initial_position_count_api is not None:
-                    log_print(f"[{serial_number}] [{task_label}] 链上持仓数量: {current_position_count_api} (初始: {initial_position_count_api})")
-                    if current_position_count_api > initial_position_count_api + 1:
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 链上数据检测到持仓数量增加！")
-                        change_detected_in_this_round = True
-                        use_api_data = True
-                
-                if not change_detected_in_this_round:
-                    # 检查Open Orders数量是否有变化
-                    log_print(f"[{serial_number}] [{task_label}] Position未变化，检查Open Orders数量是否有变化...")
-                    current_open_orders_count = get_opinion_table_row_count(driver, serial_number, need_click_open_orders=True, trending_part1=trending_part1)
-                    
-                    if current_open_orders_count < 0:
-                        log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Open Orders 数量，设为 0")
-                        current_open_orders_count = 0
-                    
-                    log_print(f"[{serial_number}] [{task_label}] 当前 Open Orders 数量: {current_open_orders_count} (初始: {initial_open_orders_count})")
-                    
-                    if current_open_orders_count > initial_open_orders_count:
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
-                        change_detected_in_this_round = True
-                    else:
-                        # 检查Closed Orders时间
-                        log_print(f"[{serial_number}] [{task_label}] Open Orders数量未变化，检查Closed Orders时间是否有变化...")
-                        current_closed_orders_time = get_closed_orders_latest_time(driver, serial_number)
-                        
-                        if not current_closed_orders_time:
-                            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Closed Orders 时间")
-                            current_closed_orders_time = ""
-                        
-                        log_print(f"[{serial_number}] [{task_label}] 当前 Closed Orders 最新时间: {current_closed_orders_time} (初始: {initial_closed_orders_time})")
-                        
-                        if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
-                            log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
-                            change_detected_in_this_round = True
-            else:
-                # Sell类型：检查已成交数量是否变化
-                current_filled_amount_local = get_position_filled_amount(driver, serial_number, trending_part1)
-                
-                current_filled_amount_api = None
-                if trending:
-                    current_filled_amount_api = get_position_from_api(serial_number, trending, option_type)
-                    if current_filled_amount_api is not None:
-                        log_print(f"[{serial_number}] [{task_label}] 链上已成交数量: {current_filled_amount_api}")
-                
-                # 检查本地数据
-                if current_filled_amount_local:
-                    log_print(f"[{serial_number}] [{task_label}] 本地已成交数量: {current_filled_amount_local} (初始: {initial_position_count})")
-                    try:
-                        amount_str = ''.join(c for c in current_filled_amount_local if c.isdigit() or c == '.')
-                        if amount_str:
-                            current_filled_amount_float = float(amount_str)
-                            if abs(current_filled_amount_float - float(initial_position_count)) > 1:
-                                log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 本地数据检测到已成交数量变化！")
-                                change_detected_in_this_round = True
-                    except (ValueError, TypeError) as e:
-                        log_print(f"[{serial_number}] [{task_label}] ⚠ 数量转换失败: {str(e)}")
-                
-                # 检查链上数据
-                if current_filled_amount_api is not None:
-                    log_print(f"[{serial_number}] [{task_label}] 链上已成交数量: {current_filled_amount_api} (初始: {initial_position_count})")
-                    if abs(current_filled_amount_api - float(initial_position_count)) > 1:
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 链上数据检测到已成交数量变化！")
-                        change_detected_in_this_round = True
-                        use_api_data = True
-                
-                if not change_detected_in_this_round:
-                    # 检查Open Orders数量是否有变化
-                    log_print(f"[{serial_number}] [{task_label}] Position未变化，检查Open Orders数量是否有变化...")
-                    current_open_orders_count = get_opinion_table_row_count(driver, serial_number, need_click_open_orders=True, trending_part1=trending_part1)
-                    
-                    if current_open_orders_count < 0:
-                        log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Open Orders 数量，设为 0")
-                        current_open_orders_count = 0
-                    
-                    log_print(f"[{serial_number}] [{task_label}] 当前 Open Orders 数量: {current_open_orders_count} (初始: {initial_open_orders_count})")
-                    
-                    if current_open_orders_count > initial_open_orders_count:
-                        log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Open Orders数量变化！")
-                        change_detected_in_this_round = True
-                    else:
-                        # 检查Closed Orders时间
-                        log_print(f"[{serial_number}] [{task_label}] Open Orders数量未变化，检查Closed Orders时间是否有变化...")
-                        current_closed_orders_time = get_closed_orders_latest_time(driver, serial_number)
-                        
-                        if not current_closed_orders_time:
-                            log_print(f"[{serial_number}] [{task_label}] ⚠ 无法获取当前 Closed Orders 时间")
-                            current_closed_orders_time = ""
-                        
-                        log_print(f"[{serial_number}] [{task_label}] 当前 Closed Orders 最新时间: {current_closed_orders_time} (初始: {initial_closed_orders_time})")
-                        
-                        if current_closed_orders_time and current_closed_orders_time != initial_closed_orders_time:
-                            log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到Closed Orders时间变化！")
-                            change_detected_in_this_round = True
-            
-            # 如果有变化，立即改变自身的状态为20，msg为"挂单成功!"
-            if change_detected_in_this_round:
-                log_print(f"[{serial_number}] [{task_label}] ✓✓✓ 检测到变化，更改自身状态为20（挂单成功!）...")
-                save_mission_result(mission_id, 20, "挂单成功!")
-                change_detected = True
-                break
-            
-            time.sleep(check_interval)
-            
-        except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 检查变化时出错: {str(e)}")
-            time.sleep(check_interval)
-    
-    # 如果5分钟超时，position、openorder、closeorder都没有变化，返回False
-    if not change_detected:
-        log_print(f"[{serial_number}] [{task_label}] ✗ 5分钟超时，position、openorder、closeorder都没有变化")
-        return False, "挂单失败"
-    
-    # 第二阶段：循环等待20分钟，每隔30s获取一次自己任务id的状态
-    log_print(f"[{serial_number}] [{task_label}] ========== 第二阶段：等待任务状态变为2 ==========")
-    
-    phase2_timeout = 1200  # 20分钟
-    phase2_check_interval = 30  # 每30秒检查一次
-    phase2_start_time = time.time()
-    status_is_2 = False
-    
-    while time.time() - phase2_start_time < phase2_timeout:
-        try:
-            current_status = get_mission_status(mission_id)
-            log_print(f"[{serial_number}] [{task_label}] 当前任务状态: {current_status}")
-            
-            if current_status == 2:
-                log_print(f"[{serial_number}] [{task_label}] ✓ 任务状态变为2，退出循环")
-                status_is_2 = True
-                break
-            elif current_status == 3:
-                log_print(f"[{serial_number}] [{task_label}] ✗ 任务状态变为3，退出循环")
-                break
-            
-            time.sleep(phase2_check_interval)
-            
-        except Exception as e:
-            log_print(f"[{serial_number}] [{task_label}] ⚠ 获取任务状态时出错: {str(e)}")
-            time.sleep(phase2_check_interval)
-    
-    # 检查是否超时
-    if not status_is_2:
-        elapsed = int(time.time() - phase2_start_time)
-        if elapsed >= phase2_timeout:
-            log_print(f"[{serial_number}] [{task_label}] ✗ 20分钟超时，任务状态未变为2")
-        else:
-            log_print(f"[{serial_number}] [{task_label}] ✗ 任务状态为3，退出循环")
-    
+
+    time.sleep(tp2_time)
+
     # 无论什么状态退出，都要执行撤单逻辑（不直接返回，只记录状态）
     log_print(f"[{serial_number}] [{task_label}] ========== 执行撤单逻辑 ==========")
     cancel_status = "无挂单"  # 默认值：有挂单取消失败、有挂单取消成功、无挂单
@@ -15205,12 +15076,7 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
                                     "https://app.opinion.trade/detail?topicId=213&type=multi",
                                     "https://app.opinion.trade/detail?topicId=79&type=multi",
                                     "https://app.opinion.trade/detail?topicId=210&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=80&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=211&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=175&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=78&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=115&type=multi",
-                                    "https://app.opinion.trade/detail?topicId=193&type=multi"
+                           
                                 ]
                                 target_url = random.choice(target_urls)
                                 log_print(f"[{browser_id}] 前往页面获取可用余额: {target_url}")
@@ -16097,12 +15963,6 @@ def process_type2_mission(task_data, retry_count=0):
                                 "https://app.opinion.trade/detail?topicId=213&type=multi",
                                 "https://app.opinion.trade/detail?topicId=79&type=multi",
                                 "https://app.opinion.trade/detail?topicId=210&type=multi",
-                                "https://app.opinion.trade/detail?topicId=80&type=multi",
-                                "https://app.opinion.trade/detail?topicId=211&type=multi",
-                                "https://app.opinion.trade/detail?topicId=175&type=multi",
-                                "https://app.opinion.trade/detail?topicId=78&type=multi",
-                                "https://app.opinion.trade/detail?topicId=115&type=multi",
-                                "https://app.opinion.trade/detail?topicId=193&type=multi"
                             ]
                             target_url = random.choice(target_urls)
                             log_print(f"[{browser_id}] 前往页面: {target_url}")
