@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <header class="top-header">
-      <h1>页面1-对冲</h1>
+      <h1>页面12-模式4</h1>
       <div class="header-actions">
         <div style="display: inline-flex; align-items: center; gap: 8px; margin-right: 10px;">
           <label style="font-size: 14px;">yes数量大于:</label>
@@ -585,8 +585,23 @@
           <div class="auto-hedge-controls">
             <!-- 账号选择设置 -->
             <div class="hedge-amount-range">
+              <div class="mode-toggle-group" style="margin-right: 8px;">
+                <button 
+                  type="button"
+                  :class="['mode-toggle-btn', !hedgeMode.singleCloseAmtAutoMode ? 'active' : '']"
+                  :disabled="autoHedgeRunning"
+                  @click="hedgeMode.singleCloseAmtAutoMode = false; saveHedgeSettings()"
+                >手动</button>
+                <button 
+                  type="button"
+                  :class="['mode-toggle-btn', hedgeMode.singleCloseAmtAutoMode ? 'active' : '']"
+                  :disabled="autoHedgeRunning"
+                  @click="hedgeMode.singleCloseAmtAutoMode = true; saveHedgeSettings()"
+                >自动</button>
+              </div>
               <span class="filter-label">每个小仓位平仓时间的最大持仓:</span>
               <input 
+                v-if="!hedgeMode.singleCloseAmtAutoMode"
                 v-model.number="hedgeMode.singleCloseAmtMax" 
                 type="number" 
                 class="amount-range-input" 
@@ -597,7 +612,7 @@
               />
             </div>
             <div class="hedge-amount-range">
-              <span class="filter-label">这一轮最少平仓数量:</span>
+              <span class="filter-label">这一轮最少平仓数量{{ hedgeMode.singleCloseAmtAutoMode ? '(与自动值取较大)' : '' }}:</span>
               <input 
                 v-model.number="hedgeMode.closeAmtSumMin" 
                 type="number" 
@@ -609,7 +624,7 @@
               />
             </div>
             <div class="hedge-amount-range">
-              <span class="filter-label">这一轮最多平仓数量 随机最小:</span>
+              <span class="filter-label">这一轮最多平仓数量 随机最小{{ hedgeMode.singleCloseAmtAutoMode ? '(与自动值取较大)' : '' }}:</span>
               <input 
                 v-model.number="hedgeMode.closeAmtSumMaxStart" 
                 type="number" 
@@ -621,7 +636,7 @@
               />
             </div>
             <div class="hedge-amount-range">
-              <span class="filter-label">这一轮最多平仓数量 随机最大:</span>
+              <span class="filter-label">这一轮最多平仓数量 随机最大{{ hedgeMode.singleCloseAmtAutoMode ? '(与自动值取较大)' : '' }}:</span>
               <input 
                 v-model.number="hedgeMode.closeAmtSumMaxEnd" 
                 type="number" 
@@ -3027,6 +3042,7 @@ const hedgeMode = reactive({
   preferLowerDepth: true,  // 价差小于0.15时，选择深度小的一方
   // 账号选择设置（新参数）
   singleCloseAmtMax: 500,  // 每个小仓位平仓时间的最大持仓(小于这个的才去平)
+  singleCloseAmtAutoMode: false,  // 是否自动根据价格计算平仓数量
   closeAmtSumMin: 0,  // 这一轮最少平仓数量
   closeAmtSumMaxStart: 0,  // 这一轮最多平仓数量 随机最小
   closeAmtSumMaxEnd: 0,  // 这一轮最多平仓数量 随机最大
@@ -3063,6 +3079,173 @@ const hedgeMode = reactive({
   // 后挂方延迟设置
   secondSideDelayMinutes: 5  // 先挂方提交后延迟多少分钟再提交后挂方，默认5分钟
 })
+
+// 平仓数量价格映射表（价格 -> 数量）
+const CLOSE_AMT_PRICE_TABLE = [
+  { price: 0.1, amount: 6578947.368 },
+  { price: 0.6, amount: 183958.7932 },
+  { price: 1.1, amount: 54963.17467 },
+  { price: 1.6, amount: 26106.934 },
+  { price: 2.1, amount: 15242.97299 },
+  { price: 2.6, amount: 9990.00999 },
+  { price: 3.1, amount: 7064.841112 },
+  { price: 3.6, amount: 5264.931345 },
+  { price: 4.1, amount: 4081.366115 },
+  { price: 4.6, amount: 3259.239945 },
+  { price: 5.1, amount: 2665.557795 },
+  { price: 5.6, amount: 2222.143213 },
+  { price: 6.1, amount: 1883.005126 },
+  { price: 6.6, amount: 1617.024029 },
+  { price: 7.1, amount: 1404.798229 },
+  { price: 7.6, amount: 1232.705147 },
+  { price: 8.1, amount: 1091.186054 },
+  { price: 8.6, amount: 973.2094892 },
+  { price: 9.1, amount: 873.9471122 },
+  { price: 9.6, amount: 789.6199717 },
+  { price: 10, amount: 730.994152 },
+  { price: 10.1, amount: 717.3590856 },
+  { price: 10.6, amount: 654.9543366 },
+  { price: 11.1, amount: 600.6006006 },
+  { price: 11.6, amount: 553.1046872 },
+  { price: 12.1, amount: 511.2249666 },
+  { price: 12.6, amount: 474.1610668 },
+  { price: 13.1, amount: 441.1458499 },
+  { price: 13.6, amount: 411.6988341 },
+  { price: 14.1, amount: 385.2362076 },
+  { price: 14.6, amount: 361.4032856 },
+  { price: 15.1, amount: 339.8602359 },
+  { price: 15.6, amount: 320.3206281 },
+  { price: 16.1, amount: 302.5121822 },
+  { price: 16.6, amount: 286.2619457 },
+  { price: 17.1, amount: 271.3919258 },
+  { price: 17.6, amount: 257.7489649 },
+  { price: 18.1, amount: 245.200687 },
+  { price: 18.6, amount: 233.6118922 },
+  { price: 19.1, amount: 222.9243845 },
+  { price: 19.6, amount: 213.0110561 },
+  { price: 20.1, amount: 203.7983114 },
+  { price: 20.6, amount: 195.2525514 },
+  { price: 21.1, amount: 187.2959411 },
+  { price: 21.6, amount: 179.861291 },
+  { price: 22.1, amount: 172.9168021 },
+  { price: 22.6, amount: 166.420143 },
+  { price: 23.1, amount: 160.321618 },
+  { price: 23.6, amount: 154.6116958 },
+  { price: 24.1, amount: 149.2367139 },
+  { price: 24.6, amount: 144.1810545 },
+  { price: 25.1, amount: 139.4199239 },
+  { price: 25.6, amount: 134.9309154 },
+  { price: 26.1, amount: 130.6848224 },
+  { price: 26.6, amount: 126.6729057 },
+  { price: 27.1, amount: 122.8865359 },
+  { price: 27.6, amount: 119.2858499 },
+  { price: 28.1, amount: 115.8814348 },
+  { price: 28.6, amount: 112.6450869 },
+  { price: 29.1, amount: 109.5799144 },
+  { price: 29.6, amount: 106.6609326 },
+  { price: 30.1, amount: 103.8855265 },
+  { price: 30.6, amount: 101.2383475 },
+  { price: 31.1, amount: 98.72379747 },
+  { price: 31.6, amount: 96.32181658 },
+  { price: 32.1, amount: 94.0315363 },
+  { price: 32.6, amount: 91.84635794 },
+  { price: 33.1, amount: 89.76017696 },
+  { price: 33.6, amount: 87.76216313 },
+  { price: 34.1, amount: 85.85254756 },
+  { price: 34.6, amount: 84.02643942 },
+  { price: 35.1, amount: 82.27929443 },
+  { price: 35.6, amount: 80.60688602 },
+  { price: 36.1, amount: 79.00077294 },
+  { price: 36.6, amount: 77.46641444 },
+  { price: 37.1, amount: 75.99147984 },
+  { price: 37.6, amount: 74.57726622 },
+  { price: 38.1, amount: 73.21669036 },
+  { price: 38.6, amount: 71.91521139 },
+  { price: 39.1, amount: 70.66211961 },
+  { price: 39.6, amount: 69.45903084 },
+  { price: 40.1, amount: 68.3036315 },
+  { price: 40.6, amount: 67.19375238 },
+  { price: 41.1, amount: 66.12376411 },
+  { price: 41.6, amount: 65.09548727 },
+  { price: 42.1, amount: 64.10711735 },
+  { price: 42.6, amount: 63.15695868 },
+  { price: 43.1, amount: 62.24341707 },
+  { price: 43.6, amount: 61.36170961 },
+  { price: 44.1, amount: 60.51704553 },
+  { price: 44.6, amount: 59.70157808 },
+  { price: 45.1, amount: 58.91420183 },
+  { price: 45.6, amount: 58.16003968 },
+  { price: 46.1, amount: 57.43479657 },
+  { price: 46.6, amount: 56.73442118 },
+  { price: 47.1, amount: 56.06100155 },
+  { price: 47.6, amount: 55.41359823 },
+  { price: 48.1, amount: 54.78843828 },
+  { price: 48.6, amount: 54.19049694 },
+  { price: 49.1, amount: 53.60759838 },
+  { price: 49.6, amount: 53.05881973 },
+  { price: 50.1, amount: 52.5265259 }
+]
+
+/**
+ * 根据目标价格自动获取平仓数量（找离目标价格最近的那一档）
+ * @param {number} targetPrice - 目标价格
+ * @returns {number} 平仓数量（向上取整保留两位小数）
+ */
+const getAutoCloseAmt = (targetPrice) => {
+  // 找离目标价格最近的那一档
+  let closestItem = CLOSE_AMT_PRICE_TABLE[0]
+  let minDiff = Math.abs(targetPrice - closestItem.price)
+  
+  for (const item of CLOSE_AMT_PRICE_TABLE) {
+    const diff = Math.abs(targetPrice - item.price)
+    if (diff < minDiff) {
+      minDiff = diff
+      closestItem = item
+    }
+  }
+  
+  // 数量向上取保留两位小数
+  return Math.ceil(closestItem.amount * 100) / 100
+}
+
+/**
+ * 根据先挂方价格获取自动计算的平仓数量
+ * @param {number} firstSidePrice - 先挂方价格
+ * @returns {number} 平仓数量
+ */
+const getAutoSingleCloseAmt = (firstSidePrice) => {
+  if (firstSidePrice === undefined || firstSidePrice === null) {
+    return hedgeMode.singleCloseAmtMax
+  }
+  // 如果先挂方价格 <= 50，使用先挂方价格；如果 > 50，使用 100 - 先挂方价格
+  const targetPrice = firstSidePrice <= 50 ? firstSidePrice : (100 - firstSidePrice)
+  const autoAmt = getAutoCloseAmt(targetPrice)
+  console.log(`自动计算平仓数量：先挂方价格=${firstSidePrice}, 目标价格=${targetPrice}, 自动计算数量=${autoAmt}`)
+  return autoAmt
+}
+
+/**
+ * 获取平仓参数（根据是否开启自动模式决定使用手动值还是根据价格计算）
+ * @param {number} firstSidePrice - 先挂方价格
+ * @returns {object} { singleCloseAmtMax, closeAmtSumMin, closeAmtSumMaxStart, closeAmtSumMaxEnd }
+ */
+const getCloseAmtParams = (firstSidePrice) => {
+  if (hedgeMode.singleCloseAmtAutoMode) {
+    const autoAmt = getAutoSingleCloseAmt(firstSidePrice)
+    return {
+      singleCloseAmtMax: autoAmt,
+      closeAmtSumMin: Math.max(hedgeMode.closeAmtSumMin || 0, autoAmt),
+      closeAmtSumMaxStart: Math.max(hedgeMode.closeAmtSumMaxStart || 0, autoAmt),
+      closeAmtSumMaxEnd: Math.max(hedgeMode.closeAmtSumMaxEnd || 0, autoAmt)
+    }
+  }
+  return {
+    singleCloseAmtMax: hedgeMode.singleCloseAmtMax,
+    closeAmtSumMin: hedgeMode.closeAmtSumMin,
+    closeAmtSumMaxStart: hedgeMode.closeAmtSumMaxStart,
+    closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd
+  }
+}
 
 // 每个主题的上一次先挂方记录（用于轮换）
 const FIRST_SIDE_STORAGE_KEY = 'firstSideHistory'
@@ -8286,16 +8469,19 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           continue
         }
         
+        // 获取平仓参数（根据是否开启自动模式）
+        const closeAmtParams = getCloseAmtParams(orderPrice)
+        
         const requestData = {
           trendingId: config.id,
           currentPrice: orderPrice,
           priceOutCome: priceInfo.firstSide,  // 先挂方 (yes/no)
           numberType: 1,  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
           timePassMin: hedgeMode.timePassMin,
-          singleCloseAmtMax: hedgeMode.singleCloseAmtMax,  // 每个小仓位平仓时间的最大持仓
-          closeAmtSumMin: hedgeMode.closeAmtSumMin,  // 这一轮最少平仓数量
-          closeAmtSumMaxStart: hedgeMode.closeAmtSumMaxStart,  // 这一轮最多平仓数量 随机最小
-          closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd,  // 这一轮最多平仓数量 随机最大
+          singleCloseAmtMax: closeAmtParams.singleCloseAmtMax,  // 每个小仓位平仓时间的最大持仓
+          closeAmtSumMin: closeAmtParams.closeAmtSumMin,  // 这一轮最少平仓数量
+          closeAmtSumMaxStart: closeAmtParams.closeAmtSumMaxStart,  // 这一轮最多平仓数量 随机最小
+          closeAmtSumMaxEnd: closeAmtParams.closeAmtSumMaxEnd,  // 这一轮最多平仓数量 随机最大
           needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,  // 是否需要校验资产优先级 0不要 1要
           balancePriority: hedgeMode.balancePriority,  // 资产优先级校验值
           needJudgeDepth: hedgeMode.needJudgeDepth,  // 是否需要校验深度 0不要 1要
@@ -9220,6 +9406,7 @@ const saveHedgeSettings = () => {
       maxDepth: hedgeMode.maxDepth,
       // 账号选择设置（新参数）
       singleCloseAmtMax: hedgeMode.singleCloseAmtMax,
+      singleCloseAmtAutoMode: hedgeMode.singleCloseAmtAutoMode,
       closeAmtSumMin: hedgeMode.closeAmtSumMin,
       closeAmtSumMaxStart: hedgeMode.closeAmtSumMaxStart,
       closeAmtSumMaxEnd: hedgeMode.closeAmtSumMaxEnd,
@@ -9315,6 +9502,9 @@ const loadHedgeSettings = () => {
     // 账号选择设置（新参数）
     if (settings.singleCloseAmtMax !== undefined) {
       hedgeMode.singleCloseAmtMax = settings.singleCloseAmtMax
+    }
+    if (settings.singleCloseAmtAutoMode !== undefined) {
+      hedgeMode.singleCloseAmtAutoMode = settings.singleCloseAmtAutoMode
     }
     if (settings.closeAmtSumMin !== undefined) {
       hedgeMode.closeAmtSumMin = settings.closeAmtSumMin
@@ -10427,14 +10617,133 @@ const executeHedgeTaskV4 = async (config, hedgeData) => {
       console.log(`Type4 - 先挂方价格 ${firstPrice} >= 50，后挂方逻辑：YES/NO相反，卖出，价格 ${secondTaskPrice}`)
     }
     
-    console.log(`Type4 - 开始提交先挂方任务，共 ${closeLimitList.length} 个`)
-    
     // 获取取消挂单延迟时间（秒），如果没有设置则使用默认值 60
     const cancelOrderDelaySeconds = hedgeMode.cancelOrderDelaySeconds || 60
     
+    // 先提交后挂方任务（takerNumberInfo是单个对象）
+    console.log(`Type4 - 开始提交后挂方任务`)
+    
+    let secondSideSuccessCount = 0
+    let secondTaskId = null  // 保存后挂方任务ID，用于后续传给先挂方
+    
+    // 检查对冲记录是否还在运行中
+    if (hedgeRecord.finalStatus !== 'running') {
+      console.log(`Type4 - 对冲记录状态已变为 ${hedgeRecord.finalStatus}，取消后挂方任务提交`)
+      return
+    }
+    
+    // 构建tp4参数（如果开启深度差0.1）
+    const shouldAddTp4 = hedgeMode.enableDepthDiffParams01 === true
+    const tp4Value = shouldAddTp4 ? hedgeMode.maxEatValue01 : undefined
+    
+    if (shouldAddTp4) {
+      console.log(`Type4 - 深度差0.1已开启，后挂方任务tp4=${tp4Value}`)
+    }
+    
+    try {
+      const browserNo = takerNumberInfo.number
+      const share = floorToTwoDecimals(takerNumberInfo.share)
+      // 使用takerNumberInfo.group，如果没有则使用browserToGroupMap
+      let groupNo = '1'
+      if (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '') {
+        groupNo = String(takerNumberInfo.group)
+      } else {
+        groupNo = browserToGroupMap.value[browserNo] || '1'
+      }
+      
+      const taskData = {
+        groupNo: groupNo,
+        numberList: parseInt(browserNo),
+        type: 6,  // 后挂方使用type6
+        trendingId: config.id,
+        exchangeName: 'OP',
+        side: secondSide,  // 根据价格决定买入或卖出
+        psSide: secondPsSide,  // 根据价格决定YES/NO
+        amt: share,
+        price: secondTaskPrice,  // 根据价格决定价格
+        tp15: Math.round(cancelOrderDelaySeconds),  // 取消挂单延迟时间（秒）
+        tp3: isFastMode.value ? "1" : "0"
+      }
+      
+      // 如果开启深度差0.1，添加tp4参数
+      if (shouldAddTp4 && tp4Value !== undefined) {
+        taskData.tp4 = tp4Value
+      }
+      
+      const response = await axios.post(
+        'https://sg.bicoin.com.cn/99l/mission/add',
+        taskData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (response.data && response.data.data) {
+        const taskData = response.data.data
+        let taskId = null
+        
+        if (typeof taskData === 'object' && taskData !== null) {
+          taskId = taskData.id
+        } else if (typeof taskData === 'number' || typeof taskData === 'string') {
+          taskId = taskData
+        }
+        
+        if (taskId === undefined || taskId === null || typeof taskId === 'object') {
+          console.error(`Type4 - 提交后挂方任务失败: 无效的任务ID`, { taskData, taskId })
+        } else {
+          taskId = String(Number(taskId))
+          secondTaskId = taskId
+          console.log(`Type4 - 后挂方任务提交成功，浏览器: ${browserNo}, 任务ID: ${taskId}`)
+          
+          // 保存任务信息
+          const taskInfo = {
+            number: browserNo,
+            share: share,
+            taskId: taskId,
+            status: 9,  // 初始状态为9（进行中）
+            groupNo: groupNo,
+            price: secondTaskPrice
+          }
+          
+          hedgeRecord.secondTasks.push(taskInfo)
+          hedgeRecord.allTaskIds.push(taskId)
+          secondSideSuccessCount++
+        }
+      } else if (response.data && response.data.msg) {
+        console.error(`Type4 - 提交后挂方任务失败（浏览器: ${browserNo}）:`, response.data.msg)
+      }
+    } catch (error) {
+      console.error(`Type4 - 提交后挂方任务失败（浏览器: ${takerNumberInfo.number}）:`, error)
+    }
+    
+    if (secondSideSuccessCount === 0 || !secondTaskId) {
+      console.error(`Type4 - 后挂方任务提交失败，无法继续提交先挂方任务`)
+      hedgeRecord.finalStatus = 'failed'
+      hedgeRecord.errorMsg = '后挂方任务提交失败'
+      finishHedge(config, hedgeRecord)
+      return
+    }
+    
+    console.log(`Type4 - 后挂方任务提交完成，成功: ${secondSideSuccessCount}/1，任务ID: ${secondTaskId}`)
+    
+    // 检查对冲记录是否还在运行中
+    if (hedgeRecord.finalStatus !== 'running') {
+      console.log(`Type4 - 对冲记录状态已变为 ${hedgeRecord.finalStatus}，取消先挂方任务提交`)
+      return
+    }
+    
+    // 现在提交先挂方任务，添加tp1参数（后挂方任务ID）和tp4参数（如果开启深度差0.1）
+    console.log(`Type4 - 开始提交先挂方任务，共 ${closeLimitList.length} 个，tp1=${secondTaskId}`)
+    
     let firstSideSuccessCount = 0
     
-    // 立即提交所有先挂方任务
+    if (shouldAddTp4) {
+      console.log(`Type4 - 深度差0.1已开启，先挂方任务tp4=${tp4Value}`)
+    }
+    
+    // 提交所有先挂方任务
     for (const item of closeLimitList) {
       try {
         const browserNo = item.number
@@ -10457,8 +10766,14 @@ const executeHedgeTaskV4 = async (config, hedgeData) => {
           psSide: firstPsSide,
           amt: share,
           price: firstTaskPrice,
-          tp2: Math.round(cancelOrderDelaySeconds),  // 取消挂单延迟时间（秒）
+          tp1: secondTaskId,  // 后挂方任务ID
+          tp15: Math.round(cancelOrderDelaySeconds),  // 取消挂单延迟时间（秒）
           tp3: isFastMode.value ? "1" : "0"
+        }
+        
+        // 如果开启深度差0.1，添加tp4参数
+        if (shouldAddTp4 && tp4Value !== undefined) {
+          taskData.tp4 = tp4Value
         }
         
         const response = await axios.post(
@@ -10519,95 +10834,6 @@ const executeHedgeTaskV4 = async (config, hedgeData) => {
     }
     
     console.log(`Type4 - 先挂方任务提交完成，成功: ${firstSideSuccessCount}/${closeLimitList.length}`)
-    
-    // // 延迟指定时间再提交后挂方任务（使用 setTimeout 非阻塞方式，不阻塞主循环）
-    // const delayMinutes = hedgeMode.secondSideDelayMinutes || 5
-    // console.log(`Type4 - 将在${delayMinutes}分钟后提交后挂方任务（非阻塞，不阻塞主循环）...`)
-    
-    // 使用 setTimeout 而不是 await，这样不会阻塞主循环
-      // 检查对冲记录是否还在运行中
-    if (hedgeRecord.finalStatus !== 'running') {
-      console.log(`Type4 - 对冲记录状态已变为 ${hedgeRecord.finalStatus}，取消后挂方任务提交`)
-      return
-    }
-    
-    // 提交后挂方任务（takerNumberInfo是单个对象）
-    console.log(`Type4 - 开始提交后挂方任务`)
-    
-    let secondSideSuccessCount = 0
-    try {
-      const browserNo = takerNumberInfo.number
-      const share = floorToTwoDecimals(takerNumberInfo.share)
-      // 使用takerNumberInfo.group，如果没有则使用browserToGroupMap
-      let groupNo = '1'
-      if (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '') {
-        groupNo = String(takerNumberInfo.group)
-      } else {
-        groupNo = browserToGroupMap.value[browserNo] || '1'
-      }
-      
-      const taskData = {
-        groupNo: groupNo,
-        numberList: parseInt(browserNo),
-        type: 6,  // 后挂方使用type6
-        trendingId: config.id,
-        exchangeName: 'OP',
-        side: secondSide,  // 根据价格决定买入或卖出
-        psSide: secondPsSide,  // 根据价格决定YES/NO
-        amt: share,
-        price: secondTaskPrice,  // 根据价格决定价格
-        tp2: Math.round(cancelOrderDelaySeconds),  // 取消挂单延迟时间（秒）
-        tp3: isFastMode.value ? "1" : "0"
-      }
-      
-      const response = await axios.post(
-        'https://sg.bicoin.com.cn/99l/mission/add',
-        taskData,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      )
-      
-      if (response.data && response.data.data) {
-        const taskData = response.data.data
-        let taskId = null
-        
-        if (typeof taskData === 'object' && taskData !== null) {
-          taskId = taskData.id
-        } else if (typeof taskData === 'number' || typeof taskData === 'string') {
-          taskId = taskData
-        }
-        
-        if (taskId === undefined || taskId === null || typeof taskId === 'object') {
-          console.error(`Type4 - 提交后挂方任务失败: 无效的任务ID`, { taskData, taskId })
-        } else {
-          taskId = String(Number(taskId))
-          console.log(`Type4 - 后挂方任务提交成功，浏览器: ${browserNo}, 任务ID: ${taskId}`)
-          
-          // 保存任务信息
-          const taskInfo = {
-            number: browserNo,
-            share: share,
-            taskId: taskId,
-            status: 9,  // 初始状态为9（进行中）
-            groupNo: groupNo,
-            price: secondTaskPrice
-          }
-          
-          hedgeRecord.secondTasks.push(taskInfo)
-          hedgeRecord.allTaskIds.push(taskId)
-          secondSideSuccessCount++
-        }
-      } else if (response.data && response.data.msg) {
-        console.error(`Type4 - 提交后挂方任务失败（浏览器: ${browserNo}）:`, response.data.msg)
-      }
-    } catch (error) {
-      console.error(`Type4 - 提交后挂方任务失败（浏览器: ${takerNumberInfo.number}）:`, error)
-    }
-    console.log(`Type4 - 后挂方任务提交完成，成功: ${secondSideSuccessCount}/1`)
-    console.log(`Type4 - 所有先挂方任务提交完成，先挂方: ${firstSideSuccessCount}/${closeLimitList.length}`)
     // 开始监控所有任务状态（先挂方和后挂方同时监控）
     monitorHedgeStatusV4(config, hedgeRecord)
   } catch (error) {
@@ -10928,18 +11154,18 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
             const success = await callUpdateTrendingTime(trendingId, currentUpdateTime)
             
             if (success) {
-              console.log(`Type4 - updateTrendingTime 成功，开始更新任务状态为 21`)
+              console.log(`Type4 - updateTrendingTime 成功，开始更新任务状态为 31`)
               
-              // 把先挂方中状态是 20 的任务改成状态 21
+              // 把先挂方中状态是 20 的任务改成状态 31
               for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
                 const task = hedgeRecord.closeTasks[i]
                 if (task.status === 20 && task.taskId) {
-                  console.log(`Type4 - 将先挂方任务 ${task.taskId} 状态改为 21`)
+                  console.log(`Type4 - 将先挂方任务 ${task.taskId} 状态改为 31`)
                   hedgeRecord.closeTasks[i] = {
                     ...task,
-                    status: 21
+                    status: 31
                   }
-                  await updateTaskStatus(task.taskId, 21)
+                  await updateTaskStatus(task.taskId, 31)
                 }
               }
               
@@ -10949,12 +11175,12 @@ const monitorHedgeStatusV4 = (config, hedgeRecord) => {
               for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
                 const task = hedgeRecord.secondTasks[i]
                 if (task.status === 20 && task.taskId) {
-                  console.log(`Type4 - 将后挂方任务 ${task.taskId} 状态改为 21`)
+                  console.log(`Type4 - 将后挂方任务 ${task.taskId} 状态改为 31`)
                   hedgeRecord.secondTasks[i] = {
                     ...task,
-                    status: 21
+                    status: 31
                   }
-                  await updateTaskStatus(task.taskId, 21)
+                  await updateTaskStatus(task.taskId, 31)
                 }
               }
               
@@ -13002,6 +13228,42 @@ onUnmounted(() => {
 }
 
 .amount-range-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 模式切换按钮组 */
+.mode-toggle-group {
+  display: inline-flex;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #ddd;
+}
+
+.mode-toggle-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: none;
+  background: #f5f5f5;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-btn:first-child {
+  border-right: 1px solid #ddd;
+}
+
+.mode-toggle-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.mode-toggle-btn.active {
+  background: #667eea;
+  color: white;
+}
+
+.mode-toggle-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

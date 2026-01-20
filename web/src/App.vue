@@ -1043,8 +1043,23 @@
             
             <!-- 平仓最小数量设置 -->
             <div class="hedge-amount-range">
+              <div class="mode-toggle-group" style="margin-right: 8px;">
+                <button 
+                  type="button"
+                  :class="['mode-toggle-btn', !hedgeMode.minCloseAmtAuto ? 'active' : '']"
+                  :disabled="autoHedgeRunning"
+                  @click="hedgeMode.minCloseAmtAuto = false; saveHedgeSettings()"
+                >手动</button>
+                <button 
+                  type="button"
+                  :class="['mode-toggle-btn', hedgeMode.minCloseAmtAuto ? 'active' : '']"
+                  :disabled="autoHedgeRunning"
+                  @click="hedgeMode.minCloseAmtAuto = true; saveHedgeSettings()"
+                >自动</button>
+              </div>
               <span class="filter-label">平仓最小数量（参数1）:</span>
               <input 
+                v-if="!hedgeMode.minCloseAmtAuto"
                 v-model.number="hedgeMode.minCloseAmt" 
                 type="number" 
                 class="amount-range-input" 
@@ -3777,6 +3792,7 @@ const hedgeMode = reactive({
   minUAmt: 10,  // 最小开单
   maxUAmt: 1500,  // 最大开单
   minCloseAmt: 500,  // 平仓最小数量（参数1）
+  minCloseAmtAuto: false,  // 是否自动根据价格计算平仓最小数量
   minTotalCloseAmt: 0,  // 合计最小平仓值（参数2）
   maxTotalCloseAmt: 0,  // 合计最大平仓值（参数3）
   takerMinAmt: 200,  // taker最小数量（参数4）
@@ -3851,6 +3867,150 @@ const hedgeMode = reactive({
   smallAccPosMinAmt: 0,  // 小账户最少持仓，默认0
   smallAccPosMaxAmt: 500  // 小账户最多持仓，默认500
 })
+
+// 平仓最小数量价格映射表（后挂方价格 -> 最小数量）
+const CLOSE_AMT_PRICE_TABLE = [
+  { price: 0.1, amount: 6578947.368 },
+  { price: 0.6, amount: 183958.7932 },
+  { price: 1.1, amount: 54963.17467 },
+  { price: 1.6, amount: 26106.934 },
+  { price: 2.1, amount: 15242.97299 },
+  { price: 2.6, amount: 9990.00999 },
+  { price: 3.1, amount: 7064.841112 },
+  { price: 3.6, amount: 5264.931345 },
+  { price: 4.1, amount: 4081.366115 },
+  { price: 4.6, amount: 3259.239945 },
+  { price: 5.1, amount: 2665.557795 },
+  { price: 5.6, amount: 2222.143213 },
+  { price: 6.1, amount: 1883.005126 },
+  { price: 6.6, amount: 1617.024029 },
+  { price: 7.1, amount: 1404.798229 },
+  { price: 7.6, amount: 1232.705147 },
+  { price: 8.1, amount: 1091.186054 },
+  { price: 8.6, amount: 973.2094892 },
+  { price: 9.1, amount: 873.9471122 },
+  { price: 9.6, amount: 789.6199717 },
+  { price: 10, amount: 730.994152 },
+  { price: 10.1, amount: 717.3590856 },
+  { price: 10.6, amount: 654.9543366 },
+  { price: 11.1, amount: 600.6006006 },
+  { price: 11.6, amount: 553.1046872 },
+  { price: 12.1, amount: 511.2249666 },
+  { price: 12.6, amount: 474.1610668 },
+  { price: 13.1, amount: 441.1458499 },
+  { price: 13.6, amount: 411.6988341 },
+  { price: 14.1, amount: 385.2362076 },
+  { price: 14.6, amount: 361.4032856 },
+  { price: 15.1, amount: 339.8602359 },
+  { price: 15.6, amount: 320.3206281 },
+  { price: 16.1, amount: 302.5121822 },
+  { price: 16.6, amount: 286.2619457 },
+  { price: 17.1, amount: 271.3919258 },
+  { price: 17.6, amount: 257.7489649 },
+  { price: 18.1, amount: 245.200687 },
+  { price: 18.6, amount: 233.6118922 },
+  { price: 19.1, amount: 222.9243845 },
+  { price: 19.6, amount: 213.0110561 },
+  { price: 20.1, amount: 203.7983114 },
+  { price: 20.6, amount: 195.2525514 },
+  { price: 21.1, amount: 187.2959411 },
+  { price: 21.6, amount: 179.861291 },
+  { price: 22.1, amount: 172.9168021 },
+  { price: 22.6, amount: 166.420143 },
+  { price: 23.1, amount: 160.321618 },
+  { price: 23.6, amount: 154.6116958 },
+  { price: 24.1, amount: 149.2367139 },
+  { price: 24.6, amount: 144.1810545 },
+  { price: 25.1, amount: 139.4199239 },
+  { price: 25.6, amount: 134.9309154 },
+  { price: 26.1, amount: 130.6848224 },
+  { price: 26.6, amount: 126.6729057 },
+  { price: 27.1, amount: 122.8865359 },
+  { price: 27.6, amount: 119.2858499 },
+  { price: 28.1, amount: 115.8814348 },
+  { price: 28.6, amount: 112.6450869 },
+  { price: 29.1, amount: 109.5799144 },
+  { price: 29.6, amount: 106.6609326 },
+  { price: 30.1, amount: 103.8855265 },
+  { price: 30.6, amount: 101.2383475 },
+  { price: 31.1, amount: 98.72379747 },
+  { price: 31.6, amount: 96.32181658 },
+  { price: 32.1, amount: 94.0315363 },
+  { price: 32.6, amount: 91.84635794 },
+  { price: 33.1, amount: 89.76017696 },
+  { price: 33.6, amount: 87.76216313 },
+  { price: 34.1, amount: 85.85254756 },
+  { price: 34.6, amount: 84.02643942 },
+  { price: 35.1, amount: 82.27929443 },
+  { price: 35.6, amount: 80.60688602 },
+  { price: 36.1, amount: 79.00077294 },
+  { price: 36.6, amount: 77.46641444 },
+  { price: 37.1, amount: 75.99147984 },
+  { price: 37.6, amount: 74.57726622 },
+  { price: 38.1, amount: 73.21669036 },
+  { price: 38.6, amount: 71.91521139 },
+  { price: 39.1, amount: 70.66211961 },
+  { price: 39.6, amount: 69.45903084 },
+  { price: 40.1, amount: 68.3036315 },
+  { price: 40.6, amount: 67.19375238 },
+  { price: 41.1, amount: 66.12376411 },
+  { price: 41.6, amount: 65.09548727 },
+  { price: 42.1, amount: 64.10711735 },
+  { price: 42.6, amount: 63.15695868 },
+  { price: 43.1, amount: 62.24341707 },
+  { price: 43.6, amount: 61.36170961 },
+  { price: 44.1, amount: 60.51704553 },
+  { price: 44.6, amount: 59.70157808 },
+  { price: 45.1, amount: 58.91420183 },
+  { price: 45.6, amount: 58.16003968 },
+  { price: 46.1, amount: 57.43479657 },
+  { price: 46.6, amount: 56.73442118 },
+  { price: 47.1, amount: 56.06100155 },
+  { price: 47.6, amount: 55.41359823 },
+  { price: 48.1, amount: 54.78843828 },
+  { price: 48.6, amount: 54.19049694 },
+  { price: 49.1, amount: 53.60759838 },
+  { price: 49.6, amount: 53.05881973 },
+  { price: 50.1, amount: 52.5265259 }
+]
+
+/**
+ * 根据目标价格自动获取平仓最小数量（找离目标价格最近的那一档）
+ * @param {number} targetPrice - 目标价格
+ * @returns {number} 平仓最小数量（向上取整保留两位小数）
+ */
+const getAutoMinCloseAmt = (targetPrice) => {
+  // 找离目标价格最近的那一档
+  let closestItem = CLOSE_AMT_PRICE_TABLE[0]
+  let minDiff = Math.abs(targetPrice - closestItem.price)
+  
+  for (const item of CLOSE_AMT_PRICE_TABLE) {
+    const diff = Math.abs(targetPrice - item.price)
+    if (diff < minDiff) {
+      minDiff = diff
+      closestItem = item
+    }
+  }
+  
+  // 数量向上取保留两位小数
+  return Math.ceil(closestItem.amount * 100) / 100
+}
+
+/**
+ * 获取平仓最小数量（根据是否开启自动模式决定使用手动值还是根据价格计算）
+ * @param {number} firstSidePrice - 先挂方价格
+ * @returns {number} 平仓最小数量
+ */
+const getMinCloseAmt = (firstSidePrice) => {
+  if (hedgeMode.minCloseAmtAuto && firstSidePrice !== undefined && firstSidePrice !== null) {
+    // 如果先挂方价格 <= 50，使用先挂方价格；如果 > 50，使用 100 - 先挂方价格
+    const targetPrice = firstSidePrice <= 50 ? firstSidePrice : (100 - firstSidePrice)
+    const autoAmt = getAutoMinCloseAmt(targetPrice)
+    console.log(`平仓最小数量自动模式：先挂方价格=${firstSidePrice}, 目标价格=${targetPrice}, 自动计算数量=${autoAmt}`)
+    return autoAmt
+  }
+  return hedgeMode.minCloseAmt
+}
 
 // 交易费查询
 const feeQuery = reactive({
@@ -4374,7 +4534,7 @@ const handleTest = async () => {
       timePassMin: hedgeMode.timePassMin,
       minShareAmt: hedgeMode.minUAmt,  // 最小开单
       maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
-      minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+      minCloseAmt: getMinCloseAmt(orderPrice),  // 平仓最小数量（参数1，支持自动模式）
       maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
       closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
       numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
@@ -4799,7 +4959,7 @@ const handleTestForConfig = async (config) => {
       timePassMin: hedgeMode.timePassMin,
       minShareAmt: hedgeMode.minUAmt,  // 最小开单
       maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
-      minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+      minCloseAmt: getMinCloseAmt(orderPrice),  // 平仓最小数量（参数1，支持自动模式）
       maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
       closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
       numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
@@ -10199,7 +10359,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             trendingId: config.id,
             currentPrice: orderPrice,
             priceOutCome: priceInfo.firstSide,  // 先挂方 (yes/no)
-            singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
+            singleCloseAmtMax: getMinCloseAmt(orderPrice),  // 参数1：平仓最小数量（支持自动模式）
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
             closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
             takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
@@ -10228,7 +10388,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             trendingId: config.id,
             currentPrice: orderPrice,
             priceOutCome: priceInfo.firstSide,  // 先挂方 (yes/no)
-            singleCloseAmtMax: hedgeMode.minCloseAmt,  // 参数1：平仓最小数量
+            singleCloseAmtMax: getMinCloseAmt(orderPrice),  // 参数1：平仓最小数量（支持自动模式）
             closeAmtSumMin: hedgeMode.minTotalCloseAmt,  // 参数2：合计最小平仓值
             closeAmtSumMax: hedgeMode.maxTotalCloseAmt,  // 参数3：合计最大平仓值
             takerMinAmt: hedgeMode.takerMinAmt,  // 参数4：taker最小数量
@@ -10260,7 +10420,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             timePassMin: hedgeMode.timePassMin,
             minShareAmt: hedgeMode.minUAmt,  // 最小开单
             maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
-            minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+            minCloseAmt: getMinCloseAmt(orderPrice),  // 平仓最小数量（参数1，支持自动模式）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
             numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
@@ -10317,7 +10477,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             timePassMin: hedgeMode.timePassMin,
             minShareAmt: hedgeMode.minUAmt,  // 最小开单
             maxShareAmt: hedgeMode.maxUAmt,   // 最大开单
-            minCloseAmt: hedgeMode.minCloseAmt,  // 平仓最小数量（参数1）
+            minCloseAmt: getMinCloseAmt(orderPrice),  // 平仓最小数量（参数1，支持自动模式）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
             numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
@@ -12014,6 +12174,7 @@ const saveHedgeSettings = () => {
       minUAmt: hedgeMode.minUAmt,
       maxUAmt: hedgeMode.maxUAmt,
       minCloseAmt: hedgeMode.minCloseAmt,
+      minCloseAmtAuto: hedgeMode.minCloseAmtAuto,
       minTotalCloseAmt: hedgeMode.minTotalCloseAmt,
       maxTotalCloseAmt: hedgeMode.maxTotalCloseAmt,
       takerMinAmt: hedgeMode.takerMinAmt,
@@ -12146,6 +12307,9 @@ const loadHedgeSettings = () => {
     }
     if (settings.minCloseAmt !== undefined) {
       hedgeMode.minCloseAmt = settings.minCloseAmt
+    }
+    if (settings.minCloseAmtAuto !== undefined) {
+      hedgeMode.minCloseAmtAuto = settings.minCloseAmtAuto
     }
     if (settings.minTotalCloseAmt !== undefined) {
       hedgeMode.minTotalCloseAmt = settings.minTotalCloseAmt
@@ -16643,6 +16807,42 @@ onUnmounted(() => {
 }
 
 .amount-range-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 模式切换按钮组 */
+.mode-toggle-group {
+  display: inline-flex;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #ddd;
+}
+
+.mode-toggle-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: none;
+  background: #f5f5f5;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-btn:first-child {
+  border-right: 1px solid #ddd;
+}
+
+.mode-toggle-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.mode-toggle-btn.active {
+  background: #667eea;
+  color: white;
+}
+
+.mode-toggle-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

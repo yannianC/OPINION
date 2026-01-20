@@ -3245,7 +3245,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                             log_print(f"[{serial_number}] {log_msg}")
                             add_bro_log_entry(bro_log_list, browser_id, log_msg)
                             
-                            if task_data and (mission_type == 5 or mission_type == 9):
+                            if task_data and mission_type == 5 :
                                 log_msg = f"[9] Type 5 任务，启动同步机制..."
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
@@ -3594,11 +3594,11 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     return True, True  # 成功
                             
-                            elif  mission_type == 6:
+                            elif  mission_type == 6 or mission_type == 9:
                                 mission_id = mission.get('id')
                                 
                                 # 先将自己的状态改为 20
-                                log_msg = f"[9] Type 6 任务: 设置状态为20..."
+                                log_msg = f"[9] Type 6/9 任务: 设置状态为20..."
                                 log_print(f"[{serial_number}] {log_msg}")
                                 add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                 save_result_success = save_mission_result(mission_id, 20)
@@ -3612,7 +3612,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 while True:
                                     # 检查是否超时
                                     if time.time() - start_time > max_wait_time:
-                                        log_msg = f"[9] ✗ Type 6 任务等待超时（10分钟）"
+                                        log_msg = f"[9] ✗ Type 6/9 任务等待超时（10分钟）"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         buttons[0].click()
@@ -3620,33 +3620,33 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                     
                                     # 请求自己的状态
                                     current_status = get_mission_status(mission_id)
-                                    log_msg = f"[9] Type 6 任务: 当前状态={current_status}"
+                                    log_msg = f"[9] Type 6/9 任务: 当前状态={current_status}"
                                     log_print(f"[{serial_number}] {log_msg}")
                                     add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                     
-                                    if current_status == 9 or current_status == 0:
+                                    if current_status == 9 or current_status == 0 or current_status == 21:
                                         # 如果状态为 9 或 0，改状态为 20
-                                        log_msg = f"[9] Type 6 任务: 状态为{current_status}，重新设置为20..."
+                                        log_msg = f"[9] Type 6/9 任务: 状态为{current_status}，重新设置为20..."
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         save_mission_result(mission_id, 20)
-                                    elif current_status == 21:
-                                        # 如果状态为 21，执行 buttons[1].click()，返回 True
-                                        log_msg = f"[9] ✓ Type 6 任务: 状态为21，点击确认按钮"
+                                    elif current_status == 31:
+                                        # 如果状态为 31 buttons[1].click()，返回 True
+                                        log_msg = f"[9] ✓ Type 6/9 任务: 状态为21，点击确认按钮"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         buttons[1].click()
-                                        log_msg = f"[11] ✓ Type 6 任务已点击 OKX 确认按钮"
+                                        log_msg = f"[11] ✓ Type 6/9 任务已点击 OKX 确认按钮"
                                         update_browser_timestamp_q(browser_id, trendingId)
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
-                                        log_msg = f"[11] ✓ Type 6 任务提交订单成功"
+                                        log_msg = f"[11] ✓ Type 6/9 任务提交订单成功"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         return True, True  # 成功
                                     elif current_status == 3:
                                         # 如果状态为 3，执行 buttons[2].click()，返回 False
-                                        log_msg = f"[9] ✗ Type 6 任务: 状态为3（已被通知失败）"
+                                        log_msg = f"[9] ✗ Type 6/9 任务: 状态为3（已被通知失败）"
                                         log_print(f"[{serial_number}] {log_msg}")
                                         add_bro_log_entry(bro_log_list, browser_id, log_msg)
                                         buttons[0].click()
@@ -5419,8 +5419,8 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     mission_id = mission.get('id')
     task_label = "Type6"
     
-    # 获取 tp2 值（取消挂单延迟时间，秒），如果没有则默认 60 秒
-    tp2 = mission.get('tp2')
+    # 获取 tp15 值（取消挂单延迟时间，秒），如果没有则默认 60 秒
+    tp2 = mission.get('tp15')
     if tp2 is not None:
         try:
             tp2_time = int(tp2) if isinstance(tp2, (int, str)) and str(tp2).isdigit() else 60
@@ -9351,7 +9351,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     mission_type = mission.get('type')
                     
                     
-                    if mission_type == 5 or mission_type == 9:
+                    if mission_type == 5 or mission_type == 9 or mission_type == 6:
                         add_bro_log_entry(bro_log_list, browser_id, "[8]步骤7.5: Type 5 任务 - 订单薄检查和价格调整")
                         log_print(f"[{browser_id}] 步骤7.5: Type 5 任务 - 订单薄检查和价格调整...")
                         
@@ -9449,7 +9449,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                         else:
                                             # 【1.2】深度差小于等于0.15
                                             # 获取tp4，如果不存在默认为100
-                                            tp4 = float(mission.get('tp4', 100))
+                                            tp4 = float(mission.get('tp4', 200))
                                             log_print(f"[{browser_id}] tp4 {tp4}")
                                             if trade_type == "Buy":
                                                 # 【1.2.1】开仓（买）
@@ -9598,15 +9598,20 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                 
                                 task1_status = task1_info.get('status')
                                 
-                                if task1_status == 21 or task1_status == 5:
-                                    # 任务1状态是21或5，获取任务1的price
+                                if task1_status == 21 or task1_status == 5 or task1_status == 20:
+                                    # 任务1状态是21或5，获取任务1的price和psSide
                                     task1_price = float(task1_info.get('price', 0))
+                                    task1_psSide = task1_info.get('psSide')
                                     
-                                    if mission_type == 9:
-                                        # 计算自己的price：100 - 任务1的price（四舍五入保留1位小数）
+                                    # 获取自己的psSide
+                                    my_psSide = mission.get('psSide')
+                                    
+                                    # 根据psSide判断价格计算方式
+                                    if task1_psSide is not None and my_psSide is not None and task1_psSide == my_psSide:
+                                        # psSide一致，价格与任务1一致
                                         calculated_price = task1_price
                                     else:
-                                        # 计算自己的price：100 - 任务1的price（四舍五入保留1位小数）
+                                        # psSide不一致，价格为 100 - 任务1的价格（四舍五入保留1位小数）
                                         calculated_price = round(100 - task1_price, 1)
                                     
                                     # 获取自己任务的当前price
@@ -9619,7 +9624,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                         update_success = update_mission_tp(mission_id, price=calculated_price)
                                         
                                         if update_success:
-                                            log_msg = f"[5]价格已更新: {current_price:.1f} -> {calculated_price:.1f} (任务一价格: {task1_price:.1f})"
+                                            psSide_info = f"任务一psSide={task1_psSide}, 自己psSide={my_psSide}"
+                                            log_msg = f"[5]价格已更新: {current_price:.1f} -> {calculated_price:.1f} (任务一价格: {task1_price:.1f}, {psSide_info})"
                                             log_print(f"[{browser_id}] ✓ {log_msg}")
                                             add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
                                             price = calculated_price  # 更新price变量
@@ -9735,7 +9741,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
         mission = task_data.get('mission', {}) if task_data else {}
         mission_type = mission.get('type')
         
-        if mission_type == 5 or mission_type == 9:
+        if mission_type == 5 :
             tp3 = mission.get('tp3')
             if tp3 != "1":
                 # Type 5 任务：检查是否有 "order failed" 并进行重试
@@ -9932,7 +9938,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     log_print(f"[{browser_id}] ⚠ 初始可用余额为 None，跳过余额监控")
                 
                 return True, '快速模式不查看仓位变化', final_available_balance
-        elif mission_type == 6:
+        elif mission_type == 6 or mission_type == 9:
             add_bro_log_entry(bro_log_list, browser_id, "Type 6 任务 - 等待订单确认并收集数据")
             log_print(f"[{browser_id}] 步骤13: Type 6 任务 - 等待订单确认并收集数据...")
             success, msg = wait_for_type6_order_and_collect_data(
