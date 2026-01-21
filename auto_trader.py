@@ -369,7 +369,7 @@ def get_mission_tp9(mission_id):
         return None
 
 
-def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=None):
+def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=None, amt=None):
     """
     更新任务数据（tp5, tp6, tp8, tp9, price）
     
@@ -400,7 +400,9 @@ def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=
         payload["tp9"] = tp9
     if price is not None:
         payload["price"] = price
-    
+    if amt is not None:
+        payload["amt"] = amt
+
     for attempt in range(max_retries):
         try:
             response = requests.post(url, json=payload, timeout=10)
@@ -3605,7 +3607,7 @@ def submit_opinion_order(driver, trade_box, trade_type, option_type, serial_numb
                                 
                                 
                                 # 在10分钟内，每隔5秒请求一次自己的状态
-                                max_wait_time = 600  # 10分钟
+                                max_wait_time = 300  # 5分钟
                                 polling_interval = 5  # 每隔5秒
                                 start_time = time.time()
                                 
@@ -5419,8 +5421,8 @@ def wait_for_type6_order_and_collect_data(driver, initial_position_count, serial
     mission_id = mission.get('id')
     task_label = "Type6"
     
-    # 获取 tp15 值（取消挂单延迟时间，秒），如果没有则默认 60 秒
-    tp2 = mission.get('tp15')
+    # 获取 tp14 值（取消挂单延迟时间，秒），如果没有则默认 60 秒
+    tp2 = mission.get('tp14')
     if tp2 is not None:
         try:
             tp2_time = int(tp2) if isinstance(tp2, (int, str)) and str(tp2).isdigit() else 60
@@ -9359,6 +9361,57 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                         tp1 = mission.get('tp1')
                         is_task1 = not tp1  # 如果tp1为空，则是任务一
                         
+                        # Type 9/6 任务特殊处理：等待同步价格
+                        if mission_type == 9 or mission_type == 6:
+                            mission_id = mission.get('id')
+                            log_msg = "[5]开始等待同步价格..."
+                            log_print(f"[{browser_id}] {log_msg}")
+                            add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                            
+                            # 先把任务状态改为 18
+                            save_mission_result(mission_id, 18, "[5]等待同步价格")
+                            
+                            # 5分钟内每隔10秒检查状态
+                            sync_start_time = time.time()
+                            sync_timeout = 420  # 7分钟
+                            sync_check_interval = 10  # 10秒
+                            sync_success = False
+                            
+                            while time.time() - sync_start_time < sync_timeout:
+                                # 获取自己的状态
+                                my_info = get_mission_info(mission_id)
+                                if my_info:
+                                    my_status = my_info.get('status')
+                                    
+                                    if my_status == 9 or my_status == 0:
+                                        # 状态是9或0，保存状态为18
+                                        log_msg = f"[5]当前状态为{my_status}，继续等待同步..."
+                                        log_print(f"[{browser_id}] {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                        save_mission_result(mission_id, 18, "[5]等待同步价格")
+                                    elif my_status == 19:
+                                        # 状态是19，继续下面的流程
+                                        log_msg = "[5]状态为19，同步价格完成"
+                                        log_print(f"[{browser_id}] ✓ {log_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                        sync_success = True
+                                        break
+                                    elif my_status == 3:
+                                        # 状态是3，返回失败
+                                        fail_msg = "[5]等待同步价格失败"
+                                        log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                        add_bro_log_entry(bro_log_list, browser_id, f"[8]{fail_msg}")
+                                        return False, fail_msg, None
+                                
+                                time.sleep(sync_check_interval)
+                            
+                            # 检查是否超时
+                            if not sync_success:
+                                fail_msg = "[5]等待同步价格超时"
+                                log_print(f"[{browser_id}] ✗ {fail_msg}")
+                                add_bro_log_entry(bro_log_list, browser_id, f"[8]{fail_msg}")
+                                return False, fail_msg, None
+                        
                         if is_task1:
                             # 【1】任务一的逻辑
                             log_print(f"[{browser_id}] [任务一] 开始订单薄检查...")
@@ -9573,6 +9626,25 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                                 log_print(f"[{browser_id}] ⚠ {log_msg}")
                                                 add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
                                                 return False, fail_msg, None
+                            
+                            # 任务1改价逻辑完成后，重新获取任务数据，更新amt
+                            log_print(f"[{browser_id}] [任务一] 改价逻辑完成，重新获取任务数据...")
+                            updated_task_data = get_mission_info(mission.get('id'))
+                            if updated_task_data:
+                                new_amt = updated_task_data.get('amt', 0)
+                                old_amt = mission.get('amt', 0)
+                                if new_amt != old_amt:
+                                    log_msg = f"[5]amt已更新: {old_amt} -> {new_amt}"
+                                    log_print(f"[{browser_id}] ✓ {log_msg}")
+                                    add_bro_log_entry(bro_log_list, browser_id, f"[8]{log_msg}")
+                                    # 更新mission中的amt
+                                    mission['amt'] = new_amt
+                                    # 更新amount变量，确保后续下单使用新的amt
+                                    amount = new_amt
+                                else:
+                                    log_print(f"[{browser_id}] [任务一] amt未变化: {old_amt}")
+                            else:
+                                log_print(f"[{browser_id}] ⚠ [任务一] 重新获取任务数据失败，继续使用原amt")
                         else:
                             # 【2】任务二的逻辑
                             log_print(f"[{browser_id}] [任务二] 开始等待任务一确认订单薄...")
@@ -9581,7 +9653,9 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                             task1_id = tp1
                             start_time = time.time()
                             timeout = 600  # 10分钟 = 600秒
-                            check_interval = 20  # 每20秒检查一次
+                            if mission_type == 6 or mission_type == 9:
+                                timeout = 60 # 1分钟
+                            check_interval = 15  # 每20秒检查一次
                             
                             task1_price_updated = False
                             

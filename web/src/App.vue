@@ -1178,6 +1178,16 @@
                   :disabled="autoHedgeRunning"
                   @blur="saveHedgeSettings"
                 />
+                <span class="mode9-label">取消挂单延迟时间(秒):</span>
+                <input 
+                  v-model.number="hedgeMode.cancelOrderDelaySecondsMode9" 
+                  type="number" 
+                  class="mode9-input" 
+                  min="0"
+                  placeholder="60"
+                  :disabled="autoHedgeRunning"
+                  @blur="saveHedgeSettings"
+                />
               </div>
             </template>
             
@@ -3125,24 +3135,28 @@
                 <template v-else-if="log.isModeV9">
                   <!-- 先挂方任务列表 -->
                   <div v-if="log.closeTasks && log.closeTasks.length > 0" class="compact-task-row mode9-log-section">
-                    <span class="task-label mode9-label">先挂方 - {{ log.firstSide }} ({{ log.closeTasks.length }}个):</span>
+                    <span class="task-label mode9-label">先挂方 - {{ log.firstSide }} ({{ log.closeTasks.length }}个):
+                      <span v-if="log.closeTasks && log.closeTasks.length > 0" class="position-change-sum" :class="getPositionChangeStatusClass(log.positionChangeStatus)">仓位变化: {{ calculatePositionChangeSum(log.closeTasks).toFixed(2) }}</span>
+                    </span>
                     <span class="task-info">
                       <template v-for="(task, taskIndex) in log.closeTasks" :key="'close-log-' + taskIndex">
                         <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
                         浏览器{{ task.number }} | 
                         任务{{ task.taskId || '-' }}
-                        <span v-if="task.type === 5" class="type-main">(主)</span>
+                        <span v-if="task.isMaxShare" class="type-main">(主)</span>
                         <span v-else class="type-sub">(从)</span> | 
                         数量{{ task.share }} | 
                         <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
-                        <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
+                        <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': isPositionChangeUnknown(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
                         <span v-if="taskIndex < log.closeTasks.length - 1">; </span>
                       </template>
                     </span>
                   </div>
                   <!-- 后挂方任务列表 -->
                   <div v-if="log.secondTasks && log.secondTasks.length > 0" class="compact-task-row mode9-log-section-second">
-                    <span class="task-label mode9-label-second">后挂方 - {{ log.firstSide === 'YES' ? 'NO' : 'YES' }} ({{ log.secondTasks.length }}个):</span>
+                    <span class="task-label mode9-label-second">后挂方 - {{ log.firstSide === 'YES' ? 'NO' : 'YES' }} ({{ log.secondTasks.length }}个):
+                      <span v-if="log.secondTasks && log.secondTasks.length > 0" class="position-change-sum" :class="getPositionChangeStatusClass(log.positionChangeStatus)">仓位变化: {{ calculatePositionChangeSum(log.secondTasks).toFixed(2) }}</span>
+                    </span>
                     <span class="task-info">
                       <template v-for="(task, taskIndex) in log.secondTasks" :key="'second-log-' + taskIndex">
                         <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
@@ -3150,7 +3164,7 @@
                         任务{{ task.taskId || '-' }} | 
                         数量{{ task.share }} | 
                         <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
-                        <span v-if="task.msg" class="task-msg">| {{ formatTaskMsg(task.msg) }}</span>
+                        <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': isPositionChangeUnknown(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
                         <span v-if="taskIndex < log.secondTasks.length - 1">; </span>
                       </template>
                     </span>
@@ -3761,7 +3775,10 @@ const batchTimer = ref(null)  // 批次定时器
 // 订单薄API配置
 const ORDERBOOK_API_KEY = 'xbR1ek3ekhnhykU8aZdvyAb6vRFcmqpU'
 const ORDERBOOK_API_KEY2 = 'qymby2cA15g8W3uvSGhO3jr67nZ33hEj'
-
+// o9aMDxp0Tnu66truCLbHcNKY4xlyS7YX     
+// 3OsAiuMJstCkTfGqhik0Lj6GN6E1p8hG
+// 7d1CDdlLJnL9TLtOAW6gavuhScQBrQMa
+//
 // API key 数组，用于交替使用
 const ORDERBOOK_API_KEYS = [ORDERBOOK_API_KEY, ORDERBOOK_API_KEY2]
 let orderbookApiKeyIndex = 0  // 当前使用的 key 索引
@@ -3865,7 +3882,8 @@ const hedgeMode = reactive({
   // 模式9专属设置
   smallAccAmt: 2,  // 小账户数量，默认2
   smallAccPosMinAmt: 0,  // 小账户最少持仓，默认0
-  smallAccPosMaxAmt: 500  // 小账户最多持仓，默认500
+  smallAccPosMaxAmt: 500,  // 小账户最多持仓，默认500
+  cancelOrderDelaySecondsMode9: 60  // 模式9取消挂单延迟时间（秒），默认60
 })
 
 // 平仓最小数量价格映射表（后挂方价格 -> 最小数量）
@@ -9385,6 +9403,38 @@ const fetchOrderbookBasic = async (config, isClose) => {
       fetchOrderbook(config.trendingPart2)
     ])
     
+    // 获取订单薄数据成功后，调用 snapDepth 接口
+    try {
+      // 调用 YES 的 snapDepth
+      await axios.post('https://sg.bicoin.com.cn/99l/hedge/snapDepth', {
+        trendingId: config.id,
+        outcome: 'YES',
+        depth: yesOrderbook
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }).catch(err => {
+        console.warn(`配置 ${config.id} - 调用 snapDepth (YES) 失败:`, err)
+      })
+      
+      // 调用 NO 的 snapDepth
+      await axios.post('https://sg.bicoin.com.cn/99l/hedge/snapDepth', {
+        trendingId: config.id,
+        outcome: 'NO',
+        depth: noOrderbook
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }).catch(err => {
+        console.warn(`配置 ${config.id} - 调用 snapDepth (NO) 失败:`, err)
+      })
+    } catch (snapDepthError) {
+      // snapDepth 调用失败不影响主流程，只记录日志
+      console.warn(`配置 ${config.id} - snapDepth 调用异常:`, snapDepthError)
+    }
+    
     // 获取YES的买一价和卖一价
     const yesBids = yesOrderbook.bids || []
     const yesAsks = yesOrderbook.asks || []
@@ -9702,6 +9752,38 @@ const parseOrderbookData = async (config, isClose) => {
         throw error
       }
       throw error
+    }
+    
+    // 获取订单薄数据成功后，调用 snapDepth 接口
+    try {
+      // 调用 YES 的 snapDepth
+      await axios.post('https://sg.bicoin.com.cn/99l/hedge/snapDepth', {
+        trendingId: config.id,
+        outcome: 'YES',
+        depth: yesOrderbook
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }).catch(err => {
+        console.warn(`配置 ${config.id} - 调用 snapDepth (YES) 失败:`, err)
+      })
+      
+      // 调用 NO 的 snapDepth
+      await axios.post('https://sg.bicoin.com.cn/99l/hedge/snapDepth', {
+        trendingId: config.id,
+        outcome: 'NO',
+        depth: noOrderbook
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }).catch(err => {
+        console.warn(`配置 ${config.id} - 调用 snapDepth (NO) 失败:`, err)
+      })
+    } catch (snapDepthError) {
+      // snapDepth 调用失败不影响主流程，只记录日志
+      console.warn(`配置 ${config.id} - snapDepth 调用异常:`, snapDepthError)
     }
     
     // 获取YES的买一价和卖一价
@@ -11399,6 +11481,32 @@ const loadCurrentPageTaskStatus = async () => {
           allHedgeLogs.value[actualIndex].finalStatus = 'success'
         }
       }
+      
+      // 当所有任务状态都获取成功后，计算仓位变化差异并标记状态
+      const closeTasks = allHedgeLogs.value[actualIndex].closeTasks || []
+      const secondTasks = allHedgeLogs.value[actualIndex].secondTasks || []
+      
+      // 检查是否所有任务都有msg（说明状态已获取成功）
+      const closeTasksAllHaveMsg = closeTasks.every(t => t.msg !== undefined && t.msg !== '')
+      const secondTasksAllHaveMsg = secondTasks.every(t => t.msg !== undefined && t.msg !== '')
+      
+      if (closeTasksAllHaveMsg && secondTasksAllHaveMsg && closeTasks.length > 0 && secondTasks.length > 0) {
+        // 计算先挂方和后挂方的仓位变化值之和
+        const closePositionChange = calculatePositionChangeSum(closeTasks)
+        const secondPositionChange = calculatePositionChangeSum(secondTasks)
+        
+        // 计算差值的绝对值：先取各自绝对值，再相减，再取绝对值
+        const diff = Math.abs(Math.abs(closePositionChange) - Math.abs(secondPositionChange))
+        
+        // 如果差值绝对值 > 后挂方仓位变化值的10%，标记为异常(红色)，否则正常(绿色)
+        const threshold = Math.abs(secondPositionChange) * 0.1
+        if (diff > threshold && Math.abs(secondPositionChange) > 0) {
+          allHedgeLogs.value[actualIndex].positionChangeStatus = 'abnormal'  // 红色
+          console.warn(`[Mode9] 对冲日志 ${actualIndex} 仓位变化异常: 先挂方=${closePositionChange.toFixed(2)}, 后挂方=${secondPositionChange.toFixed(2)}, 差值=${diff.toFixed(2)}, 阈值(10%)=${threshold.toFixed(2)}`)
+        } else {
+          allHedgeLogs.value[actualIndex].positionChangeStatus = 'normal'  // 绿色
+        }
+      }
     } else if (log.isMode2) {
       // 模式2：获取所有任务的详情
       // 更新YES任务
@@ -12260,6 +12368,7 @@ const saveHedgeSettings = () => {
       smallAccAmt: hedgeMode.smallAccAmt,
       smallAccPosMinAmt: hedgeMode.smallAccPosMinAmt,
       smallAccPosMaxAmt: hedgeMode.smallAccPosMaxAmt,
+      cancelOrderDelaySecondsMode9: hedgeMode.cancelOrderDelaySecondsMode9,
       // yes数量大于、模式选择、账户选择
       yesCountThreshold: yesCountThreshold.value,
       isFastMode: isFastMode.value,
@@ -12582,6 +12691,9 @@ const loadHedgeSettings = () => {
     if (settings.smallAccPosMaxAmt !== undefined) {
       hedgeMode.smallAccPosMaxAmt = settings.smallAccPosMaxAmt
     }
+    if (settings.cancelOrderDelaySecondsMode9 !== undefined) {
+      hedgeMode.cancelOrderDelaySecondsMode9 = settings.cancelOrderDelaySecondsMode9
+    }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
   }
@@ -12846,9 +12958,9 @@ const floorToTwoDecimals = (value) => {
 }
 
 /**
- * 执行对冲任务（模式9 - 多个先挂方，数量最多的用type5，其余用type9）
+ * 执行对冲任务（模式9 - 新版逻辑）
  * 返回格式：closeLimitList（先挂方数组）+ takerNumberInfo（后挂方单个对象）
- * 数量最多的先挂方和后挂方用type=5，其余先挂方用type=9且tp1=最多先挂方任务ID
+ * 新逻辑：先提交后挂方任务（type=9, tp14），再提交所有先挂方任务（type=9, tp1=后挂方任务ID, tp14）
  */
 const executeHedgeTaskMode9 = async (config, hedgeData) => {
   const closeLimitList = hedgeData.closeLimitList || []
@@ -12858,7 +12970,7 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
   const missionId = hedgeData.missionId
   const priceInfo = hedgeData.priceInfo
 
-  // 1. 按 share 数量排序，找到数量最多的先挂方
+  // 1. 按 share 数量排序，找到数量最多的先挂方（主任务）
   const sortedCloseLimitList = [...closeLimitList].sort((a, b) => b.share - a.share)
   
   if (sortedCloseLimitList.length === 0) {
@@ -12866,7 +12978,12 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
     return
   }
 
-  const maxShareItem = sortedCloseLimitList[0]  // 数量最多的先挂方
+  if (!takerNumberInfo || typeof takerNumberInfo !== 'object') {
+    console.error(`配置 ${config.id} - 模式9: takerNumberInfo为空或格式不正确，无法执行对冲`)
+    return
+  }
+
+  const maxShareItem = sortedCloseLimitList[0]  // 数量最多的先挂方（主任务）
   const otherItems = sortedCloseLimitList.slice(1)  // 其余先挂方
 
   console.log(`[Mode9] 先挂方数量: ${sortedCloseLimitList.length}, 最大数量: ${maxShareItem.share}, 其余数量: ${otherItems.length}`)
@@ -12875,14 +12992,19 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
   const secondPsSide = firstSide === 'YES' ? 2 : 1
 
   // 计算后挂方参数
-  let secondPrice, secondSide
+  let secondPrice, secondSide, takerPsSide
   if (firstPrice < 50) {
     secondPrice = firstPrice
     secondSide = 1  // 买入
+    takerPsSide = firstPsSide  // 价格<50时，后挂方YES/NO跟先挂方一样
   } else {
     secondPrice = parseFloat((100 - firstPrice).toFixed(1))
     secondSide = 2  // 卖出
+    takerPsSide = secondPsSide  // 价格>=50时，后挂方YES/NO跟先挂方相反
   }
+
+  // 获取取消挂单延迟时间（秒）
+  const cancelOrderDelaySeconds = hedgeMode.cancelOrderDelaySecondsMode9 || 60
 
   // 2. 创建对冲记录
   const hedgeRecord = {
@@ -12902,7 +13024,8 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
     priceInfo: priceInfo,
     closeTasks: [],       // 所有先挂方任务
     secondTasks: [],      // 后挂方任务
-    maxShareTaskId: null, // 数量最多先挂方的任务ID
+    maxShareTaskId: null, // 数量最多先挂方的任务ID（主任务）
+    secondTaskId: null,   // 后挂方任务ID
     allTaskIds: [],
     subTaskMap: {},
     wasCounted: true
@@ -12934,99 +13057,101 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
       shouldPassTp4For01 = true
     }
 
-    // 3. 提交数量最多的先挂方任务（type=5）
-    const maxGroupNo = (maxShareItem.group !== undefined && maxShareItem.group !== null && maxShareItem.group !== '')
-      ? String(maxShareItem.group)
-      : (browserToGroupMap.value[maxShareItem.number] || '1')
+    // 3. 先提交后挂方任务（type=9, tp14，不传tp1）
+    console.log(`[Mode9] 开始提交后挂方任务 (number: ${takerNumberInfo.number}, share: ${takerNumberInfo.share})`)
 
-    const maxTaskData = {
-      groupNo: maxGroupNo,
-      numberList: parseInt(maxShareItem.number),
-      type: 5,  // 数量最多的先挂方使用type5
+    const takerGroupNo = (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '')
+      ? String(takerNumberInfo.group)
+      : (browserToGroupMap.value[takerNumberInfo.number] || '1')
+
+    const takerTaskData = {
+      groupNo: takerGroupNo,
+      numberList: parseInt(takerNumberInfo.number),
+      type: 9,  // 后挂方使用type9
       trendingId: config.id,
       exchangeName: 'OP',
-      side: hedgeMode.isClose ? 2 : 1,
-      psSide: firstPsSide,
-      amt: floorToTwoDecimals(maxShareItem.share),
-      price: firstPrice,
+      side: secondSide,
+      psSide: takerPsSide,
+      amt: floorToTwoDecimals(takerNumberInfo.share),
+      price: secondPrice,
       tp3: isFastMode.value ? "1" : "0",
-      tp5: hedgeMode.openOrderCancelHours
+      tp5: hedgeMode.openOrderCancelHours,
+      tp14: Math.round(cancelOrderDelaySeconds)  // 取消挂单延迟时间
     }
 
     // 添加深度差相关参数
     if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-      maxTaskData.tp2 = Math.round(hedgeData.tp2)
+      takerTaskData.tp2 = Math.round(hedgeData.tp2)
     }
     if (shouldPassTp2Tp4 || shouldPassTp4For01) {
-      maxTaskData.tp4 = getMaxDepth(config)
+      takerTaskData.tp4 = getMaxDepth(config)
     }
     if (hedgeMode.enableSecondPricePlusMinus01) {
-      maxTaskData.tp10 = "1"
+      takerTaskData.tp10 = "1"
     }
-    maxTaskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
+    takerTaskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
 
-    console.log(`[Mode9] 提交数量最多的先挂方任务 (number: ${maxShareItem.number}, share: ${maxShareItem.share})`)
-
-    let maxTaskId = null
+    let secondTaskId = null
     const maxRetries = 3
 
-    // 提交最大数量先挂方任务（带重试）
+    // 提交后挂方任务（带重试）
     for (let retry = 0; retry < maxRetries; retry++) {
       try {
         const response = await axios.post(
           'https://sg.bicoin.com.cn/99l/mission/add',
-          maxTaskData,
+          takerTaskData,
           { headers: { 'Content-Type': 'application/json' } }
         )
 
         if (response.data && response.data.data) {
           const taskData = response.data.data
           if (typeof taskData === 'object' && taskData !== null) {
-            maxTaskId = taskData.id
+            secondTaskId = taskData.id
           } else if (typeof taskData === 'number' || typeof taskData === 'string') {
-            maxTaskId = taskData
+            secondTaskId = taskData
           }
 
-          if (maxTaskId !== undefined && maxTaskId !== null && typeof maxTaskId !== 'object') {
-            maxTaskId = String(Number(maxTaskId))
-            console.log(`[Mode9] 数量最多的先挂方任务提交成功，任务ID: ${maxTaskId}`)
-            hedgeRecord.maxShareTaskId = maxTaskId
-            hedgeRecord.allTaskIds.push(maxTaskId)
-            hedgeRecord.subTaskMap[maxShareItem.number] = maxTaskId
-            hedgeRecord.closeTasks.push({
-              number: maxShareItem.number,
-              share: floorToTwoDecimals(maxShareItem.share),
-              taskId: maxTaskId,
+          if (secondTaskId !== undefined && secondTaskId !== null && typeof secondTaskId !== 'object') {
+            secondTaskId = String(Number(secondTaskId))
+            console.log(`[Mode9] 后挂方任务提交成功，任务ID: ${secondTaskId}`)
+            hedgeRecord.secondTaskId = secondTaskId
+            hedgeRecord.allTaskIds.push(secondTaskId)
+            hedgeRecord.subTaskMap[takerNumberInfo.number] = secondTaskId
+            hedgeRecord.secondTasks.push({
+              number: takerNumberInfo.number,
+              share: floorToTwoDecimals(takerNumberInfo.share),
+              taskId: secondTaskId,
               status: 9,
-              groupNo: maxGroupNo,
-              price: firstPrice,
-              type: 5,  // 主任务使用type5
-              isMaxShare: true
+              groupNo: takerGroupNo,
+              price: secondPrice
             })
             break
           }
         }
         throw new Error('无效的任务ID')
       } catch (error) {
-        console.error(`[Mode9] 提交最大先挂方任务失败 (重试 ${retry + 1}/${maxRetries}):`, error)
+        console.error(`[Mode9] 提交后挂方任务失败 (重试 ${retry + 1}/${maxRetries}):`, error)
         if (retry < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000))
         }
       }
     }
 
-    if (!maxTaskId) {
-      console.error('[Mode9] 数量最多的先挂方任务提交失败，终止对冲')
+    if (!secondTaskId) {
+      console.error('[Mode9] 后挂方任务提交失败，终止对冲')
       hedgeRecord.finalStatus = 'failed'
-      hedgeRecord.errorMsg = '数量最多的先挂方任务提交失败'
+      hedgeRecord.errorMsg = '后挂方任务提交失败'
       finishHedge(config, hedgeRecord)
       return
     }
 
-    // 4. 提交其余先挂方任务（type=9, tp1=maxTaskId）
-    console.log(`[Mode9] 开始提交其余 ${otherItems.length} 个先挂方任务 (type=9)`)
+    // 4. 提交所有先挂方任务（type=9, tp1=后挂方任务ID, tp14）
+    console.log(`[Mode9] 开始提交所有 ${sortedCloseLimitList.length} 个先挂方任务 (type=9, tp1=${secondTaskId})`)
     
-    for (const item of otherItems) {
+    let firstSideSuccessCount = 0
+    
+    for (const item of sortedCloseLimitList) {
+      const isMaxShare = item === maxShareItem
       const groupNo = (item.group !== undefined && item.group !== null && item.group !== '')
         ? String(item.group)
         : (browserToGroupMap.value[item.number] || '1')
@@ -13034,16 +13159,17 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
       const taskData = {
         groupNo: groupNo,
         numberList: parseInt(item.number),
-        type: 9,  // 其余先挂方使用type9
+        type: 9,  // 所有先挂方都使用type9
         trendingId: config.id,
         exchangeName: 'OP',
         side: hedgeMode.isClose ? 2 : 1,
         psSide: firstPsSide,
         amt: floorToTwoDecimals(item.share),
         price: firstPrice,
-        tp1: maxTaskId,  // 引用数量最多先挂方的任务ID
+        tp1: secondTaskId,  // 引用后挂方任务ID
         tp3: isFastMode.value ? "1" : "0",
-        tp5: hedgeMode.openOrderCancelHours
+        tp5: hedgeMode.openOrderCancelHours,
+        tp14: Math.round(cancelOrderDelaySeconds)  // 取消挂单延迟时间
       }
 
       // 添加深度差相关参数
@@ -13076,9 +13202,15 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
 
           if (taskId !== undefined && taskId !== null && typeof taskId !== 'object') {
             taskId = String(Number(taskId))
-            console.log(`[Mode9] 其余先挂方任务提交成功 (number: ${item.number}, share: ${item.share}), 任务ID: ${taskId}`)
+            console.log(`[Mode9] 先挂方任务提交成功 (number: ${item.number}, share: ${item.share}, isMaxShare: ${isMaxShare}), 任务ID: ${taskId}`)
             hedgeRecord.allTaskIds.push(taskId)
             hedgeRecord.subTaskMap[item.number] = taskId
+            
+            // 如果是数量最多的先挂方，记录为主任务ID
+            if (isMaxShare) {
+              hedgeRecord.maxShareTaskId = taskId
+            }
+            
             hedgeRecord.closeTasks.push({
               number: item.number,
               share: floorToTwoDecimals(item.share),
@@ -13086,101 +13218,39 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
               status: 9,
               groupNo: groupNo,
               price: firstPrice,
-              type: 9,  // 从任务使用type9
-              isMaxShare: false
+              type: 9,
+              isMaxShare: isMaxShare
             })
+            firstSideSuccessCount++
           }
         }
       } catch (error) {
-        console.error(`[Mode9] 提交其余先挂方任务失败 (number: ${item.number}):`, error)
+        console.error(`[Mode9] 提交先挂方任务失败 (number: ${item.number}):`, error)
       }
     }
 
-    // 5. 提交后挂方任务（type=5, tp1=maxTaskId）
-    if (takerNumberInfo) {
-      console.log(`[Mode9] 开始提交后挂方任务 (number: ${takerNumberInfo.number}, share: ${takerNumberInfo.share})`)
-
-      const takerGroupNo = (takerNumberInfo.group !== undefined && takerNumberInfo.group !== null && takerNumberInfo.group !== '')
-        ? String(takerNumberInfo.group)
-        : (browserToGroupMap.value[takerNumberInfo.number] || '1')
-
-      // 计算后挂方的psSide
-      let takerPsSide
-      if (firstPrice < 50) {
-        takerPsSide = firstPsSide  // 价格<50时，后挂方YES/NO跟先挂方一样
-      } else {
-        takerPsSide = secondPsSide  // 价格>=50时，后挂方YES/NO跟先挂方相反
-      }
-
-      const takerTaskData = {
-        groupNo: takerGroupNo,
-        numberList: parseInt(takerNumberInfo.number),
-        type: 5,  // 后挂方使用type5
-        trendingId: config.id,
-        exchangeName: 'OP',
-        side: secondSide,
-        psSide: takerPsSide,
-        amt: floorToTwoDecimals(takerNumberInfo.share),
-        price: secondPrice,
-        tp1: maxTaskId,  // 引用数量最多先挂方的任务ID
-        tp3: isFastMode.value ? "1" : "0",
-        tp5: hedgeMode.openOrderCancelHours
-      }
-
-      // 添加深度差相关参数
-      if (shouldPassTp2Tp4 && hedgeData.tp2 !== null && hedgeData.tp2 !== undefined) {
-        takerTaskData.tp2 = Math.round(hedgeData.tp2)
-      }
-      if (shouldPassTp2Tp4 || shouldPassTp4For01) {
-        takerTaskData.tp4 = getMaxDepth(config)
-      }
-      if (hedgeMode.enableSecondPricePlusMinus01) {
-        takerTaskData.tp10 = "1"
-      }
-      takerTaskData.tp11 = String(hedgeMode.taskSyncPollingInterval || 5)
-
-      try {
-        const response = await axios.post(
-          'https://sg.bicoin.com.cn/99l/mission/add',
-          takerTaskData,
-          { headers: { 'Content-Type': 'application/json' } }
-        )
-
-        if (response.data && response.data.data) {
-          const respData = response.data.data
-          let taskId = null
-          if (typeof respData === 'object' && respData !== null) {
-            taskId = respData.id
-          } else if (typeof respData === 'number' || typeof respData === 'string') {
-            taskId = respData
-          }
-
-          if (taskId !== undefined && taskId !== null && typeof taskId !== 'object') {
-            taskId = String(Number(taskId))
-            console.log(`[Mode9] 后挂方任务提交成功，任务ID: ${taskId}`)
-            hedgeRecord.allTaskIds.push(taskId)
-            hedgeRecord.subTaskMap[takerNumberInfo.number] = taskId
-            hedgeRecord.secondTasks.push({
-              number: takerNumberInfo.number,
-              share: floorToTwoDecimals(takerNumberInfo.share),
-              taskId: taskId,
-              status: 9,
-              groupNo: takerGroupNo,
-              price: secondPrice
-            })
-          }
-        }
-      } catch (error) {
-        console.error(`[Mode9] 提交后挂方任务失败:`, error)
-      }
+    if (firstSideSuccessCount === 0) {
+      console.error('[Mode9] 所有先挂方任务提交失败')
+      hedgeRecord.finalStatus = 'failed'
+      hedgeRecord.errorMsg = '所有先挂方任务提交失败'
+      finishHedge(config, hedgeRecord)
+      return
     }
 
-    console.log(`[Mode9] 所有任务提交完成，先挂方: ${hedgeRecord.closeTasks.length}/${closeLimitList.length}, 后挂方: ${hedgeRecord.secondTasks.length}/1`)
+    if (!hedgeRecord.maxShareTaskId) {
+      console.error('[Mode9] 主任务（数量最多的先挂方）提交失败')
+      hedgeRecord.finalStatus = 'failed'
+      hedgeRecord.errorMsg = '主任务提交失败'
+      finishHedge(config, hedgeRecord)
+      return
+    }
 
-    // 6. 调用更新接口
+    console.log(`[Mode9] 所有任务提交完成，先挂方: ${hedgeRecord.closeTasks.length}/${closeLimitList.length}, 后挂方: ${hedgeRecord.secondTasks.length}/1, 主任务ID: ${hedgeRecord.maxShareTaskId}`)
+
+    // 5. 调用更新接口
     await updateHedgeMissionStatus(hedgeRecord)
 
-    // 7. 启动状态监控
+    // 6. 启动状态监控
     monitorHedgeStatusV9(config, hedgeRecord)
 
   } catch (error) {
@@ -13191,79 +13261,566 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
 }
 
 /**
- * 监控对冲状态（模式9）
+ * 监控对冲状态（模式9 - 新版逻辑，参考模式4）
  */
 const monitorHedgeStatusV9 = (config, hedgeRecord) => {
   const startTime = new Date(hedgeRecord.startTime)
+  let phase0Completed = false  // 阶段0是否完成（等待状态18）
+  let phase1Completed = false  // 第一阶段是否完成
+  let phase2InProgress = false  // 第二阶段是否进行中（updateTrendingTime）
+  let taskTimeoutMap = new Map()  // 记录每个任务的超时时间
+  let phase0TimeoutMap = new Map()  // 阶段0的超时时间（9分钟）
+  let phase1StartTime = null  // 阶段1开始时间（阶段0完成后重新计时）
+  
+  // 初始化每个任务的阶段0超时时间（9分钟）
+  const allTasks = [...(hedgeRecord.closeTasks || []), ...(hedgeRecord.secondTasks || [])]
+  allTasks.forEach(task => {
+    if (task.taskId) {
+      phase0TimeoutMap.set(task.taskId, startTime.getTime() + 9 * 60 * 1000)  // 阶段0：9分钟超时
+    }
+  })
+  
+  // 辅助函数：更新任务状态到服务器（带重试机制）
+  const updateTaskStatusToServer = async (taskId, status, maxRetries = 3) => {
+    for (let retry = 0; retry < maxRetries; retry++) {
+      try {
+        await axios.post('https://sg.bicoin.com.cn/99l/mission/saveResult', {
+          id: taskId,
+          status: status
+        })
+        console.log(`[Mode9] 保存任务 ${taskId} 状态${status}到服务器成功（重试次数: ${retry}）`)
+        return true
+      } catch (error) {
+        console.error(`[Mode9] 保存任务 ${taskId} 状态${status}到服务器失败（重试次数: ${retry}）:`, error)
+        if (retry < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+      }
+    }
+    return false
+  }
+  
+  // 辅助函数：调用 updateTrendingTime 接口
+  const callUpdateTrendingTime = async (trendingId, updateTime) => {
+    try {
+      const response = await axios.post('https://sg.bicoin.com.cn/99l/hedge/updateTrendingTime', {
+        trendingId: trendingId,
+        updateTime: updateTime
+      })
+      if (response.data && response.data.code === 0) {
+        const data = response.data.data || {}
+        const changeSucc = data.changeSucc || 0
+        if (changeSucc === 1) {
+          console.log(`[Mode9] updateTrendingTime 成功，changeSucc=1`)
+          return true
+        } else {
+          console.log(`[Mode9] updateTrendingTime changeSucc=${changeSucc}，继续等待...`)
+          return false
+        }
+      } else {
+        console.log(`[Mode9] updateTrendingTime 返回错误, code=${response.data?.code}`)
+        return false
+      }
+    } catch (error) {
+      console.error(`[Mode9] updateTrendingTime 请求异常:`, error)
+      return false
+    }
+  }
+  
+  // 辅助函数：将所有非3状态的任务改为3
+  const setAllTasksToFailed = async () => {
+    const allCurrentTasks = [...(hedgeRecord.closeTasks || []), ...(hedgeRecord.secondTasks || [])]
+    for (const task of allCurrentTasks) {
+      if (task.taskId && task.status !== 3) {
+        // 更新本地状态
+        const closeTaskIndex = hedgeRecord.closeTasks.findIndex(t => t.taskId === task.taskId)
+        if (closeTaskIndex !== -1) {
+          hedgeRecord.closeTasks[closeTaskIndex] = { ...hedgeRecord.closeTasks[closeTaskIndex], status: 3 }
+        } else {
+          const secondTaskIndex = hedgeRecord.secondTasks.findIndex(t => t.taskId === task.taskId)
+          if (secondTaskIndex !== -1) {
+            hedgeRecord.secondTasks[secondTaskIndex] = { ...hedgeRecord.secondTasks[secondTaskIndex], status: 3 }
+          }
+        }
+        // 更新服务器状态
+        await updateTaskStatusToServer(task.taskId, 3)
+      }
+    }
+  }
 
   const checkStatus = async () => {
+    // 检查是否已完成
     if (hedgeRecord.finalStatus !== 'running') {
       return
     }
-
+    
     const now = new Date()
     const elapsed = (now - startTime) / 1000 / 60
-
-    // 检查20分钟超时
-    if (elapsed >= 20) {
-      console.log(`[Mode9] 对冲 ${hedgeRecord.id} 超时（${elapsed.toFixed(1)}分钟）`)
-      hedgeRecord.finalStatus = 'timeout'
-      finishHedge(config, hedgeRecord)
-      return
-    }
-
-    // 更新所有任务状态
-    let allCompleted = true
-    let hasFailure = false
-
-    // 检查先挂方任务
+    
+    // 更新所有任务的状态（先挂方和后挂方）
     for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
       const task = hedgeRecord.closeTasks[i]
       if (task.taskId) {
         const taskData = await fetchMissionStatus(task.taskId)
         if (taskData) {
           const oldStatus = task.status
-          hedgeRecord.closeTasks[i] = { ...task, status: taskData.status }
           if (oldStatus !== taskData.status) {
             console.log(`[Mode9] 先挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+            hedgeRecord.closeTasks[i] = { ...task, status: taskData.status }
           }
-          if (taskData.status === 3) hasFailure = true
-          if (taskData.status !== 2 && taskData.status !== 3 && taskData.status !== 20) allCompleted = false
         }
       }
     }
-
-    // 检查后挂方任务
+    
     for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
       const task = hedgeRecord.secondTasks[i]
       if (task.taskId) {
         const taskData = await fetchMissionStatus(task.taskId)
         if (taskData) {
           const oldStatus = task.status
-          hedgeRecord.secondTasks[i] = { ...task, status: taskData.status }
           if (oldStatus !== taskData.status) {
             console.log(`[Mode9] 后挂方任务 ${task.taskId} 状态变化: ${oldStatus} -> ${taskData.status}`)
+            hedgeRecord.secondTasks[i] = { ...task, status: taskData.status }
           }
-          if (taskData.status === 3) hasFailure = true
-          if (taskData.status !== 2 && taskData.status !== 3 && taskData.status !== 20) allCompleted = false
         }
       }
     }
-
-    // 检查是否全部完成
-    if (allCompleted) {
-      console.log(`[Mode9] 对冲 ${hedgeRecord.id} 所有任务已完成`)
-      hedgeRecord.finalStatus = hasFailure ? 'partial' : 'success'
-      finishHedge(config, hedgeRecord)
+    
+    const allCurrentTasks = [...(hedgeRecord.closeTasks || []), ...(hedgeRecord.secondTasks || [])]
+    
+    // ========== 阶段0：等待所有任务状态为 3 或 18 或超时（9分钟） ==========
+    if (!phase0Completed) {
+      // 检查阶段0超时
+      for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+        const task = hedgeRecord.closeTasks[i]
+        if (task.taskId) {
+          const phase0Timeout = phase0TimeoutMap.get(task.taskId)
+          if (phase0Timeout && now.getTime() >= phase0Timeout && (task.status === 9 || task.status === 0)) {
+            console.log(`[Mode9] 阶段0：先挂方任务 ${task.taskId} 超时（9分钟），强制改为状态3`)
+            hedgeRecord.closeTasks[i] = { ...hedgeRecord.closeTasks[i], status: 3 }
+            await updateTaskStatusToServer(task.taskId, 3)
+          }
+        }
+      }
+      
+      for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+        const task = hedgeRecord.secondTasks[i]
+        if (task.taskId) {
+          const phase0Timeout = phase0TimeoutMap.get(task.taskId)
+          if (phase0Timeout && now.getTime() >= phase0Timeout && (task.status === 9 || task.status === 0)) {
+            console.log(`[Mode9] 阶段0：后挂方任务 ${task.taskId} 超时（9分钟），强制改为状态3`)
+            hedgeRecord.secondTasks[i] = { ...hedgeRecord.secondTasks[i], status: 3 }
+            await updateTaskStatusToServer(task.taskId, 3)
+          }
+        }
+      }
+      
+      // 检查阶段0是否完成：所有任务状态为 3 或 18 或超时
+      const isPhase0Completed = allCurrentTasks.every(task => {
+        const status = task.status
+        const phase0Timeout = phase0TimeoutMap.get(task.taskId)
+        const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
+        return status === 3 || status === 18 || isTimeout
+      })
+      
+      if (isPhase0Completed) {
+        console.log(`[Mode9] 阶段0完成，所有任务状态为 3 或 18 或超时`)
+        
+        // 检查后挂方任务状态（阶段0用18判断）
+        const secondTasks = hedgeRecord.secondTasks || []
+        const hasSecondTaskStatus18 = secondTasks.some(t => t.status === 18)
+        const hasSecondTaskStatus3OrTimeout = secondTasks.some(task => {
+          const phase0Timeout = phase0TimeoutMap.get(task.taskId)
+          const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
+          return task.status === 3 || isTimeout
+        })
+        
+        // 检查先挂方主任务状态（数量最多的那个，阶段0用18判断）
+        const maxShareTaskId = hedgeRecord.maxShareTaskId
+        const maxShareTask = hedgeRecord.closeTasks.find(t => t.taskId === maxShareTaskId)
+        const hasMaxShareTaskStatus18 = maxShareTask && maxShareTask.status === 18
+        const hasMaxShareTaskStatus3OrTimeout = maxShareTask && (() => {
+          const phase0Timeout = phase0TimeoutMap.get(maxShareTask.taskId)
+          const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
+          return maxShareTask.status === 3 || isTimeout
+        })()
+        
+        console.log(`[Mode9] 阶段0：后挂方任务状态18: ${hasSecondTaskStatus18}, 失败/超时: ${hasSecondTaskStatus3OrTimeout}`)
+        console.log(`[Mode9] 阶段0：先挂方主任务状态18: ${hasMaxShareTaskStatus18}, 失败/超时: ${hasMaxShareTaskStatus3OrTimeout}`)
+        
+        // 如果后挂方任务或先挂方主任务失败/超时，整组任务结束
+        if (hasSecondTaskStatus3OrTimeout || hasMaxShareTaskStatus3OrTimeout) {
+          console.log(`[Mode9] 阶段0：后挂方任务或先挂方主任务失败/超时，将所有任务状态改为 3，整组任务结束`)
+          await setAllTasksToFailed()
+          hedgeRecord.finalStatus = 'failed'
+          hedgeRecord.errorMsg = hasSecondTaskStatus3OrTimeout ? '后挂方任务失败或超时' : '先挂方主任务失败或超时'
+          console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+          finishHedge(config, hedgeRecord)
+          return
+        }
+        
+        // 如果后挂方任务和先挂方主任务都成功（状态18）
+        if (hasSecondTaskStatus18 && hasMaxShareTaskStatus18) {
+          console.log(`[Mode9] 阶段0成功：后挂方任务和先挂方主任务都是状态18`)
+          
+          // 计算并更新吃单方（后挂方）的amt
+          // 1. 获取后挂方任务的amt
+          const takerTask = secondTasks.find(t => t.status === 18)
+          if (takerTask) {
+            const takerAmt = parseFloat(takerTask.share) || 0
+            
+            // 2. 计算先挂方中失败任务（状态3或超时）的amt总和
+            let failedMakerAmtSum = 0
+            for (const task of hedgeRecord.closeTasks) {
+              const phase0Timeout = phase0TimeoutMap.get(task.taskId)
+              const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
+              if (task.status === 3 || isTimeout) {
+                failedMakerAmtSum += parseFloat(task.share) || 0
+              }
+            }
+            
+            // 3. 计算新的amt（向上取整保留2位小数）
+            const newAmt = Math.ceil((takerAmt - failedMakerAmtSum) * 100) / 100
+            console.log(`[Mode9] 吃单方原amt: ${takerAmt}, 先挂方失败任务amt总和: ${failedMakerAmtSum}, 新amt: ${newAmt}`)
+            
+            // 4. 如果有失败的先挂方任务，调用接口更新后挂方任务的amt（重试3次）
+            if (failedMakerAmtSum > 0 && newAmt > 0) {
+              let updateAmtSuccess = false
+              const maxAmtRetries = 3
+              
+              for (let retry = 0; retry < maxAmtRetries; retry++) {
+                try {
+                  const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/updateMissionTp', {
+                    id: takerTask.taskId,
+                    amt: newAmt
+                  })
+                  
+                  if (response.data && response.data.code === 0) {
+                    console.log(`[Mode9] 更新吃单方任务 ${takerTask.taskId} amt为 ${newAmt} 成功`)
+                    // 更新本地记录
+                    const takerIndex = hedgeRecord.secondTasks.findIndex(t => t.taskId === takerTask.taskId)
+                    if (takerIndex !== -1) {
+                      hedgeRecord.secondTasks[takerIndex] = { ...hedgeRecord.secondTasks[takerIndex], share: newAmt }
+                    }
+                    updateAmtSuccess = true
+                    break
+                  } else {
+                    console.log(`[Mode9] 更新吃单方任务amt失败 (重试 ${retry + 1}/${maxAmtRetries}): ${response.data?.msg || '未知错误'}`)
+                  }
+                } catch (error) {
+                  console.error(`[Mode9] 更新吃单方任务amt异常 (重试 ${retry + 1}/${maxAmtRetries}):`, error)
+                }
+                
+                if (retry < maxAmtRetries - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 1000))
+                }
+              }
+              
+              if (!updateAmtSuccess) {
+                console.log(`[Mode9] 更新吃单方任务amt失败，已重试${maxAmtRetries}次，将所有任务状态改为3`)
+                await setAllTasksToFailed()
+                hedgeRecord.finalStatus = 'failed'
+                hedgeRecord.errorMsg = '更新吃单方amt失败'
+                console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+                finishHedge(config, hedgeRecord)
+                return
+              }
+            } else if (newAmt <= 0) {
+              console.log(`[Mode9] 新amt ${newAmt} <= 0，将所有任务状态改为3`)
+              await setAllTasksToFailed()
+              hedgeRecord.finalStatus = 'failed'
+              hedgeRecord.errorMsg = '计算后amt无效'
+              console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+              finishHedge(config, hedgeRecord)
+              return
+            }
+          }
+          
+          console.log(`[Mode9] 开始将状态18的任务改为19`)
+          
+          // 将所有状态18的任务改为19
+          for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+            const task = hedgeRecord.closeTasks[i]
+            if (task.taskId && task.status === 18) {
+              console.log(`[Mode9] 将先挂方任务 ${task.taskId} 状态从18改为19`)
+              hedgeRecord.closeTasks[i] = { ...hedgeRecord.closeTasks[i], status: 19 }
+              await updateTaskStatusToServer(task.taskId, 19)
+            }
+          }
+          
+          for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+            const task = hedgeRecord.secondTasks[i]
+            if (task.taskId && task.status === 18) {
+              console.log(`[Mode9] 将后挂方任务 ${task.taskId} 状态从18改为19`)
+              hedgeRecord.secondTasks[i] = { ...hedgeRecord.secondTasks[i], status: 19 }
+              await updateTaskStatusToServer(task.taskId, 19)
+            }
+          }
+          
+          phase0Completed = true
+          phase1StartTime = Date.now()  // 阶段1开始计时
+          
+          // 初始化阶段1的超时时间（2分钟）
+          allCurrentTasks.forEach(task => {
+            if (task.taskId) {
+              taskTimeoutMap.set(task.taskId, phase1StartTime + 2 * 60 * 1000)  // 阶段1：2分钟超时
+            }
+          })
+          
+          console.log(`[Mode9] 阶段0完成，进入阶段1，重新开始计时（2分钟超时）`)
+        } else {
+          // 阶段0完成但主任务不成功
+          console.log(`[Mode9] 阶段0：主任务未成功，将所有任务状态改为 3，整组任务结束`)
+          await setAllTasksToFailed()
+          hedgeRecord.finalStatus = 'failed'
+          hedgeRecord.errorMsg = '阶段0主任务未成功'
+          console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+          finishHedge(config, hedgeRecord)
+          return
+        }
+      } else {
+        // 阶段0还没完成，显示进度并继续监控
+        const runningTasks = allCurrentTasks.filter(t => t.status === 9 || t.status === 0 || t.status === 19)
+        const completedTasks = allCurrentTasks.filter(t => t.status === 18 || t.status === 3)
+        console.log(`[Mode9] 阶段0进度: ${completedTasks.length}/${allCurrentTasks.length} 完成，${runningTasks.length} 个运行中，已用时 ${elapsed.toFixed(1)} 分钟`)
+        
+        setTimeout(checkStatus, 5000)
+        return
+      }
+    }
+    
+    // ========== 阶段1：等待所有任务状态为 3 或 20 或超时（2分钟） ==========
+    
+    // 修复状态竞争：检查是否有任务被脚本覆盖回状态18，如果是则重新改为19
+    for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+      const task = hedgeRecord.closeTasks[i]
+      if (task.taskId && task.status === 18) {
+        console.log(`[Mode9] 阶段1：检测到先挂方任务 ${task.taskId} 状态被覆盖回18，重新改为19`)
+        hedgeRecord.closeTasks[i] = { ...hedgeRecord.closeTasks[i], status: 19 }
+        await updateTaskStatusToServer(task.taskId, 19)
+      }
+    }
+    
+    for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+      const task = hedgeRecord.secondTasks[i]
+      if (task.taskId && task.status === 18) {
+        console.log(`[Mode9] 阶段1：检测到后挂方任务 ${task.taskId} 状态被覆盖回18，重新改为19`)
+        hedgeRecord.secondTasks[i] = { ...hedgeRecord.secondTasks[i], status: 19 }
+        await updateTaskStatusToServer(task.taskId, 19)
+      }
+    }
+    
+    // 检查阶段1超时
+    for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
+      const task = hedgeRecord.closeTasks[i]
+      if (task.taskId) {
+        const timeoutTime = taskTimeoutMap.get(task.taskId)
+        if (timeoutTime && now.getTime() >= timeoutTime && (task.status === 9 || task.status === 0 || task.status === 19)) {
+          console.log(`[Mode9] 阶段1：先挂方任务 ${task.taskId} 超时（2分钟），强制改为状态3`)
+          hedgeRecord.closeTasks[i] = { ...hedgeRecord.closeTasks[i], status: 3 }
+          await updateTaskStatusToServer(task.taskId, 3)
+        }
+      }
+    }
+    
+    for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+      const task = hedgeRecord.secondTasks[i]
+      if (task.taskId) {
+        const timeoutTime = taskTimeoutMap.get(task.taskId)
+        if (timeoutTime && now.getTime() >= timeoutTime && (task.status === 9 || task.status === 0 || task.status === 19)) {
+          console.log(`[Mode9] 阶段1：后挂方任务 ${task.taskId} 超时（2分钟），强制改为状态3`)
+          hedgeRecord.secondTasks[i] = { ...hedgeRecord.secondTasks[i], status: 3 }
+          await updateTaskStatusToServer(task.taskId, 3)
+        }
+      }
+    }
+    
+    // 检查第一阶段是否完成：所有任务状态为 3 或 20 或超时
+    const isPhase1Completed = allCurrentTasks.every(task => {
+      const status = task.status
+      const timeoutTime = taskTimeoutMap.get(task.taskId)
+      const isTimeout = timeoutTime && now.getTime() >= timeoutTime
+      return status === 3 || status === 20 || isTimeout
+    })
+    
+    if (isPhase1Completed && !phase1Completed) {
+      // 第一阶段完成，开始处理第二阶段逻辑
+      const phase1Elapsed = phase1StartTime ? (now.getTime() - phase1StartTime) / 1000 / 60 : 0
+      console.log(`[Mode9] 阶段1完成，所有任务状态为 3 或 20 或超时，阶段1用时 ${phase1Elapsed.toFixed(1)} 分钟`)
+      phase1Completed = true
+      
+      // 检查后挂方任务状态
+      const secondTasks = hedgeRecord.secondTasks || []
+      const hasSecondTaskStatus20 = secondTasks.some(t => t.status === 20)
+      const hasSecondTaskStatus3OrTimeout = secondTasks.some(task => {
+        const timeoutTime = taskTimeoutMap.get(task.taskId)
+        const isTimeout = timeoutTime && now.getTime() >= timeoutTime
+        return task.status === 3 || isTimeout
+      })
+      
+      // 检查先挂方主任务状态（数量最多的那个）
+      const maxShareTaskId = hedgeRecord.maxShareTaskId
+      const maxShareTask = hedgeRecord.closeTasks.find(t => t.taskId === maxShareTaskId)
+      const hasMaxShareTaskStatus20 = maxShareTask && maxShareTask.status === 20
+      const hasMaxShareTaskStatus3OrTimeout = maxShareTask && (() => {
+        const timeoutTime = taskTimeoutMap.get(maxShareTask.taskId)
+        const isTimeout = timeoutTime && now.getTime() >= timeoutTime
+        return maxShareTask.status === 3 || isTimeout
+      })()
+      
+      console.log(`[Mode9] 阶段1：后挂方任务状态20: ${hasSecondTaskStatus20}, 失败/超时: ${hasSecondTaskStatus3OrTimeout}`)
+      console.log(`[Mode9] 阶段1：先挂方主任务状态20: ${hasMaxShareTaskStatus20}, 失败/超时: ${hasMaxShareTaskStatus3OrTimeout}`)
+      
+      // 如果后挂方任务或先挂方主任务失败/超时，整组任务结束
+      if (hasSecondTaskStatus3OrTimeout || hasMaxShareTaskStatus3OrTimeout) {
+        console.log(`[Mode9] 阶段1：后挂方任务或先挂方主任务失败/超时，将所有任务状态改为 3，整组任务结束`)
+        await setAllTasksToFailed()
+        hedgeRecord.finalStatus = 'failed'
+        hedgeRecord.errorMsg = hasSecondTaskStatus3OrTimeout ? '后挂方任务失败或超时' : '先挂方主任务失败或超时'
+        console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+        finishHedge(config, hedgeRecord)
+        return
+      }
+      
+      // 如果后挂方任务和先挂方主任务都成功（状态20）
+      if (hasSecondTaskStatus20 && hasMaxShareTaskStatus20) {
+        console.log(`[Mode9] 阶段1成功：后挂方任务和先挂方主任务都成功，开始阶段2处理`)
+        
+        // 把超时的任务状态改为 3
+        for (const task of allCurrentTasks) {
+          const timeoutTime = taskTimeoutMap.get(task.taskId)
+          const isTimeout = timeoutTime && now.getTime() >= timeoutTime
+          if (isTimeout && task.status !== 3) {
+            console.log(`[Mode9] 任务 ${task.taskId} 超时，改为状态 3`)
+            const closeTaskIndex = hedgeRecord.closeTasks.findIndex(t => t.taskId === task.taskId)
+            if (closeTaskIndex !== -1) {
+              hedgeRecord.closeTasks[closeTaskIndex] = { ...hedgeRecord.closeTasks[closeTaskIndex], status: 3 }
+            } else {
+              const secondTaskIndex = hedgeRecord.secondTasks.findIndex(t => t.taskId === task.taskId)
+              if (secondTaskIndex !== -1) {
+                hedgeRecord.secondTasks[secondTaskIndex] = { ...hedgeRecord.secondTasks[secondTaskIndex], status: 3 }
+              }
+            }
+            await updateTaskStatusToServer(task.taskId, 3)
+          }
+        }
+        
+        // 开始阶段2：调用 updateTrendingTime
+        if (!phase2InProgress) {
+          phase2InProgress = true
+          console.log(`[Mode9] 开始阶段2：调用 updateTrendingTime`)
+          
+          const trendingId = hedgeRecord.trendingId
+          const updateTrendingTimeout = 300  // 5分钟超时
+          const updateTrendingInterval = 20  // 每20秒请求一次
+          const updateTrendingStartTime = Date.now()
+          let firstRequest = true
+          
+          const pollUpdateTrendingTime = async () => {
+            if (hedgeRecord.finalStatus !== 'running') {
+              return
+            }
+            
+            const elapsedSeconds = (Date.now() - updateTrendingStartTime) / 1000
+            
+            if (elapsedSeconds >= updateTrendingTimeout) {
+              console.log(`[Mode9] updateTrendingTime 5分钟超时`)
+              // 超时后，将所有非3状态的任务改为 3，整组任务结束
+              await setAllTasksToFailed()
+              hedgeRecord.finalStatus = 'failed'
+              hedgeRecord.errorMsg = 'updateTrendingTime 超时'
+              console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+              finishHedge(config, hedgeRecord)
+              return
+            }
+            
+            if (!firstRequest) {
+              await new Promise(resolve => setTimeout(resolve, updateTrendingInterval * 1000))
+            }
+            firstRequest = false
+            
+            const currentUpdateTime = Date.now()
+            const success = await callUpdateTrendingTime(trendingId, currentUpdateTime)
+            
+            if (success) {
+              console.log(`[Mode9] updateTrendingTime 成功，开始分批更新任务状态为 31`)
+              
+              // 第一批：除主任务外的其他先挂方任务
+              const otherCloseTasks = hedgeRecord.closeTasks.filter(t => t.taskId !== maxShareTaskId && t.status === 20)
+              console.log(`[Mode9] 第一批：更新 ${otherCloseTasks.length} 个其他先挂方任务状态为 31`)
+              for (const task of otherCloseTasks) {
+                const taskIndex = hedgeRecord.closeTasks.findIndex(t => t.taskId === task.taskId)
+                if (taskIndex !== -1) {
+                  hedgeRecord.closeTasks[taskIndex] = { ...hedgeRecord.closeTasks[taskIndex], status: 31 }
+                  await updateTaskStatusToServer(task.taskId, 31)
+                }
+              }
+              
+              // 等待 10 秒
+              console.log(`[Mode9] 等待 10 秒...`)
+              await new Promise(resolve => setTimeout(resolve, 10000))
+              
+              // 第二批：先挂方主任务
+              console.log(`[Mode9] 第二批：更新先挂方主任务 ${maxShareTaskId} 状态为 31`)
+              const maxShareTaskIndex = hedgeRecord.closeTasks.findIndex(t => t.taskId === maxShareTaskId)
+              if (maxShareTaskIndex !== -1 && hedgeRecord.closeTasks[maxShareTaskIndex].status === 20) {
+                hedgeRecord.closeTasks[maxShareTaskIndex] = { ...hedgeRecord.closeTasks[maxShareTaskIndex], status: 31 }
+                await updateTaskStatusToServer(maxShareTaskId, 31)
+              }
+              
+              // 等待 10 秒
+              console.log(`[Mode9] 等待 10 秒...`)
+              await new Promise(resolve => setTimeout(resolve, 10000))
+              
+              // 第三批：后挂方任务
+              console.log(`[Mode9] 第三批：更新后挂方任务状态为 31`)
+              for (let i = 0; i < hedgeRecord.secondTasks.length; i++) {
+                const task = hedgeRecord.secondTasks[i]
+                if (task.status === 20 && task.taskId) {
+                  hedgeRecord.secondTasks[i] = { ...task, status: 31 }
+                  await updateTaskStatusToServer(task.taskId, 31)
+                }
+              }
+              
+              console.log(`[Mode9] 第二阶段完成，所有成功任务状态已更新为 31`)
+              // 第二阶段完成，整组任务成功结束
+              hedgeRecord.finalStatus = 'success'
+              console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
+              finishHedge(config, hedgeRecord)
+              return
+            } else {
+              // 继续轮询（使用 setTimeout 避免栈溢出）
+              setTimeout(() => pollUpdateTrendingTime(), 0)
+            }
+          }
+          
+          pollUpdateTrendingTime()
+          return
+        }
+      }
+    }
+    
+    // 如果第二阶段正在进行中，继续监控
+    if (phase2InProgress) {
+      setTimeout(checkStatus, 5000)
       return
     }
-
-    // 继续轮询
-    setTimeout(checkStatus, 2000)
+    
+    // 如果阶段1还没完成，继续监控
+    if (!phase1Completed) {
+      // 显示监控进度
+      const phase1Elapsed = phase1StartTime ? (now.getTime() - phase1StartTime) / 1000 / 60 : 0
+      const runningTasks = allCurrentTasks.filter(t => t.status === 9 || t.status === 0 || t.status === 19)
+      const completedTasks = allCurrentTasks.filter(t => t.status === 20 || t.status === 2 || t.status === 3)
+      console.log(`[Mode9] 阶段1进度: ${completedTasks.length}/${allCurrentTasks.length} 完成，${runningTasks.length} 个运行中，阶段1用时 ${phase1Elapsed.toFixed(1)} 分钟`)
+      
+      setTimeout(checkStatus, 5000)
+      return
+    }
   }
-
+  
   // 开始轮询
-  setTimeout(checkStatus, 2000)
+  checkStatus()
 }
 
 /**
@@ -15816,6 +16373,65 @@ const getOrderbookStatusText = (orderbookData) => {
 }
 
 /**
+ * 从任务消息中提取仓位变化值
+ * @param {string} msg - 任务消息字符串，格式如："有挂单取消成功,仓位变化值为:0.003826239999995096, 挂单:无"
+ * @returns {number} - 仓位变化值，如果无法提取则返回0
+ */
+const extractPositionChangeValue = (msg) => {
+  if (!msg) return 0
+  
+  const msgStr = typeof msg === 'string' ? msg : String(msg)
+  
+  // 使用正则表达式匹配 "仓位变化值为:" 后面的数字
+  const match = msgStr.match(/仓位变化值为[：:]?\s*(-?[\d.]+)/)
+  if (match && match[1]) {
+    return parseFloat(match[1]) || 0
+  }
+  
+  return 0
+}
+
+/**
+ * 计算任务列表的仓位变化值之和
+ * @param {Array} tasks - 任务列表，每个任务对象包含msg字段
+ * @returns {number} - 仓位变化值之和
+ */
+const calculatePositionChangeSum = (tasks) => {
+  if (!tasks || !Array.isArray(tasks) || tasks.length === 0) return 0
+  
+  let sum = 0
+  for (const task of tasks) {
+    if (task && task.msg) {
+      sum += extractPositionChangeValue(task.msg)
+    }
+  }
+  return sum
+}
+
+/**
+ * 根据仓位变化状态返回对应的CSS类名
+ * @param {string} status - 状态值：'pending'(默认/灰色), 'normal'(正常/绿色), 'abnormal'(异常/红色)
+ * @returns {string} - CSS类名
+ */
+const getPositionChangeStatusClass = (status) => {
+  if (status === 'normal') return 'status-normal'
+  if (status === 'abnormal') return 'status-abnormal'
+  return 'status-pending'  // 默认灰色
+}
+
+/**
+ * 检测msg中仓位变化值是否为"未知"
+ * @param {string} msg - 任务消息字符串
+ * @returns {boolean} - 如果仓位变化值为"未知"返回true
+ */
+const isPositionChangeUnknown = (msg) => {
+  if (!msg) return false
+  const msgStr = typeof msg === 'string' ? msg : String(msg)
+  // 匹配 "仓位变化值为:未知" 或 "仓位变化值为：未知"
+  return /仓位变化值为[：:]\s*未知/.test(msgStr)
+}
+
+/**
  * 格式化任务消息（支持JSON格式的Type 5消息）
  */
 /**
@@ -17430,6 +18046,40 @@ onUnmounted(() => {
 .mode9-label-second {
   color: #2196f3 !important;
   font-weight: 600;
+}
+
+/* 仓位变化值展示样式 */
+.position-change-sum {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  display: inline-block;
+}
+
+/* 默认/请求中状态 - 背景灰色，字体黑色 */
+.position-change-sum.status-pending {
+  background: rgba(128, 128, 128, 0.3);
+  color: #333;
+}
+
+/* 正常状态 - 背景和字体都是绿色 */
+.position-change-sum.status-normal {
+  background: rgba(40, 167, 69, 0.3);
+  color: #28a745;
+  font-weight: 600;
+}
+
+/* 异常状态 - 背景和字体都是红色 */
+.position-change-sum.status-abnormal {
+  background: rgba(220, 53, 69, 0.3);
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+/* 仓位变化值为"未知"时的msg样式 - 黑色 */
+.task-msg.msg-unknown {
+  color: #333 !important;
 }
 
 .compact-log-info {
