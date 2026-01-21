@@ -707,6 +707,19 @@
                 <span style="color: red; cursor: pointer;">是否需要校验深度</span>
               </label>
             </div>
+            <div style="margin-right: 10px;">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: red;">深度价格变化最大值:</span>
+                <input 
+                  type="number" 
+                  v-model.number="hedgeMode.depthPriceMaxDiff"
+                  :disabled="autoHedgeRunning"
+                  step="0.01"
+                  min="0"
+                  style="width: 80px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;"
+                />
+              </label>
+            </div>
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
               @click="toggleAutoHedge"
@@ -3048,6 +3061,7 @@ const hedgeMode = reactive({
   balancePriority: 2000,  // 资产优先级校验值
   // 深度校验设置
   needJudgeDepth: 0,  // 是否需要校验深度 0不要 1要
+  depthPriceMaxDiff: 0.2,  // 深度价格变化最大值，默认0.2
   // 深度差相关设置
   depthThreshold1: 15,  // 深度差阈值1（默认15）
   depthThreshold2: 2,   // 深度差阈值2（默认2）
@@ -3078,23 +3092,23 @@ const hedgeMode = reactive({
 
 // 平仓数量价格映射表（价格 -> 数量）
 const CLOSE_AMT_PRICE_TABLE = [
-  { price: 0.1, amount: 6578947.368 },
-  { price: 0.6, amount: 183958.7932 },
-  { price: 1.1, amount: 54963.17467 },
-  { price: 1.6, amount: 26106.934 },
-  { price: 2.1, amount: 15242.97299 },
-  { price: 2.6, amount: 9990.00999 },
-  { price: 3.1, amount: 7064.841112 },
-  { price: 3.6, amount: 5264.931345 },
-  { price: 4.1, amount: 4081.366115 },
-  { price: 4.6, amount: 3259.239945 },
-  { price: 5.1, amount: 2665.557795 },
-  { price: 5.6, amount: 2222.143213 },
-  { price: 6.1, amount: 1883.005126 },
-  { price: 6.6, amount: 1617.024029 },
-  { price: 7.1, amount: 1404.798229 },
-  { price: 7.6, amount: 1232.705147 },
-  { price: 8.1, amount: 1091.186054 },
+  { price: 0.1, amount: 2000 },
+  { price: 0.6, amount: 2000 },
+  { price: 1.1, amount: 2000 },
+  { price: 1.6, amount: 2000 },
+  { price: 2.1, amount: 2000 },
+  { price: 2.6, amount: 2000 },
+  { price: 3.1, amount: 2000 },
+  { price: 3.6, amount: 2000 },
+  { price: 4.1, amount: 2000 },
+  { price: 4.6, amount: 1000 },
+  { price: 5.1, amount: 1000 },
+  { price: 5.6, amount: 1000 },
+  { price: 6.1, amount: 1000 },
+  { price: 6.6, amount: 1000 },
+  { price: 7.1, amount: 1000 },
+  { price: 7.6, amount: 1000 },
+  { price: 8.1, amount: 1000 },
   { price: 8.6, amount: 973.2094892 },
   { price: 9.1, amount: 873.9471122 },
   { price: 9.6, amount: 789.6199717 },
@@ -8115,8 +8129,30 @@ const parseOrderbookData = async (config, isClose) => {
             const minVolatility = hedgeMode.priceVolatilityGt15Min
             const maxVolatility = hedgeMode.priceVolatilityGt15Max
             const adjustment = calculatePriceAdjustment(result.diff, minVolatility, maxVolatility)
-            result.finalPrice = isClose ? result.price2 - adjustment : result.price1 + adjustment
-            console.log(`深度差 > ${threshold1} - 计算最终价格: ${result.finalPrice.toFixed(2)}`)
+            let originalPrice = isClose ? result.price2 - adjustment : result.price1 + adjustment
+            
+            // 如果原价格>=90，计算80%波动值的价格，选择更靠近90的
+            if (originalPrice >= 90) {
+                const adjustment80 = calculatePriceAdjustment(result.diff, 80, 80)
+                const price80 = isClose ? result.price2 - adjustment80 : result.price1 + adjustment80
+                // 选择更靠近90的价格
+                const distOriginal = Math.abs(originalPrice - 90)
+                const dist80 = Math.abs(price80 - 90)
+                result.finalPrice = distOriginal <= dist80 ? originalPrice : price80
+                console.log(`深度差 > ${threshold1} - 原价格: ${originalPrice.toFixed(2)} >= 90, 80%价格: ${price80.toFixed(2)}, 选择更靠近90的: ${result.finalPrice.toFixed(2)}`)
+            } else if (originalPrice <= 10) {
+                // 如果原价格<=10，计算80%波动值的价格，选择更靠近10的
+                const adjustment80 = calculatePriceAdjustment(result.diff, 80, 80)
+                const price80 = isClose ? result.price2 - adjustment80 : result.price1 + adjustment80
+                // 选择更靠近10的价格
+                const distOriginal = Math.abs(originalPrice - 10)
+                const dist80 = Math.abs(price80 - 10)
+                result.finalPrice = distOriginal <= dist80 ? originalPrice : price80
+                console.log(`深度差 > ${threshold1} - 原价格: ${originalPrice.toFixed(2)} <= 10, 80%价格: ${price80.toFixed(2)}, 选择更靠近10的: ${result.finalPrice.toFixed(2)}`)
+            } else {
+                result.finalPrice = originalPrice
+                console.log(`深度差 > ${threshold1} - 计算最终价格: ${result.finalPrice.toFixed(2)}`)
+            }
         }
     } else if (result.diff >= threshold2 - 0.00001) {
         if (!hedgeMode.enableDepthDiffParams2To15) {
@@ -8513,6 +8549,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           needJudgeBalancePriority: hedgeMode.needJudgeBalancePriority,  // 是否需要校验资产优先级 0不要 1要
           balancePriority: hedgeMode.balancePriority,  // 资产优先级校验值
           needJudgeDepth: hedgeMode.needJudgeDepth,  // 是否需要校验深度 0不要 1要
+          depthPriceMaxDiff: hedgeMode.depthPriceMaxDiff,  // 深度价格变化最大值
           blackGroupList:[],
           blackNumberList:[]
         }
@@ -9448,6 +9485,7 @@ const saveHedgeSettings = () => {
       balancePriority: hedgeMode.balancePriority,
       // 深度校验设置
       needJudgeDepth: hedgeMode.needJudgeDepth,
+      depthPriceMaxDiff: hedgeMode.depthPriceMaxDiff,
       // 深度差相关设置
       depthThreshold1: hedgeMode.depthThreshold1,
       depthThreshold2: hedgeMode.depthThreshold2,
@@ -9562,6 +9600,9 @@ const loadHedgeSettings = () => {
     // 深度校验设置
     if (settings.needJudgeDepth !== undefined) {
       hedgeMode.needJudgeDepth = settings.needJudgeDepth
+    }
+    if (settings.depthPriceMaxDiff !== undefined) {
+      hedgeMode.depthPriceMaxDiff = settings.depthPriceMaxDiff
     }
     
     // 深度差相关设置

@@ -1204,6 +1204,19 @@
                 <span style="color: red; cursor: pointer;">是否需要校验深度</span>
               </label>
             </div>
+            <div style="margin-right: 10px;">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: red;">深度价格变化最大值:</span>
+                <input 
+                  type="number" 
+                  v-model.number="hedgeMode.depthPriceMaxDiff"
+                  :disabled="autoHedgeRunning"
+                  step="0.01"
+                  min="0"
+                  style="width: 80px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;"
+                />
+              </label>
+            </div>
             
             <button 
               :class="['btn', 'btn-primary', { 'btn-running': autoHedgeRunning }]" 
@@ -3829,6 +3842,7 @@ const hedgeMode = reactive({
   balancePriority: 2000,  // 资产优先级校验值
   // 深度校验设置
   needJudgeDepth: 0,  // 是否需要校验深度 0不要 1要
+  depthPriceMaxDiff: 0.2,  // 深度价格变化最大值，默认0.2
   // 订单薄更新设置
   yesPositionThreshold: 0.2,  // yes持仓阈值（万），默认0.2万
   yesPositionCompareType: 'less',  // yes持仓比较类型：'less'（小于）或'greater'（大于），默认'less'
@@ -3886,23 +3900,23 @@ const hedgeMode = reactive({
 
 // 平仓最小数量价格映射表（后挂方价格 -> 最小数量）
 const CLOSE_AMT_PRICE_TABLE = [
-  { price: 0.1, amount: 6578947.368 },
-  { price: 0.6, amount: 183958.7932 },
-  { price: 1.1, amount: 54963.17467 },
-  { price: 1.6, amount: 26106.934 },
-  { price: 2.1, amount: 15242.97299 },
-  { price: 2.6, amount: 9990.00999 },
-  { price: 3.1, amount: 7064.841112 },
-  { price: 3.6, amount: 5264.931345 },
-  { price: 4.1, amount: 4081.366115 },
-  { price: 4.6, amount: 3259.239945 },
-  { price: 5.1, amount: 2665.557795 },
-  { price: 5.6, amount: 2222.143213 },
-  { price: 6.1, amount: 1883.005126 },
-  { price: 6.6, amount: 1617.024029 },
-  { price: 7.1, amount: 1404.798229 },
-  { price: 7.6, amount: 1232.705147 },
-  { price: 8.1, amount: 1091.186054 },
+  { price: 0.1, amount: 2000 },
+  { price: 0.6, amount: 2000 },
+  { price: 1.1, amount: 2000 },
+  { price: 1.6, amount: 2000 },
+  { price: 2.1, amount: 2000 },
+  { price: 2.6, amount: 2000 },
+  { price: 3.1, amount: 2000 },
+  { price: 3.6, amount: 2000 },
+  { price: 4.1, amount: 2000 },
+  { price: 4.6, amount: 1000 },
+  { price: 5.1, amount: 1000 },
+  { price: 5.6, amount: 1000 },
+  { price: 6.1, amount: 1000 },
+  { price: 6.6, amount: 1000 },
+  { price: 7.1, amount: 1000 },
+  { price: 7.6, amount: 1000 },
+  { price: 8.1, amount: 1000 },
   { price: 8.6, amount: 973.2094892 },
   { price: 9.1, amount: 873.9471122 },
   { price: 9.6, amount: 789.6199717 },
@@ -10004,7 +10018,29 @@ const parseOrderbookData = async (config, isClose) => {
       if (isClose) {
         // 平仓：原始数据的卖一价 - 深度差的配置范围内取随机值
         const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = rawAsk1 - adjustment
+        let originalPrice = rawAsk1 - adjustment
+        
+        // 如果原价格>=90，计算80%波动值的价格，选择更靠近90的
+        if (originalPrice >= 90) {
+          const adjustment80 = calculatePriceAdjustment(depthDiff, 80, 80)
+          const price80 = rawAsk1 - adjustment80
+          // 选择更靠近90的价格
+          const distOriginal = Math.abs(originalPrice - 90)
+          const dist80 = Math.abs(price80 - 90)
+          finalPrice = distOriginal <= dist80 ? originalPrice : price80
+          console.log(`深度差 > ${threshold1} - 平仓模式，原价格: ${originalPrice.toFixed(2)} >= 90, 80%价格: ${price80.toFixed(2)}, 选择更靠近90的: ${finalPrice.toFixed(2)}`)
+        } else if (originalPrice <= 10) {
+          // 如果原价格<=10，计算80%波动值的价格，选择更靠近10的
+          const adjustment80 = calculatePriceAdjustment(depthDiff, 80, 80)
+          const price80 = rawAsk1 - adjustment80
+          // 选择更靠近10的价格
+          const distOriginal = Math.abs(originalPrice - 10)
+          const dist80 = Math.abs(price80 - 10)
+          finalPrice = distOriginal <= dist80 ? originalPrice : price80
+          console.log(`深度差 > ${threshold1} - 平仓模式，原价格: ${originalPrice.toFixed(2)} <= 10, 80%价格: ${price80.toFixed(2)}, 选择更靠近10的: ${finalPrice.toFixed(2)}`)
+        } else {
+          finalPrice = originalPrice
+        }
         
         // 深度差>阈值1时，平仓模式：最终价格需要小于 最大区间+3
         if (finalPrice >= priceMax + 3) {
@@ -10014,7 +10050,29 @@ const parseOrderbookData = async (config, isClose) => {
       } else {
         // 开仓：原始数据的买一价 + 深度差的配置范围内取随机值
         const adjustment = calculatePriceAdjustment(depthDiff, minVolatility, maxVolatility)
-        finalPrice = rawBid1 + adjustment
+        let originalPrice = rawBid1 + adjustment
+        
+        // 如果原价格>=90，计算80%波动值的价格，选择更靠近90的
+        if (originalPrice >= 90) {
+          const adjustment80 = calculatePriceAdjustment(depthDiff, 80, 80)
+          const price80 = rawBid1 + adjustment80
+          // 选择更靠近90的价格
+          const distOriginal = Math.abs(originalPrice - 90)
+          const dist80 = Math.abs(price80 - 90)
+          finalPrice = distOriginal <= dist80 ? originalPrice : price80
+          console.log(`深度差 > ${threshold1} - 开仓模式，原价格: ${originalPrice.toFixed(2)} >= 90, 80%价格: ${price80.toFixed(2)}, 选择更靠近90的: ${finalPrice.toFixed(2)}`)
+        } else if (originalPrice <= 10) {
+          // 如果原价格<=10，计算80%波动值的价格，选择更靠近10的
+          const adjustment80 = calculatePriceAdjustment(depthDiff, 80, 80)
+          const price80 = rawBid1 + adjustment80
+          // 选择更靠近10的价格
+          const distOriginal = Math.abs(originalPrice - 10)
+          const dist80 = Math.abs(price80 - 10)
+          finalPrice = distOriginal <= dist80 ? originalPrice : price80
+          console.log(`深度差 > ${threshold1} - 开仓模式，原价格: ${originalPrice.toFixed(2)} <= 10, 80%价格: ${price80.toFixed(2)}, 选择更靠近10的: ${finalPrice.toFixed(2)}`)
+        } else {
+          finalPrice = originalPrice
+        }
         
         // 深度差>阈值1时，开仓模式：最终价格需要大于 最小区间-5
         if (finalPrice <= priceMin - 5) {
@@ -10461,6 +10519,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.balancePriority = hedgeMode.balancePriority
           // 添加深度校验字段
           requestData.needJudgeDepth = hedgeMode.needJudgeDepth
+          requestData.depthPriceMaxDiff = hedgeMode.depthPriceMaxDiff
         } else if (currentMode === 3) {
           // 模式3：使用 quickCalReadyToHedgeToClose 接口
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/quickCalReadyToHedgeToClose'
@@ -10489,6 +10548,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.balancePriority = hedgeMode.balancePriority
           // 添加深度校验字段
           requestData.needJudgeDepth = hedgeMode.needJudgeDepth
+          requestData.depthPriceMaxDiff = hedgeMode.depthPriceMaxDiff
         } else if (currentMode === 9) {
           // 模式9：使用 model9Close 接口，参数与模式1相同，返回多个先挂方
           apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model9Close'
@@ -10519,6 +10579,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.balancePriority = hedgeMode.balancePriority
           // 添加深度校验字段
           requestData.needJudgeDepth = hedgeMode.needJudgeDepth
+          requestData.depthPriceMaxDiff = hedgeMode.depthPriceMaxDiff
           // 添加账号随机8小时不交易参数
           requestData.needJudgeTimeRandom = hedgeMode.needJudgeTimeRandom || 0
           // 添加持有一个事件的账号数量上限参数
@@ -10576,6 +10637,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           requestData.balancePriority = hedgeMode.balancePriority
           // 添加深度校验字段
           requestData.needJudgeDepth = hedgeMode.needJudgeDepth
+          requestData.depthPriceMaxDiff = hedgeMode.depthPriceMaxDiff
           // 添加账号随机8小时不交易参数
           requestData.needJudgeTimeRandom = hedgeMode.needJudgeTimeRandom || 0
           // 添加持有一个事件的账号数量上限参数
@@ -12307,6 +12369,7 @@ const saveHedgeSettings = () => {
       balancePriority: hedgeMode.balancePriority,
       // 深度校验设置
       needJudgeDepth: hedgeMode.needJudgeDepth,
+      depthPriceMaxDiff: hedgeMode.depthPriceMaxDiff,
       // 其他设置
       hedgeTasksPerTopic: hedgeTasksPerTopic.value,
       hedgeMaxTasksPerRound: hedgeMaxTasksPerRound.value,
@@ -12487,6 +12550,9 @@ const loadHedgeSettings = () => {
     // 深度校验设置
     if (settings.needJudgeDepth !== undefined) {
       hedgeMode.needJudgeDepth = settings.needJudgeDepth
+    }
+    if (settings.depthPriceMaxDiff !== undefined) {
+      hedgeMode.depthPriceMaxDiff = settings.depthPriceMaxDiff
     }
     
     // 其他设置
@@ -13718,8 +13784,8 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
               }
               
               // 等待 10 秒
-              console.log(`[Mode9] 等待 10 秒...`)
-              await new Promise(resolve => setTimeout(resolve, 10000))
+              console.log(`[Mode9] 等待 3 秒...`)
+              await new Promise(resolve => setTimeout(resolve, 3000))
               
               // 第二批：先挂方主任务
               console.log(`[Mode9] 第二批：更新先挂方主任务 ${maxShareTaskId} 状态为 31`)
