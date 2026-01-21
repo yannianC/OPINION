@@ -3138,8 +3138,8 @@
                     <span class="task-label mode9-label">先挂方 - {{ log.firstSide }} ({{ log.closeTasks.length }}个):
                       <span v-if="log.closeTasks && log.closeTasks.length > 0" class="position-change-sum" :class="getPositionChangeStatusClass(log.positionChangeStatus)">仓位变化: {{ calculatePositionChangeSum(log.closeTasks).toFixed(2) }}</span>
                     </span>
-                    <span class="task-info">
-                      <template v-for="(task, taskIndex) in log.closeTasks" :key="'close-log-' + taskIndex">
+                    <div class="task-info">
+                      <div v-for="(task, taskIndex) in log.closeTasks" :key="'close-log-' + taskIndex" class="task-item">
                         <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
                         浏览器{{ task.number }} | 
                         任务{{ task.taskId || '-' }}
@@ -3147,27 +3147,25 @@
                         <span v-else class="type-sub">(从)</span> | 
                         数量{{ task.share }} | 
                         <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
-                        <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': isPositionChangeUnknown(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
-                        <span v-if="taskIndex < log.closeTasks.length - 1">; </span>
-                      </template>
-                    </span>
+                        <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': !hasValidPositionChangeValue(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
+                      </div>
+                    </div>
                   </div>
                   <!-- 后挂方任务列表 -->
                   <div v-if="log.secondTasks && log.secondTasks.length > 0" class="compact-task-row mode9-log-section-second">
                     <span class="task-label mode9-label-second">后挂方 - {{ log.firstSide === 'YES' ? 'NO' : 'YES' }} ({{ log.secondTasks.length }}个):
                       <span v-if="log.secondTasks && log.secondTasks.length > 0" class="position-change-sum" :class="getPositionChangeStatusClass(log.positionChangeStatus)">仓位变化: {{ calculatePositionChangeSum(log.secondTasks).toFixed(2) }}</span>
                     </span>
-                    <span class="task-info">
-                      <template v-for="(task, taskIndex) in log.secondTasks" :key="'second-log-' + taskIndex">
+                    <div class="task-info">
+                      <div v-for="(task, taskIndex) in log.secondTasks" :key="'second-log-' + taskIndex" class="task-item">
                         <span class="task-group">组{{ task.groupNo || '-' }}</span> | 
                         浏览器{{ task.number }} | 
                         任务{{ task.taskId || '-' }} | 
                         数量{{ task.share }} | 
                         <span :class="getTaskStatusClass(task.status, task.msg)">{{ getStatusText(task.status, task.msg) }}</span>
-                        <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': isPositionChangeUnknown(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
-                        <span v-if="taskIndex < log.secondTasks.length - 1">; </span>
-                      </template>
-                    </span>
+                        <span v-if="task.msg" class="task-msg" :class="{ 'msg-unknown': !hasValidPositionChangeValue(task.msg) }">| {{ formatTaskMsg(task.msg) }}</span>
+                      </div>
+                    </div>
                   </div>
                   <!-- 任务ID汇总 -->
                   <div v-if="log.allTaskIds && log.allTaskIds.length > 0" class="compact-task-row">
@@ -11491,6 +11489,9 @@ const loadCurrentPageTaskStatus = async () => {
       const secondTasksAllHaveMsg = secondTasks.every(t => t.msg !== undefined && t.msg !== '')
       
       if (closeTasksAllHaveMsg && secondTasksAllHaveMsg && closeTasks.length > 0 && secondTasks.length > 0) {
+        // 检查所有任务是否都有有效的仓位变化数值
+        const allTasksHaveValidPositionChange = [...closeTasks, ...secondTasks].every(t => hasValidPositionChangeValue(t.msg))
+        
         // 计算先挂方和后挂方的仓位变化值之和
         const closePositionChange = calculatePositionChangeSum(closeTasks)
         const secondPositionChange = calculatePositionChangeSum(secondTasks)
@@ -11499,8 +11500,9 @@ const loadCurrentPageTaskStatus = async () => {
         const diff = Math.abs(Math.abs(closePositionChange) - Math.abs(secondPositionChange))
         
         // 如果差值绝对值 > 后挂方仓位变化值的10%，标记为异常(红色)，否则正常(绿色)
+        // 但如果有任务获取不到有效的仓位变化值（包括没有该字段、值是"未知"等），则不标记为红色
         const threshold = Math.abs(secondPositionChange) * 0.1
-        if (diff > threshold && Math.abs(secondPositionChange) > 0) {
+        if (diff > threshold && Math.abs(secondPositionChange) > 0 && allTasksHaveValidPositionChange) {
           allHedgeLogs.value[actualIndex].positionChangeStatus = 'abnormal'  // 红色
           console.warn(`[Mode9] 对冲日志 ${actualIndex} 仓位变化异常: 先挂方=${closePositionChange.toFixed(2)}, 后挂方=${secondPositionChange.toFixed(2)}, 差值=${diff.toFixed(2)}, 阈值(10%)=${threshold.toFixed(2)}`)
         } else {
@@ -13269,14 +13271,14 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
   let phase1Completed = false  // 第一阶段是否完成
   let phase2InProgress = false  // 第二阶段是否进行中（updateTrendingTime）
   let taskTimeoutMap = new Map()  // 记录每个任务的超时时间
-  let phase0TimeoutMap = new Map()  // 阶段0的超时时间（9分钟）
+  let phase0TimeoutMap = new Map()  // 阶段0的超时时间（8分钟）
   let phase1StartTime = null  // 阶段1开始时间（阶段0完成后重新计时）
   
-  // 初始化每个任务的阶段0超时时间（9分钟）
+  // 初始化每个任务的阶段0超时时间（8分钟）
   const allTasks = [...(hedgeRecord.closeTasks || []), ...(hedgeRecord.secondTasks || [])]
   allTasks.forEach(task => {
     if (task.taskId) {
-      phase0TimeoutMap.set(task.taskId, startTime.getTime() + 9 * 60 * 1000)  // 阶段0：9分钟超时
+      phase0TimeoutMap.set(task.taskId, startTime.getTime() + 8 * 60 * 1000)  // 阶段0：8分钟超时
     }
   })
   
@@ -13388,15 +13390,15 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
     
     const allCurrentTasks = [...(hedgeRecord.closeTasks || []), ...(hedgeRecord.secondTasks || [])]
     
-    // ========== 阶段0：等待所有任务状态为 3 或 18 或超时（9分钟） ==========
+    // ========== 阶段0：等待所有任务状态为 3 或 18 或超时（8分钟） ==========
     if (!phase0Completed) {
-      // 检查阶段0超时
+      // 检查阶段0超时：将所有非完毕状态（不是18且不是3）且超时的任务改为3
       for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
         const task = hedgeRecord.closeTasks[i]
         if (task.taskId) {
           const phase0Timeout = phase0TimeoutMap.get(task.taskId)
-          if (phase0Timeout && now.getTime() >= phase0Timeout && (task.status === 9 || task.status === 0)) {
-            console.log(`[Mode9] 阶段0：先挂方任务 ${task.taskId} 超时（9分钟），强制改为状态3`)
+          if (phase0Timeout && now.getTime() >= phase0Timeout && task.status !== 18 && task.status !== 3) {
+            console.log(`[Mode9] 阶段0：先挂方任务 ${task.taskId} 超时（8分钟），当前状态${task.status}，强制改为状态3`)
             hedgeRecord.closeTasks[i] = { ...hedgeRecord.closeTasks[i], status: 3 }
             await updateTaskStatusToServer(task.taskId, 3)
           }
@@ -13407,53 +13409,43 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
         const task = hedgeRecord.secondTasks[i]
         if (task.taskId) {
           const phase0Timeout = phase0TimeoutMap.get(task.taskId)
-          if (phase0Timeout && now.getTime() >= phase0Timeout && (task.status === 9 || task.status === 0)) {
-            console.log(`[Mode9] 阶段0：后挂方任务 ${task.taskId} 超时（9分钟），强制改为状态3`)
+          if (phase0Timeout && now.getTime() >= phase0Timeout && task.status !== 18 && task.status !== 3) {
+            console.log(`[Mode9] 阶段0：后挂方任务 ${task.taskId} 超时（8分钟），当前状态${task.status}，强制改为状态3`)
             hedgeRecord.secondTasks[i] = { ...hedgeRecord.secondTasks[i], status: 3 }
             await updateTaskStatusToServer(task.taskId, 3)
           }
         }
       }
       
-      // 检查阶段0是否完成：所有任务状态为 3 或 18 或超时
+      // 检查阶段0是否完成：所有任务状态为 3 或 18（超时的已经被改成3了）
       const isPhase0Completed = allCurrentTasks.every(task => {
         const status = task.status
-        const phase0Timeout = phase0TimeoutMap.get(task.taskId)
-        const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
-        return status === 3 || status === 18 || isTimeout
+        return status === 3 || status === 18
       })
       
       if (isPhase0Completed) {
-        console.log(`[Mode9] 阶段0完成，所有任务状态为 3 或 18 或超时`)
+        console.log(`[Mode9] 阶段0完成，所有任务状态为 3 或 18`)
         
-        // 检查后挂方任务状态（阶段0用18判断）
+        // 检查后挂方任务状态（阶段0用18判断，超时的已经被改成3了）
         const secondTasks = hedgeRecord.secondTasks || []
         const hasSecondTaskStatus18 = secondTasks.some(t => t.status === 18)
-        const hasSecondTaskStatus3OrTimeout = secondTasks.some(task => {
-          const phase0Timeout = phase0TimeoutMap.get(task.taskId)
-          const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
-          return task.status === 3 || isTimeout
-        })
+        const hasSecondTaskStatus3 = secondTasks.some(t => t.status === 3)
         
         // 检查先挂方主任务状态（数量最多的那个，阶段0用18判断）
         const maxShareTaskId = hedgeRecord.maxShareTaskId
         const maxShareTask = hedgeRecord.closeTasks.find(t => t.taskId === maxShareTaskId)
         const hasMaxShareTaskStatus18 = maxShareTask && maxShareTask.status === 18
-        const hasMaxShareTaskStatus3OrTimeout = maxShareTask && (() => {
-          const phase0Timeout = phase0TimeoutMap.get(maxShareTask.taskId)
-          const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
-          return maxShareTask.status === 3 || isTimeout
-        })()
+        const hasMaxShareTaskStatus3 = maxShareTask && maxShareTask.status === 3
         
-        console.log(`[Mode9] 阶段0：后挂方任务状态18: ${hasSecondTaskStatus18}, 失败/超时: ${hasSecondTaskStatus3OrTimeout}`)
-        console.log(`[Mode9] 阶段0：先挂方主任务状态18: ${hasMaxShareTaskStatus18}, 失败/超时: ${hasMaxShareTaskStatus3OrTimeout}`)
+        console.log(`[Mode9] 阶段0：后挂方任务状态18: ${hasSecondTaskStatus18}, 失败: ${hasSecondTaskStatus3}`)
+        console.log(`[Mode9] 阶段0：先挂方主任务状态18: ${hasMaxShareTaskStatus18}, 失败: ${hasMaxShareTaskStatus3}`)
         
-        // 如果后挂方任务或先挂方主任务失败/超时，整组任务结束
-        if (hasSecondTaskStatus3OrTimeout || hasMaxShareTaskStatus3OrTimeout) {
-          console.log(`[Mode9] 阶段0：后挂方任务或先挂方主任务失败/超时，将所有任务状态改为 3，整组任务结束`)
+        // 如果后挂方任务或先挂方主任务失败（状态3），整组任务结束
+        if (hasSecondTaskStatus3 || hasMaxShareTaskStatus3) {
+          console.log(`[Mode9] 阶段0：后挂方任务或先挂方主任务失败，将所有任务状态改为 3，整组任务结束`)
           await setAllTasksToFailed()
           hedgeRecord.finalStatus = 'failed'
-          hedgeRecord.errorMsg = hasSecondTaskStatus3OrTimeout ? '后挂方任务失败或超时' : '先挂方主任务失败或超时'
+          hedgeRecord.errorMsg = hasSecondTaskStatus3 ? '后挂方任务失败或超时' : '先挂方主任务失败或超时'
           console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
           finishHedge(config, hedgeRecord)
           return
@@ -13469,12 +13461,10 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
           if (takerTask) {
             const takerAmt = parseFloat(takerTask.share) || 0
             
-            // 2. 计算先挂方中失败任务（状态3或超时）的amt总和
+            // 2. 计算先挂方中失败任务（状态3，超时的已经被改成3了）的amt总和
             let failedMakerAmtSum = 0
             for (const task of hedgeRecord.closeTasks) {
-              const phase0Timeout = phase0TimeoutMap.get(task.taskId)
-              const isTimeout = phase0Timeout && now.getTime() >= phase0Timeout
-              if (task.status === 3 || isTimeout) {
+              if (task.status === 3) {
                 failedMakerAmtSum += parseFloat(task.share) || 0
               }
             }
@@ -13610,13 +13600,13 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
       }
     }
     
-    // 检查阶段1超时
+    // 检查阶段1超时：将所有非完毕状态（不是20且不是3）且超时的任务改为3
     for (let i = 0; i < hedgeRecord.closeTasks.length; i++) {
       const task = hedgeRecord.closeTasks[i]
       if (task.taskId) {
         const timeoutTime = taskTimeoutMap.get(task.taskId)
-        if (timeoutTime && now.getTime() >= timeoutTime && (task.status === 9 || task.status === 0 || task.status === 19)) {
-          console.log(`[Mode9] 阶段1：先挂方任务 ${task.taskId} 超时（2分钟），强制改为状态3`)
+        if (timeoutTime && now.getTime() >= timeoutTime && task.status !== 20 && task.status !== 3) {
+          console.log(`[Mode9] 阶段1：先挂方任务 ${task.taskId} 超时（2分钟），当前状态${task.status}，强制改为状态3`)
           hedgeRecord.closeTasks[i] = { ...hedgeRecord.closeTasks[i], status: 3 }
           await updateTaskStatusToServer(task.taskId, 3)
         }
@@ -13627,56 +13617,46 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
       const task = hedgeRecord.secondTasks[i]
       if (task.taskId) {
         const timeoutTime = taskTimeoutMap.get(task.taskId)
-        if (timeoutTime && now.getTime() >= timeoutTime && (task.status === 9 || task.status === 0 || task.status === 19)) {
-          console.log(`[Mode9] 阶段1：后挂方任务 ${task.taskId} 超时（2分钟），强制改为状态3`)
+        if (timeoutTime && now.getTime() >= timeoutTime && task.status !== 20 && task.status !== 3) {
+          console.log(`[Mode9] 阶段1：后挂方任务 ${task.taskId} 超时（2分钟），当前状态${task.status}，强制改为状态3`)
           hedgeRecord.secondTasks[i] = { ...hedgeRecord.secondTasks[i], status: 3 }
           await updateTaskStatusToServer(task.taskId, 3)
         }
       }
     }
     
-    // 检查第一阶段是否完成：所有任务状态为 3 或 20 或超时
+    // 检查第一阶段是否完成：所有任务状态为 3 或 20（超时的已经被改成3了）
     const isPhase1Completed = allCurrentTasks.every(task => {
       const status = task.status
-      const timeoutTime = taskTimeoutMap.get(task.taskId)
-      const isTimeout = timeoutTime && now.getTime() >= timeoutTime
-      return status === 3 || status === 20 || isTimeout
+      return status === 3 || status === 20
     })
     
     if (isPhase1Completed && !phase1Completed) {
       // 第一阶段完成，开始处理第二阶段逻辑
       const phase1Elapsed = phase1StartTime ? (now.getTime() - phase1StartTime) / 1000 / 60 : 0
-      console.log(`[Mode9] 阶段1完成，所有任务状态为 3 或 20 或超时，阶段1用时 ${phase1Elapsed.toFixed(1)} 分钟`)
+      console.log(`[Mode9] 阶段1完成，所有任务状态为 3 或 20，阶段1用时 ${phase1Elapsed.toFixed(1)} 分钟`)
       phase1Completed = true
       
-      // 检查后挂方任务状态
+      // 检查后挂方任务状态（超时的已经被改成3了）
       const secondTasks = hedgeRecord.secondTasks || []
       const hasSecondTaskStatus20 = secondTasks.some(t => t.status === 20)
-      const hasSecondTaskStatus3OrTimeout = secondTasks.some(task => {
-        const timeoutTime = taskTimeoutMap.get(task.taskId)
-        const isTimeout = timeoutTime && now.getTime() >= timeoutTime
-        return task.status === 3 || isTimeout
-      })
+      const hasSecondTaskStatus3 = secondTasks.some(t => t.status === 3)
       
       // 检查先挂方主任务状态（数量最多的那个）
       const maxShareTaskId = hedgeRecord.maxShareTaskId
       const maxShareTask = hedgeRecord.closeTasks.find(t => t.taskId === maxShareTaskId)
       const hasMaxShareTaskStatus20 = maxShareTask && maxShareTask.status === 20
-      const hasMaxShareTaskStatus3OrTimeout = maxShareTask && (() => {
-        const timeoutTime = taskTimeoutMap.get(maxShareTask.taskId)
-        const isTimeout = timeoutTime && now.getTime() >= timeoutTime
-        return maxShareTask.status === 3 || isTimeout
-      })()
+      const hasMaxShareTaskStatus3 = maxShareTask && maxShareTask.status === 3
       
-      console.log(`[Mode9] 阶段1：后挂方任务状态20: ${hasSecondTaskStatus20}, 失败/超时: ${hasSecondTaskStatus3OrTimeout}`)
-      console.log(`[Mode9] 阶段1：先挂方主任务状态20: ${hasMaxShareTaskStatus20}, 失败/超时: ${hasMaxShareTaskStatus3OrTimeout}`)
+      console.log(`[Mode9] 阶段1：后挂方任务状态20: ${hasSecondTaskStatus20}, 失败: ${hasSecondTaskStatus3}`)
+      console.log(`[Mode9] 阶段1：先挂方主任务状态20: ${hasMaxShareTaskStatus20}, 失败: ${hasMaxShareTaskStatus3}`)
       
-      // 如果后挂方任务或先挂方主任务失败/超时，整组任务结束
-      if (hasSecondTaskStatus3OrTimeout || hasMaxShareTaskStatus3OrTimeout) {
-        console.log(`[Mode9] 阶段1：后挂方任务或先挂方主任务失败/超时，将所有任务状态改为 3，整组任务结束`)
+      // 如果后挂方任务或先挂方主任务失败（状态3），整组任务结束
+      if (hasSecondTaskStatus3 || hasMaxShareTaskStatus3) {
+        console.log(`[Mode9] 阶段1：后挂方任务或先挂方主任务失败，将所有任务状态改为 3，整组任务结束`)
         await setAllTasksToFailed()
         hedgeRecord.finalStatus = 'failed'
-        hedgeRecord.errorMsg = hasSecondTaskStatus3OrTimeout ? '后挂方任务失败或超时' : '先挂方主任务失败或超时'
+        hedgeRecord.errorMsg = hasSecondTaskStatus3 ? '后挂方任务失败或超时' : '先挂方主任务失败或超时'
         console.log(`[Mode9] 整组任务结束，最终状态: ${hedgeRecord.finalStatus}`)
         finishHedge(config, hedgeRecord)
         return
@@ -13685,25 +13665,6 @@ const monitorHedgeStatusV9 = (config, hedgeRecord) => {
       // 如果后挂方任务和先挂方主任务都成功（状态20）
       if (hasSecondTaskStatus20 && hasMaxShareTaskStatus20) {
         console.log(`[Mode9] 阶段1成功：后挂方任务和先挂方主任务都成功，开始阶段2处理`)
-        
-        // 把超时的任务状态改为 3
-        for (const task of allCurrentTasks) {
-          const timeoutTime = taskTimeoutMap.get(task.taskId)
-          const isTimeout = timeoutTime && now.getTime() >= timeoutTime
-          if (isTimeout && task.status !== 3) {
-            console.log(`[Mode9] 任务 ${task.taskId} 超时，改为状态 3`)
-            const closeTaskIndex = hedgeRecord.closeTasks.findIndex(t => t.taskId === task.taskId)
-            if (closeTaskIndex !== -1) {
-              hedgeRecord.closeTasks[closeTaskIndex] = { ...hedgeRecord.closeTasks[closeTaskIndex], status: 3 }
-            } else {
-              const secondTaskIndex = hedgeRecord.secondTasks.findIndex(t => t.taskId === task.taskId)
-              if (secondTaskIndex !== -1) {
-                hedgeRecord.secondTasks[secondTaskIndex] = { ...hedgeRecord.secondTasks[secondTaskIndex], status: 3 }
-              }
-            }
-            await updateTaskStatusToServer(task.taskId, 3)
-          }
-        }
         
         // 开始阶段2：调用 updateTrendingTime
         if (!phase2InProgress) {
@@ -16432,6 +16393,18 @@ const isPositionChangeUnknown = (msg) => {
 }
 
 /**
+ * 检测msg中是否有有效的仓位变化数值
+ * @param {string} msg - 任务消息字符串
+ * @returns {boolean} - 如果有有效的仓位变化数值返回true，否则返回false
+ */
+const hasValidPositionChangeValue = (msg) => {
+  if (!msg) return false
+  const msgStr = typeof msg === 'string' ? msg : String(msg)
+  // 匹配 "仓位变化值为:" 后面跟着有效数字（包括负数和小数）
+  return /仓位变化值为[：:]\s*-?[\d.]+/.test(msgStr)
+}
+
+/**
  * 格式化任务消息（支持JSON格式的Type 5消息）
  */
 /**
@@ -17141,11 +17114,7 @@ onUnmounted(() => {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.9);
   word-break: break-all;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  flex: 1 1 100%;
-  max-width: 100%;
-  min-width: 0;
+  white-space: nowrap;
 }
 
 .msg-label {
@@ -18201,11 +18170,17 @@ onUnmounted(() => {
 .task-info {
   color: #6c757d;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.3rem;
-  flex-wrap: wrap;
   flex: 1;
   min-width: 0;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
 }
 
 .task-group {
@@ -18220,11 +18195,7 @@ onUnmounted(() => {
 .task-msg {
   color: #dc3545;
   font-style: italic;
-  word-wrap: break-word;
-  white-space: pre-wrap;
-  flex: 1 1 100%;
-  max-width: 100%;
-  min-width: 0;
+  white-space: nowrap;
 }
 
 .on-chain-balance {
