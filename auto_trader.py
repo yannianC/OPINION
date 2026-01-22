@@ -428,6 +428,53 @@ def update_mission_tp(mission_id, tp5=None, tp6=None, tp8=None, tp9=None, price=
     return False
 
 
+def save_recent_price(trending_id, outcome, price):
+    """
+    保存最近的价格到 /hedge/recentPrice 接口
+    
+    Args:
+        trending_id: 交易主题ID
+        outcome: 选项类型 ("YES" 或 "NO")
+        price: 价格
+        
+    Returns:
+        bool: 成功返回True，失败返回False
+    """
+    max_retries = 3
+    retry_delay = 2  # 重试间隔秒数
+    
+    url = f"{SERVER_BASE_URL}/hedge/recentPrice"
+    payload = {
+        "trendingId": trending_id,
+        "outcome": outcome,
+        "price": price
+    }
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == 0:
+                    log_print(f"[系统] ✓ 保存最近价格成功: trendingId={trending_id}, outcome={outcome}, price={price}")
+                    return True
+                else:
+                    log_print(f"[系统] ⚠ 保存最近价格失败: {data.get('msg', '未知错误')} (第{attempt + 1}/{max_retries}次)")
+            else:
+                log_print(f"[系统] ⚠ 保存最近价格失败，状态码: {response.status_code} (第{attempt + 1}/{max_retries}次)")
+        except Exception as e:
+            log_print(f"[系统] ⚠ 保存最近价格异常: {str(e)} (第{attempt + 1}/{max_retries}次)")
+        
+        # 如果不是最后一次尝试，等待后重试
+        if attempt < max_retries - 1:
+            log_print(f"[系统] 等待{retry_delay}秒后重试...")
+            time.sleep(retry_delay)
+    
+    log_print(f"[系统] ✗ 保存最近价格失败，已重试{max_retries}次")
+    return False
+
+
 def send_fingerprint_monitor_request(browser_id):
     """
     发送 fingerprint 监控请求
@@ -9617,6 +9664,25 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                                                     price = new_price
                                                     # 同时更新task_data中的价格，确保后续检查使用新价格
                                                     mission['price'] = new_price
+                                                    
+                                                    # 调用 /hedge/recentPrice 保存最近的价格
+                                                   
+                                                    ps_side = mission.get('psSide', 1)
+                                                    outcome = "YES" if ps_side == 1 else "NO"
+                                                    if trendingId:
+                                                        save_price_success = save_recent_price(trendingId, outcome, new_price)
+                                                        if save_price_success:
+                                                            log_msg = f"[5]已保存最近价格: trendingId={trendingId}, outcome={outcome}, price={new_price}"
+                                                            log_print(f"[{browser_id}] ✓ {log_msg}")
+                                                            add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                                        else:
+                                                            log_msg = f"[5]保存最近价格失败，但继续执行"
+                                                            log_print(f"[{browser_id}] ⚠ {log_msg}")
+                                                            add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
+                                                    else:
+                                                        log_msg = f"[5]trendingId为空，跳过保存最近价格"
+                                                        log_print(f"[{browser_id}] ⚠ {log_msg}")
+                                                        add_bro_log_entry(bro_log_list, browser_id, f"{log_msg}")
                                                 else:
                                                     log_msg = f"[5]价格更新后验证失败，但继续执行"
                                                     log_print(f"[{browser_id}] ⚠ {log_msg}")
