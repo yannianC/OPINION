@@ -726,6 +726,16 @@
             >
               {{ autoHedgeRunning ? '停止自动分配' : '开始自动分配' }}
             </button>
+            <label class="auto-close-at-wrap" title="勾选后，到达所选时间将自动开启自动分配（执行一次后自动取消勾选）">
+              <input type="checkbox" v-model="enableAutoOpenAt" :disabled="autoHedgeRunning" @change="saveHedgeSettings" />
+              <span class="filter-label">自动开启</span>
+              <input type="time" v-model="autoOpenTime" :disabled="!enableAutoOpenAt || autoHedgeRunning" class="auto-close-time-input" @change="saveHedgeSettings" />
+            </label>
+            <label class="auto-close-at-wrap" title="勾选后，到达所选时间将自动停止自动分配（执行一次后自动取消勾选）">
+              <input type="checkbox" v-model="enableAutoCloseAt" :disabled="autoHedgeRunning" @change="saveHedgeSettings" />
+              <span class="filter-label">自动关闭</span>
+              <input type="time" v-model="autoCloseTime" :disabled="!enableAutoCloseAt || autoHedgeRunning" class="auto-close-time-input" @change="saveHedgeSettings" />
+            </label>
             <span v-if="autoHedgeRunning" class="status-badge status-running">运行中</span>
             
             <!-- 测试模式开关 -->
@@ -3004,6 +3014,12 @@ const isAccountConfigMapped = ref(false)  // 账户配置是否成功映射
 // 自动对冲相关
 const autoHedgeRunning = ref(false)
 const autoHedgeInterval = ref(null)
+const enableAutoCloseAt = ref(false)  // 是否启用到达时间自动关闭
+const autoCloseTime = ref('22:00')   // 自动关闭时间 HH:mm
+const autoCloseCheckInterval = ref(null)  // 检查是否到达关闭时间的定时器
+const enableAutoOpenAt = ref(false)  // 是否启用到达时间自动开启
+const autoOpenTime = ref('08:00')    // 自动开启时间 HH:mm
+const autoOpenCheckInterval = ref(null)  // 检查是否到达开启时间的定时器
 const activeConfigs = ref([])  // 启用的配置列表
 const hedgeStatusInterval = ref(null)  // 对冲状态轮询定时器
 const isRandomGetting = ref(false)  // 是否正在随机获取主题
@@ -3402,7 +3418,10 @@ const getGroupNo = (fingerprintNo) => {
 
 // 本地存储的对冲记录
 const LOCAL_STORAGE_KEY = 'hedge_logs'
+const HEDGE_LOG_MAX = 300  // 最多保留条数，减少 localStorage 体积与写入耗时
 const HEDGE_SETTINGS_KEY = 'hedge_settings'
+// 生产环境关闭详细日志，避免长时间运行后 console 卡顿；控制台执行 window.__HEDGE_DEBUG__=true 可开启
+const debugLog = (...args) => { if (typeof window !== 'undefined' && window.__HEDGE_DEBUG__) console.log(...args) }
 const MONITOR_BROWSER_KEY = 'monitor_browser_ids'
 const CONFIG_VISIBLE_KEY = 'config_visible_status'  // 配置显示状态
 const CONFIG_BLACKLIST_KEY = 'config_blacklist'  // 配置拉黑状态
@@ -6681,6 +6700,34 @@ const startAutoHedge = () => {
   autoHedgeRunning.value = true
   currentBatchIndex.value = 0  // 重置批次索引
   
+  // 若勾选自动关闭时间，启动定时检查（每 30 秒）
+  if (enableAutoCloseAt.value && autoCloseTime.value) {
+    if (autoCloseCheckInterval.value) {
+      clearInterval(autoCloseCheckInterval.value)
+      autoCloseCheckInterval.value = null
+    }
+    // 计算下次关闭时间（基于启动时刻）
+    const startNow = new Date()
+    const [closeH, closeM] = autoCloseTime.value.split(':').map(Number)
+    let nextCloseTarget = new Date(startNow.getFullYear(), startNow.getMonth(), startNow.getDate(), closeH, closeM, 0, 0)
+    if (startNow.getTime() >= nextCloseTarget.getTime()) nextCloseTarget.setDate(nextCloseTarget.getDate() + 1)
+    
+    autoCloseCheckInterval.value = setInterval(() => {
+      if (!autoHedgeRunning.value) return
+      const now = new Date()
+      if (now.getTime() >= nextCloseTarget.getTime()) {
+        if (autoCloseCheckInterval.value) {
+          clearInterval(autoCloseCheckInterval.value)
+          autoCloseCheckInterval.value = null
+        }
+        enableAutoCloseAt.value = false  // 执行一次后自动取消勾选
+        saveHedgeSettings()
+        stopAutoHedge()
+        showToast('已到达自动关闭时间，已停止自动分配', 'info')
+      }
+    }, 30000)
+  }
+  
   // 如果启用了分批模式
   if (enableBatchMode.value) {
     // 验证批次设置
@@ -6695,12 +6742,12 @@ const startAutoHedge = () => {
       return
     }
     
-    console.log('开始自动对冲（分批执行模式）')
+    debugLog('开始自动对冲（分批执行模式）')
     // 立即执行第一批
     executeBatch()
   } else {
     // 不分批，直接执行所有主题
-    console.log('开始自动对冲（全部同时执行模式）')
+    debugLog('开始自动对冲（全部同时执行模式）')
     executeAllTopics()
   }
 }
@@ -6712,6 +6759,10 @@ const stopAutoHedge = () => {
   autoHedgeRunning.value = false
   
   // 清除定时器
+  if (autoCloseCheckInterval.value) {
+    clearInterval(autoCloseCheckInterval.value)
+    autoCloseCheckInterval.value = null
+  }
   if (autoHedgeInterval.value) {
     clearInterval(autoHedgeInterval.value)
     autoHedgeInterval.value = null
@@ -6731,7 +6782,7 @@ const stopAutoHedge = () => {
     config.retryCount = 0
     config.errorMessage = null
     config.noHedgeSince = null
-    console.log(`配置 ${config.id} - 清除状态`)
+    debugLog(`配置 ${config.id} - 清除状态`)
   }
   
   currentBatchIndex.value = 0
@@ -7186,12 +7237,12 @@ const executeAllTopics = async () => {
   let validConfigs = filteredActiveConfigs.value.filter(c => c.trendingPart1 && c.trendingPart2)
   
   if (validConfigs.length === 0) {
-    console.log('没有有效的主题配置')
+    debugLog('没有有效的主题配置')
     return
   }
   
   // 不打乱顺序，直接使用列表顺序从上往下执行
-  console.log(`开始执行所有 ${validConfigs.length} 个主题（不分批模式，按列表顺序执行）`)
+  debugLog(`开始执行所有 ${validConfigs.length} 个主题（不分批模式，按列表顺序执行）`)
   
   // 执行所有主题的任务
   await executeAutoHedgeTasksForBatch(validConfigs)
@@ -7231,7 +7282,7 @@ const executeBatch = async () => {
   const totalBatches = Math.ceil(validConfigs.length / batchSize.value)
   
   if (totalBatches === 0) {
-    console.log('没有有效的主题配置')
+    debugLog('没有有效的主题配置')
     return
   }
   
@@ -7240,7 +7291,7 @@ const executeBatch = async () => {
   const endIndex = Math.min(startIndex + batchSize.value, validConfigs.length)
   const currentBatchConfigs = validConfigs.slice(startIndex, endIndex)
   
-  console.log(`开始执行第 ${currentBatchIndex.value + 1}/${totalBatches} 批，包含 ${currentBatchConfigs.length} 个主题`)
+  debugLog(`开始执行第 ${currentBatchIndex.value + 1}/${totalBatches} 批，包含 ${currentBatchConfigs.length} 个主题`)
   
   // 记录批次开始时间
   const batchStartTime = Date.now()
@@ -7256,7 +7307,7 @@ const executeBatch = async () => {
   const remainingTime = Math.max(0, batchExecutionTime.value * 60 * 1000 - elapsed)
   
   if (remainingTime > 0) {
-    console.log(`批次执行完成，等待 ${remainingTime}ms 后切换到下一批`)
+    debugLog(`批次执行完成，等待 ${remainingTime}ms 后切换到下一批`)
     batchTimer.value = setTimeout(() => {
       moveToNextBatch()
     }, remainingTime)
@@ -7278,14 +7329,14 @@ const moveToNextBatch = () => {
   const totalBatches = Math.ceil(validConfigs.length / batchSize.value)
   
   if (totalBatches === 0) {
-    console.log('没有有效的主题配置，停止执行')
+    debugLog('没有有效的主题配置，停止执行')
     return
   }
   
   // 移动到下一批（循环执行）
   currentBatchIndex.value = (currentBatchIndex.value + 1) % totalBatches
   
-  console.log(`切换到第 ${currentBatchIndex.value + 1}/${totalBatches} 批`)
+  debugLog(`切换到第 ${currentBatchIndex.value + 1}/${totalBatches} 批`)
   
   // 执行下一批
   executeBatch()
@@ -7295,7 +7346,7 @@ const moveToNextBatch = () => {
  * 执行指定批次的主题任务
  */
 const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
-  console.log(`执行批次任务，包含 ${batchConfigs.length} 个主题`)
+  debugLog(`执行批次任务，包含 ${batchConfigs.length} 个主题`)
   
   // 检查901-927任务数是否满足条件
   const canTradeBy901To927 = await checkTask901To927Condition()
@@ -7338,7 +7389,7 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
             const startTime = new Date(hedge.startTime)
             const elapsed = (now - startTime) / 1000 / 60
             if (elapsed >= 20) {
-              console.log(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
+              debugLog(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
               hedge.finalStatus = 'timeout'
               finishHedge(config, hedge)
               hasTimeout = true
@@ -7356,7 +7407,7 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
           
           if (remainingRunning >= maxTasks) {
-            console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
+            debugLog(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
             // 跳过，但会在循环末尾等待1秒
           } else {
             // 可以继续处理
@@ -7371,19 +7422,19 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
             
             if (elapsed < intervalMinutes) {
               const remaining = Math.ceil((intervalMinutes - elapsed) * 60)
-              console.log(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
+              debugLog(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
               // 跳过，但会在循环末尾等待1秒
             } else {
               // 间隔时间已过，清除记录
               config.lastGroupFinishTime = null
-              console.log(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
+              debugLog(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
               // 可以继续处理
               await processConfigOrderbook(config, canStartNewHedge)
             }
           } else {
             // 测试模式：如果已经请求过一组任务，则不再请求新的任务
             if (testModeSingleGroup.value && config.hasRequestedGroup) {
-              console.log(`配置 ${config.id} - 测试模式已开启，已请求过一组任务，停止请求新任务`)
+              debugLog(`配置 ${config.id} - 测试模式已开启，已请求过一组任务，停止请求新任务`)
               // 跳过，但会在循环末尾等待1秒
             } else {
               // 可以继续处理
@@ -7410,7 +7461,7 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
 const processConfigOrderbook = async (config, canStartNewHedge) => {
   // 检查是否正在请求中
   if (config.isFetching) {
-    console.log(`配置 ${config.id} - 正在请求订单薄中，跳过`)
+    debugLog(`配置 ${config.id} - 正在请求订单薄中，跳过`)
     return
   }
   
@@ -7420,7 +7471,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
   
   if (!shouldFetch) {
     const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
-    console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
+    debugLog(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
     return
   }
   
@@ -7429,7 +7480,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
   config.lastRequestTime = now
   
   try {
-    console.log(`配置 ${config.id} - 开始请求订单薄...`)
+    debugLog(`配置 ${config.id} - 开始请求订单薄...`)
     
     // 解析订单薄数据
     const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
@@ -7443,7 +7494,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
     config.retryCount = 0  // 重置重试次数
     config.errorMessage = null  // 清除错误信息
     
-    console.log(`配置 ${config.id} - 订单薄数据:`, {
+    debugLog(`配置 ${config.id} - 订单薄数据:`, {
       先挂方: priceInfo.firstSide,
       先挂价格: priceInfo.price1,
       后挂价格: priceInfo.price2,
@@ -7455,7 +7506,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
       // 检查是否满足对冲条件
       const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
       if (hedgeCheck.canHedge) {
-        console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
+        debugLog(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
         
         // 清空无法对冲时间和标记
         config.noHedgeSince = null
@@ -7470,7 +7521,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
         // 记录对冲时间
         config.lastHedgeTime = Date.now()
       } else {
-        console.log(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
+        debugLog(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
         
         // 设置错误信息，显示具体原因
         config.errorMessage = hedgeCheck.reason
@@ -7516,7 +7567,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
     let basicInfo = null
     try {
       basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
-      console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
+      debugLog(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
     } catch (basicError) {
       console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
     }
@@ -7535,7 +7586,7 @@ const processConfigOrderbook = async (config, canStartNewHedge) => {
     
     // 随机1-3秒后重试
     const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
-    console.log(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
+    debugLog(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
     
     setTimeout(() => {
       config.isFetching = false
@@ -7956,7 +8007,7 @@ const parseOrderbookData = async (config, isClose) => {
     // 请求 calLimitOrder API 获取挂单数据
     // try {
     //   const limitOrderData = await fetchCalLimitOrder(config.id)
-    //   console.log(`配置 ${config.id} - 获取到挂单数据:`, limitOrderData)
+    //   debugLog(`配置 ${config.id} - 获取到挂单数据:`, limitOrderData)
       
     //   if (isClose) {
     //     // 平仓：将买入转换为卖出，汇合卖出挂单
@@ -7965,11 +8016,11 @@ const parseOrderbookData = async (config, isClose) => {
     //     // 从订单薄中减去对应的卖出挂单
     //     if (convertedAsks.yes.length > 0) {
     //       yesAsks = subtractLimitOrdersFromOrderbook(yesAsks, convertedAsks.yes)
-    //       console.log(`配置 ${config.id} - 从YES卖单中减去 ${convertedAsks.yes.length} 个挂单`)
+    //       debugLog(`配置 ${config.id} - 从YES卖单中减去 ${convertedAsks.yes.length} 个挂单`)
     //     }
     //     if (convertedAsks.no.length > 0) {
     //       noAsks = subtractLimitOrdersFromOrderbook(noAsks, convertedAsks.no)
-    //       console.log(`配置 ${config.id} - 从NO卖单中减去 ${convertedAsks.no.length} 个挂单`)
+    //       debugLog(`配置 ${config.id} - 从NO卖单中减去 ${convertedAsks.no.length} 个挂单`)
     //     }
     //   } else {
     //     // 开仓：将卖出转换为买入，汇合买入挂单
@@ -7978,11 +8029,11 @@ const parseOrderbookData = async (config, isClose) => {
     //     // 从订单薄中减去对应的买入挂单
     //     if (convertedBids.yes.length > 0) {
     //       yesBids = subtractLimitOrdersFromOrderbook(yesBids, convertedBids.yes)
-    //       console.log(`配置 ${config.id} - 从YES买单中减去 ${convertedBids.yes.length} 个挂单`)
+    //       debugLog(`配置 ${config.id} - 从YES买单中减去 ${convertedBids.yes.length} 个挂单`)
     //     }
     //     if (convertedBids.no.length > 0) {
     //       noBids = subtractLimitOrdersFromOrderbook(noBids, convertedBids.no)
-    //       console.log(`配置 ${config.id} - 从NO买单中减去 ${convertedBids.no.length} 个挂单`)
+    //       debugLog(`配置 ${config.id} - 从NO买单中减去 ${convertedBids.no.length} 个挂单`)
     //     }
     //   }
     // } catch (error) {
@@ -8442,7 +8493,7 @@ const checkOrderbookHedgeCondition = (priceInfo) => {
  */
 const executeHedgeFromOrderbook = async (config, priceInfo) => {
   try {
-    console.log(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
+    debugLog(`配置 ${config.id} - 符合对冲条件，准备执行对冲`, priceInfo)
     
     // 使用计算出的最终价格，如果没有则使用原来的逻辑
     let orderPrice
@@ -8483,17 +8534,17 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     const availableSlots = taskCount - runningHedges.length
     
     if (availableSlots <= 0) {
-      console.log(`配置 ${config.id} - 已达到最大任务数 ${taskCount}，跳过`)
+      debugLog(`配置 ${config.id} - 已达到最大任务数 ${taskCount}，跳过`)
       return
     }
     
-    console.log(`配置 ${config.id} - 需要执行 ${availableSlots} 个对冲任务（最大: ${taskCount}, 当前运行: ${runningHedges.length}）`)
+    debugLog(`配置 ${config.id} - 需要执行 ${availableSlots} 个对冲任务（最大: ${taskCount}, 当前运行: ${runningHedges.length}）`)
     
     // 顺序请求多个对冲任务（避免同时请求导致的问题）
     const hedgeResults = []
     for (let i = 0; i < availableSlots; i++) {
       try {
-        console.log(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
+        debugLog(`配置 ${config.id} - 开始请求第 ${i + 1}/${availableSlots} 个对冲任务...`)
         
         // 根据价格和执行模式开关选择接口
         const orderPriceNum = parseFloat(orderPrice)
@@ -8505,9 +8556,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           if (hedgeMode.enableMove) {
             apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model4Move'
             shouldExecute = true
-            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，且挪仓开关已开启，使用 model4Move 接口`)
+            debugLog(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，且挪仓开关已开启，使用 model4Move 接口`)
           } else {
-            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，但挪仓开关未开启，跳过`)
+            debugLog(`配置 ${config.id} - 价格 ${orderPriceNum} < 50，但挪仓开关未开启，跳过`)
             continue
           }
         } else {
@@ -8515,9 +8566,9 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
           if (hedgeMode.enableClose) {
             apiUrl = 'https://sg.bicoin.com.cn/99l/hedge/model5Close'
             shouldExecute = true
-            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，且平仓开关已开启，使用 model5Close 接口`)
+            debugLog(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，且平仓开关已开启，使用 model5Close 接口`)
           } else {
-            console.log(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，但平仓开关未开启，跳过`)
+            debugLog(`配置 ${config.id} - 价格 ${orderPriceNum} >= 50，但平仓开关未开启，跳过`)
             continue
           }
         }
@@ -8529,7 +8580,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
         // 检查901-927任务数是否满足条件
         const canTradeBy901To927 = await checkTask901To927Condition()
         if (!canTradeBy901To927) {
-          console.log(`配置 ${config.id} - 901-927任务数不满足条件，跳过本次对冲任务请求`)
+          debugLog(`配置 ${config.id} - 901-927任务数不满足条件，跳过本次对冲任务请求`)
           continue
         }
         
@@ -8570,7 +8621,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
         
         if (response.data && response.data.data) {
           const responseData = response.data.data
-          console.log(`配置 ${config.id} - 获取对冲数据成功 (任务 ${i + 1}/${availableSlots}):`, responseData)
+          debugLog(`配置 ${config.id} - 获取对冲数据成功 (任务 ${i + 1}/${availableSlots}):`, responseData)
           
           // 保存missionId用于下次请求（如果存在）
           if (responseData.missionId) {
@@ -8591,14 +8642,14 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             // 测试模式：标记已请求过一组任务
             if (testModeSingleGroup.value && i === 0) {
               config.hasRequestedGroup = true
-              console.log(`配置 ${config.id} - 测试模式：已请求到一组任务，标记为已请求，后续将不再请求新任务`)
+              debugLog(`配置 ${config.id} - 测试模式：已请求到一组任务，标记为已请求，后续将不再请求新任务`)
             }
           } else {
             console.warn(`配置 ${config.id} - closeLimitList 或 takerNumberInfo 为空或格式不正确`)
           }
           
           hedgeResults.push(true)
-          console.log(`配置 ${config.id} - 第 ${i + 1} 个对冲任务已提交成功`)
+          debugLog(`配置 ${config.id} - 第 ${i + 1} 个对冲任务已提交成功`)
         } else if (response.data && response.data.msg) {
           // 服务器返回错误消息，添加到对冲信息中
           console.warn(`配置 ${config.id} - 对冲任务 ${i + 1} 服务器返回错误:`, response.data.msg)
@@ -8636,7 +8687,7 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
     }
     
     const successCount = hedgeResults.filter(r => r === true).length
-    console.log(`配置 ${config.id} - 已提交 ${successCount}/${availableSlots} 个对冲任务`)
+    debugLog(`配置 ${config.id} - 已提交 ${successCount}/${availableSlots} 个对冲任务`)
   } catch (error) {
     console.error(`配置 ${config.id} - 执行对冲失败:`, error)
   }
@@ -8720,7 +8771,7 @@ const closeConfigTask = async (config) => {
     )
     
     if (response.data) {
-      console.log(`配置 ${config.id} 已关闭`)
+      debugLog(`配置 ${config.id} 已关闭`)
       showToast(`任务"${config.trending}"已关闭`, 'success')
       
       // 3. 更新本地配置列表中这个配置的状态（避免重新加载所有配置）
@@ -8762,7 +8813,7 @@ const checkAndReplaceTopics = async () => {
       
       // 如果有正在运行的对冲任务，不替换
       if (runningHedges.length > 0) {
-        console.log(`配置 ${config.id} - 有正在运行的对冲任务，暂不替换`)
+        debugLog(`配置 ${config.id} - 有正在运行的对冲任务，暂不替换`)
         return false
       }
       
@@ -8827,7 +8878,7 @@ const checkAndReplaceTopics = async () => {
             configInList.enabled = false
           }
           
-          console.log(`配置 ${config.id} 已关闭`)
+          debugLog(`配置 ${config.id} 已关闭`)
         } catch (error) {
           console.error(`关闭配置 ${config.id} 失败:`, error)
         }
@@ -9051,7 +9102,7 @@ const openConfigTask = async (config) => {
     )
     
     if (response.data) {
-      console.log(`配置 ${config.id} 已打开`)
+      debugLog(`配置 ${config.id} 已打开`)
       
       // 2. 更新本地显示状态（只更新这一个主题，不影响其他主题）
       try {
@@ -9517,7 +9568,12 @@ const saveHedgeSettings = () => {
       // 白名单设置
       enableWhitelist: enableWhitelist.value,
       exportWhitelistInput: exportWhitelistInput.value,
-      showOnlyWhitelist: showOnlyWhitelist.value
+      showOnlyWhitelist: showOnlyWhitelist.value,
+      // 自动开启/关闭时间设置
+      enableAutoOpenAt: enableAutoOpenAt.value,
+      autoOpenTime: autoOpenTime.value,
+      enableAutoCloseAt: enableAutoCloseAt.value,
+      autoCloseTime: autoCloseTime.value
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -9694,9 +9750,47 @@ const loadHedgeSettings = () => {
     if (settings.showOnlyWhitelist !== undefined) {
       showOnlyWhitelist.value = settings.showOnlyWhitelist
     }
+    
+    // 自动开启/关闭时间设置
+    if (settings.enableAutoOpenAt !== undefined) {
+      enableAutoOpenAt.value = settings.enableAutoOpenAt
+    }
+    if (settings.autoOpenTime !== undefined) {
+      autoOpenTime.value = settings.autoOpenTime
+    }
+    if (settings.enableAutoCloseAt !== undefined) {
+      enableAutoCloseAt.value = settings.enableAutoCloseAt
+    }
+    if (settings.autoCloseTime !== undefined) {
+      autoCloseTime.value = settings.autoCloseTime
+    }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
   }
+}
+
+/**
+ * 启动自动开启检查定时器（页面加载后持续检查）
+ */
+const startAutoOpenCheck = () => {
+  if (autoOpenCheckInterval.value) {
+    clearInterval(autoOpenCheckInterval.value)
+    autoOpenCheckInterval.value = null
+  }
+  
+  autoOpenCheckInterval.value = setInterval(() => {
+    // 仅当勾选了自动开启且当前未在运行时才检查
+    if (!enableAutoOpenAt.value || autoHedgeRunning.value) return
+    
+    const now = new Date()
+    const nowHHmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    if (nowHHmm === autoOpenTime.value) {
+      enableAutoOpenAt.value = false  // 执行一次后自动取消勾选
+      saveHedgeSettings()
+      showToast('已到达自动开启时间，正在开始自动分配...', 'info')
+      toggleAutoHedge()
+    }
+  }, 30000)  // 每30秒检查一次
 }
 
 /**
@@ -11586,7 +11680,7 @@ const finishHedge = (config, hedgeRecord) => {
       pausedType3Tasks.value.delete(config.id)
       // 记录任务组结束时间（用于任务间隔控制）
       config.lastGroupFinishTime = Date.now()
-      console.log(`配置 ${config.id} - 所有任务已结束，记录结束时间，等待间隔后再分配新任务`)
+      debugLog(`配置 ${config.id} - 所有任务已结束，记录结束时间，等待间隔后再分配新任务`)
     }
   } else {
     // 兼容旧代码
@@ -11596,18 +11690,19 @@ const finishHedge = (config, hedgeRecord) => {
 }
 
 /**
- * 保存对冲记录到本地存储
+ * 保存对冲记录到本地存储（异步写入，避免阻塞主线程）
  */
 const saveHedgeLog = (hedgeRecord) => {
   try {
     const logs = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]')
     logs.push(hedgeRecord)
-    
-    if (logs.length > 500) {
-      logs.splice(0, logs.length - 500)
+    if (logs.length > HEDGE_LOG_MAX) {
+      logs.splice(0, logs.length - HEDGE_LOG_MAX)
     }
-    
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(logs))
+    const toWrite = JSON.stringify(logs)
+    setTimeout(() => {
+      try { localStorage.setItem(LOCAL_STORAGE_KEY, toWrite) } catch (_) {}
+    }, 0)
   } catch (e) {
     console.error('保存对冲日志失败:', e)
   }
@@ -11624,7 +11719,7 @@ const fetchHedgeStatus = async () => {
       const data = response.data.data
       hedgeStatus.amtSum = data.amtSum || 0
       hedgeStatus.amt = data.amt || 0
-      console.log('对冲状态已更新:', hedgeStatus)
+      debugLog('对冲状态已更新:', hedgeStatus)
     }
   } catch (error) {
     console.error('获取对冲状态失败:', error)
@@ -11934,7 +12029,7 @@ const executeAutoHedgeTasks = async () => {
     try {
       // 检查该主题的token是否配置完整
       if (!config.trendingPart1 || !config.trendingPart2) {
-        console.log(`配置 ${config.id} - 缺少tokenId配置，跳过`)
+        debugLog(`配置 ${config.id} - 缺少tokenId配置，跳过`)
         continue
       }
       
@@ -11950,7 +12045,7 @@ const executeAutoHedgeTasks = async () => {
           const startTime = new Date(hedge.startTime)
           const elapsed = (now - startTime) / 1000 / 60
           if (elapsed >= 20) {
-            console.log(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
+            debugLog(`配置 ${config.id} 对冲任务 ${hedge.id} 超时（${elapsed.toFixed(1)}分钟），强制结束`)
             hedge.finalStatus = 'timeout'
             finishHedge(config, hedge)
             hasTimeout = true
@@ -11968,7 +12063,7 @@ const executeAutoHedgeTasks = async () => {
         const maxTasks = Math.max(1, Math.floor(hedgeTasksPerTopic.value) || 2)
         
         if (remainingRunning >= maxTasks) {
-          console.log(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
+          debugLog(`配置 ${config.id} 正在执行 ${remainingRunning} 个对冲任务（已达最大 ${maxTasks}），跳过订单薄请求`)
           continue
         }
       } else {
@@ -11980,19 +12075,19 @@ const executeAutoHedgeTasks = async () => {
           
           if (elapsed < intervalMinutes) {
             const remaining = Math.ceil((intervalMinutes - elapsed) * 60)
-            console.log(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
+            debugLog(`配置 ${config.id} - 任务组刚结束，等待间隔时间（还需等待 ${remaining} 秒）`)
             continue
           } else {
             // 间隔时间已过，清除记录
             config.lastGroupFinishTime = null
-            console.log(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
+            debugLog(`配置 ${config.id} - 任务间隔时间已过，可以开始新的任务分配`)
           }
         }
       }
       
       // 检查是否正在请求中
       if (config.isFetching) {
-        console.log(`配置 ${config.id} - 正在请求订单薄中，跳过`)
+        debugLog(`配置 ${config.id} - 正在请求订单薄中，跳过`)
         continue
       }
       
@@ -12002,7 +12097,7 @@ const executeAutoHedgeTasks = async () => {
       
       if (!shouldFetch) {
         const remaining = Math.ceil((20000 - (now - config.lastRequestTime)) / 1000)
-        console.log(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
+        debugLog(`配置 ${config.id} - 距离下次请求还有 ${remaining} 秒`)
         continue
       }
       
@@ -12011,7 +12106,7 @@ const executeAutoHedgeTasks = async () => {
       config.lastRequestTime = now
       
       try {
-        console.log(`配置 ${config.id} - 开始请求订单薄...`)
+        debugLog(`配置 ${config.id} - 开始请求订单薄...`)
         
         // 解析订单薄数据
         const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
@@ -12025,7 +12120,7 @@ const executeAutoHedgeTasks = async () => {
         config.retryCount = 0  // 重置重试次数
         config.errorMessage = null  // 清除错误信息
         
-        console.log(`配置 ${config.id} - 订单薄数据:`, {
+        debugLog(`配置 ${config.id} - 订单薄数据:`, {
           先挂方: priceInfo.firstSide,
           先挂价格: priceInfo.price1,
           后挂价格: priceInfo.price2,
@@ -12037,7 +12132,7 @@ const executeAutoHedgeTasks = async () => {
           // 检查是否满足对冲条件
           const hedgeCheck = checkOrderbookHedgeCondition(priceInfo)
           if (hedgeCheck.canHedge) {
-            console.log(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
+            debugLog(`配置 ${config.id} - 满足对冲条件，开始执行对冲`)
             
             // 清空无法对冲时间和标记
             config.noHedgeSince = null
@@ -12052,7 +12147,7 @@ const executeAutoHedgeTasks = async () => {
             // 记录对冲时间
             config.lastHedgeTime = Date.now()
           } else {
-            console.log(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
+            debugLog(`配置 ${config.id} - 不满足对冲条件: ${hedgeCheck.reason}`)
             
             // 设置错误信息，显示具体原因
             config.errorMessage = hedgeCheck.reason
@@ -12098,7 +12193,7 @@ const executeAutoHedgeTasks = async () => {
         let basicInfo = null
         try {
           basicInfo = await fetchOrderbookBasic(config, hedgeMode.isClose)
-          console.log(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
+          debugLog(`配置 ${config.id} - 虽然订单薄检查失败，但获取到基本数据:`, basicInfo)
         } catch (basicError) {
           console.warn(`配置 ${config.id} - 获取基本订单薄数据也失败:`, basicError)
         }
@@ -12117,7 +12212,7 @@ const executeAutoHedgeTasks = async () => {
         
         // 随机1-3秒后重试
         const retryDelay = Math.floor(Math.random() * 2000) + 1000  // 1000-3000ms
-        console.log(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
+        debugLog(`配置 ${config.id} - 将在 ${retryDelay}ms 后重试（第 ${config.retryCount} 次）`)
         
         setTimeout(() => {
           config.isFetching = false
@@ -12670,6 +12765,9 @@ onMounted(() => {
   hedgeStatusInterval.value = setInterval(() => {
     fetchHedgeStatus()
   }, 30000)
+  
+  // 启动自动开启检查定时器
+  startAutoOpenCheck()
 })
 
 onUnmounted(() => {
@@ -12681,6 +12779,12 @@ onUnmounted(() => {
   }
   if (hedgeStatusInterval.value) {
     clearInterval(hedgeStatusInterval.value)
+  }
+  if (autoCloseCheckInterval.value) {
+    clearInterval(autoCloseCheckInterval.value)
+  }
+  if (autoOpenCheckInterval.value) {
+    clearInterval(autoOpenCheckInterval.value)
   }
 })
 </script>
@@ -13409,6 +13513,32 @@ onUnmounted(() => {
 }
 
 .depth-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 自动关闭时间（开始自动分配后） */
+.auto-close-at-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  cursor: default;
+}
+.auto-close-at-wrap input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.auto-close-time-input {
+  padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.15);
+  color: inherit;
+  font-size: 0.9rem;
+}
+.auto-close-time-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
