@@ -330,6 +330,18 @@
                 style="width: 80px;"
               />
             </div>
+            <!-- --- 新增两个输入框开始 --- -->
+            <div class="trending-filter">
+              <label>单日最大交易额:</label>
+              <input v-model.number="hedgeMode.maxTradeDay" type="number" class="filter-input" placeholder="不限制"
+                :disabled="autoHedgeRunning" @blur="saveHedgeSettings" style="width: 100px;" />
+            </div>
+            <div class="trending-filter">
+              <label>单周最大交易额:</label>
+              <input v-model.number="hedgeMode.maxTradeWeek" type="number" class="filter-input" placeholder="不限制"
+                :disabled="autoHedgeRunning" @blur="saveHedgeSettings" style="width: 100px;" />
+            </div>
+            <!-- --- 新增两个输入框结束 --- -->
           </div>
           
           <!-- 深度差相关设置 -->
@@ -3895,7 +3907,10 @@ const hedgeMode = reactive({
   smallAccAmt: 2,  // 小账户数量，默认2
   smallAccPosMinAmt: 0,  // 小账户最少持仓，默认0
   smallAccPosMaxAmt: 500,  // 小账户最多持仓，默认500
-  cancelOrderDelaySecondsMode9: 60  // 模式9取消挂单延迟时间（秒），默认60
+  cancelOrderDelaySecondsMode9: 60,  // 模式9取消挂单延迟时间（秒），默认60
+  // --- 新增参数 ---
+  maxTradeDay: null,    // 单日最大交易额
+  maxTradeWeek: null    // 单周最大交易额
 })
 
 // 平仓最小数量价格映射表（后挂方价格 -> 最小数量）
@@ -10621,7 +10636,10 @@ const executeHedgeFromOrderbook = async (config, priceInfo) => {
             minCloseAmt: getMinCloseAmt(orderPrice),  // 平仓最小数量（参数1，支持自动模式）
             maxOpenHour: hedgeMode.maxOpenHour,  // 可加仓时间（小时）
             closeOpenHourArea: hedgeMode.closeOpenHourArea,  // 可平仓随机区间（小时）
-            numberType: parseInt(selectedNumberType.value)  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+            numberType: parseInt(selectedNumberType.value),  // 账号类型：1-全部账户, 2-1000个账户, 3-1000个账户中未达标的
+            // --- 新增传参 ---
+            maxTradeDay: hedgeMode.maxTradeDay,
+            maxTradeWeek: hedgeMode.maxTradeWeek
           }
           // 如果 maxIpDelay 有值，则添加到请求参数中
           if (hedgeMode.maxIpDelay && hedgeMode.maxIpDelay !== '') {
@@ -12440,7 +12458,10 @@ const saveHedgeSettings = () => {
       selectedNumberType: selectedNumberType.value,
       // 拉黑设置
       enableBlacklist: enableBlacklist.value,
-      exportBlacklistInput: exportBlacklistInput.value
+      exportBlacklistInput: exportBlacklistInput.value,
+      // --- 新增保存 ---
+      maxTradeDay: hedgeMode.maxTradeDay,
+      maxTradeWeek: hedgeMode.maxTradeWeek,
     }))
   } catch (e) {
     console.error('保存对冲设置失败:', e)
@@ -12761,6 +12782,14 @@ const loadHedgeSettings = () => {
     }
     if (settings.cancelOrderDelaySecondsMode9 !== undefined) {
       hedgeMode.cancelOrderDelaySecondsMode9 = settings.cancelOrderDelaySecondsMode9
+    }
+    
+    // --- 新增加载 ---
+    if (settings.maxTradeDay !== undefined) {
+      hedgeMode.maxTradeDay = settings.maxTradeDay
+    }
+    if (settings.maxTradeWeek !== undefined) {
+      hedgeMode.maxTradeWeek = settings.maxTradeWeek
     }
   } catch (e) {
     console.error('加载对冲设置失败:', e)
@@ -13144,7 +13173,10 @@ const executeHedgeTaskMode9 = async (config, hedgeData) => {
       price: secondPrice,
       tp3: isFastMode.value ? "1" : "0",
       tp5: hedgeMode.openOrderCancelHours,
-      tp14: Math.round(cancelOrderDelaySeconds)  // 取消挂单延迟时间
+      tp14: Math.round(cancelOrderDelaySeconds),  // 取消挂单延迟时间
+      // --- 新增下单传参 ---
+      tp15: hedgeMode.maxTradeDay,
+      tp16: hedgeMode.maxTradeWeek
     }
 
     // 添加深度差相关参数
@@ -13957,7 +13989,10 @@ const executeHedgeTask = async (config, hedgeData) => {
       amt: floorToTwoDecimals(firstShare),  // 先挂方数量，保留2位小数向下取整
       price: hedgeData.currentPrice,
       tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
-      tp5: hedgeMode.openOrderCancelHours  // 挂单超过XX小时撤单
+      tp5: hedgeMode.openOrderCancelHours,  // 挂单超过XX小时撤单
+      // --- 新增下单传参 ---
+      tp15: hedgeMode.maxTradeDay,
+      tp16: hedgeMode.maxTradeWeek
     }
     
     // 根据深度差范围和开关决定是否传递tp2和tp4
@@ -14594,7 +14629,10 @@ const executeHedgeTaskV2 = async (config, hedgeData) => {
           amt: share,
           price: taskPrice,
           tp3: isFastMode.value ? "1" : "0",  // 根据模式设置tp3
-          tp5: hedgeMode.openOrderCancelHours  // 挂单超过XX小时撤单
+          tp5: hedgeMode.openOrderCancelHours,  // 挂单超过XX小时撤单
+          // --- 新增下单传参 ---
+          tp15: hedgeMode.maxTradeDay,
+          tp16: hedgeMode.maxTradeWeek
         }
         
         // 根据深度差范围和开关决定是否传递tp2和tp4

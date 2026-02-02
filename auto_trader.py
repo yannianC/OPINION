@@ -11726,283 +11726,240 @@ def cancel_expired_open_orders(driver, serial_number, tp5, current_ip=None):
         return False
 
 
+# ============================================================================
+# 辅助函数 (必须包含，否则主函数会报错)
+# ============================================================================
+def get_text_from_element(element):
+    """鲁棒的文本获取函数，优先获取 p 标签，否则获取自身文本"""
+    try:
+        text = element.text.strip()
+        if text:
+            return text
+        # 尝试找内部 p 标签
+        p_tags = element.find_elements(By.TAG_NAME, "p")
+        if p_tags:
+            return p_tags[0].text.strip()
+        return ""
+    except:
+        return ""
+
+
+# ============================================================================
+# 2. 核心抓取函数（逻辑修正版）
+# ============================================================================
 def click_opinion_open_orders_and_get_data(driver, serial_number):
-    """
-    点击 Opinion Trade Open Orders 按钮并获取数据，返回标准格式字符串（支持分页）
-    
-    Args:
-        driver: Selenium WebDriver对象
-        serial_number: 浏览器序列号
-        
-    Returns:
-        tuple: (标准格式字符串, 是否需要刷新重试)
-            - 如果正常获取数据或找到"No data yet": (标准格式字符串, False)
-            - 如果超时且没有"No data yet": ("", True)
-            标准格式: "唯一标题|||买卖方向|||选项|||价格|||进度;唯一标题|||买卖方向|||选项|||价格|||进度"
-    """
-    
-    def parse_tbody_data(open_orders_div, serial_number):
+    """点击 Open Orders 并获取数据，支持分页，支持多事件混合"""
+
+    def parse_page_data(open_orders_div, serial_number, current_main_title):
         """
-        解析当前页的tbody数据
-        
-        Args:
-            open_orders_div: Open Orders div元素
-            serial_number: 浏览器序列号
-            
-        Returns:
-            list: 解析后的订单字符串列表
+        解析单页数据
+        :param current_main_title: 传入上一页最后使用的标题，防止跨页时丢失上下文
+        :return: (结果列表, 是否无数据, 本页最后使用的标题)
         """
         result_parts = []
-        
-        # 先检查是否有"No data yet"
-        all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
-        for p in all_p_tags_in_div:
-            if "No data yet" in p.text:
-                log_print(f"[{serial_number}] [OP] ✓ Open Orders 发现 'No data yet'，无数据")
-                return result_parts, True  # 返回空列表和"无数据"标记
-        
-        # 再找这个 div 下的 tbody
-        tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-        
-        if len(tr_list) == 0:
-            time.sleep(10)
-             # 先检查是否有"No data yet"
-            all_p_tags_in_div = open_orders_div.find_elements(By.TAG_NAME, "p")
-            for p in all_p_tags_in_div:
-                if "No data yet" in p.text:
-                    log_print(f"[{serial_number}] [OP] ✓ Open Orders 发现 'No data yet'，无数据")
-                    return result_parts, True  # 返回空列表和"无数据"标记
-              # 再找这个 div 下的 tbody
+        last_title = current_main_title  # 保持标题状态
+
+        # 1. 检查无数据
+        try:
+            # 检查特定 p 标签是否存在 "No data"
+            all_ps = open_orders_div.find_elements(By.TAG_NAME, "p")
+            for p in all_ps:
+                if "No data yet" in p.text or "No open orders" in p.text:
+                    log_print(f"[{serial_number}] [OP] ✓ 页面显示无挂单数据")
+                    return result_parts, True, last_title
+        except:
+            pass
+
+        # 2. 获取 tbody
+        try:
             tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
             tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-            if len(tr_list) == 0:
-                return result_parts, False  # 返回空列表，但不是"No data yet"
-        
-        log_print(f"[{serial_number}] [OP] ✓ 当前页找到 {len(tr_list)} 个 tr 标签")
-        
-        # 解析tr标签，构建标准格式字符串
-        current_main_title = ""
-        i = 0
-        tr_count = len(tr_list)
-        
-        while i < tr_count:
+        except Exception as e:
+            # 这种情况通常是真的没数据或者加载慢
+            return result_parts, False, last_title
+
+        if len(tr_list) == 0:
+            return result_parts, False, last_title
+
+        log_print(
+            f"[{serial_number}] [OP] 当前页共有 {len(tr_list)} 行 (包含标题行和数据行)"
+        )
+
+        # 3. 遍历每一行 (关键修改：状态机模式)
+        for i, tr in enumerate(tr_list):
             try:
-                # 每次迭代时重新获取tr元素，避免stale element reference
-                try:
-                    # 重新获取open_orders_div和tbody（防止页面更新导致元素失效）
-                    open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
-                    tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-                    current_tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-                    
-                    # 如果tr数量发生变化，更新tr_count
-                    if len(current_tr_list) != tr_count:
-                        log_print(f"[{serial_number}] [OP] ⚠ tr数量从 {tr_count} 变为 {len(current_tr_list)}，更新计数")
-                        tr_count = len(current_tr_list)
-                        if i >= tr_count:
-                            break
-                    
-                    tr = current_tr_list[i]
-                except Exception as e:
-                    log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr元素失败: {str(e)}，跳过当前tr")
-                    i += 1
-                    continue
-                
                 td_list = tr.find_elements(By.TAG_NAME, "td")
-                
-                # 如果只有一个td，这是主标题
+
+                # --- 情况 A: 标题行 (通常只有1个td，或者colspan很大) ---
+                # 判断标准：td数量少，或者第一个td有colspan属性
+                is_header = False
                 if len(td_list) == 1:
-                    main_title_text = get_p_tag_text_from_element(td_list[0])
-                    if main_title_text:
-                        current_main_title = main_title_text.strip()
-                        log_print(f"[{serial_number}] [OP] 找到主标题: {current_main_title}")
-                    i += 1
+                    is_header = True
+                elif len(td_list) > 0:
+                    colspan = td_list[0].get_attribute("colspan")
+                    if colspan and int(colspan) > 1:
+                        is_header = True
+
+                if is_header:
+                    # 提取新标题
+                    title_text = get_text_from_element(td_list[0])
+                    if title_text:
+                        last_title = title_text  # 更新状态
+                        # log_print(f"[{serial_number}] [OP] 发现新事件标题: {last_title}")
+                    continue  # 标题行处理完，跳过进入下一循环
+
+                # --- 情况 B: 数据行 (通常列数较多) ---
+                # 新结构：CheckBox(0) | Side(1) | Outcome(2) | Type(3) | Price(4) | Expiration(5) | Filled(6) | Status(7) | Time(8) | Action(9)
+                if len(td_list) < 9:
+                    # 既不是标题行，列数又不够，可能是异常行，跳过
                     continue
-                
-                # 如果有多个td，这是挂单仓位信息
-                if len(td_list) >= 6 and current_main_title:
-                    # 第一个td: 买卖方向（"Buy"或"Sell"）
-                    first_td_text = get_p_tag_text_from_element(td_list[0]).strip()
-                    if not first_td_text:
-                        i += 1
-                        continue
-                    
-                    buy_sell_direction = first_td_text  # "Buy" 或 "Sell"
-                    
-                    # 第二个td: 选项（可能有子标题，例如"90,000 - YES"或"YES"/"NO"）
-                    second_td_text = get_p_tag_text_from_element(td_list[1]).strip()
-                    if not second_td_text:
-                        i += 1
-                        continue
-                    
-                    # 解析选项和子标题
-                    option = ""
-                    sub_title = ""
-                    unique_title = current_main_title
-                    
-                    if " - " in second_td_text:
-                        # 有子标题，例如 "90,000 - YES"
-                        parts = second_td_text.split(" - ", 1)
-                        if len(parts) == 2:
-                            sub_title = parts[0].strip()
-                            option = parts[1].strip()
-                            unique_title = f"{current_main_title}###{sub_title}"
-                    else:
-                        # 没有子标题，直接是选项（"YES"或"NO"）
-                        option = second_td_text
-                    
-                    # 第四个td: 价格
-                    fourth_td_text = get_p_tag_text_from_element(td_list[3]).strip()
-                    if not fourth_td_text:
-                        i += 1
-                        continue
-                    
-                    price = fourth_td_text
-                    
-                    # 第六个td: 所有p标签内容相连，得到进度
-                    sixth_td = td_list[5]
-                    p_tags_in_sixth = sixth_td.find_elements(By.TAG_NAME, "p")
-                    progress_parts = []
-                    for p in p_tags_in_sixth:
-                        p_text = p.text.strip()
-                        if p_text:
-                            progress_parts.append(p_text)
-                    progress = "".join(progress_parts) if progress_parts else ""
-                    
-                    # 拼接标准格式: 唯一标题|||买卖方向|||选项|||价格|||进度
-                    order_str = f"{unique_title}|||{buy_sell_direction}|||{option}|||{price}|||{progress}"
-                    result_parts.append(order_str)
-                    log_print(f"[{serial_number}] [OP] 解析到挂单: {order_str}")
-                
-                i += 1
+
+                if not last_title or last_title == "Unknown Event":
+                    # 如果还没有标题就开始出现数据行，记录警告
+                    # log_print(f"[{serial_number}] [OP] ⚠ 数据行缺失标题，归类为 Unknown")
+                    pass
+
+                # 数据提取
+                side = get_text_from_element(td_list[1])
+                outcome = get_text_from_element(td_list[2])
+                order_type = get_text_from_element(td_list[3])
+                price = get_text_from_element(td_list[4])
+                # expiration = get_text_from_element(td_list[5]) # 暂时不用
+                filled_raw = get_text_from_element(td_list[6])
+                status_raw = get_text_from_element(td_list[7])
+                placed_time = get_text_from_element(td_list[8])
+
+                # 格式化进度字段
+                progress = f"{filled_raw}"  # 可以在这里把 status 拼进去，也可以分开传
+
+                # 拼接标准字符串
+                # 格式: 标题|||方向|||选项|||价格|||进度|||状态|||时间
+                order_str = f"{last_title}|||{side}|||{outcome}|||{order_type}|||{price}|||{progress}|||{status_raw}|||{placed_time}"
+                result_parts.append(order_str)
+                # log_print(f"[{serial_number}] [OP] 解析成功: {last_title} - {outcome} - {price}")
+
+            except StaleElementReferenceException:
+                log_print(f"[{serial_number}] [OP] ⚠ 元素失效，跳过单行")
+                continue
             except Exception as e:
-                error_msg = str(e)
-                if "stale element" in error_msg.lower():
-                    # 遇到stale element reference，重新获取tr列表
-                    log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签时遇到stale element，重新获取tr列表...")
-                    try:
-                        open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
-                        tbody = open_orders_div.find_element(By.TAG_NAME, "tbody")
-                        tr_list = tbody.find_elements(By.TAG_NAME, "tr")
-                        tr_count = len(tr_list)
-                        log_print(f"[{serial_number}] [OP] ✓ 重新获取到 {tr_count} 个 tr 标签，从索引 {i} 继续")
-                        # 不增加i，重新尝试当前索引
-                        continue
-                    except Exception as e2:
-                        log_print(f"[{serial_number}] [OP] ⚠ 重新获取tr列表失败: {str(e2)}，跳过当前tr")
-                        i += 1
-                else:
-                    log_print(f"[{serial_number}] [OP] ⚠ 解析tr标签异常: {error_msg}")
-                    i += 1
-        
-        return result_parts, False  # 返回解析结果，不是"No data yet"
-    
+                log_print(f"[{serial_number}] [OP] ⚠ 解析行失败: {str(e)}")
+                continue
+
+        return result_parts, False, last_title
+
+    # --- 主逻辑 ---
     try:
-        log_print(f"[{serial_number}] [OP] 在10秒内查找并点击 Open Orders 按钮...")
-        
+        log_print(f"[{serial_number}] [OP] 查找并点击 Open Orders 按钮...")
+
+        # 1. 点击按钮 (带重试)
         open_orders_clicked = False
         start_time = time.time()
-        
         while time.time() - start_time < 10:
             try:
                 buttons = driver.find_elements(By.TAG_NAME, "button")
-                
                 for button in buttons:
-                    log_print(f"[{serial_number}] [OP] ✓ {button.text.strip()}")
                     if button.text.strip() == "Open Orders":
                         button.click()
-                        log_print(f"[{serial_number}] [OP] ✓ 已点击 Open Orders 按钮")
+                        log_print(f"[{serial_number}] [OP] ✓ 已点击 Open Orders")
                         open_orders_clicked = True
                         break
-                
                 if open_orders_clicked:
                     break
-                
                 time.sleep(0.5)
             except:
                 time.sleep(0.5)
-        
+
         if not open_orders_clicked:
-            log_print(f"[{serial_number}] [OP] ✗ 10秒内未找到 Open Orders 按钮，需要刷新页面重试")
+            log_print(f"[{serial_number}] [OP] ✗ 未找到 Open Orders 按钮")
             return "", True
-        
-        time.sleep(5)
-        
-        try:
-            # 在180秒内多次查找tbody和tr标签，如果数量为0则等待5秒后重试
-            max_retry_time = 180
-            retry_start_time = time.time()
-            
-            # 所有页面的结果
-            all_result_parts = []
-            page_num = 1
-            
-            while time.time() - retry_start_time < max_retry_time:
+
+        time.sleep(5)  # 等待加载
+
+        # 2. 分页抓取
+        all_result_parts = []
+        page_num = 1
+        max_retry_time = 60
+        retry_start_time = time.time()
+
+        # 维护一个跨页的标题状态
+        # 因为如果第一页最后一行是标题，第二页第一行是数据，需要把标题传下去
+        current_context_title = "Unknown Event"
+
+        while time.time() - retry_start_time < max_retry_time:
+            try:
+                # 查找容器
                 try:
-                    # 重新获取 open_orders_div（因为分页后内容会刷新）
-                    log_print(f"[{serial_number}] [OP] 查找 Open Orders 内容区域（第 {page_num} 页）...")
-                    open_orders_div = driver.find_element(By.CSS_SELECTOR, "div[id$='content-open-orders']")
-                    log_print(f"[{serial_number}] [OP] ✓ 找到 Open Orders 内容区域 (ID: {open_orders_div.get_attribute('id')})")
-                    
-                    # 解析当前页数据
-                    page_result_parts, is_no_data = parse_tbody_data(open_orders_div, serial_number)
-                    
-                    if is_no_data:
-                        # 如果是"No data yet"，直接返回
-                        if len(all_result_parts) == 0:
-                            return "", False
-                        else:
-                            # 已经有数据了，说明之前有数据，现在没数据了，返回已有数据
-                            break
-                    
-                    if len(page_result_parts) > 0:
-                        all_result_parts.extend(page_result_parts)
-                        log_print(f"[{serial_number}] [OP] ✓ 第 {page_num} 页解析完成，共 {len(page_result_parts)} 个仓位，累计 {len(all_result_parts)} 个仓位")
-                    else:
-                        elapsed = int(time.time() - retry_start_time)
-                        log_print(f"[{serial_number}] [OP] ⚠ 第 {page_num} 页解析后无有效仓位数据")
-                    
-                    # 检查是否有下一页（即使当前页没有数据，也可能有下一页）
-                    try:
-                        next_page_button = open_orders_div.find_element(By.CSS_SELECTOR, 'button[aria-label="next page"]')
-                        is_disabled = next_page_button.get_attribute("disabled") is not None
-                        
-                        if is_disabled:
-                            log_print(f"[{serial_number}] [OP] ✓ 下一页按钮已禁用，所有页面数据获取完成")
-                            break
-                        else:
-                            log_print(f"[{serial_number}] [OP] 发现下一页，点击下一页按钮...")
-                            next_page_button.click()
-                            time.sleep(3)  # 等待页面加载
-                            page_num += 1
-                            retry_start_time = time.time()  # 重置超时时间，因为开始新的一页
-                            continue
-                    except Exception as e:
-                        # 找不到下一页按钮，说明没有分页或已经是最后一页
-                        log_print(f"[{serial_number}] [OP] ✓ 未找到下一页按钮，所有页面数据获取完成")
+                    open_orders_div = driver.find_element(
+                        By.CSS_SELECTOR, "div[id$='content-open-orders']"
+                    )
+                except:
+                    log_print(f"[{serial_number}] [OP] ⚠ 未找到内容区域")
+                    time.sleep(1)
+                    continue
+
+                # 解析数据
+                page_parts, is_no_data, last_title_in_page = parse_page_data(
+                    open_orders_div, serial_number, current_context_title
+                )
+
+                # 更新上下文标题
+                current_context_title = last_title_in_page
+
+                if is_no_data and len(all_result_parts) == 0:
+                    return "", False  # 真的没数据
+
+                if page_parts:
+                    all_result_parts.extend(page_parts)
+                    log_print(
+                        f"[{serial_number}] [OP] 第 {page_num} 页解析完成，累计 {len(all_result_parts)} 条"
+                    )
+
+                # 翻页逻辑
+                try:
+                    # 查找下一页按钮
+                    next_btns = open_orders_div.find_elements(
+                        By.CSS_SELECTOR, 'button[aria-label="next page"]'
+                    )
+                    if not next_btns:
+                        log_print(f"[{serial_number}] [OP] ✓ 无分页按钮，结束")
                         break
-                    
+
+                    next_btn = next_btns[0]
+                    if next_btn.get_attribute("disabled"):
+                        log_print(f"[{serial_number}] [OP] ✓ 已经是最后一页")
+                        break
+
+                    # 滚动到按钮处防止被遮挡
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView(true);", next_btn
+                    )
+                    time.sleep(0.5)
+                    next_btn.click()
+                    log_print(f"[{serial_number}] [OP] 点击下一页 -> {page_num + 1}")
+
+                    time.sleep(3)  # 等待新页面加载
+                    page_num += 1
+                    retry_start_time = time.time()  # 翻页成功，重置超时
+
                 except Exception as e:
-                    elapsed = int(time.time() - retry_start_time)
-                    log_print(f"[{serial_number}] [OP] ⚠ 查找 Open Orders 数据异常: {str(e)}，等待5秒后重试... ({elapsed}s/{max_retry_time}s)")
-                    time.sleep(5)
-            
-            # 返回所有页面的结果
-            if len(all_result_parts) > 0:
-                result_str = ";".join(all_result_parts)
-                log_print(f"[{serial_number}] [OP] ✓ Open Orders 所有页面解析完成，共 {len(all_result_parts)} 个仓位")
-                return result_str, False
-            else:
-                log_print(f"[{serial_number}] [OP] ✗ 180秒内未获取到 Open Orders 数据且无'No data yet'，需要刷新重试")
-                return "", True
-            
-        except Exception as e:
-            log_print(f"[{serial_number}] [OP] ⚠ 获取 Open Orders 数据失败: {str(e)}")
+                    log_print(f"[{serial_number}] [OP] 翻页结束: {str(e)}")
+                    break
+
+            except Exception as e:
+                log_print(f"[{serial_number}] [OP] ⚠ 抓取循环出错: {e}")
+                time.sleep(2)
+
+        # 3. 返回结果
+        result_str = ";".join(all_result_parts)
+        if not result_str and not is_no_data:
+            # 如果不是明确的No data，但结果为空，可能是加载超时
             return "", True
-        
+
+        return result_str, False
+
     except Exception as e:
-        log_print(f"[{serial_number}] [OP] ✗ 点击 Open Orders 按钮失败: {str(e)}")
-        return "", False
+        log_print(f"[{serial_number}] [OP] ✗ 整体流程失败: {e}")
+        return "", True
 
 
 def click_opinion_closed_orders_and_get_data(driver, serial_number):
