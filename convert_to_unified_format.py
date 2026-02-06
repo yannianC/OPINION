@@ -147,10 +147,9 @@ class XlsxConverter:
             
             # 处理每一行，判断当前行或下一行是否有 options
             for i, (idx, row) in enumerate(rows_list):
-                # 当前行有 options，或者下一行有 options，都需要保留完整内容
+                # 只有下一行包含 “options” 的行。保留完整的。本身有“options”的行，不保留
                 next_has_options = (i + 1) in rows_with_options
-                current_has_options = i in rows_with_options
-                keep_full_content = current_has_options or next_has_options
+                keep_full_content = next_has_options
                 
                 event_id = self.process_row(row, sheet_name, filename, last_event_content, keep_full_content)
                 if event_id:
