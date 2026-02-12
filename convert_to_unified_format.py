@@ -55,6 +55,12 @@ class XlsxConverter:
             'jumpStory': 34,  # 跳转剧情
             'specialOption': 35  # 特殊选项
         }
+        # 事件内容导出时的键顺序（与 col_indices 一致，保证 C_TABLE_EventContens 列顺序不乱）
+        self.event_content_key_order = [
+            'role', 'text', 'event', 'music', 'audio', 'voice', 'animation',
+            'action', 'painting', 'bgAnim', 'bg', 'props', 'jump', 'options',
+            'branches', 'dialog', 'nobacktracking', 'ending', 'jumpStory', 'specialOption'
+        ]
     
     def process_file(self, filename):
         """
@@ -424,7 +430,8 @@ class XlsxConverter:
     
     def format_event_content(self, event_content):
         """
-        格式化事件内容为字符串
+        格式化事件内容为字符串。
+        按 event_content_key_order 顺序输出，保证 C_TABLE_EventContens 列顺序与 col_indices 一致。
         
         参数:
             event_content: 事件内容字典
@@ -435,12 +442,18 @@ class XlsxConverter:
         if not event_content:
             return ''
         
-        # 格式化为 {key=value,key=value} 的形式
+        # 按固定顺序输出，未在顺序中的键放在最后
         items = []
+        for key in self.event_content_key_order:
+            if key in event_content:
+                value = event_content[key]
+                value_str = str(value).replace('{', '').replace('}', '')
+                items.append(f'{key}={value_str}')
+        # 若有其他键（理论上不应出现），也输出
         for key, value in event_content.items():
-            # 如果值中包含逗号，需要特殊处理
-            value_str = str(value).replace('{', '').replace('}', '')
-            items.append(f'{key}={value_str}')
+            if key not in self.event_content_key_order:
+                value_str = str(value).replace('{', '').replace('}', '')
+                items.append(f'{key}={value_str}')
         
         return '{' + ','.join(items) + '}'
     

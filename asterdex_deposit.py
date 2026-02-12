@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Aster DEX API 自动创建脚本（独立运行，不依赖其他脚本）
+Aster DEX Deposit 脚本（独立运行）
 
-从 findAccountConfigCache 接口获取浏览器列表，筛选出本地电脑组且 s/t 为空的账户，
-依次为每个浏览器在 Aster DEX 创建 API，并上传 API Key 和 Secret 到服务器。
+与 asterdex_api_setup 前面逻辑相同，打开 Spot 交易页面后执行 Deposit 流程。
 """
 
 import os
-import sys
 import time
 import json
 import requests
@@ -30,9 +28,8 @@ SERVER_BASE_URL = "https://sg.bicoin.com.cn/99l"
 ADSPOWER_BASE_URL = "http://127.0.0.1:50325"
 ADSPOWER_API_KEY = "506664c47e5e174036720d305c7b9732"
 OKX_EXTENSION_ID = "mcohilncbfahbmgdjkbpemcciiolgcge"
-SPOT_URL = "https://www.asterdex.com/en/trade/pro/spot/ASTERUSDT"
-ASTERDEX_API_URL = "https://www.asterdex.com/en/api-management"
-TRUSTED_IP = "47.88.228.109"
+TARGET_URL = "https://www.asterdex.com/en/trade/pro/spot/BTCUSDT"
+DEPOSIT_TOKEN = "4"  # 可配置为其他代币
 MAX_RETRIES = 3
 
 # 特定浏览器ID的密码配置（与 auto_trader 一致）
@@ -60,7 +57,7 @@ SPECIFIC_BROWSER_PASSWORDS = {
 }
 # 电脑组对应的默认密码配置（与 auto_trader 一致）
 GROUP_PASSWORDS = {
-    "0": "Ok123456", "1": "qwer1234", "2": "ywj000805*", "3": "Qrfv*Fjh87gg", "4": "@#nsgaSBF224",
+    "0": "Ok678910", "1": "qwer1234", "2": "ywj000805*", "3": "Qrfv*Fjh87gg", "4": "@#nsgaSBF224",
     "5": "Qsst-455fgdf8", "6": "zxcvbnm123#", "7": "cx142359.", "8": "ywj000805*", "9": "Qwer009qaz`",
     "10": "yhCHG^&145", "11": "jhJ89891", "12": "Hhgj*liu-khHy5", "13": "shdjjeG@^68Jhg", "14": "gkj^&HGkhh45",
     "15": " kaznb3969*m%", "16": "ggTG*h785Wunj", "21": "kjakln3*zhjql3", "22": "ttRo451YU*58",
@@ -73,25 +70,19 @@ GROUP_PASSWORDS = {
     "923": "mj@w2ndJ*kX0g8!rns", "924": "5cx2Wsn#0kQnj*w240", "925": "kashg2*dk2F", "926": "cxknwlJK&*f8",
     "927": "kiIH78hjfi.*+*",
 }
-DEFAULT_PASSWORD = "Ok123456"
+DEFAULT_PASSWORD = "Ok678910"
 
-# 全局变量
 FINGERPRINT_TO_USERID = {}
 LAST_PROXY_CONFIG = {}
+COMPUTER_GROUP = "0"
 
-
-# ============================================================================
-# 工具函数
-# ============================================================================
 
 def log_print(*args, **kwargs):
-    """带时间戳的打印"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{timestamp}]", *args, **kwargs)
 
 
 def read_computer_config():
-    """从 COMPUTER.txt 读取电脑组、IP线程数、交易线程数"""
     default_group, default_ip, default_trade = "0", 15, 15
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -112,7 +103,6 @@ def read_computer_config():
 
 
 def get_browser_password(browser_id, computer_group):
-    """根据浏览器ID和电脑组获取密码"""
     bid = str(browser_id)
     if bid in SPECIFIC_BROWSER_PASSWORDS:
         return SPECIFIC_BROWSER_PASSWORDS[bid]
@@ -120,7 +110,6 @@ def get_browser_password(browser_id, computer_group):
 
 
 def load_fingerprint_mapping():
-    """加载 fingerprintNo -> user_id 映射（用于 AdsPower）"""
     global FINGERPRINT_TO_USERID
     script_dir = os.path.dirname(os.path.abspath(__file__))
     mapping_file = os.path.join(script_dir, "FINGERPRINT_MAPPING.txt")
@@ -135,11 +124,10 @@ def load_fingerprint_mapping():
             return
         except Exception as e:
             log_print(f"[系统] 读取映射文件失败: {e}")
-    # 尝试从 AdsPower API 获取
     try:
         url = f"{ADSPOWER_BASE_URL}/api/v1/user/list"
         headers = {'Authorization': f'Bearer {ADSPOWER_API_KEY}'}
-        page, total = 1, 0
+        page = 1
         while True:
             r = requests.get(url, params={"page_size": 100, "page": page}, headers=headers, timeout=10)
             if r.status_code != 200:
@@ -153,24 +141,16 @@ def load_fingerprint_mapping():
                 uid = u.get("user_id", "")
                 if sn and uid:
                     FINGERPRINT_TO_USERID[sn] = uid
-            total += len(li)
             if len(li) < 100:
                 break
             page += 1
         if FINGERPRINT_TO_USERID:
             log_print(f"[系统] 从 AdsPower API 加载 {len(FINGERPRINT_TO_USERID)} 个映射")
-            return
     except Exception as e:
         log_print(f"[系统] AdsPower API 加载映射失败: {e}")
-    log_print("[系统] ⚠ 未加载到指纹映射，请在脚本同目录创建 FINGERPRINT_MAPPING.txt（每行: 浏览器编号 user_id）")
 
-
-# ============================================================================
-# 代理与浏览器
-# ============================================================================
 
 def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
-    """获取新代理配置"""
     try:
         url = f"{SERVER_BASE_URL}/bro/ipStatusByNumber"
         r = requests.get(url, params={"number": browser_id}, timeout=timeout)
@@ -216,10 +196,8 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0):
 
 
 def update_adspower_proxy(browser_id, proxy_config):
-    """更新 AdsPower 代理"""
     uid = FINGERPRINT_TO_USERID.get(str(browser_id))
     if not uid:
-        log_print(f"[{browser_id}] ✗ 无 user_id 映射，跳过代理更新")
         return False
     try:
         url = f"{ADSPOWER_BASE_URL}/api/v1/user/update"
@@ -232,13 +210,12 @@ def update_adspower_proxy(browser_id, proxy_config):
         if r.status_code == 200 and r.json().get("code") == 0:
             LAST_PROXY_CONFIG[str(browser_id)] = proxy_config.copy()
             return True
-    except Exception as e:
-        log_print(f"[{browser_id}] 更新代理异常: {e}")
+    except Exception:
+        pass
     return False
 
 
 def try_update_ip_before_start(browser_id):
-    """打开浏览器前获取并更新代理"""
     cfg = get_new_ip_for_browser(browser_id, timeout=8, ip_index=0)
     if cfg:
         ok = update_adspower_proxy(browser_id, cfg)
@@ -250,7 +227,6 @@ def try_update_ip_before_start(browser_id):
 
 
 def start_adspower_browser(serial_number):
-    """启动 AdsPower 浏览器"""
     url = f"{ADSPOWER_BASE_URL}/api/v1/browser/start"
     params = {"serial_number": serial_number, "user_id": "", "open_tabs": 1,
               "launch_args": json.dumps(["--window-size=1500,1700"])}
@@ -270,7 +246,6 @@ def start_adspower_browser(serial_number):
 
 
 def close_adspower_browser(serial_number, max_retries=3):
-    """关闭 AdsPower 浏览器"""
     url = f"{ADSPOWER_BASE_URL}/api/v1/browser/stop"
     params = {"serial_number": serial_number}
     headers = {'Authorization': f'Bearer {ADSPOWER_API_KEY}'}
@@ -288,7 +263,6 @@ def close_adspower_browser(serial_number, max_retries=3):
 
 
 def create_selenium_driver(browser_data):
-    """创建 Selenium WebDriver"""
     options = webdriver.ChromeOptions()
     options.add_experimental_option("debuggerAddress", browser_data["ws"]["selenium"])
     service = Service(executable_path=browser_data["webdriver"])
@@ -299,7 +273,6 @@ def create_selenium_driver(browser_data):
 
 
 def open_new_tab_with_url(driver, url, serial_number):
-    """新标签页打开 URL"""
     try:
         driver.switch_to.new_window('tab')
         time.sleep(1)
@@ -320,7 +293,6 @@ def open_new_tab_with_url(driver, url, serial_number):
 
 
 def check_and_unlock_wallet(driver, serial_number, password):
-    """检查并解锁 OKX 钱包"""
     try:
         try:
             iframe = WebDriverWait(driver, 5).until(
@@ -346,9 +318,12 @@ def check_and_unlock_wallet(driver, serial_number, password):
             """, pwd_input, password)
             time.sleep(1)
             btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-testid='okd-button']"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "button[data-testid='okd-button']"))
             )
-            btn.click()
+            # 用 JS 点击，避免 element click intercepted（即使视觉上无遮挡）
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", btn
+            )
             time.sleep(2)
         except TimeoutException:
             pass
@@ -367,7 +342,6 @@ def check_and_unlock_wallet(driver, serial_number, password):
 
 
 def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=None):
-    """预打开 OKX 钱包并解锁、处理确认按钮"""
     main_win = driver.current_window_handle
     okx_url = f"chrome-extension://{OKX_EXTENSION_ID}/popup.html"
     okx_win = None
@@ -399,7 +373,7 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
             try:
                 btns = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
                 if btns:
-                    btns[0].click()
+                    driver.execute_script("arguments[0].click();", btns[0])
                     time.sleep(0.5)
                 else:
                     break
@@ -410,26 +384,8 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
     return main_win
 
 
-# ============================================================================
-# 重试与点击辅助
-# ============================================================================
-
-def retry_click(driver, by, selector, browser_id, timeout=15, desc=""):
-    """带重试的点击"""
-    for _ in range(3):
-        try:
-            el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, selector)))
-            el.click()
-            log_print(f"[{browser_id}] ✓ 已点击 {desc}")
-            return True
-        except Exception as e:
-            log_print(f"[{browser_id}] ⚠ 点击 {desc} 失败: {e}")
-            time.sleep(2)
-    return False
-
-
-def find_connect_wallet_button(driver, browser_id, timeout=15):
-    """查找 Connect wallet 按钮（兼容多种选择器）"""
+def find_connect_wallet_button(driver, timeout=15):
+    """找 Connect wallet 按钮，用 presence 即可（点击处已改为 JS click 避免被遮挡）. """
     selectors = [
         (By.XPATH, "//button[contains(text(), 'Connect wallet')]"),
         (By.XPATH, "//button[@aria-label='Connect wallet']"),
@@ -438,7 +394,7 @@ def find_connect_wallet_button(driver, browser_id, timeout=15):
     ]
     for by, sel in selectors:
         try:
-            el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, sel)))
+            el = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, sel)))
             return el
         except TimeoutException:
             continue
@@ -446,17 +402,18 @@ def find_connect_wallet_button(driver, browser_id, timeout=15):
 
 
 def click_okx_second_button(driver, browser_id, timeout=15):
-    """在 OKX 窗口点击第二个 okd-button"""
     try:
         btns = WebDriverWait(driver, timeout).until(
             EC.presence_of_all_elements_located((By.CSS_SELECTOR, "button[data-testid='okd-button']"))
         )
         if len(btns) >= 2:
-            btns[1].click()
+            log_print(f"[{browser_id}] ✓ 已点击 okd-button-1")
+            driver.execute_script("arguments[0].click();", btns[1])
         elif btns:
-            btns[0].click()
+            driver.execute_script("arguments[0].click();", btns[0])
         else:
             return False
+
         log_print(f"[{browser_id}] ✓ 已点击 okd-button")
         return True
     except Exception as e:
@@ -464,8 +421,7 @@ def click_okx_second_button(driver, browser_id, timeout=15):
         return False
 
 
-def switch_to_okx_window(driver, browser_id):
-    """切换到 OKX 窗口"""
+def switch_to_okx_window(driver):
     for h in driver.window_handles:
         try:
             driver.switch_to.window(h)
@@ -476,56 +432,27 @@ def switch_to_okx_window(driver, browser_id):
     return False
 
 
-def safe_click(driver, element, browser_id="", desc=""):
-    """安全点击：先尝试普通点击，被 overlay 拦截时改用 JS 点击"""
-    try:
-        element.click()
-        if browser_id and desc:
-            log_print(f"[{browser_id}] ✓ 已点击 {desc}")
-        return True
-    except Exception as e:
-        if "click intercepted" in str(e).lower() or "obscured" in str(e).lower():
-            try:
-                driver.execute_script("arguments[0].click();", element)
-                if browser_id and desc:
-                    log_print(f"[{browser_id}] ✓ 已点击 {desc} (JS)")
-                return True
-            except Exception as e2:
-                log_print(f"[{browser_id}] ✗ 点击 {desc} 失败: {e2}")
-                return False
-        raise
-
-
 # ============================================================================
 # 主流程
 # ============================================================================
 
 def fetch_account_list_simple():
-    """获取 findAccountConfigCacheSimple 数据（轻量，仅 id/fingerprintNo/computeGroup/d/f）"""
     url = f"{SERVER_BASE_URL}/boost/findAccountConfigCacheSimple"
     try:
         log_print(f"[系统] 正在请求 findAccountConfigCacheSimple...")
         r = requests.get(url, timeout=60)
-        log_print(f"[系统] 请求完成，状态码: {r.status_code}")
         if r.status_code != 200:
             return []
         data = r.json()
-        items = data.get("data") or []
-        log_print(f"[系统] 获取到 {len(items)} 条数据")
-        return items
-    except requests.exceptions.Timeout:
-        log_print(f"[系统] ✗ 请求超时")
-        return []
+        return data.get("data") or []
     except Exception as e:
         log_print(f"[系统] ✗ 请求失败: {e}")
         return []
 
 
 def fetch_api_all_bound():
-    """获取 api/all 中已绑定 API 的浏览器编号集合"""
     url = f"{SERVER_BASE_URL}/api/all"
     try:
-        log_print(f"[系统] 正在请求 api/all 获取已绑定列表...")
         r = requests.get(url, timeout=30)
         if r.status_code != 200:
             return set()
@@ -533,16 +460,13 @@ def fetch_api_all_bound():
         if data.get("code") != 0:
             return set()
         li = data.get("data", {}).get("list") or []
-        bound = {str(x.get("number", "")) for x in li if x.get("number")}
-        log_print(f"[系统] 已绑定 API 的浏览器数: {len(bound)}")
-        return bound
+        return {str(x.get("number", "")) for x in li if x.get("number")}
     except Exception as e:
         log_print(f"[系统] ✗ 请求 api/all 失败: {e}")
         return set()
 
 
 def filter_target_items(items, computer_group, bound_numbers):
-    """筛选：电脑组一致，且未在 api/all 中已绑定"""
     out = []
     for i in items:
         cg = str(i.get("computeGroup") or "").strip()
@@ -552,77 +476,14 @@ def filter_target_items(items, computer_group, bound_numbers):
     return out
 
 
-def extract_api_key_secret(driver, dialog, browser_id):
-    """从 dialog 中提取 API Key 和 API Secret Key，带多种选择器尝试"""
-    api_key, api_secret = None, None
-    selectors_key = [
-        ".//p[contains(text(), 'API key') and not(contains(text(), 'API secret'))]/following-sibling::div[1]",
-        ".//p[text()='API key']/following-sibling::div[1]",
-        ".//*[contains(text(), 'API key') and not(contains(text(), 'secret'))]/../div[last()]",
-    ]
-    selectors_secret = [
-        ".//p[contains(text(), 'API secret key')]/following-sibling::div[1]",
-        ".//p[text()='API secret key']/following-sibling::div[1]",
-        ".//*[contains(text(), 'API secret key')]/../div[last()]",
-    ]
-    for sel in selectors_key:
-        try:
-            div = dialog.find_element(By.XPATH, sel)
-            ps = div.find_elements(By.TAG_NAME, "p")
-            t = (ps[0].text or "").strip() if ps else ""
-            if t and len(t) > 10 and "API key" not in t:
-                api_key = t
-                log_print(f"[{browser_id}] 提取 API Key 成功 (选择器: {sel[:50]}...)")
-                break
-        except Exception as e:
-            log_print(f"[{browser_id}] 尝试提取 API Key 失败: {e}")
-    for sel in selectors_secret:
-        try:
-            div = dialog.find_element(By.XPATH, sel)
-            ps = div.find_elements(By.TAG_NAME, "p")
-            t = (ps[0].text or "").strip() if ps else ""
-            if t and len(t) > 10 and "API secret" not in t:
-                api_secret = t
-                log_print(f"[{browser_id}] 提取 API Secret 成功")
-                break
-        except Exception as e:
-            log_print(f"[{browser_id}] 尝试提取 API Secret 失败: {e}")
-    if not api_key or not api_secret:
-        log_print(f"[{browser_id}] ⚠ 提取结果: APIKey={bool(api_key)}, APISecret={bool(api_secret)}")
-    return api_key, api_secret
-
-
-def bind_api_with_retry(number, api_key, api_secret, browser_id, max_retries=5, retry_interval=10):
-    """带重试的 api/bind 绑定"""
-    url = f"{SERVER_BASE_URL}/api/bind"
-    payload = {"number": str(number), "apiKey": api_key, "apiSecret": api_secret}
-    for attempt in range(1, max_retries + 1):
-        try:
-            r = requests.post(url, json=payload, timeout=15)
-            if r.status_code == 200:
-                res = r.json()
-                if res.get("code") == 0:
-                    return True, res, None
-                err = res.get("msg", "unknown")
-            else:
-                err = f"HTTP {r.status_code}"
-        except Exception as e:
-            err = str(e)
-        log_print(f"[{browser_id}] 绑定失败(第{attempt}次): {err}")
-        if attempt < max_retries:
-            time.sleep(retry_interval)
-    return False, None, err
-
-
 def process_single_browser(item, computer_group):
-    """处理单个浏览器"""
     browser_id = str(item.get("fingerprintNo") or item.get("no", ""))
     if not browser_id:
         return False
     driver = None
     try:
-        # log_print(f"[{browser_id}] 步骤1: 获取 IP 并更新代理")
-        # _, current_ip, current_delay = try_update_ip_before_start(browser_id)
+        log_print(f"[{browser_id}] 步骤1: 获取 IP 并更新代理")
+        _, current_ip, current_delay = try_update_ip_before_start(browser_id)
 
         log_print(f"[{browser_id}] 步骤2: 启动浏览器")
         browser_data = start_adspower_browser(browser_id)
@@ -633,230 +494,210 @@ def process_single_browser(item, computer_group):
         time.sleep(4)
 
         log_print(f"[{browser_id}] 步骤3: 打开 Spot 页面")
-        driver.get(SPOT_URL)
+        driver.get(TARGET_URL)
         time.sleep(3)
 
         try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, "//div[contains(., 'Spot overview')]"))
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Spot overview')]"))
             )
-            log_print(f"[{browser_id}] ✓ Spot 页面加载完成")
+            log_print(f"[{browser_id}] ✓ 页面加载完成（Spot overview）")
         except TimeoutException:
-            log_print(f"[{browser_id}] ⚠ 20s 内未找到 Spot overview，继续执行")
+            log_print(f"[{browser_id}] ⚠ 15s 内未找到 Spot overview，继续执行")
 
         main_window = driver.current_window_handle
 
         log_print(f"[{browser_id}] 步骤4: 预打开 OKX 钱包")
-        preopen_okx_wallet(driver, browser_id, current_ip=None, current_delay=None)
+        preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
         driver.switch_to.window(main_window)
         time.sleep(2)
 
-        # Connect wallet
-        btn = find_connect_wallet_button(driver, browser_id, 15)
+        # Connect wallet（用 JS 点击，避免顶部导航等遮挡导致 element click intercepted）
+        btn = find_connect_wallet_button(driver, 15)
         if btn:
-            btn.click()
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", btn
+            )
             log_print(f"[{browser_id}] ✓ 已点击 Connect wallet")
             time.sleep(2)
-
-            # OKX Wallet
             try:
                 okx_els = driver.find_elements(By.XPATH, "//span[contains(text(), 'OKX Wallet')]")
                 if okx_els:
-                    okx_els[0].find_element(By.XPATH, "./..").click()
+                    parent = okx_els[0].find_element(By.XPATH, "./..")
+                    driver.execute_script("arguments[0].click();", parent)
                     log_print(f"[{browser_id}] ✓ 已选择 OKX Wallet")
                     time.sleep(2)
             except Exception as e:
                 log_print(f"[{browser_id}] 选择 OKX Wallet 失败: {e}")
 
-            # 切换到 OKX：解锁 -> 点击第二个 okd-button -> 等3s -> 再点击第二个
-            if switch_to_okx_window(driver, browser_id):
+            if switch_to_okx_window(driver):
                 password = get_browser_password(browser_id, computer_group)
                 check_and_unlock_wallet(driver, browser_id, password)
                 click_okx_second_button(driver, browser_id, 15)
                 time.sleep(3)
                 click_okx_second_button(driver, browser_id, 15)
 
-            driver.switch_to.window(main_window)
-            time.sleep(2)
+        driver.switch_to.window(main_window)
+        time.sleep(2)
 
-        # Connect wallet 完成后：20s 内等待 Verify 按钮，若有则点击
+        # Deposit 流程
+        log_print(f"[{browser_id}] 步骤5: 点击 Deposit")
+        deposit_btns = driver.find_elements(By.XPATH, "//button[text()='Deposit']")
+        if not deposit_btns:
+            log_print(f"[{browser_id}] ✗ 未找到 Deposit 按钮")
+            return False
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", deposit_btns[0])
+        time.sleep(1)
+
+        # 15s 内找到 role="dialog" 的 div (A)
         try:
-            verify_btns = WebDriverWait(driver, 20).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//button[text()='Verify']"))
+            a = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='dialog']"))
             )
-            if verify_btns:
-                verify_btns[0].click()
-                log_print(f"[{browser_id}] ✓ 已点击 Verify")
-                if switch_to_okx_window(driver, browser_id):
-                    click_okx_second_button(driver, browser_id, 10)
+        except TimeoutException:
+            log_print(f"[{browser_id}] ✗ 15s 内未找到 dialog A")
+            return False
+
+        # A 内是否有 Spot account
+        spot_divs = a.find_elements(By.XPATH, ".//div[contains(text(), 'Spot account')]")
+        if not spot_divs:
+            btns = a.find_elements(By.CSS_SELECTOR, "button[aria-haspopup='dialog']")
+            if btns:
+                driver.execute_script("arguments[0].click();", btns[0])
                 time.sleep(1)
-                driver.switch_to.window(main_window)
-        except TimeoutException:
-            log_print(f"[{browser_id}] ℹ 20s 内未找到 Verify 按钮，跳过")
+            spot_divs = driver.find_elements(By.XPATH, "//div[contains(text(), 'Spot account')]")
+            if spot_divs:
+                driver.execute_script("arguments[0].click();", spot_divs[0])
+                log_print(f"[{browser_id}] ✓ 已点击 Spot account")
+                time.sleep(0.5)
 
-        # 进入 API management 页面
-        log_print(f"[{browser_id}] 步骤5: 进入 API management 页面")
-        driver.get(ASTERDEX_API_URL)
-        time.sleep(3)
+        time.sleep(0.5)
 
+        # A 下是否有内容为 "BNB Chain" 的 div；没有则点第二个 aria-haspopup 按钮并选 BNB Chain
+        bnb_in_a = a.find_elements(By.XPATH, ".//div[text()='BNB Chain']")
+        if not bnb_in_a:
+            a_haspopup_btns = a.find_elements(By.CSS_SELECTOR, "button[aria-haspopup='dialog']")
+            if len(a_haspopup_btns) >= 2:
+                driver.execute_script("arguments[0].click();", a_haspopup_btns[1])
+                time.sleep(0.5)
+            bnb_divs = driver.find_elements(By.XPATH, "//div[text()='BNB Chain']")
+            if bnb_divs:
+                bnb_parent_parent = bnb_divs[0].find_element(By.XPATH, "./../..")
+                driver.execute_script("arguments[0].click();", bnb_parent_parent)
+                log_print(f"[{browser_id}] ✓ 已选择 BNB Chain")
+                time.sleep(2)
+
+        # A 下 class="relative mb-4" 的 div (b)
         try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, "//h1[contains(text(), 'API management')]"))
+            b_divs = a.find_elements(By.CSS_SELECTOR, "div.relative.mb-4")
+            if not b_divs:
+                b_divs = a.find_elements(By.XPATH, ".//div[contains(@class,'relative') and contains(@class,'mb-4')]")
+            if b_divs:
+                b_btns = b_divs[0].find_elements(By.CSS_SELECTOR, "button[aria-haspopup='dialog']")
+                if b_btns:
+                    driver.execute_script("arguments[0].click();", b_btns[0])
+                    log_print(f"[{browser_id}] ✓ 已点击 b 下 aria-haspopup 按钮")
+        except Exception as e:
+            log_print(f"[{browser_id}] b 区域操作异常: {e}")
+        time.sleep(0.5)
+
+        # 5s 内找 div c: data-side="bottom" data-align="start" data-state="open" role="dialog"
+        try:
+            c = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR,
+                    "div[data-side='bottom'][data-align='start'][data-state='open'][role='dialog']"
+                ))
             )
-            log_print(f"[{browser_id}] ✓ API management 已出现")
         except TimeoutException:
-            log_print(f"[{browser_id}] ⚠ 未找到 API management h1，继续执行")
+            log_print(f"[{browser_id}] ✗ 5s 内未找到 dialog c")
+            return False
+
+        # c 下找内容为 DEPOSIT_TOKEN 的 div，取父的父并点击（滚动到可视再点）
+        opn_divs = c.find_elements(By.XPATH, f".//div[text()='{DEPOSIT_TOKEN}']")
+        if not opn_divs:
+            opn_divs = c.find_elements(By.XPATH, f".//div[contains(text(), '{DEPOSIT_TOKEN}')]")
+        if not opn_divs:
+            log_print(f"[{browser_id}] ✗ 在 c 中未找到 {DEPOSIT_TOKEN} div")
+            return False
+        target_el = opn_divs[0]
+        parent_parent = target_el.find_element(By.XPATH, "./../..")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", parent_parent)
+        time.sleep(10)
+        log_print(f"[{browser_id}] ✓ 已选择 {DEPOSIT_TOKEN}")
+
+        # 重新获取 A
+        try:
+            a = driver.find_element(By.CSS_SELECTOR, "div[role='dialog']")
+        except Exception:
+            log_print(f"[{browser_id}] ✗ 无法重新获取 dialog A")
+            return False
+
+        opn_in_a = a.find_elements(By.XPATH, f".//div[text()='{DEPOSIT_TOKEN}']")
+        if not opn_in_a:
+            opn_in_a = a.find_elements(By.XPATH, f".//div[contains(text(), '{DEPOSIT_TOKEN}')]")
+        if not opn_in_a:
+            log_print(f"[{browser_id}] ✗ A 内无 {DEPOSIT_TOKEN}，任务失败")
+            return False
+
+        # A 下点击 Max
+        max_btns = a.find_elements(By.XPATH, ".//button[text()='Max']")
+        if max_btns:
+            driver.execute_script("arguments[0].click();", max_btns[0])
+            log_print(f"[{browser_id}] ✓ 已点击 Max")
+        time.sleep(0.5)
+
+        # A 内是否有 Approve 按钮
+        approve_btns = a.find_elements(By.XPATH, ".//button[.//span[contains(text(), 'Approve')]]")
+        if approve_btns:
+            driver.execute_script("arguments[0].click();", approve_btns[0])
+            log_print(f"[{browser_id}] ✓ 已点击 Approve")
+            time.sleep(3)
+            if switch_to_okx_window(driver):
+                try:
+                    unlim = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='unlimited']"))
+                    )
+                    driver.execute_script("arguments[0].click();", unlim)
+                    log_print(f"[{browser_id}] ✓ 已点击 unlimited")
+                except TimeoutException:
+                    log_print(f"[{browser_id}] ⚠ 10s 内未找到 unlimited div")
+                time.sleep(0.5)
+                try:
+                    time.sleep(3)
+                    confirm_btn = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button[data-testid='okd-dialog-confirm-btn']"))
+                    )
+                    driver.execute_script("arguments[0].click();", confirm_btn)
+                    log_print(f"[{browser_id}] ✓ 已点击 okd-dialog-confirm-btn")
+                except TimeoutException:
+                    log_print(f"[{browser_id}] ⚠ 未找到 okd-dialog-confirm-btn")
+                time.sleep(3)
+                click_okx_second_button(driver, browser_id, 10)
+            driver.switch_to.window(main_window)
+            time.sleep(0.5)
 
         time.sleep(5)
-
-        # 若有 Delete 按钮则点击并确认
-        delete_btns = driver.find_elements(By.XPATH, "//button[text()='Delete']")
-        if delete_btns:
-            delete_btns[0].click()
-            log_print(f"[{browser_id}] ✓ 已点击 Delete")
-            time.sleep(1)
-            try:
-                confirm_btns = WebDriverWait(driver, 10).until(
-                    EC.presence_of_all_elements_located((By.XPATH, "//button[text()='Confirm']"))
-                )
-                if confirm_btns:
-                    confirm_btns[0].click()
-                    log_print(f"[{browser_id}] ✓ 已点击 Confirm")
-            except TimeoutException:
-                log_print(f"[{browser_id}] 10s 内未找到 Confirm 按钮")
-            time.sleep(1)
-            if switch_to_okx_window(driver, browser_id):
-                click_okx_second_button(driver, browser_id, 10)
-            time.sleep(1)
-            driver.switch_to.window(main_window)
-
-        # Create API（需同时满足文本和 type="submit"）
-        create_btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'Create API') and @type='button']")
-        if not create_btns:
-            log_print(f"[{browser_id}] ✗ 未找到 Create API 按钮")
-            return False
-        create_btns[0].click()
-        log_print(f"[{browser_id}] ✓ 已点击 Create API")
-        time.sleep(2)
-
-        # 填写 API label
+        # A 内 type="submit" 且内容 Deposit 的 button
         try:
-            inp = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='API label']"))
-            )
-            inp.clear()
-            inp.send_keys(browser_id)
-            time.sleep(0.5)
-        except TimeoutException:
-            log_print(f"[{browser_id}] ✗ 未找到 API label 输入框")
+            a = driver.find_element(By.CSS_SELECTOR, "div[role='dialog']")
+        except Exception:
+            log_print(f"[{browser_id}] ✗ 无法获取 dialog A 以点击 Deposit")
+            return False
+        submit_btns = a.find_elements(By.XPATH, ".//button[@type='submit' and .//span[text()='Deposit']]")
+        if submit_btns:
+            driver.execute_script("arguments[0].click();", submit_btns[0])
+            log_print(f"[{browser_id}] ✓ 已点击 Deposit 提交")
+        else:
+            log_print(f"[{browser_id}] ✗ 未找到 Deposit 提交按钮")
             return False
 
-        # 再次点击 Create API（弹窗内确认，type=submit）
-        create_btns = WebDriverWait(driver, 5).until(
-            EC.presence_of_all_elements_located((By.XPATH, "//button[contains(text(), 'Create API') and @type='submit']"))
-        )
-        if create_btns:
-            create_btns[0].click()
-            log_print(f"[{browser_id}] ✓ 已点击 Create API（确认）")
-        time.sleep(2)
-
-        if switch_to_okx_window(driver, browser_id):
-            click_okx_second_button(driver, browser_id, 15)
+        if switch_to_okx_window(driver):
+            time.sleep(5)
+            click_okx_second_button(driver, browser_id, 10)
         driver.switch_to.window(main_window)
         time.sleep(2)
-
-        # Restrict to trusted IPs only：优先用 id=ip_restrict 的 button，否则找包含文本的 div -> 父的父 A -> A 下 data-state=unchecked 的 button
-        try:
-            btn = driver.find_elements(By.CSS_SELECTOR, "button#ip_restrict")
-            if not btn:
-                divs = driver.find_elements(By.XPATH, "//div[contains(., 'Restrict to trusted IPs only')]")
-                if divs:
-                    a = divs[0].find_element(By.XPATH, "./../..")
-                    btns = a.find_elements(By.CSS_SELECTOR, "button[data-state='unchecked']")
-                    btn = btns
-            if btn and btn[0].get_attribute("data-state") == "unchecked":
-                btn[0].click()
-                log_print(f"[{browser_id}] ✓ 已点击 Restrict to trusted IPs only")
-            else:
-                log_print(f"[{browser_id}] ℹ 未找到可点击的 Restrict 按钮（可能已选中）")
-            time.sleep(0.5)
-        except Exception as e:
-            log_print(f"[{browser_id}] Restrict 操作异常: {e}")
-
-        try:
-            ip_inp = driver.find_element(
-                By.CSS_SELECTOR,
-                "input[placeholder='If entering multiple IP addresses, separate them with spaces.']"
-            )
-            ip_inp.clear()
-            ip_inp.send_keys(TRUSTED_IP)
-            time.sleep(2)
-        except Exception as e:
-            log_print(f"[{browser_id}] 填写 IP 失败: {e}")
-
-        # Confirm
-        try:
-            ps = driver.find_elements(By.XPATH, "//p[contains(text(), 'Confirm')]")
-            if ps:
-                safe_click(driver, ps[0], browser_id, "Confirm")
-        except Exception:
-            pass
-        time.sleep(1)
-
-        # Checkboxes
-        try:
-            for b in driver.find_elements(By.CSS_SELECTOR, "button[role='checkbox'][data-state='unchecked']"):
-                try:
-                    safe_click(driver, b, browser_id=browser_id)
-                    time.sleep(0.3)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        time.sleep(1)
-
-        # 提取 API Key / Secret
-        try:
-            dialog = driver.find_element(By.CSS_SELECTOR, "div[role='dialog'][data-state='open']")
-        except Exception as e:
-            log_print(f"[{browser_id}] ✗ 未找到 dialog: {e}")
-            return False
-
-        APIKey, APISecretKey = extract_api_key_secret(driver, dialog, browser_id)
-        if not APIKey or not APISecretKey:
-            log_print(f"[{browser_id}] ✗ 未能提取 API Key/Secret")
-            return False
-
-        # Save
-        try:
-            save_btns = dialog.find_elements(By.XPATH, ".//button[contains(text(), 'Save')]")
-            if save_btns:
-                safe_click(driver, save_btns[0], browser_id, "Save")
-        except Exception as e:
-            log_print(f"[{browser_id}] 点击 Save 失败: {e}")
-            return False
-        time.sleep(2)
-
-        if switch_to_okx_window(driver, browser_id):
-            click_okx_second_button(driver, browser_id, 15)
-        driver.switch_to.window(main_window)
-        time.sleep(3)
-
-        # 验证 td
-        try:
-            tds = WebDriverWait(driver, 15).until(EC.presence_of_all_elements_located((By.TAG_NAME, "td")))
-            found = any(browser_id in (t.text or "") for t in tds)
-            if not found:
-                log_print(f"[{browser_id}] ⚠ 未在页面中找到浏览器编号的 td")
-        except TimeoutException:
-            pass
-
-        # 调用 api/bind 绑定
-        ok, _, err = bind_api_with_retry(browser_id, APIKey, APISecretKey, browser_id)
-        if not ok:
-            log_print(f"[{browser_id}] ✗ 绑定失败: {err}")
-            return False
-        log_print(f"[{browser_id}] ✓ 绑定成功")
+        log_print(f"[{browser_id}] ✓ Deposit 流程完成")
         return True
 
     except Exception as e:
@@ -877,20 +718,16 @@ def process_single_browser(item, computer_group):
             log_print(f"[{browser_id}] 关闭异常: {e}")
 
 
-# 模块级电脑组（main 中设置）
-COMPUTER_GROUP = "0"
-
-
 def main():
     global COMPUTER_GROUP
     log_print("=" * 60)
-    log_print("Aster DEX API 自动创建脚本（独立运行）")
+    log_print("Aster DEX Deposit 脚本（独立运行）")
     log_print("=" * 60)
 
     COMPUTER_GROUP, _, thread_limit = read_computer_config()
     load_fingerprint_mapping()
 
-    # 若本地电脑组 > 900，减去 900 得到真实电脑组（用于与服务器数据比较）
+    #若本地电脑组 > 900，减去 900 得到真实电脑组（用于与服务器数据比较）
     cg_num = int(COMPUTER_GROUP or 0)
     real_group = str(cg_num - 900) if cg_num > 900 else str(COMPUTER_GROUP or "0")
     log_print(f"[系统] 本地电脑组={COMPUTER_GROUP}, 用于筛选的真实电脑组={real_group}")
@@ -903,12 +740,18 @@ def main():
     bound_numbers = fetch_api_all_bound()
     target = filter_target_items(items, real_group, bound_numbers)
     log_print(f"[系统] 共 {len(items)} 条，已绑定 {len(bound_numbers)} 个，待处理 {len(target)} 条（电脑组={real_group}）")
+
+    # 【测试模式】固定请求：浏览器编号 4001，电脑组 0
+    # TEST_BROWSER_NO = "3700"
+    # TEST_COMPUTER_GROUP = "0"
+    # target = [{"fingerprintNo": TEST_BROWSER_NO, "no": TEST_BROWSER_NO, "computeGroup": TEST_COMPUTER_GROUP}]
+    # COMPUTER_GROUP = TEST_COMPUTER_GROUP
+    # log_print(f"[系统] 测试模式：固定账号 浏览器编号={TEST_BROWSER_NO}, 电脑组={TEST_COMPUTER_GROUP}")
     if not target:
         log_print("[系统] 无待处理项，退出")
         return
 
     success, fail = 0, 0
-    # 每个线程间隔 0.5s 再启动，避免指纹浏览器 API 限流
     with ThreadPoolExecutor(max_workers=thread_limit) as ex:
         futures = {}
         for idx, it in enumerate(target):

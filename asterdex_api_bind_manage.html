@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster DEX API 绑定管理</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #eee;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 24px;
+      font-size: 24px;
+      color: #fff;
+    }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .toolbar button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .btn-primary { background: #4361ee; color: #fff; }
+    .btn-primary:hover { background: #3651d4; }
+    .btn-success { background: #06d6a0; color: #1a1a2e; }
+    .btn-success:hover { background: #05c290; }
+    .btn-danger { background: #ef476f; color: #fff; }
+    .btn-danger:hover { background: #dc3a5f; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .stats {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.08);
+      padding: 16px 24px;
+      border-radius: 10px;
+      min-width: 160px;
+    }
+    .stat-card .label { color: #94a3b8; font-size: 13px; }
+    .stat-card .value { font-size: 22px; font-weight: bold; margin-top: 4px; }
+    .section {
+      background: rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .section h2 { font-size: 16px; margin-bottom: 16px; color: #cbd5e1; }
+    .manual-add {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .manual-add input {
+      flex: 1;
+      min-width: 280px;
+      padding: 10px 14px;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      background: #1e293b;
+      color: #fff;
+      font-size: 14px;
+    }
+    .manual-add input::placeholder { color: #64748b; }
+    .manual-add input:focus { outline: none; border-color: #4361ee; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    th {
+      background: rgba(67,97,238,0.3);
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+    tr:hover { background: rgba(255,255,255,0.04); }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .badge-bound { background: #06d6a0; color: #1a1a2e; }
+    .badge-unbound { background: #f59e0b; color: #1a1a2e; }
+    .loading { opacity: 0.7; pointer-events: none; }
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .loading-spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255,255,255,0.2);
+      border-top-color: #4361ee;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .loading-text {
+      position: absolute;
+      margin-top: 80px;
+      color: #fff;
+      font-size: 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty-tip { color: #64748b; padding: 24px; text-align: center; }
+    .filter-input {
+      padding: 8px 12px;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      background: #1e293b;
+      color: #fff;
+      width: 200px;
+      font-size: 13px;
+    }
+    .table-input {
+      width: 100%;
+      min-width: 120px;
+      padding: 6px 10px;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      background: #1e293b;
+      color: #fff;
+      font-size: 13px;
+    }
+    .table-input:focus { outline: none; border-color: #4361ee; }
+    .btn-save { padding: 6px 14px; font-size: 12px; }
+    .text-ellipsis { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div id="app" class="container">
+    <div v-if="loading" class="loading-overlay">
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="loading-spinner"></div>
+        <span class="loading-text">加载中，请耐心等待（超时 3 分钟）...</span>
+      </div>
+    </div>
+
+    <h1>Aster DEX API 绑定管理</h1>
+
+    <div class="toolbar">
+      <button class="btn-primary" @click="loadData" :disabled="loading">刷新数据</button>
+      <button class="btn-success" @click="saveManual" :disabled="saving || !manualInput.trim()">保存手动填写</button>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" v-model="showUnboundOnly" />
+        <span>仅显示未绑定</span>
+      </label>
+      <input
+        v-model="filterKeyword"
+        class="filter-input"
+        placeholder="筛选浏览器编号..."
+      />
+    </div>
+
+    <div class="stats">
+      <div class="stat-card">
+        <div class="label">总列表（去重后）</div>
+        <div class="value">{{ displayList.length }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">已绑定</div>
+        <div class="value" style="color: #06d6a0">{{ boundCount }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">未绑定</div>
+        <div class="value" style="color: #f59e0b">{{ unboundCount }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">手动添加</div>
+        <div class="value" style="color: #94a3b8">{{ manualList.length }}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>手动添加未绑定浏览器编号</h2>
+      <div class="manual-add">
+        <input
+          v-model="manualInput"
+          placeholder="浏览器编号，逗号或分号分隔，如: 4001,4002;4003"
+        />
+        <button class="btn-success" @click="addManual">添加</button>
+      </div>
+      <div v-if="manualList.length" class="manual-tags">
+        <span v-for="n in manualList" :key="n" class="badge badge-unbound" style="margin-right:8px;margin-bottom:8px;">
+          {{ n }}
+          <a href="#" @click.prevent="removeManual(n)" style="color:inherit;margin-left:4px;">×</a>
+        </span>
+      </div>
+    </div>
+
+    <div class="section" :class="{ loading }">
+      <h2>全部列表（按浏览器编号去重，电脑组优先 &lt; 900）</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>序号</th>
+            <th>浏览器编号</th>
+            <th>电脑组</th>
+            <th>绑定状态</th>
+            <th>apiKey</th>
+            <th>apiSecret</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(item, idx) in displayList" :key="item.fingerprintNo + '-' + (item.computeGroup||'')">
+            <td>{{ idx + 1 }}</td>
+            <td>{{ item.fingerprintNo }}</td>
+            <td>{{ item.computeGroup }}</td>
+            <td>
+              <span :class="item.bound ? 'badge badge-bound' : 'badge badge-unbound'">
+                {{ item.bound ? '已绑定' : '未绑定' }}
+              </span>
+              <span v-if="item.isManual" style="margin-left:6px;color:#94a3b8;font-size:12px;">(手动)</span>
+            </td>
+            <td>
+              <span v-if="item.bound" class="text-ellipsis" :title="item.apiKey">{{ item.apiKey || '-' }}</span>
+              <input v-else :value="getEditValue(item.fingerprintNo, 'apiKey')" @input="setEditValue(item.fingerprintNo, 'apiKey', $event.target.value)" class="table-input" placeholder="apiKey" />
+            </td>
+            <td>
+              <span v-if="item.bound" class="text-ellipsis" :title="item.apiSecret">{{ item.apiSecret || '-' }}</span>
+              <input v-else :value="getEditValue(item.fingerprintNo, 'apiSecret')" @input="setEditValue(item.fingerprintNo, 'apiSecret', $event.target.value)" class="table-input" type="password" placeholder="apiSecret" />
+            </td>
+            <td>
+              <button v-if="!item.bound" class="btn-primary btn-save" @click="saveBind(item.fingerprintNo)" :disabled="savingBind === item.fingerprintNo">
+                {{ savingBind === item.fingerprintNo ? '保存中...' : '保存' }}
+              </button>
+              <span v-else style="color:#94a3b8;">-</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="!displayList.length && !loading" class="empty-tip">
+        {{ allList.length ? '无符合筛选条件的数据' : '暂无数据，请点击刷新' }}
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp } = Vue;
+
+    const API_BASE = 'https://sg.bicoin.com.cn/99l';
+
+    createApp({
+      data() {
+        return {
+          loading: false,
+          saving: false,
+          savingBind: null,
+          allList: [],
+          boundMap: {}, // { number: { apiKey, apiSecret } }
+          manualList: [],
+          manualInput: '',
+          filterKeyword: '',
+          showUnboundOnly: false,
+          editValues: {}, // { number: { apiKey, apiSecret } } 未绑定时的编辑值
+        };
+      },
+      computed: {
+        // 去重：以 fingerprintNo 去重，电脑组优先用 <900 的
+        deduplicatedList() {
+          const map = new Map();
+          for (const item of this.allList) {
+            const fp = String(item.fingerprintNo || item.no || '').trim();
+            if (!fp) continue;
+            const cg = parseInt(item.computeGroup, 10) || 0;
+            const existing = map.get(fp);
+            if (!existing) {
+              map.set(fp, { ...item, fingerprintNo: fp, computeGroup: String(item.computeGroup || '') });
+            } else {
+              const existingCg = parseInt(existing.computeGroup, 10) || 0;
+              if (cg < 900 && existingCg >= 900) {
+                map.set(fp, { ...item, fingerprintNo: fp, computeGroup: String(item.computeGroup || '') });
+              }
+            }
+          }
+          return Array.from(map.values());
+        },
+        displayList() {
+          const fpSet = new Set(this.deduplicatedList.map(it => String(it.fingerprintNo)));
+          let list = this.deduplicatedList.map(it => {
+            const fp = String(it.fingerprintNo);
+            const boundInfo = this.boundMap[fp];
+            const bound = !!boundInfo;
+            return {
+              ...it,
+              bound,
+              apiKey: boundInfo?.apiKey ?? '',
+              apiSecret: boundInfo?.apiSecret ?? '',
+              isManual: false,
+            };
+          });
+          for (const n of this.manualList) {
+            if (!fpSet.has(String(n))) {
+              list.push({ fingerprintNo: n, computeGroup: '-', bound: false, apiKey: '', apiSecret: '', isManual: true });
+              fpSet.add(String(n));
+            }
+          }
+          list.sort((a, b) => {
+            const na = parseInt(a.fingerprintNo, 10) || 0;
+            const nb = parseInt(b.fingerprintNo, 10) || 0;
+            return na - nb;
+          });
+          if (this.showUnboundOnly) {
+            list = list.filter(it => !it.bound);
+          }
+          const kw = (this.filterKeyword || '').trim().toLowerCase();
+          if (kw) {
+            list = list.filter(it => String(it.fingerprintNo || '').toLowerCase().includes(kw));
+          }
+          return list;
+        },
+        boundCount() {
+          const fpSet = new Set(this.deduplicatedList.map(it => String(it.fingerprintNo)));
+          for (const n of this.manualList) fpSet.add(String(n));
+          return [...fpSet].filter(fp => this.boundMap[fp]).length;
+        },
+        unboundCount() {
+          const fpSet = new Set(this.deduplicatedList.map(it => String(it.fingerprintNo)));
+          for (const n of this.manualList) fpSet.add(String(n));
+          return [...fpSet].filter(fp => !this.boundMap[fp]).length;
+        },
+      },
+      mounted() {
+        this.loadManualFromStorage();
+        this.loadData();
+      },
+      methods: {
+        async loadData() {
+          this.loading = true;
+          try {
+            const timeout = 180000; // 3 分钟
+            const [listRes, boundRes] = await Promise.all([
+              axios.get(`${API_BASE}/boost/findAccountConfigCacheSimple`, { timeout }),
+              axios.get(`${API_BASE}/api/all`, { timeout }),
+            ]);
+            const listData = listRes.data?.data || [];
+            const boundData = boundRes.data?.data?.list || [];
+            this.allList = listData;
+            const map = {};
+            for (const x of boundData) {
+              const num = String(x.number || '').trim();
+              if (num) map[num] = { apiKey: x.apiKey || '', apiSecret: x.apiSecret || '' };
+            }
+            this.boundMap = map;
+          } catch (e) {
+            console.error(e);
+            alert('加载失败: ' + (e.message || '请检查网络或接口地址'));
+          } finally {
+            this.loading = false;
+          }
+        },
+        addManual() {
+          const raw = (this.manualInput || '').trim();
+          if (!raw) return;
+          const parts = raw.split(/[,，;；\s]+/).map(s => s.trim()).filter(Boolean);
+          for (const p of parts) {
+            if (p && !this.manualList.includes(p)) this.manualList.push(p);
+          }
+          this.manualInput = '';
+          this.saveManualToStorage();
+        },
+        removeManual(n) {
+          this.manualList = this.manualList.filter(x => x !== n);
+          this.saveManualToStorage();
+        },
+        saveManual() {
+          this.saving = true;
+          this.saveManualToStorage();
+          setTimeout(() => { this.saving = false; }, 300);
+          alert('已保存到本地');
+        },
+        saveManualToStorage() {
+          try {
+            localStorage.setItem('asterdex_manual_unbound', JSON.stringify(this.manualList));
+          } catch (_) {}
+        },
+        loadManualFromStorage() {
+          try {
+            const s = localStorage.getItem('asterdex_manual_unbound');
+            if (s) this.manualList = JSON.parse(s);
+          } catch (_) {}
+        },
+        getEditValue(fp, field) {
+          const key = String(fp);
+          if (!this.editValues[key]) return '';
+          return this.editValues[key][field] || '';
+        },
+        setEditValue(fp, field, val) {
+          const key = String(fp);
+          if (!this.editValues[key]) this.editValues[key] = { apiKey: '', apiSecret: '' };
+          this.editValues[key][field] = val;
+        },
+        async saveBind(number) {
+          const apiKey = (this.editValues[String(number)]?.apiKey || '').trim();
+          const apiSecret = (this.editValues[String(number)]?.apiSecret || '').trim();
+          if (!apiKey || !apiSecret) {
+            alert('请填写 apiKey 和 apiSecret');
+            return;
+          }
+          this.savingBind = number;
+          try {
+            const r = await axios.post(`${API_BASE}/api/bind`, {
+              number: String(number),
+              apiKey,
+              apiSecret,
+            }, { timeout: 15000 });
+            const res = r.data;
+            if (res?.code === 0) {
+              this.boundMap[String(number)] = { apiKey, apiSecret };
+              alert('绑定成功');
+            } else {
+              alert('绑定失败: ' + (res?.msg || '未知错误'));
+            }
+          } catch (e) {
+            alert('绑定失败: ' + (e.message || '网络错误'));
+          } finally {
+            this.savingBind = null;
+          }
+        },
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>
