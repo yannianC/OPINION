@@ -457,6 +457,10 @@
               <span class="total-label">Portfolio总计:</span>
               <span class="total-value">{{ formatNumber(filteredSummaryTotals.totalPortfolio) }}</span>
             </div>
+            <div class="total-item">
+              <span class="total-label">已转金额总计:</span>
+              <span class="total-value">{{ formatNumber(filteredSummaryTotals.totalTransferAmount) }}</span>
+            </div>
           </div>
           
           <el-table 
@@ -1583,15 +1587,18 @@ const filteredSummaryTotals = computed(() => {
   const data = filteredTableData.value
   let totalBalance = 0
   let totalPortfolio = 0
+  let totalTransferAmount = 0
   
   for (const row of data) {
     totalBalance += parseFloat(row.balance) || 0
     totalPortfolio += parseFloat(row.c) || 0
+    totalTransferAmount += parseFloat(row.t) || 0
   }
   
   return {
     totalBalance: totalBalance,
-    totalPortfolio: totalPortfolio
+    totalPortfolio: totalPortfolio,
+    totalTransferAmount: totalTransferAmount
   }
 })
 
