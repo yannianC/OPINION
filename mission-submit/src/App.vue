@@ -400,6 +400,177 @@
           </div>
         </div>
       </section>
+
+      <!-- OP提现转到新地址任务 -->
+      <section class="section">
+        <h2>OP提现转到新地址任务</h2>
+        <div class="task-form">
+          <!-- 选择类型：浏览器id或电脑组 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>选择类型 *</label>
+              <div class="radio-group">
+                <div class="radio-option">
+                  <input 
+                    type="radio" 
+                    id="withdraw-type-browser" 
+                    value="browser" 
+                    v-model="withdrawInputType"
+                  />
+                  <label for="withdraw-type-browser">浏览器ID</label>
+                </div>
+                <div class="radio-option">
+                  <input 
+                    type="radio" 
+                    id="withdraw-type-group" 
+                    value="group" 
+                    v-model="withdrawInputType"
+                  />
+                  <label for="withdraw-type-group">电脑组</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 浏览器ID批次选择和输入框 -->
+          <div class="form-row" v-if="withdrawInputType === 'browser'">
+            <div class="form-group">
+              <label for="withdrawBrowserBatchType">电脑批次 *</label>
+              <select
+                id="withdrawBrowserBatchType"
+                v-model="withdrawBrowserBatchType"
+              >
+                <option value="first">第一批电脑（1-27）</option>
+                <option value="second">第二批电脑（901-927）</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" v-if="withdrawInputType === 'browser'">
+            <div class="form-group">
+              <label for="withdrawBrowserIds">浏览器ID *</label>
+              <input
+                id="withdrawBrowserIds"
+                v-model="withdrawBrowserIdsInput"
+                type="text"
+                placeholder="支持格式: 201 或 201,202,203 或 201-203"
+              />
+              <div v-if="parsedWithdrawBrowserIds.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
+                已解析（共 {{ parsedWithdrawBrowserIds.length }} 个）: {{ parsedWithdrawBrowserIds.join(', ') }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 电脑组输入框（带第一批全部和第二批全部按钮） -->
+          <div class="form-row" v-if="withdrawInputType === 'group'">
+            <div class="form-group">
+              <label for="withdrawGroupNos">电脑组 *</label>
+              <input
+                id="withdrawGroupNos"
+                v-model="withdrawGroupNosInput"
+                type="text"
+                placeholder="支持格式: 1 或 1,2,3 或 1-3"
+              />
+              <div style="margin-top: 8px; display: flex; gap: 8px;">
+                <button type="button" class="btn btn-info btn-sm" @click="withdrawGroupNosInput = firstBatchGroups.join(',')">
+                  第一批全部
+                </button>
+                <button type="button" class="btn btn-info btn-sm" @click="withdrawGroupNosInput = secondBatchGroups.join(',')">
+                  第二批全部
+                </button>
+              </div>
+              <div v-if="parsedWithdrawGroupNos.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
+                已解析: {{ parsedWithdrawGroupNos.join(', ') }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 参数设置 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="withdrawDeductValue">可用+资产减去此值等于要转出的钱 (tp1) *</label>
+              <input
+                id="withdrawDeductValue"
+                v-model.number="withdrawDeductValue"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="例如: 1500"
+              />
+              <div style="margin-top: 6px; color: #888; font-size: 12px;">
+                说明：比如设置 1500，可用+资产 - 1500 = 要转出的钱
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="withdrawMinAmount">转出的钱大于此值才执行 (tp2) *</label>
+              <input
+                id="withdrawMinAmount"
+                v-model.number="withdrawMinAmount"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="例如: 10000"
+              />
+              <div style="margin-top: 6px; color: #888; font-size: 12px;">
+                说明：比如设置 10000，转出的钱大于 10000 才执行转账
+              </div>
+            </div>
+          </div>
+
+          <!-- 任务间隔时间 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="withdrawInterval">每个任务间隔时间（秒）</label>
+              <input
+                id="withdrawInterval"
+                v-model="withdrawIntervalInput"
+                type="text"
+                placeholder="例如: 600,1800（最小秒数,最大秒数）"
+              />
+              <div style="margin-top: 6px; color: #888; font-size: 12px;">
+                说明：填写 600,1800 表示每个任务之间随机等待 600~1800 秒后再执行下一个任务
+              </div>
+              <div v-if="withdrawCurrentWait" style="margin-top: 8px; color: #28a745; font-size: 12px;">
+                {{ withdrawCurrentWait }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 备注说明 -->
+          <div class="form-row">
+            <div class="withdraw-note">
+              <strong>计算规则：</strong>可用+资产 - <span style="color: #e67e22;">{{ withdrawDeductValue || '???' }}</span> = 要转出的钱；转出的钱 &gt; <span style="color: #e67e22;">{{ withdrawMinAmount || '???' }}</span> 才执行转账。任务type=21
+            </div>
+          </div>
+
+          <!-- 提交按钮 -->
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" @click="handleWithdrawSubmit" :disabled="isSubmittingWithdraw">
+              <span v-if="isSubmittingWithdraw">提交中...</span>
+              <span v-else>提交OP提现任务</span>
+            </button>
+            <button type="button" class="btn btn-secondary" @click="resetWithdrawForm">
+              重置
+            </button>
+          </div>
+        </div>
+
+        <!-- 提现任务失败列表 -->
+        <div v-if="failedWithdrawBrowserIds.length > 0" class="failed-list" style="margin-top: 20px;">
+          <h3 style="font-size: 16px; margin-bottom: 12px; color: #333;">提交失败的浏览器ID</h3>
+          <div class="failed-item" v-for="(item, index) in failedWithdrawBrowserIds" :key="index">
+            <span class="failed-id">浏览器ID: {{ item.browserId }}</span>
+            <span class="failed-error" v-if="item.error">错误: {{ item.error }}</span>
+          </div>
+          <div class="failed-actions">
+            <button class="btn btn-primary" @click="retryFailedWithdraw" :disabled="isRetryingWithdraw">
+              {{ isRetryingWithdraw ? '重试中...' : '重试失败的浏览器ID' }}
+            </button>
+            <button class="btn btn-secondary" @click="failedWithdrawBrowserIds = []">清除列表</button>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -445,6 +616,19 @@ const cancelHours = ref(null) // 时间超过XX小时以上的撤单
 const cleanGroupNosInput = ref('')
 const isCleaning = ref(false)
 const showConfirmDialog = ref(false)
+
+// OP提现转到新地址任务相关
+const withdrawInputType = ref('browser') // 'browser' 或 'group'
+const withdrawBrowserIdsInput = ref('')
+const withdrawBrowserBatchType = ref('second') // 浏览器ID批次选择
+const withdrawGroupNosInput = ref('')
+const withdrawDeductValue = ref(null) // 可用+资产减去此值 (tp1)
+const withdrawMinAmount = ref(null) // 转出的钱大于此值才执行 (tp2)
+const withdrawIntervalInput = ref('') // 任务间隔时间，格式: min,max（秒）
+const withdrawCurrentWait = ref('') // 当前等待状态描述
+const isSubmittingWithdraw = ref(false)
+const failedWithdrawBrowserIds = ref([]) // [{browserId, error, groupNo, tp1, tp2}]
+const isRetryingWithdraw = ref(false)
 
 // IP检测任务相关
 const ipBatchType = ref('second') // 默认第二批电脑
@@ -589,6 +773,16 @@ const validCleanGroupNos = computed(() => {
   return parsedCleanGroupNos.value.filter(groupNo => existingGroups.includes(groupNo)).sort((a, b) => a - b)
 })
 
+// 解析后的提现任务浏览器ID列表
+const parsedWithdrawBrowserIds = computed(() => {
+  return parseInput(withdrawBrowserIdsInput.value)
+})
+
+// 解析后的提现任务电脑组列表
+const parsedWithdrawGroupNos = computed(() => {
+  return parseInput(withdrawGroupNosInput.value)
+})
+
 // 解析后的IP检测电脑组列表
 const parsedIpGroupNos = computed(() => {
   return parseInput(ipGroupNosInput.value)
@@ -686,7 +880,7 @@ const showMessage = (text, type = 'info') => {
 const fetchAccountConfig = async () => {
   isLoadingAccountConfig.value = true
   try {
-    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCache')
+    const response = await axios.get('https://sg.bicoin.com.cn/99l/boost/findAccountConfigCacheSimple')
     
     if (response.data && response.data.data) {
       accountConfigData.value = response.data.data
@@ -1556,6 +1750,15 @@ watch(trendingSearchText, (newVal) => {
   }
 })
 
+// 监听提现任务输入类型变化，清空另一个输入框
+watch(withdrawInputType, () => {
+  if (withdrawInputType.value === 'browser') {
+    withdrawGroupNosInput.value = ''
+  } else {
+    withdrawBrowserIdsInput.value = ''
+  }
+})
+
 // 监听IP批次类型变化，自动填充对应的电脑组
 watch(ipBatchType, (newVal) => {
   if (newVal === 'first') {
@@ -1564,6 +1767,259 @@ watch(ipBatchType, (newVal) => {
     ipGroupNosInput.value = secondBatchGroups.join(',')
   }
 }, { immediate: true })
+
+/**
+ * 提交单个浏览器ID的OP提现任务（带重试，type=21）
+ * @param {number} browserId - 浏览器ID
+ * @param {number} groupNo - 电脑组
+ * @param {number} tp1 - 可用+资产减去此值
+ * @param {number} tp2 - 转出的钱大于此值才执行
+ * @param {number} maxRetries - 最大重试次数
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+const submitSingleWithdraw = async (browserId, groupNo, tp1, tp2, maxRetries = 3) => {
+  const payload = {
+    type: 21,
+    groupNo: groupNo,
+    numberList: String(browserId),
+    exchangeName: 'OP',
+    tp1: String(tp1),
+    tp2: String(tp2)
+  }
+  
+  let lastError = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`浏览器ID ${browserId} OP提现第 ${attempt} 次重试，等待5秒...`)
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+      
+      const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/add', payload)
+      
+      if (response.data && response.data.code === 0) {
+        console.log(`浏览器ID ${browserId} OP提现任务提交成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+        return { success: true }
+      } else {
+        lastError = response.data?.msg || '未知错误'
+        console.error(`浏览器ID ${browserId} OP提现提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      }
+    } catch (error) {
+      lastError = error.message || '未知错误'
+      console.error(`浏览器ID ${browserId} OP提现提交失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+    }
+  }
+  
+  return { success: false, error: lastError }
+}
+
+/**
+ * 处理OP提现任务提交
+ */
+const handleWithdrawSubmit = async () => {
+  if (isSubmittingWithdraw.value) return
+  
+  // 验证参数
+  if (!withdrawDeductValue.value && withdrawDeductValue.value !== 0) {
+    showMessage('请输入"可用+资产减去此值"的值', 'error')
+    return
+  }
+  if (!withdrawMinAmount.value && withdrawMinAmount.value !== 0) {
+    showMessage('请输入"转出的钱大于此值才执行"的值', 'error')
+    return
+  }
+  
+  // 验证输入
+  if (withdrawInputType.value === 'browser' && parsedWithdrawBrowserIds.value.length === 0) {
+    showMessage('请正确输入浏览器ID', 'error')
+    return
+  }
+  
+  if (withdrawInputType.value === 'group' && parsedWithdrawGroupNos.value.length === 0) {
+    showMessage('请正确输入电脑组', 'error')
+    return
+  }
+  
+  // 获取要提交的浏览器ID列表
+  let browserIdsToSubmit = []
+  const browserIdToGroupNoMap = {}
+  
+  if (withdrawInputType.value === 'browser') {
+    browserIdsToSubmit = parsedWithdrawBrowserIds.value
+  } else {
+    for (const groupNo of parsedWithdrawGroupNos.value) {
+      const browserIds = groupToBrowserMap.value[groupNo] || []
+      browserIdsToSubmit.push(...browserIds)
+      for (const browserId of browserIds) {
+        browserIdToGroupNoMap[browserId] = groupNo
+        browserIdToGroupNoMap[String(browserId)] = groupNo
+      }
+    }
+    
+    if (browserIdsToSubmit.length === 0) {
+      showMessage('所选电脑组没有对应的浏览器ID', 'error')
+      return
+    }
+  }
+  
+  // 去重并排序
+  browserIdsToSubmit = [...new Set(browserIdsToSubmit)].sort((a, b) => a - b)
+  
+  const tp1 = withdrawDeductValue.value
+  const tp2 = withdrawMinAmount.value
+  
+  // 解析间隔时间
+  let intervalMin = 0
+  let intervalMax = 0
+  if (withdrawIntervalInput.value && withdrawIntervalInput.value.trim()) {
+    const parts = withdrawIntervalInput.value.split(',').map(s => parseInt(s.trim()))
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] >= 0 && parts[1] >= parts[0]) {
+      intervalMin = parts[0]
+      intervalMax = parts[1]
+    } else {
+      showMessage('任务间隔时间格式错误，请按"最小秒数,最大秒数"格式填写，例如: 600,1800', 'error')
+      return
+    }
+  }
+  
+  isSubmittingWithdraw.value = true
+  failedWithdrawBrowserIds.value = []
+  withdrawCurrentWait.value = ''
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    const totalCount = browserIdsToSubmit.length
+    
+    for (let i = 0; i < browserIdsToSubmit.length; i++) {
+      const browserId = browserIdsToSubmit[i]
+      
+      // 非第一个任务时，如果设置了间隔，等待随机秒数
+      if (i > 0 && intervalMax > 0) {
+        const waitSeconds = Math.floor(Math.random() * (intervalMax - intervalMin + 1)) + intervalMin
+        const estimatedTime = new Date(Date.now() + waitSeconds * 1000)
+        const etaStr = `${String(estimatedTime.getHours()).padStart(2, '0')}:${String(estimatedTime.getMinutes()).padStart(2, '0')}:${String(estimatedTime.getSeconds()).padStart(2, '0')}`
+        withdrawCurrentWait.value = `等待 ${waitSeconds} 秒后提交第 ${i + 1}/${totalCount} 个任务（浏览器ID: ${browserId}），预计 ${etaStr} 执行`
+        console.log(`等待 ${waitSeconds} 秒后提交浏览器ID ${browserId}，预计 ${etaStr} 执行`)
+        await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000))
+      } else {
+        withdrawCurrentWait.value = `正在提交第 ${i + 1}/${totalCount} 个任务（浏览器ID: ${browserId}）...`
+      }
+      
+      let groupNo = null
+      if (withdrawInputType.value === 'browser') {
+        groupNo = getGroupNoByBrowserIdAndBatch(browserId, withdrawBrowserBatchType.value)
+      } else {
+        groupNo = browserIdToGroupNoMap[browserId] || browserIdToGroupNoMap[String(browserId)]
+      }
+      
+      if (!groupNo) {
+        console.warn(`浏览器ID ${browserId} 没有对应的电脑组，跳过`)
+        failCount++
+        failedWithdrawBrowserIds.value.push({
+          browserId: browserId,
+          error: '没有对应的电脑组',
+          groupNo: null,
+          tp1: tp1,
+          tp2: tp2
+        })
+        continue
+      }
+      
+      const result = await submitSingleWithdraw(browserId, groupNo, tp1, tp2, 3)
+      
+      if (result.success) {
+        successCount++
+      } else {
+        failCount++
+        failedWithdrawBrowserIds.value.push({
+          browserId: browserId,
+          error: result.error || '提交失败',
+          groupNo: groupNo,
+          tp1: tp1,
+          tp2: tp2
+        })
+      }
+    }
+    
+    withdrawCurrentWait.value = ''
+    
+    if (successCount > 0) {
+      showMessage(`OP提现任务提交完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+    } else {
+      showMessage(`OP提现任务提交失败：所有请求都失败了`, 'error')
+    }
+  } catch (error) {
+    console.error('OP提现任务提交失败:', error)
+    showMessage('OP提现任务提交失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isSubmittingWithdraw.value = false
+    withdrawCurrentWait.value = ''
+  }
+}
+
+/**
+ * 重试失败的OP提现任务
+ */
+const retryFailedWithdraw = async () => {
+  if (isRetryingWithdraw.value || failedWithdrawBrowserIds.value.length === 0) return
+  
+  isRetryingWithdraw.value = true
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    const newFailedList = []
+    
+    for (const item of failedWithdrawBrowserIds.value) {
+      if (!item.groupNo) {
+        newFailedList.push(item)
+        failCount++
+        continue
+      }
+      
+      const result = await submitSingleWithdraw(item.browserId, item.groupNo, item.tp1, item.tp2, 3)
+      
+      if (result.success) {
+        successCount++
+      } else {
+        failCount++
+        newFailedList.push({
+          ...item,
+          error: result.error || '提交失败'
+        })
+      }
+    }
+    
+    failedWithdrawBrowserIds.value = newFailedList
+    
+    if (successCount > 0) {
+      showMessage(`重试完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+    } else {
+      showMessage(`重试失败：所有请求都失败了`, 'error')
+    }
+  } catch (error) {
+    console.error('重试OP提现任务失败:', error)
+    showMessage('重试OP提现任务失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isRetryingWithdraw.value = false
+  }
+}
+
+/**
+ * 重置提现任务表单
+ */
+const resetWithdrawForm = () => {
+  withdrawBrowserIdsInput.value = ''
+  withdrawBrowserBatchType.value = 'second'
+  withdrawGroupNosInput.value = ''
+  withdrawInputType.value = 'browser'
+  withdrawDeductValue.value = null
+  withdrawMinAmount.value = null
+  withdrawIntervalInput.value = ''
+  withdrawCurrentWait.value = ''
+}
 
 /**
  * 获取任务状态
@@ -2071,6 +2527,23 @@ onUnmounted(() => {
   display: flex;
   gap: 12px;
   margin-top: 12px;
+}
+
+/* 提现任务备注说明 */
+.withdraw-note {
+  padding: 12px 16px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  color: #6d4c00;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 小号按钮 */
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 12px;
 }
 </style>
 

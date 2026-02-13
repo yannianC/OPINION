@@ -230,6 +230,26 @@
           />
         </div>
         <div class="filter-item">
+          <label>已转金额范围:</label>
+          <el-input 
+            v-model="filters.transferAmountMin" 
+            placeholder="最小值"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+          />
+          <span style="margin: 0 8px; color: #666;">-</span>
+          <el-input 
+            v-model="filters.transferAmountMax" 
+            placeholder="最大值"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+          />
+        </div>
+        <div class="filter-item">
           <label>余额+Portfolio:</label>
           <el-select 
             v-model="filters.balancePlusPortfolioOperator" 
@@ -658,6 +678,23 @@
           <el-input 
             v-model="scope.row.n" 
             placeholder="钱包地址"
+            size="small"
+            @blur="saveRowData(scope.row)"
+          />
+        </template>
+      </el-table-column>
+
+      <el-table-column label="新接收地址 (s)" width="300" align="center">
+        <template #default="scope">
+          <span style="font-size: 12px; color: #606266; word-break: break-all;">{{ scope.row.s || '' }}</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="已转金额 (t)" width="150" align="center">
+        <template #default="scope">
+          <el-input 
+            v-model="scope.row.t" 
+            placeholder="已转金额"
             size="small"
             @blur="saveRowData(scope.row)"
           />
@@ -1644,6 +1681,8 @@ const filters = ref({
   addressSearch: '',  // 地址搜索
   balanceMin: '',  // 余额最小值
   balanceMax: '',  // 余额最大值
+  transferAmountMin: '',  // 已转金额最小值
+  transferAmountMax: '',  // 已转金额最大值
   balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
   balancePlusPortfolioValue: '',  // 余额+Portfolio值
   showNoAddress: false,  // 显示无地址
@@ -1670,6 +1709,8 @@ const activeFilters = ref({
   addressSearch: '',  // 地址搜索
   balanceMin: null,  // 余额最小值
   balanceMax: null,  // 余额最大值
+  transferAmountMin: null,  // 已转金额最小值
+  transferAmountMax: null,  // 已转金额最大值
   balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
   balancePlusPortfolioValue: null,  // 余额+Portfolio值
   showNoAddress: false,  // 显示无地址
@@ -1747,6 +1788,10 @@ const applyFilters = () => {
   const balanceMin = filters.value.balanceMin ? parseFloat(filters.value.balanceMin) : null
   const balanceMax = filters.value.balanceMax ? parseFloat(filters.value.balanceMax) : null
   
+  // 解析已转金额范围
+  const transferAmountMin = filters.value.transferAmountMin ? parseFloat(filters.value.transferAmountMin) : null
+  const transferAmountMax = filters.value.transferAmountMax ? parseFloat(filters.value.transferAmountMax) : null
+  
   // 解析余额+Portfolio值
   const balancePlusPortfolioValue = filters.value.balancePlusPortfolioValue ? parseFloat(filters.value.balancePlusPortfolioValue) : null
   const balancePlusPortfolioOperator = filters.value.balancePlusPortfolioOperator || '>'
@@ -1767,6 +1812,8 @@ const applyFilters = () => {
     addressSearch: filters.value.addressSearch.trim(),
     balanceMin: isNaN(balanceMin) ? null : balanceMin,
     balanceMax: isNaN(balanceMax) ? null : balanceMax,
+    transferAmountMin: isNaN(transferAmountMin) ? null : transferAmountMin,
+    transferAmountMax: isNaN(transferAmountMax) ? null : transferAmountMax,
     balancePlusPortfolioOperator: balancePlusPortfolioOperator,
     balancePlusPortfolioValue: isNaN(balancePlusPortfolioValue) ? null : balancePlusPortfolioValue,
     showNoAddress: filters.value.showNoAddress,
@@ -1800,6 +1847,8 @@ const clearFilters = () => {
     addressSearch: '',
     balanceMin: '',
     balanceMax: '',
+    transferAmountMin: '',
+    transferAmountMax: '',
     balancePlusPortfolioOperator: '>',
     balancePlusPortfolioValue: '',
     showNoAddress: false,
@@ -1826,6 +1875,8 @@ const clearFilters = () => {
     addressSearch: '',
     balanceMin: null,
     balanceMax: null,
+    transferAmountMin: null,
+    transferAmountMax: null,
     balancePlusPortfolioOperator: '>',
     balancePlusPortfolioValue: null,
     showNoAddress: false,
@@ -1873,6 +1924,8 @@ const filteredTableData = computed(() => {
                     filters.addressSearch ||
                     filters.balanceMin !== null ||
                     filters.balanceMax !== null ||
+                    filters.transferAmountMin !== null ||
+                    filters.transferAmountMax !== null ||
                     (filters.balancePlusPortfolioValue !== null && filters.balancePlusPortfolioValue !== undefined) ||
                     filters.showNoAddress ||
                     filters.showDuplicateAddress ||
@@ -1940,6 +1993,17 @@ const filteredTableData = computed(() => {
           return false
         }
         if (filters.balanceMax !== null && balance > filters.balanceMax) {
+          return false
+        }
+      }
+      
+      // 已转金额范围筛选
+      if (filters.transferAmountMin !== null || filters.transferAmountMax !== null) {
+        const transferAmount = parseFloat(row.t) || 0
+        if (filters.transferAmountMin !== null && transferAmount < filters.transferAmountMin) {
+          return false
+        }
+        if (filters.transferAmountMax !== null && transferAmount > filters.transferAmountMax) {
           return false
         }
       }
@@ -2637,7 +2701,7 @@ const formatChainMarkets = (markets) => {
 const loadChainData = async () => {
   try {
     const response = await axios.get(CHAIN_DATA_API_URL, {
-      timeout: 120000  // 120秒超时，数据量较大
+      timeout: 360000  // 120秒超时，数据量较大
     })
     
     if (response.data && response.data.items && Array.isArray(response.data.items)) {
@@ -3287,7 +3351,7 @@ const loadData = async (silent = false) => {
   
   try {
     const response = await axios.get(`${API_BASE_URL}/boost/findAccountConfigCache`, {
-      timeout: 180000  // 120秒超时，数据量较大
+      timeout: 1800000  // 120秒超时，数据量较大
     })
     
     if (response.data && response.data.data) {
@@ -5754,6 +5818,8 @@ const exportFilteredToExcel = () => {
       '余额+Portfolio',
       '地址',
       '钱包地址',
+      '新接收地址',
+      '已转金额',
       '持有仓位',
       '链上信息',
       '挂单仓位',
@@ -5792,6 +5858,8 @@ const exportFilteredToExcel = () => {
         balancePlusPortfolio.toFixed(2),
         row.h || '',
         row.n || '',
+        row.s || '',
+        row.t || '',
         row.a || '',
         getChainInfo(row) || '',
         row.b || '',

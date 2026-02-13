@@ -1533,7 +1533,7 @@ def get_mission_from_server():
     """
     try:
         url = f"{SERVER_BASE_URL}/mission/getOneMission"
-        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6,9]}
+        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6,9,21]}
         
         log_print(f"\n[系统] 请求任务: {url}")
         log_print(f"[系统] 请求参数: {payload}")
@@ -15458,6 +15458,723 @@ def collect_position_data(driver, browser_id, exchange_name, tp3, available_bala
         return False, collected_data
 
 
+def parse_locale_number(value_str):
+    """
+    解析可能包含不同地区格式的数字字符串
+    
+    处理以下情况：
+    - 标准格式: "1,234.56" -> 1234.56
+    - 欧洲格式（逗号作为小数点）: "0,5" -> 0.5, "1.234,56" -> 1234.56
+    - 纯数字: "123.45" -> 123.45
+    - 带货币符号: "$1,234.56" -> 1234.56
+    
+    判断逻辑：
+    1. 如果同时包含 . 和 ,，最后出现的那个是小数分隔符
+    2. 如果只有 ,：
+       - 逗号后面不是3位数字 -> 逗号是小数点（如 "0,5" "123,45"）
+       - 逗号前面是0且只有一位 -> 逗号是小数点（如 "0,123456"）
+       - 只有一个逗号且后面正好3位数字且前面多于1位 -> 逗号是千分位（如 "1,234"）
+       - 有多个逗号 -> 逗号都是千分位（如 "1,234,567"）
+    3. 如果只有 . -> 按正常小数点处理
+    
+    Returns:
+        float: 解析后的数字，解析失败返回 None
+    """
+    if not value_str:
+        return None
+    
+    # 去除货币符号和空白
+    import re
+    cleaned = value_str.replace('$', '').replace('¢', '').replace('€', '').replace('£', '').strip()
+    
+    if not cleaned:
+        return None
+    
+    has_comma = ',' in cleaned
+    has_dot = '.' in cleaned
+    
+    try:
+        if has_comma and has_dot:
+            # 同时有逗号和点，最后出现的是小数分隔符
+            last_comma = cleaned.rfind(',')
+            last_dot = cleaned.rfind('.')
+            
+            if last_comma > last_dot:
+                # 逗号在后面，逗号是小数点: "1.234,56" -> 1234.56
+                cleaned = cleaned.replace('.', '').replace(',', '.')
+            else:
+                # 点在后面，点是小数点: "1,234.56" -> 1234.56
+                cleaned = cleaned.replace(',', '')
+        elif has_comma and not has_dot:
+            comma_count = cleaned.count(',')
+            last_comma = cleaned.rfind(',')
+            after_comma = cleaned[last_comma + 1:]
+            before_first_comma = cleaned[:cleaned.find(',')]
+            
+            if comma_count == 1 and len(after_comma) == 3 and len(before_first_comma) > 1:
+                # 单个逗号，后面正好3位，前面多于1位 -> 千分位: "1,234" -> 1234
+                cleaned = cleaned.replace(',', '')
+            elif comma_count > 1:
+                # 多个逗号 -> 全是千分位: "1,234,567" -> 1234567
+                cleaned = cleaned.replace(',', '')
+            else:
+                # 其他情况逗号当小数点: "0,5" -> 0.5, "123,45" -> 123.45
+                cleaned = cleaned.replace(',', '.')
+        # 如果只有点或都没有，直接解析
+        
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return None
+
+
+def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_value, balance_value):
+    """
+    处理 Type 21 任务 - Withdraw 并通过 OKX 钱包发送 USDT
+    
+    Args:
+        driver: Selenium WebDriver 对象
+        browser_id: 浏览器编号
+        mission: 任务信息字典
+        portfolio_value: Portfolio 值（字符串，如 "$1,996.84"）
+        balance_value: Balance 值（字符串，如 "$1,996.84"）
+        
+    Returns:
+        tuple: (success: bool, failure_reason: str)
+    """
+    try:
+        # 1. 获取 tp1 和 tp2
+        tp1 = mission.get('tp1')
+        tp2 = mission.get('tp2')
+        log_print(f"[{browser_id}] [Type21] tp1={tp1}, tp2={tp2}")
+        
+        if tp1 is None or tp2 is None:
+            log_print(f"[{browser_id}] [Type21] ✗ tp1 或 tp2 为空，任务失败")
+            return False, "tp1 或 tp2 为空"
+        
+        # 2. 将 portfolio 和 balance 转成数字
+        try:
+            if isinstance(portfolio_value, str):
+                portfolio_num = float(portfolio_value.replace('$', '').replace(',', '').strip())
+            else:
+                portfolio_num = float(portfolio_value) if portfolio_value else 0
+        except:
+            portfolio_num = 0
+        
+        try:
+            if isinstance(balance_value, str):
+                balance_num = float(balance_value.replace('$', '').replace(',', '').strip())
+            else:
+                balance_num = float(balance_value) if balance_value else 0
+        except:
+            balance_num = 0
+        
+        try:
+            tp1_num = float(tp1)
+        except:
+            log_print(f"[{browser_id}] [Type21] ✗ tp1 无法转换为数字: {tp1}")
+            return False, f"tp1 无法转换为数字: {tp1}"
+        
+        try:
+            tp2_num = float(tp2)
+        except:
+            log_print(f"[{browser_id}] [Type21] ✗ tp2 无法转换为数字: {tp2}")
+            return False, f"tp2 无法转换为数字: {tp2}"
+        
+        total_sum = portfolio_num + balance_num
+        withdraw_amount = total_sum - tp1_num
+        # 保留两位小数
+        withdraw_amount = round(withdraw_amount, 2)
+        
+        log_print(f"[{browser_id}] [Type21] portfolio={portfolio_num}, balance={balance_num}, 总和={total_sum}")
+        log_print(f"[{browser_id}] [Type21] 总和({total_sum}) - tp1({tp1_num}) = 要转出的钱 A={withdraw_amount}")
+        log_print(f"[{browser_id}] [Type21] tp2={tp2_num}")
+        
+        # 3. 判断 A 是否小于 tp2
+        if withdraw_amount < tp2_num:
+            log_print(f"[{browser_id}] [Type21] ✗ 要转出的钱 A({withdraw_amount}) < tp2({tp2_num})，任务失败")
+            return False, f"转出金额({withdraw_amount}) 小于 tp2({tp2_num})"
+        
+        log_print(f"[{browser_id}] [Type21] ✓ 要转出的钱 A({withdraw_amount}) >= tp2({tp2_num})，继续执行")
+        
+        # 4. 点击 "Withdraw" 按钮
+        log_print(f"[{browser_id}] [Type21] 查找并点击 Withdraw 按钮...")
+        withdraw_button = None
+        all_buttons = driver.find_elements(By.TAG_NAME, "button")
+        for btn in all_buttons:
+            try:
+                if btn.text.strip() == "Withdraw":
+                    withdraw_button = btn
+                    break
+            except:
+                continue
+        
+        if not withdraw_button:
+            log_print(f"[{browser_id}] [Type21] ✗ 未找到 Withdraw 按钮")
+            return False, "未找到 Withdraw 按钮"
+        
+        withdraw_button.click()
+        log_print(f"[{browser_id}] [Type21] ✓ 已点击 Withdraw 按钮")
+        time.sleep(2)
+        
+        # 5. 找到 dialog div
+        dialog_div = None
+        try:
+            dialog_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="dialog"][data-part="content"]')
+            if dialog_divs:
+                dialog_div = dialog_divs[0]
+                log_print(f"[{browser_id}] [Type21] ✓ 找到 dialog div")
+            else:
+                log_print(f"[{browser_id}] [Type21] ✗ 未找到 dialog div")
+                return False, "未找到 dialog div"
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ✗ 查找 dialog div 异常: {str(e)}")
+            return False, f"查找 dialog div 异常: {str(e)}"
+        
+        # 6. 判断 A 是否大于 balance，决定填入方式
+        if withdraw_amount > balance_num:
+            log_print(f"[{browser_id}] [Type21] A({withdraw_amount}) > balance({balance_num})，点击 Max")
+            # 找到 Max span 并点击
+            max_span = None
+            all_spans = dialog_div.find_elements(By.TAG_NAME, "span")
+            for span in all_spans:
+                try:
+                    if span.text.strip() == "Max":
+                        max_span = span
+                        break
+                except:
+                    continue
+            
+            if max_span:
+                max_span.click()
+                log_print(f"[{browser_id}] [Type21] ✓ 已点击 Max")
+                
+                # 点击 Max 后等待2s，获取 input 实际值并与 tp2 比较
+                time.sleep(2)
+                try:
+                    max_amount_inputs = dialog_div.find_elements(By.CSS_SELECTOR, 'input[placeholder="10.00"]')
+                    if max_amount_inputs:
+                        max_input_value_str = max_amount_inputs[0].get_attribute("value")
+                        log_print(f"[{browser_id}] [Type21] Max 后 input 实际值: {max_input_value_str}")
+                        try:
+                            max_input_value = float(max_input_value_str.replace('$', '').replace(',', '').strip())
+                        except:
+                            log_print(f"[{browser_id}] [Type21] ✗ Max 后 input 值无法转换为数字: {max_input_value_str}")
+                            return False, f"Max 后 input 值无法转换为数字: {max_input_value_str}"
+                        
+                        if max_input_value < tp2_num:
+                            log_print(f"[{browser_id}] [Type21] ✗ Max 后实际值({max_input_value}) < tp2({tp2_num})，任务失败")
+                            return False, f"Max 后实际值({max_input_value}) 小于 tp2({tp2_num})"
+                        else:
+                            log_print(f"[{browser_id}] [Type21] ✓ Max 后实际值({max_input_value}) >= tp2({tp2_num})，继续执行")
+                    else:
+                        log_print(f"[{browser_id}] [Type21] ⚠ 未找到 input，跳过 Max 值校验")
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] ⚠ 获取 Max 后 input 值异常: {str(e)}，跳过校验")
+            else:
+                log_print(f"[{browser_id}] [Type21] ✗ 未找到 Max span")
+                return False, "未找到 Max span"
+        else:
+            log_print(f"[{browser_id}] [Type21] A({withdraw_amount}) <= balance({balance_num})，手动填入金额")
+            # 找到 input 并填入 A
+            amount_input = None
+            try:
+                amount_inputs = dialog_div.find_elements(By.CSS_SELECTOR, 'input[placeholder="10.00"]')
+                if amount_inputs:
+                    amount_input = amount_inputs[0]
+                else:
+                    log_print(f"[{browser_id}] [Type21] ✗ 未找到 placeholder='10.00' 的 input")
+                    return False, "未找到金额输入框"
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ✗ 查找金额输入框异常: {str(e)}")
+                return False, f"查找金额输入框异常: {str(e)}"
+            
+            amount_input.clear()
+            amount_input.send_keys(str(withdraw_amount))
+            log_print(f"[{browser_id}] [Type21] ✓ 已填入金额: {withdraw_amount}")
+        
+        # 7. 等待2s，点击 dialog 内的 Withdraw 按钮
+        time.sleep(2)
+        dialog_withdraw_btn = None
+        all_dialog_buttons = dialog_div.find_elements(By.TAG_NAME, "button")
+        for btn in all_dialog_buttons:
+            try:
+                if btn.text.strip() == "Withdraw":
+                    dialog_withdraw_btn = btn
+                    break
+            except:
+                continue
+        
+        if not dialog_withdraw_btn:
+            log_print(f"[{browser_id}] [Type21] ✗ 未找到 dialog 内的 Withdraw 按钮")
+            return False, "未找到 dialog 内的 Withdraw 按钮"
+        
+        dialog_withdraw_btn.click()
+        log_print(f"[{browser_id}] [Type21] ✓ 已点击 dialog 内的 Withdraw 按钮")
+        
+        # 8. 等待3s，切换到 OKX 界面
+        time.sleep(10)
+        log_print(f"[{browser_id}] [Type21] 切换到 OKX 钱包页面...")
+        okx_extension_id = "mcohilncbfahbmgdjkbpemcciiolgcge"
+        all_windows = driver.window_handles
+        okx_window = None
+        
+        for window in all_windows:
+            try:
+                driver.switch_to.window(window)
+                current_url = driver.current_url
+                if "chrome-extension://" in current_url and okx_extension_id in current_url:
+                    okx_window = window
+                    log_print(f"[{browser_id}] [Type21] ✓ 已切换到 OKX 页面")
+                    break
+            except:
+                continue
+        
+        if not okx_window:
+            log_print(f"[{browser_id}] [Type21] ✗ 未找到 OKX 页面")
+            return False, "未找到 OKX 页面"
+        
+        # 9. 在10s内找到 data-testid="okd-button" 的第二个 button 并点击
+        log_print(f"[{browser_id}] [Type21] 在10s内查找 okd-button 的第二个按钮...")
+        start_time = time.time()
+        okd_button_clicked = False
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                if len(buttons) >= 2:
+                    buttons[1].click()
+                    log_print(f"[{browser_id}] [Type21] ✓ 已点击第二个 okd-button")
+                    okd_button_clicked = True
+                    break
+                else:
+                    time.sleep(0.5)
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ⚠ 查找 okd-button 时出错: {str(e)}")
+                time.sleep(0.5)
+        
+        if not okd_button_clicked:
+            log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到第二个 okd-button")
+            return False, "10s内未找到第二个 okd-button"
+        
+        # 10. 停留在 OKX 界面，等待60s
+        time.sleep(60)
+        
+        # 10.5 重新进入 OKX 界面（因为 OKX 页面可能已跳转到其他页面）
+        log_print(f"[{browser_id}] [Type21] 重新进入 OKX 界面...")
+        okx_popup_url = f"chrome-extension://{okx_extension_id}/popup.html"
+        try:
+            driver.get(okx_popup_url)
+            log_print(f"[{browser_id}] [Type21] ✓ 已重新打开 OKX 页面: {okx_popup_url}")
+            time.sleep(3)
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ⚠ 重新打开 OKX 页面异常: {str(e)}")
+        
+        # 11. 在10s内找到 home-page-action-item-wallet_home_btn_send 按钮
+        log_print(f"[{browser_id}] [Type21] 在10s内查找 Send 按钮...")
+        start_time = time.time()
+        send_button_found = False
+        
+        while time.time() - start_time < 10:
+            try:
+                send_buttons = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="home-page-action-item-wallet_home_btn_send"]')
+                if send_buttons:
+                    send_buttons[0].click()
+                    log_print(f"[{browser_id}] [Type21] ✓ 已点击 Send 按钮")
+                    send_button_found = True
+                    break
+                else:
+                    time.sleep(0.5)
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ⚠ 查找 Send 按钮时出错: {str(e)}")
+                time.sleep(0.5)
+        
+        if not send_button_found:
+            log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到 Send 按钮")
+            return False, "10s内未找到 Send 按钮"
+        
+        # 12. 等待2s，找到 USDT div 并点击其父节点的父节点的父节点
+        time.sleep(5)
+        log_print(f"[{browser_id}] [Type21] 查找 USDT 币种...")
+        usdt_clicked = False
+        
+        try:
+            usdt_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="home-page-common-coin-list-item"]')
+            for div in usdt_divs:
+                try:
+                    if "USDT" in div.text:
+                        # 点击父节点的父节点的父节点
+                        parent1 = div.find_element(By.XPATH, '..')
+                        parent2 = parent1.find_element(By.XPATH, '..')
+                        parent3 = parent2.find_element(By.XPATH, '..')
+                        parent3.click()
+                        log_print(f"[{browser_id}] [Type21] ✓ 已点击 USDT 的父节点的父节点的父节点")
+                        usdt_clicked = True
+                        break
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] ⚠ 处理 USDT div 时出错: {str(e)}")
+                    continue
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ✗ 查找 USDT div 异常: {str(e)}")
+        
+        if not usdt_clicked:
+            log_print(f"[{browser_id}] [Type21] ✗ 未找到或未能点击 USDT")
+            return False, "未找到或未能点击 USDT"
+        
+        # 13. 等待2s，找到 textarea 并填入地址
+        time.sleep(5)
+        log_print(f"[{browser_id}] [Type21] 获取浏览器账户数据（s 字段）...")
+        
+        # 请求获取浏览器数据
+        account_config = None
+        try:
+            get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
+            params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
+            response = requests.get(get_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result and result.get('data'):
+                    account_config = result['data']
+                    log_print(f"[{browser_id}] [Type21] ✓ 已获取账户配置")
+                else:
+                    log_print(f"[{browser_id}] [Type21] ✗ 账户配置不存在")
+                    return False, "账户配置不存在"
+            else:
+                log_print(f"[{browser_id}] [Type21] ✗ 获取账户配置失败: HTTP {response.status_code}")
+                return False, f"获取账户配置失败: HTTP {response.status_code}"
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ✗ 获取账户配置异常: {str(e)}")
+            return False, f"获取账户配置异常: {str(e)}"
+        
+        s_value = account_config.get('s')
+        if s_value and str(s_value).strip():
+            log_print(f"[{browser_id}] [Type21] s 字段值: {s_value}")
+            
+            # 找到 textarea 并填入
+            try:
+                textareas = driver.find_elements(By.CSS_SELECTOR, 'textarea[data-testid="okd-input"]')
+                if textareas:
+                    textareas[0].clear()
+                    textareas[0].send_keys(str(s_value).strip())
+                    log_print(f"[{browser_id}] [Type21] ✓ 已填入地址")
+                else:
+                    log_print(f"[{browser_id}] [Type21] ✗ 未找到 textarea")
+                    return False, "未找到地址输入框"
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ✗ 填入地址异常: {str(e)}")
+                return False, f"填入地址异常: {str(e)}"
+        else:
+            log_print(f"[{browser_id}] [Type21] ✗ s 字段为空或不存在")
+            return False, "s 字段为空或不存在"
+        
+        # 14. 等待2s，在10s内找到 okd-button 并点击
+        time.sleep(5)
+        log_print(f"[{browser_id}] [Type21] 在10s内查找确认按钮...")
+        start_time = time.time()
+        confirm_clicked = False
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                if buttons:
+                    buttons[0].click()
+                    log_print(f"[{browser_id}] [Type21] ✓ 已点击确认按钮")
+                    confirm_clicked = True
+                    break
+                else:
+                    time.sleep(0.5)
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ⚠ 查找确认按钮时出错: {str(e)}")
+                time.sleep(0.5)
+        
+        if not confirm_clicked:
+            log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到确认按钮")
+            return False, "10s内未找到确认按钮"
+        
+        # 15. 等待3s，再在10s内找到 okd-button 并点击
+        time.sleep(5)
+        log_print(f"[{browser_id}] [Type21] 在10s内查找第二次确认按钮...")
+        start_time = time.time()
+        confirm2_clicked = False
+        
+        while time.time() - start_time < 10:
+            try:
+                buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                if buttons:
+                    buttons[0].click()
+                    log_print(f"[{browser_id}] [Type21] ✓ 已点击第二次确认按钮")
+                    confirm2_clicked = True
+                    break
+                else:
+                    time.sleep(0.5)
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ⚠ 查找第二次确认按钮时出错: {str(e)}")
+                time.sleep(0.5)
+        
+        if not confirm2_clicked:
+            log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到第二次确认按钮")
+            return False, "10s内未找到第二次确认按钮"
+        
+        # 16. 等待2s，获取转出额
+        time.sleep(5)
+        transfer_amount_str = ""
+        try:
+            amount_divs = driver.find_elements(By.CSS_SELECTOR, 'div[class*="coinAmount__input__contrast__enter__text"]')
+            if amount_divs:
+                transfer_amount_str = amount_divs[0].text.strip()
+                log_print(f"[{browser_id}] [Type21] ✓ 转出额: {transfer_amount_str}")
+            else:
+                log_print(f"[{browser_id}] [Type21] ⚠ 未找到转出额 div，使用 withdraw_amount 作为转出额")
+                transfer_amount_str = str(withdraw_amount)
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ⚠ 获取转出额异常: {str(e)}，使用 withdraw_amount 作为转出额")
+            transfer_amount_str = str(withdraw_amount)
+        
+        time.sleep(3)
+        # 17. 找到 send-page-send-amount-confirm-button 并点击
+        log_print(f"[{browser_id}] [Type21] 查找并点击金额确认按钮...")
+        try:
+            confirm_amount_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-amount-confirm-button"], button[data-testid="send-amount-page-confirm-button"]')
+            if confirm_amount_buttons:
+                confirm_amount_buttons[0].click()
+                log_print(f"[{browser_id}] [Type21] ✓ 已点击金额确认按钮")
+            else:
+                log_print(f"[{browser_id}] [Type21] ✗ 未找到金额确认按钮")
+                return False, "未找到金额确认按钮"
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ✗ 点击金额确认按钮异常: {str(e)}")
+            return False, f"点击金额确认按钮异常: {str(e)}"
+        
+        # 18. 等待3s，在10s内找到 send-page-send-confirm-button 并点击
+        time.sleep(5)
+        log_print(f"[{browser_id}] [Type21] 在10s内查找最终确认按钮...")
+        start_time = time.time()
+        final_confirm_clicked = False
+        
+        while time.time() - start_time < 10:
+            try:
+                final_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-confirm-button"], button[data-testid="send-confirm-page-confirm-button"]')
+                if final_buttons:
+                    final_buttons[0].click()
+                    log_print(f"[{browser_id}] [Type21] ✓ 已点击最终确认按钮")
+                    final_confirm_clicked = True
+                    break
+                else:
+                    time.sleep(0.5)
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] ⚠ 查找最终确认按钮时出错: {str(e)}")
+                time.sleep(0.5)
+        
+        if not final_confirm_clicked:
+            log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到最终确认按钮")
+            return False, "10s内未找到最终确认按钮"
+        
+        # ======== BNB 转出流程 ========
+        log_print(f"[{browser_id}] [Type21] ======== 开始 BNB 转出流程 ========")
+        time.sleep(5)
+        
+        # BNB-12. 找到 BNB div 并点击其父节点的父节点的父节点
+        log_print(f"[{browser_id}] [Type21] [BNB] 查找 BNB 币种...")
+        bnb_clicked = False
+        
+        bnb_balance_value = None
+        try:
+            bnb_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="home-page-common-coin-list-item"]')
+            for div in bnb_divs:
+                try:
+                    if "BNB" in div.text:
+                        parent1 = div.find_element(By.XPATH, '..')
+                        parent2 = parent1.find_element(By.XPATH, '..')
+                        parent3 = parent2.find_element(By.XPATH, '..')
+                        
+                        # 获取 BNB 余额
+                        try:
+                            balance_display = parent3.find_element(By.CSS_SELECTOR, 'div[data-testid="home-page-coin-balance-display"]')
+                            first_child_div = balance_display.find_element(By.CSS_SELECTOR, 'div:first-child')
+                            bnb_balance_str = first_child_div.text.strip()
+                            log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额原始值: {bnb_balance_str}")
+                            bnb_balance_value = parse_locale_number(bnb_balance_str)
+                            if bnb_balance_value is not None:
+                                log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额: {bnb_balance_value}")
+                            else:
+                                log_print(f"[{browser_id}] [Type21] [BNB] ⚠ BNB 余额无法转换为数字: {bnb_balance_str}")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 获取 BNB 余额异常: {str(e)}")
+                        
+                        parent3.click()
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击 BNB 的父节点的父节点的父节点")
+                        bnb_clicked = True
+                        break
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 处理 BNB div 时出错: {str(e)}")
+                    continue
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 查找 BNB div 异常: {str(e)}")
+        
+        if not bnb_clicked:
+            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到或未能点击 BNB，跳过 BNB 转出")
+        else:
+            # BNB-13. 等待5s，找到 textarea 并填入地址（同 USDT 的 s 字段地址）
+            time.sleep(5)
+            log_print(f"[{browser_id}] [Type21] [BNB] 填入地址（s 字段）...")
+            try:
+                bnb_textareas = driver.find_elements(By.CSS_SELECTOR, 'textarea[data-testid="okd-input"]')
+                if bnb_textareas:
+                    bnb_textareas[0].clear()
+                    bnb_textareas[0].send_keys(str(s_value).strip())
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已填入地址")
+                else:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到 textarea，跳过 BNB 转出")
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 填入地址异常: {str(e)}，跳过 BNB 转出")
+            
+            # BNB-14. 等待5s，在10s内找到 okd-button 并点击
+            time.sleep(5)
+            log_print(f"[{browser_id}] [Type21] [BNB] 在10s内查找确认按钮...")
+            start_time = time.time()
+            bnb_confirm_clicked = False
+            
+            while time.time() - start_time < 10:
+                try:
+                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                    if buttons:
+                        buttons[0].click()
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击确认按钮")
+                        bnb_confirm_clicked = True
+                        break
+                    else:
+                        time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 查找确认按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not bnb_confirm_clicked:
+                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 10s内未找到确认按钮，跳过 BNB 转出")
+            else:
+                # BNB-15. 等待5s，找到 data-testid="okd-input" 的 input，填入 BNB 余额的一半
+                time.sleep(5)
+                
+                if bnb_balance_value is not None and bnb_balance_value > 0:
+                    bnb_amount = round(bnb_balance_value / 2, 6)
+                    log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额的一半: {bnb_amount}")
+                else:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ BNB 余额无效({bnb_balance_value})，跳过 BNB 转出")
+                    bnb_amount = None
+                
+                if bnb_amount is not None:
+                    try:
+                        bnb_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[data-testid="okd-input"]')
+                        if bnb_inputs:
+                            bnb_inputs[0].clear()
+                            bnb_inputs[0].send_keys(str(bnb_amount))
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已填入 BNB 金额: {bnb_amount}")
+                        else:
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到金额输入框，跳过 BNB 转出")
+                    except Exception as e:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ 填入 BNB 金额异常: {str(e)}，跳过 BNB 转出")
+                
+                # BNB-17. 找到金额确认按钮并点击
+                time.sleep(3)
+                log_print(f"[{browser_id}] [Type21] [BNB] 查找并点击金额确认按钮...")
+                try:
+                    bnb_confirm_amount_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-amount-confirm-button"], button[data-testid="send-amount-page-confirm-button"]')
+                    if bnb_confirm_amount_buttons:
+                        bnb_confirm_amount_buttons[0].click()
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击金额确认按钮")
+                    else:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到金额确认按钮，跳过 BNB 转出")
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ 点击金额确认按钮异常: {str(e)}，跳过 BNB 转出")
+                
+                # BNB-18. 等待5s，在10s内找到最终确认按钮并点击
+                time.sleep(5)
+                log_print(f"[{browser_id}] [Type21] [BNB] 在10s内查找最终确认按钮...")
+                start_time = time.time()
+                bnb_final_confirm_clicked = False
+                
+                while time.time() - start_time < 10:
+                    try:
+                        bnb_final_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-confirm-button"], button[data-testid="send-confirm-page-confirm-button"]')
+                        if bnb_final_buttons:
+                            bnb_final_buttons[0].click()
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击最终确认按钮")
+                            bnb_final_confirm_clicked = True
+                            break
+                        else:
+                            time.sleep(0.5)
+                    except Exception as e:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 查找最终确认按钮时出错: {str(e)}")
+                        time.sleep(0.5)
+                
+                if bnb_final_confirm_clicked:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✓ BNB 转出流程完成")
+                else:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 10s内未找到最终确认按钮，BNB 转出可能未完成")
+        
+        log_print(f"[{browser_id}] [Type21] ======== BNB 转出流程结束 ========")
+        
+        # 19. 更新 t 字段（累加转出额）
+        log_print(f"[{browser_id}] [Type21] 更新 t 字段（累加转出额）...")
+        try:
+            # 解析转出额（支持不同地区的数字格式）
+            parsed_transfer = parse_locale_number(transfer_amount_str)
+            if parsed_transfer is not None:
+                transfer_amount_num = parsed_transfer
+            else:
+                transfer_amount_num = withdraw_amount
+                log_print(f"[{browser_id}] [Type21] ⚠ 转出额字符串无法解析，使用 withdraw_amount: {withdraw_amount}")
+            
+            # 获取 t 字段（原来的转出额）
+            t_value = account_config.get('t')
+            if t_value is None or str(t_value).strip() == '' or str(t_value).strip().lower() == 'null':
+                original_transfer = 0
+                log_print(f"[{browser_id}] [Type21] t 字段为空/null，原转出额视为 0")
+            else:
+                try:
+                    original_transfer = float(str(t_value).replace('$', '').replace(',', '').strip())
+                except:
+                    original_transfer = 0
+                    log_print(f"[{browser_id}] [Type21] ⚠ t 字段无法解析为数字: {t_value}，视为 0")
+            
+            new_transfer_total = original_transfer + transfer_amount_num
+            new_transfer_total = round(new_transfer_total, 2)
+            log_print(f"[{browser_id}] [Type21] 原转出额: {original_transfer}, 本次转出: {transfer_amount_num}, 新总转出额: {new_transfer_total}")
+            
+            # 更新 account_config 的 t 字段
+            account_config['t'] = str(new_transfer_total)
+            
+            # 上传更新到服务器
+            log_print(f"[{browser_id}] [Type21] 上传更新到服务器...")
+            upload_data = account_config
+            
+            success, result, error_msg = upload_account_config_with_retry(
+                upload_data, 
+                browser_id=browser_id, 
+                timeout=15
+            )
+            
+            if not success:
+                log_print(f"[{browser_id}] [Type21] ✗ 上传失败: {error_msg}")
+                return False, f"上传失败: {error_msg}"
+            
+            log_print(f"[{browser_id}] [Type21] ✓ 数据上传成功，t 字段已更新为 {new_transfer_total}")
+            
+        except Exception as e:
+            log_print(f"[{browser_id}] [Type21] ✗ 更新 t 字段异常: {str(e)}")
+            import traceback
+            log_print(f"[{browser_id}] [Type21] 错误详情:\n{traceback.format_exc()}")
+            return False, f"更新 t 字段异常: {str(e)}"
+        
+        log_print(f"[{browser_id}] [Type21] ✓ Type 21 任务执行成功")
+        return True, ""
+        
+    except Exception as e:
+        log_print(f"[{browser_id}] [Type21] ✗ 执行异常: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] [Type21] 错误详情:\n{traceback.format_exc()}")
+        return False, f"执行异常: {str(e)}"
+
+
 def process_type2_mission(task_data, retry_count=0):
     """
     处理 Type 2 任务 - 获取交易所数据
@@ -15972,7 +16689,18 @@ def process_type2_mission(task_data, retry_count=0):
                             log_print(f"[{browser_id}] ✗ 已达到最大重试次数，Balance 数据获取失败")
                             break
                     
-                   
+                    # ======== Type 21 任务特殊处理 ========
+                    if mission_type == 21:
+                        log_print(f"[{browser_id}] [Type21] 检测到 Type 21 任务，执行 Withdraw 和 Send 流程...")
+                        type21_success, type21_reason = process_type21_withdraw_and_send(
+                            driver, browser_id, mission, portfolio_value, balance_value
+                        )
+                        if type21_success:
+                            log_print(f"[{browser_id}] [Type21] ✓ Type 21 任务执行成功")
+                            return True, "", collected_data
+                        else:
+                            log_print(f"[{browser_id}] [Type21] ✗ Type 21 任务执行失败: {type21_reason}")
+                            return False, type21_reason, collected_data
                     
                     log_print(f"[{browser_id}] {'第' + str(retry_attempt + 1) + '次尝试 ' if retry_attempt > 0 else ''}步骤7: 点击 Position 并获取数据...")
                     position_data, need_retry_position, task_failed = click_opinion_position_and_get_data(driver, browser_id)
@@ -16668,7 +17396,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 process_browser_waiting_queue(browser_id)
             return
             
-        elif mission_type == 2 or mission_type == 4:
+        elif mission_type == 2 or mission_type == 4 or mission_type == 21:
             # Type 2: 数据获取任务
             # 初始化变量（放在最前面，确保即使前面发生异常也能访问）
             success = False
