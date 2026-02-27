@@ -1241,7 +1241,7 @@ def start_adspower_browser(serial_number):
     params = {
         "serial_number": serial_number,
         "user_id": "",
-        "open_tabs": 1
+        "open_tabs": 1,
     }
     launch_args = [f"--window-size={1500},{1700}"]
     params["launch_args"] = json.dumps(launch_args)
@@ -13995,8 +13995,8 @@ def upload_type2_data(browser_id, collected_data, exchange_name='', available_ba
                 available_balance_value = None
             
             # 判断2: 如果可用余额解析不出来，或者等于0，则不上传数据
-            if available_balance_value is None or available_balance_value == 0:
-                log_print(f"[{browser_id}] ✗ 可用余额解析不出来或等于0（available_balance_value={available_balance_value}），不上传数据")
+            if available_balance_value is None:
+                log_print(f"[{browser_id}] ✗ 可用余额解析不出来（available_balance_value={available_balance_value}），不上传数据")
                 return False
             
             # 判断3: 如果可用余额和余额的相差的绝对值大于0.1，并且open_orders_str是空字符串，则不上传数据

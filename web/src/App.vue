@@ -1268,11 +1268,19 @@
               />
               <button 
                 class="btn btn-success btn-sm" 
-                @click="randomGetAvailableTopic(flase)"
+                @click="randomGetAvailableTopic(false)"
                 :disabled="isRandomGetting"
                 title="随机获取可用的主题"
               >
                 {{ isRandomGetting ? '🔄 获取中...' : '🎲 随机获取主题' }}
+              </button>
+              <button 
+                class="btn btn-info btn-sm" 
+                @click="randomGetAvailableTopicAndCleanInvalid()"
+                :disabled="isRandomGetting"
+                title="随机获取可用主题，并关闭当前列表中不符合条件的主题（无 token 或 trending 含 undefined）"
+              >
+                {{ isRandomGetting ? '🔄 获取中...' : '🎲 获取并清理无用主题' }}
               </button>
               <button 
                 class="btn btn-warning btn-sm" 
@@ -3803,6 +3811,7 @@ const batchSize = ref(10)  // 每一批的个数
 
 // 持仓数据相关
 const positionDataMap = ref(new Map())  // 存储每个事件的持仓数据，key为事件名(trending)，value为{yesPosition, noPosition}
+const positionDataLoaded = ref(false)  // 持仓接口是否已成功请求过
 const idToTrendingMap = ref(new Map())  // 存储 id -> trending 的映射
 const testingConfigIds = ref(new Set())  // 正在测试的配置ID集合
 const savingMaxDailyAmountIds = ref(new Set())  // 正在保存最大开单量的配置ID集合
@@ -5253,6 +5262,7 @@ const loadPositionData = async () => {
       
       // 更新 positionDataMap
       positionDataMap.value = eventMap
+      positionDataLoaded.value = true
       console.log(`[持仓数据] 持仓数据加载完成，共 ${eventMap.size} 个事件`)
     } else {
       console.warn('[持仓数据] 未获取到持仓数据')
@@ -8943,10 +8953,12 @@ const executeAutoHedgeTasksForBatch = async (batchConfigs) => {
           config.isFetching = false
           continue
         }
-      } else {
-        debugLog(`配置 ${config.id} - 未获取到持仓数据，跳过本次请求`)
+      } else if (!positionDataLoaded.value) {
+        console.log(`配置 ${config.id} - 持仓接口尚未成功请求，跳过本次请求`)
         config.isFetching = false
         continue
+      } else {
+        console.log(`配置 ${config.id} - 无持仓数据（视为0持仓），继续请求订单薄`)
       }
       
       // 检查加权时间和yes持仓组合条件（不交易）- 适用于开仓和平仓模式
@@ -11090,9 +11102,12 @@ const openOpenOrderDetail = (config) => {
 
 /**
  * 关闭配置任务
+ * @param {Object} config - 配置项
+ * @param {Object} options - { silent: true } 时不弹确认、不 toast 成功（用于批量关闭）
  */
-const closeConfigTask = async (config) => {
-  if (!confirm(`确定要关闭任务"${config.trending}"吗？`)) {
+const closeConfigTask = async (config, options = {}) => {
+  const { silent = false } = options
+  if (!silent && !confirm(`确定要关闭任务"${config.trending}"吗？`)) {
     return
   }
   
@@ -11135,7 +11150,7 @@ const closeConfigTask = async (config) => {
     
     if (response.data) {
       debugLog(`配置 ${config.id} 已关闭`)
-      showToast(`任务"${config.trending}"已关闭`, 'success')
+      if (!silent) showToast(`任务"${config.trending}"已关闭`, 'success')
       
       // 3. 更新本地配置列表中这个配置的状态（避免重新加载所有配置）
       const configInList = configList.value.find(c => c.id === config.id)
@@ -11151,6 +11166,104 @@ const closeConfigTask = async (config) => {
     console.error('关闭任务失败:', error)
     showToast(`关闭任务失败: ${error.message}`, 'error')
   }
+}
+
+/**
+ * 随机获取可用主题，并删除当前主题列表中不符合条件的主题（无 token 或 trending 含 undefined）
+ * 先关闭所有“已打开但无效”的主题，再按数量随机获取可用主题
+ */
+const randomGetAvailableTopicAndCleanInvalid = async () => {
+  if (isRandomGetting.value) return
+  isRandomGetting.value = true
+
+  let closedCount = 0
+  let keptCount = 0
+  try {
+    // 如果是平仓模式，先获取持仓数据（与随机获取逻辑一致）
+    if (hedgeMode.isClose) {
+      console.log('平仓模式：先获取持仓数据...')
+      await fetchPositionTopics()
+      console.log(`当前持仓主题数量: ${positionTopics.value.size}`)
+    }
+
+    // 取当前正在执行的主题列表快照
+    const currentActive = [...activeConfigs.value]
+    if (currentActive.length === 0) {
+      showToast('当前没有启用的主题，无需清理', 'info')
+    } else {
+      showToast(`正在检查 ${currentActive.length} 个活跃主题的订单薄...`, 'info')
+
+      for (let i = 0; i < currentActive.length; i++) {
+        const config = currentActive[i]
+        try {
+          // 1. 基础字段检查（与随机获取的筛选条件一致）
+          if (!config.trendingPart1 || !config.trendingPart2 || !config.trending || config.trending.includes('undefined')) {
+            console.log(`❌ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 基础字段不全，关闭`)
+            await closeConfigTask(config, { silent: true })
+            closedCount++
+            await new Promise(r => setTimeout(r, 100))
+            continue
+          }
+
+          showToast(`检查中 (${i + 1}/${currentActive.length}, 已关闭${closedCount}): ${config.trending?.substring(0, 30)}...`, 'info')
+
+          // 2. 请求订单薄数据（与随机获取逻辑完全一致）
+          const priceInfo = await parseOrderbookData(config, hedgeMode.isClose)
+
+          if (!priceInfo) {
+            console.log(`❌ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 订单薄数据不足，关闭`)
+            await closeConfigTask(config, { silent: true })
+            closedCount++
+            await new Promise(r => setTimeout(r, 100))
+            continue
+          }
+
+          // 3. 检查是否满足对冲条件（与随机获取逻辑完全一致）
+          if (!checkOrderbookHedgeCondition(priceInfo, config)) {
+            console.log(`❌ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 不满足对冲条件，关闭`)
+            await closeConfigTask(config, { silent: true })
+            closedCount++
+            await new Promise(r => setTimeout(r, 100))
+            continue
+          }
+
+          // 4. 平仓模式下，检查是否在持仓列表中（与随机获取逻辑完全一致）
+          if (hedgeMode.isClose) {
+            const isInPosition = positionTopics.value.has(config.trending)
+            if (!isInPosition) {
+              console.log(`❌ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 不在持仓列表中，关闭`)
+              await closeConfigTask(config, { silent: true })
+              closedCount++
+              await new Promise(r => setTimeout(r, 100))
+              continue
+            }
+          }
+
+          console.log(`✅ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 仍然满足条件`)
+          keptCount++
+        } catch (error) {
+          const isNetworkError = error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED' || error.isRateLimit || error.message === 'API rate limit exceeded'
+          if (isNetworkError) {
+            console.warn(`⚠️ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 网络/限流错误，跳过不关闭:`, error.message)
+          } else {
+            console.log(`❌ [${i + 1}/${currentActive.length}] 主题 ${config.trending} 不符合条件(${error.message})，关闭`)
+            await closeConfigTask(config, { silent: true })
+            closedCount++
+          }
+        }
+        await new Promise(r => setTimeout(r, 100))
+      }
+
+      showToast(`清理完成：保留 ${keptCount} 个，关闭 ${closedCount} 个`, closedCount > 0 ? 'success' : 'info')
+    }
+  } catch (error) {
+    console.error('清理无用主题失败:', error)
+    showToast(`清理失败: ${error.message}`, 'error')
+  } finally {
+    isRandomGetting.value = false
+  }
+  // 清理完成后，继续随机获取可用主题
+  await randomGetAvailableTopic(false)
 }
 
 /**
@@ -11325,9 +11438,8 @@ const randomGetAvailableTopic = async (useFailedTopics = false) => {
         // 继续测试下一个
       }
       
-      // 每个主题之间间隔5秒钟
       if (testedCount < shuffled.length && foundCount < targetCount) {
-        await new Promise(resolve => setTimeout(resolve, 5000))
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
     }
     
@@ -15767,10 +15879,12 @@ const executeAutoHedgeTasks = async () => {
           config.isFetching = false
           continue
         }
-      } else {
-        debugLog(`配置 ${config.id} - 未获取到持仓数据，跳过本次请求`)
+      } else if (!positionDataLoaded.value) {
+        debugLog(`配置 ${config.id} - 持仓接口尚未成功请求，跳过本次请求`)
         config.isFetching = false
         continue
+      } else {
+        debugLog(`配置 ${config.id} - 无持仓数据（视为0持仓），继续请求订单薄`)
       }
       
       // 检查加权时间和yes持仓组合条件（不交易）- 适用于开仓和平仓模式
