@@ -3365,7 +3365,7 @@ const loadData = async (silent = false) => {
       // 过滤掉电脑组 900 以上的数据
       const serverData = response.data.data.filter(item => {
         const computeGroup = Number(item.computeGroup)
-        return !computeGroup || computeGroup < 900
+        return !computeGroup || computeGroup > 900
       })
       
       // 提取所有的 fingerprintNo 并保存到 txt 文件
@@ -4014,7 +4014,7 @@ const fetchAccountConfig = async () => {
       // 过滤掉电脑组 900 以上的数据
       const filteredData = response.data.data.filter(item => {
         const computeGroup = Number(item.computeGroup)
-        return !computeGroup || computeGroup < 900
+        return !computeGroup || computeGroup >900
       })
       
       accountConfigData.value = filteredData

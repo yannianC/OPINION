@@ -8993,6 +8993,30 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
             log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
         
+        # 6.0.1 打开登录页面
+        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.0.1: 打开登录页面")
+        log_print(f"[{browser_id}] 步骤6.0.1: 打开登录页面...")
+        login_url = "https://app.opinion.trade/login"
+        login_page_loaded = False
+        for login_attempt in range(3):
+            try:
+                log_print(f"[{browser_id}] 尝试打开登录页面（第{login_attempt+1}次）...")
+                driver.get(login_url)
+                WebDriverWait(driver, 45).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                log_print(f"[{browser_id}] ✓ 登录页面加载完成")
+                login_page_loaded = True
+                break
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ 登录页面加载失败（第{login_attempt+1}次）: {str(e)}")
+                time.sleep(2)
+        
+        if not login_page_loaded:
+            add_bro_log_entry(bro_log_list, browser_id, "[5]登陆页面打开失败")
+            log_print(f"[{browser_id}] ✗ 登录页面3次加载均失败")
+            return False, "[5]登陆页面打开失败", None
+        
         # 6.1 检查并连接钱包
         add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1: 检查并连接钱包")
         log_print(f"[{browser_id}] 步骤6.1: 检查并连接钱包...")
@@ -9034,6 +9058,29 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                 log_print(f"[{browser_id}] ✓ 当前标签页已包含 app.opinion.trade")
         except Exception as e:
             log_print(f"[{browser_id}] ⚠ 检查并切换标签页时出现异常: {str(e)}，继续执行...")
+        
+        # 6.1.1.1 重新打开目标页面
+        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1.1.1: 重新打开目标页面")
+        log_print(f"[{browser_id}] 步骤6.1.1.1: 重新打开目标页面 {target_url}...")
+        target_page_loaded = False
+        for target_attempt in range(3):
+            try:
+                log_print(f"[{browser_id}] 尝试打开目标页面（第{target_attempt+1}次）...")
+                driver.get(target_url)
+                WebDriverWait(driver, 45).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                log_print(f"[{browser_id}] ✓ 目标页面加载完成")
+                target_page_loaded = True
+                break
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ 目标页面加载失败（第{target_attempt+1}次）: {str(e)}")
+                time.sleep(2)
+        
+        if not target_page_loaded:
+            add_bro_log_entry(bro_log_list, browser_id, "[6] 重新打开目标页面失败")
+            log_print(f"[{browser_id}] ✗ 目标页面3次加载均失败")
+            return False, "[6] 重新打开目标页面失败", None
         
         # 6.1.2 检查地区限制
         add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1.2: 检查地区限制")

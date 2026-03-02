@@ -5473,6 +5473,7 @@ const startStatsAutoRefresh = () => {
 
 /**
  * 根据yes数量获取主题并添加到自动对冲列表
+ * 直接使用 exchangeConfig 接口中的 yesAmt 字段筛选
  */
 const fetchTopicsByYesCount = async () => {
   if (!yesCountThreshold.value || yesCountThreshold.value <= 0) {
@@ -5483,173 +5484,7 @@ const fetchTopicsByYesCount = async () => {
   isFetchingTopics.value = true
   
   try {
-    // 1. 请求 positions/summary/trades API
-    showToast('正在获取交易数据，请稍候...', 'info')
-    const tradesResponse = await axios.get('https://enstudyai.fatedreamer.com/t3/api/positions/summary/trades')
-    
-    // 检查数据结构，支持多种可能的数据格式
-    let items = []
-    if (tradesResponse.data) {
-      if (Array.isArray(tradesResponse.data)) {
-        items = tradesResponse.data
-      } else if (tradesResponse.data.items && Array.isArray(tradesResponse.data.items)) {
-        items = tradesResponse.data.items
-      } else if (tradesResponse.data.data && Array.isArray(tradesResponse.data.data)) {
-        items = tradesResponse.data.data
-      } else if (tradesResponse.data.list && Array.isArray(tradesResponse.data.list)) {
-        items = tradesResponse.data.list
-      }
-    }
-    
-    if (items.length === 0) {
-      console.error('API返回的完整数据结构:', tradesResponse.data)
-      throw new Error('获取交易数据失败：未找到有效的数据数组')
-    }
-    
-    console.log(`获取到 ${items.length} 条数据`)
-    console.log('API返回的原始数据示例（第1条）:', JSON.stringify(items[0], null, 2))
-    
-    // 2. 统计每个主题的yes数量（参照 dataweb/src/App.vue 的处理方式）
-    const topicYesCountMap = new Map()
-    
-    for (const item of items) {
-      if (item.wallet_address && item.markets) {
-        // 处理 markets 数据，类似于 formatChainMarkets 的逻辑
-        const markets = item.markets
-        if (typeof markets === 'string') {
-          // 如果是字符串，尝试解析
-          const marketPairs = markets.split(';').filter(pair => pair.trim())
-          for (const pair of marketPairs) {
-            const parts = pair.split('|||')
-            if (parts.length >= 2) {
-              const title = parts[0].trim()
-              const marketData = parts[1] || ''
-              
-              // 解析市场数据，提取yes数量
-              // 格式可能是 "YES:100,NO:50" 或其他格式
-              if (marketData) {
-                // 尝试从 marketData 中提取 yes 数量
-                // 这里需要根据实际数据结构调整
-                const yesMatch = marketData.match(/yes[:_]\s*([\d.]+)/i)
-                if (yesMatch) {
-                  const yesCount = parseFloat(yesMatch[1]) || 0
-                  const existingCount = topicYesCountMap.get(title) || 0
-                  topicYesCountMap.set(title, existingCount + yesCount)
-                }
-              }
-            }
-          }
-        } else if (Array.isArray(markets)) {
-          // 如果是数组格式（标准格式：markets: [{ title, yes_amount, no_amount, ... }]）
-          for (const market of markets) {
-            if (market && market.title) {
-              const title = market.title.trim()
-              // 使用 yes_amount 字段（这是API返回的标准字段名）
-              const yesAmount = parseFloat(market.yes_amount || market.yesAmount || 0) || 0
-              if (yesAmount > 0) {
-                const existingCount = topicYesCountMap.get(title) || 0
-                topicYesCountMap.set(title, existingCount + yesAmount)
-              }
-            }
-          }
-        } else if (typeof markets === 'object') {
-          // 如果是对象格式
-          if (markets.title) {
-            const title = markets.title.trim()
-            const yesCount = parseFloat(markets.yes_total || markets.yesCount || markets.yes || 0) || 0
-            const existingCount = topicYesCountMap.get(title) || 0
-            topicYesCountMap.set(title, existingCount + yesCount)
-          }
-        }
-      }
-      
-      // 也尝试直接从 item 中提取主题和yes数量
-      if (item.title || item.topic || item.market_title || item.marketName || item.market_name) {
-        const title = (item.title || item.topic || item.market_title || item.marketName || item.market_name || '').trim()
-        if (title) {
-          const yesCount = parseFloat(
-            item.yes_total || item.yesCount || item.yes || item.yes_amount || 
-            item.yesAmount || item.yesTotal || 0
-          ) || 0
-          if (yesCount > 0) {
-            const existingCount = topicYesCountMap.get(title) || 0
-            topicYesCountMap.set(title, existingCount + yesCount)
-          }
-        }
-      }
-      
-      // 如果是直接包含主题和数量的格式
-      if (item.market && typeof item.market === 'string') {
-        // 尝试解析 market 字符串格式
-        const marketPairs = item.market.split(';').filter(pair => pair.trim())
-        for (const pair of marketPairs) {
-          const parts = pair.split('|||')
-          if (parts.length >= 1) {
-            const title = parts[0].trim()
-            if (title) {
-              // 尝试从后续部分提取数值
-              let yesCount = 0
-              for (let i = 1; i < parts.length; i++) {
-                const num = parseFloat(parts[i])
-                if (!isNaN(num) && num > 0) {
-                  yesCount = num
-                  break
-                }
-              }
-              if (yesCount > 0) {
-                const existingCount = topicYesCountMap.get(title) || 0
-                topicYesCountMap.set(title, existingCount + yesCount)
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    console.log(`统计完成，共找到 ${topicYesCountMap.size} 个主题`)
-    if (topicYesCountMap.size > 0) {
-      const sortedTopics = Array.from(topicYesCountMap.entries())
-        .sort((a, b) => b[1] - a[1])  // 按数量降序排序
-      console.log('主题yes数量统计（前20个，按数量排序）:', sortedTopics
-        .slice(0, 20)
-        .map(([title, count]) => ({ title, count })))
-      console.log('所有主题数量统计（完整列表）:', sortedTopics.map(([title, count]) => ({ title, count })))
-    } else {
-      console.warn('未找到任何主题数据')
-      console.warn('原始数据示例（前2条）:', items.slice(0, 2))
-      console.warn('原始数据结构:', items.length > 0 ? Object.keys(items[0]) : '空数据')
-      showToast('未找到任何主题数据，请检查API返回的数据格式', 'warning')
-      return
-    }
-    
-    // 3. 筛选yes数量大于阈值的主题
-    const filteredTopics = []
-    for (const [title, yesCount] of topicYesCountMap.entries()) {
-      if (yesCount > yesCountThreshold.value) {
-        filteredTopics.push({ title, yesCount })
-      }
-    }
-    
-    if (filteredTopics.length === 0) {
-      // 显示统计信息帮助用户调整阈值
-      const allCounts = Array.from(topicYesCountMap.values()).sort((a, b) => b - a)
-      const maxCount = allCounts[0] || 0
-      const minCount = allCounts[allCounts.length - 1] || 0
-      const avgCount = allCounts.length > 0 ? allCounts.reduce((a, b) => a + b, 0) / allCounts.length : 0
-      
-      console.log(`主题数量统计: 最大=${maxCount.toFixed(2)}, 最小=${minCount.toFixed(2)}, 平均=${avgCount.toFixed(2)}, 阈值=${yesCountThreshold.value}`)
-      
-      showToast(
-        `没有找到yes数量大于 ${yesCountThreshold.value} 的主题。` +
-        `当前最大数量为 ${maxCount.toFixed(2)}，请调整阈值重试。`,
-        'warning'
-      )
-      return
-    }
-    
-    console.log(`筛选出 ${filteredTopics.length} 个符合条件的主题:`, filteredTopics)
-    
-    // 4. 获取 exchangeConfig 数据
+    showToast('正在获取配置数据，请稍候...', 'info')
     const exchangeConfigResponse = await axios.get('https://sg.bicoin.com.cn/99l/mission/exchangeConfig')
     
     if (!exchangeConfigResponse.data || exchangeConfigResponse.data.code !== 0) {
@@ -5657,83 +5492,53 @@ const fetchTopicsByYesCount = async () => {
     }
     
     const exchangeConfigList = exchangeConfigResponse.data.data?.configList || []
-    const configMap = new Map()
-    exchangeConfigList.forEach(config => {
-      // 使用 trending 字段进行匹配（可能包含完整标题或部分标题）
-      if (config.trending) {
-        configMap.set(config.trending.trim().toLowerCase(), config)
-        // 也尝试使用 trendingPart1 和 trendingPart2 组合
-        if (config.trendingPart1 && config.trendingPart2) {
-          const combined = `${config.trendingPart1} ${config.trendingPart2}`.trim().toLowerCase()
-          configMap.set(combined, config)
-        }
-      }
+    console.log(`配置加载完成，共 ${exchangeConfigList.length} 个配置`)
+    
+    // 筛选 yesAmt 大于阈值的主题
+    const threshold = yesCountThreshold.value
+    const matchedConfigs = exchangeConfigList.filter(config => {
+      const yesAmt = parseFloat(config.yesAmt) || 0
+      return config.trending && yesAmt > threshold
     })
     
-    // 5. 匹配符合条件的主题并更新配置
-    const matchedConfigs = []
-    for (const topic of filteredTopics) {
-      const titleLower = topic.title.toLowerCase().trim()
-      
-      // 尝试精确匹配
-      let matchedConfig = configMap.get(titleLower)
-      
-      // 如果没有精确匹配，尝试部分匹配（标题包含配置的trending，或配置的trending包含标题）
-      if (!matchedConfig) {
-        for (const [configKey, config] of configMap.entries()) {
-          if (titleLower.includes(configKey) || configKey.includes(titleLower)) {
-            matchedConfig = config
-            break
-          }
-        }
-      }
-      
-      // 如果还是没有匹配，尝试在 configList 中查找
-      if (!matchedConfig) {
-        matchedConfig = configList.value.find(c => {
-          const configTitle = (c.trending || '').toLowerCase().trim()
-          return titleLower === configTitle || 
-                 titleLower.includes(configTitle) || 
-                 configTitle.includes(titleLower)
-        })
-      }
-      
-      if (matchedConfig) {
-        matchedConfigs.push({
-          config: matchedConfig,
-          topic: topic,
-          yesCount: topic.yesCount
-        })
-      }
-    }
+    // 按 yesAmt 降序排序
+    matchedConfigs.sort((a, b) => (parseFloat(b.yesAmt) || 0) - (parseFloat(a.yesAmt) || 0))
     
     if (matchedConfigs.length === 0) {
-      showToast(`找到 ${filteredTopics.length} 个符合条件的主题，但在配置中未找到匹配项`, 'warning')
+      const allYesAmts = exchangeConfigList
+        .map(c => parseFloat(c.yesAmt) || 0)
+        .filter(v => v > 0)
+        .sort((a, b) => b - a)
+      const maxAmt = allYesAmts.length > 0 ? allYesAmts[0] : 0
+      
+      showToast(
+        `没有找到YES数量大于 ${threshold} 的主题。当前最大YES数量为 ${maxAmt.toFixed(0)}，请调整阈值重试。`,
+        'warning'
+      )
       return
     }
     
-    console.log(`找到 ${matchedConfigs.length} 个匹配的配置:`, matchedConfigs.map(m => ({
-      trending: m.config.trending,
-      yesCount: m.yesCount
+    console.log(`筛选出 ${matchedConfigs.length} 个符合条件的主题:`, matchedConfigs.map(c => ({
+      trending: c.trending,
+      yesAmt: c.yesAmt
     })))
     
-    // 6. 批量更新配置：启用和显示
+    // 批量更新配置：启用和显示
     const updateData = {
-      list: matchedConfigs.map(m => ({
-        id: m.config.id,
-        trending: m.config.trending,
-        trendingPart1: m.config.trendingPart1 || null,
-        trendingPart2: m.config.trendingPart2 || null,
-        trendingPart3: m.config.trendingPart3 || null,
-        opUrl: m.config.opUrl || '',
-        polyUrl: m.config.polyUrl || '',
-        opTopicId: m.config.opTopicId || '',
-        weight: m.config.weight || 0,
-        isOpen: 1  // 启用
+      list: matchedConfigs.map(config => ({
+        id: config.id,
+        trending: config.trending,
+        trendingPart1: config.trendingPart1 || null,
+        trendingPart2: config.trendingPart2 || null,
+        trendingPart3: config.trendingPart3 || null,
+        opUrl: config.opUrl || '',
+        polyUrl: config.polyUrl || '',
+        opTopicId: config.opTopicId || '',
+        weight: config.weight || 0,
+        isOpen: 1
       }))
     }
     
-    // 提交到服务器
     const updateResponse = await axios.post(
       'https://sg.bicoin.com.cn/99l/mission/exchangeConfig',
       updateData,
@@ -5747,23 +5552,23 @@ const fetchTopicsByYesCount = async () => {
     if (updateResponse.data && updateResponse.data.code === 0) {
       // 更新本地显示状态
       const visibleData = JSON.parse(localStorage.getItem(CONFIG_VISIBLE_KEY) || '{}')
-      matchedConfigs.forEach(m => {
-        visibleData[m.config.id] = true
+      matchedConfigs.forEach(config => {
+        visibleData[config.id] = true
       })
       localStorage.setItem(CONFIG_VISIBLE_KEY, JSON.stringify(visibleData))
       
       // 更新本地配置列表
-      matchedConfigs.forEach(m => {
-        const configInList = configList.value.find(c => c.id === m.config.id)
+      matchedConfigs.forEach(config => {
+        const configInList = configList.value.find(c => c.id === config.id)
         if (configInList) {
           configInList.isOpen = 1
           configInList.enabled = true
         }
       })
       
-      showToast(`成功添加 ${matchedConfigs.length} 个主题到自动对冲列表`, 'success')
+      showToast(`成功添加 ${matchedConfigs.length} 个主题到自动对冲列表（YES数量 > ${threshold}）`, 'success')
       
-      // 异步刷新配置列表（不阻塞界面响应）
+      // 异步刷新配置列表
       fetchExchangeConfig().catch(err => {
         console.error('刷新配置列表失败:', err)
       })
