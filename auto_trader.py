@@ -1533,7 +1533,7 @@ def get_mission_from_server():
     """
     try:
         url = f"{SERVER_BASE_URL}/mission/getOneMission"
-        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6,9,21]}
+        payload = {"groupNo": COMPUTER_GROUP,"typeList": [1,2,4,5,6,9,21,22]}
         
         log_print(f"\n[系统] 请求任务: {url}")
         log_print(f"[系统] 请求参数: {payload}")
@@ -15592,7 +15592,8 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
         # 1. 获取 tp1 和 tp2
         tp1 = mission.get('tp1')
         tp2 = mission.get('tp2')
-        log_print(f"[{browser_id}] [Type21] tp1={tp1}, tp2={tp2}")
+        tp3 = mission.get('tp3')  # tp3: 空=完整流程, "1"=提现到OKX, "2"=从OKX转入新钱包
+        log_print(f"[{browser_id}] [Type21] tp1={tp1}, tp2={tp2}, tp3={tp3}")
         
         if tp1 is None or tp2 is None:
             log_print(f"[{browser_id}] [Type21] ✗ tp1 或 tp2 为空，任务失败")
@@ -15643,171 +15644,185 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
         
         log_print(f"[{browser_id}] [Type21] ✓ 要转出的钱 A({withdraw_amount}) >= tp2({tp2_num})，继续执行")
         
-        # 4. 点击 "Withdraw" 按钮
-        log_print(f"[{browser_id}] [Type21] 查找并点击 Withdraw 按钮...")
-        withdraw_button = None
-        all_buttons = driver.find_elements(By.TAG_NAME, "button")
-        for btn in all_buttons:
-            try:
-                if btn.text.strip() == "Withdraw":
-                    withdraw_button = btn
-                    break
-            except:
-                continue
+        # ======== 如果 tp3=="2"，跳过提现到OKX部分，直接执行从OKX转入新钱包 ========
+        if str(tp3) == "2":
+            log_print(f"[{browser_id}] [Type21] tp3=2，跳过提现到OKX步骤，直接执行从OKX转入新钱包流程")
+        else:
+            # ======== 以下是提现到OKX的流程（步骤4-9）========
         
-        if not withdraw_button:
-            log_print(f"[{browser_id}] [Type21] ✗ 未找到 Withdraw 按钮")
-            return False, "未找到 Withdraw 按钮"
-        
-        withdraw_button.click()
-        log_print(f"[{browser_id}] [Type21] ✓ 已点击 Withdraw 按钮")
-        time.sleep(2)
-        
-        # 5. 找到 dialog div
-        dialog_div = None
-        try:
-            dialog_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="dialog"][data-part="content"]')
-            if dialog_divs:
-                dialog_div = dialog_divs[0]
-                log_print(f"[{browser_id}] [Type21] ✓ 找到 dialog div")
-            else:
-                log_print(f"[{browser_id}] [Type21] ✗ 未找到 dialog div")
-                return False, "未找到 dialog div"
-        except Exception as e:
-            log_print(f"[{browser_id}] [Type21] ✗ 查找 dialog div 异常: {str(e)}")
-            return False, f"查找 dialog div 异常: {str(e)}"
-        
-        # 6. 判断 A 是否大于 balance，决定填入方式
-        if withdraw_amount > balance_num:
-            log_print(f"[{browser_id}] [Type21] A({withdraw_amount}) > balance({balance_num})，点击 Max")
-            # 找到 Max span 并点击
-            max_span = None
-            all_spans = dialog_div.find_elements(By.TAG_NAME, "span")
-            for span in all_spans:
+            # 4. 点击 "Withdraw" 按钮
+            log_print(f"[{browser_id}] [Type21] 查找并点击 Withdraw 按钮...")
+            withdraw_button = None
+            all_buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in all_buttons:
                 try:
-                    if span.text.strip() == "Max":
-                        max_span = span
+                    if btn.text.strip() == "Withdraw":
+                        withdraw_button = btn
                         break
                 except:
                     continue
             
-            if max_span:
-                max_span.click()
-                log_print(f"[{browser_id}] [Type21] ✓ 已点击 Max")
-                
-                # 点击 Max 后等待2s，获取 input 实际值并与 tp2 比较
-                time.sleep(2)
-                try:
-                    max_amount_inputs = dialog_div.find_elements(By.CSS_SELECTOR, 'input[placeholder="10.00"]')
-                    if max_amount_inputs:
-                        max_input_value_str = max_amount_inputs[0].get_attribute("value")
-                        log_print(f"[{browser_id}] [Type21] Max 后 input 实际值: {max_input_value_str}")
-                        try:
-                            max_input_value = float(max_input_value_str.replace('$', '').replace(',', '').strip())
-                        except:
-                            log_print(f"[{browser_id}] [Type21] ✗ Max 后 input 值无法转换为数字: {max_input_value_str}")
-                            return False, f"Max 后 input 值无法转换为数字: {max_input_value_str}"
-                        
-                        if max_input_value < tp2_num:
-                            log_print(f"[{browser_id}] [Type21] ✗ Max 后实际值({max_input_value}) < tp2({tp2_num})，任务失败")
-                            return False, f"Max 后实际值({max_input_value}) 小于 tp2({tp2_num})"
-                        else:
-                            log_print(f"[{browser_id}] [Type21] ✓ Max 后实际值({max_input_value}) >= tp2({tp2_num})，继续执行")
-                    else:
-                        log_print(f"[{browser_id}] [Type21] ⚠ 未找到 input，跳过 Max 值校验")
-                except Exception as e:
-                    log_print(f"[{browser_id}] [Type21] ⚠ 获取 Max 后 input 值异常: {str(e)}，跳过校验")
-            else:
-                log_print(f"[{browser_id}] [Type21] ✗ 未找到 Max span")
-                return False, "未找到 Max span"
-        else:
-            log_print(f"[{browser_id}] [Type21] A({withdraw_amount}) <= balance({balance_num})，手动填入金额")
-            # 找到 input 并填入 A
-            amount_input = None
-            try:
-                amount_inputs = dialog_div.find_elements(By.CSS_SELECTOR, 'input[placeholder="10.00"]')
-                if amount_inputs:
-                    amount_input = amount_inputs[0]
-                else:
-                    log_print(f"[{browser_id}] [Type21] ✗ 未找到 placeholder='10.00' 的 input")
-                    return False, "未找到金额输入框"
-            except Exception as e:
-                log_print(f"[{browser_id}] [Type21] ✗ 查找金额输入框异常: {str(e)}")
-                return False, f"查找金额输入框异常: {str(e)}"
+            if not withdraw_button:
+                log_print(f"[{browser_id}] [Type21] ✗ 未找到 Withdraw 按钮")
+                return False, "未找到 Withdraw 按钮"
             
-            amount_input.clear()
-            amount_input.send_keys(str(withdraw_amount))
-            log_print(f"[{browser_id}] [Type21] ✓ 已填入金额: {withdraw_amount}")
+            withdraw_button.click()
+            log_print(f"[{browser_id}] [Type21] ✓ 已点击 Withdraw 按钮")
+            time.sleep(2)
         
-        # 7. 等待2s，点击 dialog 内的 Withdraw 按钮
-        time.sleep(2)
-        dialog_withdraw_btn = None
-        all_dialog_buttons = dialog_div.find_elements(By.TAG_NAME, "button")
-        for btn in all_dialog_buttons:
+            # 5. 找到 dialog div
+            dialog_div = None
             try:
-                if btn.text.strip() == "Withdraw":
-                    dialog_withdraw_btn = btn
-                    break
-            except:
-                continue
-        
-        if not dialog_withdraw_btn:
-            log_print(f"[{browser_id}] [Type21] ✗ 未找到 dialog 内的 Withdraw 按钮")
-            return False, "未找到 dialog 内的 Withdraw 按钮"
-        
-        dialog_withdraw_btn.click()
-        log_print(f"[{browser_id}] [Type21] ✓ 已点击 dialog 内的 Withdraw 按钮")
-        
-        # 8. 等待3s，切换到 OKX 界面
-        time.sleep(10)
-        log_print(f"[{browser_id}] [Type21] 切换到 OKX 钱包页面...")
-        okx_extension_id = "mcohilncbfahbmgdjkbpemcciiolgcge"
-        all_windows = driver.window_handles
-        okx_window = None
-        
-        for window in all_windows:
-            try:
-                driver.switch_to.window(window)
-                current_url = driver.current_url
-                if "chrome-extension://" in current_url and okx_extension_id in current_url:
-                    okx_window = window
-                    log_print(f"[{browser_id}] [Type21] ✓ 已切换到 OKX 页面")
-                    break
-            except:
-                continue
-        
-        if not okx_window:
-            log_print(f"[{browser_id}] [Type21] ✗ 未找到 OKX 页面")
-            return False, "未找到 OKX 页面"
-        
-        # 9. 在10s内找到 data-testid="okd-button" 的第二个 button 并点击
-        log_print(f"[{browser_id}] [Type21] 在10s内查找 okd-button 的第二个按钮...")
-        start_time = time.time()
-        okd_button_clicked = False
-        
-        while time.time() - start_time < 10:
-            try:
-                buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
-                if len(buttons) >= 2:
-                    buttons[1].click()
-                    log_print(f"[{browser_id}] [Type21] ✓ 已点击第二个 okd-button")
-                    okd_button_clicked = True
-                    break
+                dialog_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-scope="dialog"][data-part="content"]')
+                if dialog_divs:
+                    dialog_div = dialog_divs[0]
+                    log_print(f"[{browser_id}] [Type21] ✓ 找到 dialog div")
                 else:
-                    time.sleep(0.5)
+                    log_print(f"[{browser_id}] [Type21] ✗ 未找到 dialog div")
+                    return False, "未找到 dialog div"
             except Exception as e:
-                log_print(f"[{browser_id}] [Type21] ⚠ 查找 okd-button 时出错: {str(e)}")
-                time.sleep(0.5)
+                log_print(f"[{browser_id}] [Type21] ✗ 查找 dialog div 异常: {str(e)}")
+                return False, f"查找 dialog div 异常: {str(e)}"
         
-        if not okd_button_clicked:
-            log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到第二个 okd-button")
-            return False, "10s内未找到第二个 okd-button"
+            # 6. 判断 A 是否大于 balance，决定填入方式
+            if withdraw_amount > balance_num:
+                log_print(f"[{browser_id}] [Type21] A({withdraw_amount}) > balance({balance_num})，点击 Max")
+                # 找到 Max span 并点击
+                max_span = None
+                all_spans = dialog_div.find_elements(By.TAG_NAME, "span")
+                for span in all_spans:
+                    try:
+                        if span.text.strip() == "Max":
+                            max_span = span
+                            break
+                    except:
+                        continue
+                
+                if max_span:
+                    max_span.click()
+                    log_print(f"[{browser_id}] [Type21] ✓ 已点击 Max")
+                    
+                    # 点击 Max 后等待2s，获取 input 实际值并与 tp2 比较
+                    time.sleep(2)
+                    try:
+                        max_amount_inputs = dialog_div.find_elements(By.CSS_SELECTOR, 'input[placeholder="10.00"]')
+                        if max_amount_inputs:
+                            max_input_value_str = max_amount_inputs[0].get_attribute("value")
+                            log_print(f"[{browser_id}] [Type21] Max 后 input 实际值: {max_input_value_str}")
+                            try:
+                                max_input_value = float(max_input_value_str.replace('$', '').replace(',', '').strip())
+                            except:
+                                log_print(f"[{browser_id}] [Type21] ✗ Max 后 input 值无法转换为数字: {max_input_value_str}")
+                                return False, f"Max 后 input 值无法转换为数字: {max_input_value_str}"
+                            
+                            if max_input_value < tp2_num:
+                                log_print(f"[{browser_id}] [Type21] ✗ Max 后实际值({max_input_value}) < tp2({tp2_num})，任务失败")
+                                return False, f"Max 后实际值({max_input_value}) 小于 tp2({tp2_num})"
+                            else:
+                                log_print(f"[{browser_id}] [Type21] ✓ Max 后实际值({max_input_value}) >= tp2({tp2_num})，继续执行")
+                        else:
+                            log_print(f"[{browser_id}] [Type21] ⚠ 未找到 input，跳过 Max 值校验")
+                    except Exception as e:
+                        log_print(f"[{browser_id}] [Type21] ⚠ 获取 Max 后 input 值异常: {str(e)}，跳过校验")
+                else:
+                    log_print(f"[{browser_id}] [Type21] ✗ 未找到 Max span")
+                    return False, "未找到 Max span"
+            else:
+                log_print(f"[{browser_id}] [Type21] A({withdraw_amount}) <= balance({balance_num})，手动填入金额")
+                # 找到 input 并填入 A
+                amount_input = None
+                try:
+                    amount_inputs = dialog_div.find_elements(By.CSS_SELECTOR, 'input[placeholder="10.00"]')
+                    if amount_inputs:
+                        amount_input = amount_inputs[0]
+                    else:
+                        log_print(f"[{browser_id}] [Type21] ✗ 未找到 placeholder='10.00' 的 input")
+                        return False, "未找到金额输入框"
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] ✗ 查找金额输入框异常: {str(e)}")
+                    return False, f"查找金额输入框异常: {str(e)}"
+                
+                amount_input.clear()
+                amount_input.send_keys(str(withdraw_amount))
+                log_print(f"[{browser_id}] [Type21] ✓ 已填入金额: {withdraw_amount}")
         
-        # 10. 停留在 OKX 界面，等待60s
+            # 7. 等待2s，点击 dialog 内的 Withdraw 按钮
+            time.sleep(2)
+            dialog_withdraw_btn = None
+            all_dialog_buttons = dialog_div.find_elements(By.TAG_NAME, "button")
+            for btn in all_dialog_buttons:
+                try:
+                    if btn.text.strip() == "Withdraw":
+                        dialog_withdraw_btn = btn
+                        break
+                except:
+                    continue
+            
+            if not dialog_withdraw_btn:
+                log_print(f"[{browser_id}] [Type21] ✗ 未找到 dialog 内的 Withdraw 按钮")
+                return False, "未找到 dialog 内的 Withdraw 按钮"
+            
+            dialog_withdraw_btn.click()
+            log_print(f"[{browser_id}] [Type21] ✓ 已点击 dialog 内的 Withdraw 按钮")
+        
+            # 8. 等待3s，切换到 OKX 界面
+            time.sleep(10)
+            log_print(f"[{browser_id}] [Type21] 切换到 OKX 钱包页面...")
+            okx_extension_id = "mcohilncbfahbmgdjkbpemcciiolgcge"
+            all_windows = driver.window_handles
+            okx_window = None
+            
+            for window in all_windows:
+                try:
+                    driver.switch_to.window(window)
+                    current_url = driver.current_url
+                    if "chrome-extension://" in current_url and okx_extension_id in current_url:
+                        okx_window = window
+                        log_print(f"[{browser_id}] [Type21] ✓ 已切换到 OKX 页面")
+                        break
+                except:
+                    continue
+            
+            if not okx_window:
+                log_print(f"[{browser_id}] [Type21] ✗ 未找到 OKX 页面")
+                return False, "未找到 OKX 页面"
+            
+            # 9. 在10s内找到 data-testid="okd-button" 的第二个 button 并点击
+            log_print(f"[{browser_id}] [Type21] 在10s内查找 okd-button 的第二个按钮...")
+            start_time = time.time()
+            okd_button_clicked = False
+            
+            while time.time() - start_time < 10:
+                try:
+                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                    if len(buttons) >= 2:
+                        buttons[1].click()
+                        log_print(f"[{browser_id}] [Type21] ✓ 已点击第二个 okd-button")
+                        okd_button_clicked = True
+                        break
+                    else:
+                        time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] ⚠ 查找 okd-button 时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not okd_button_clicked:
+                log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到第二个 okd-button")
+                return False, "10s内未找到第二个 okd-button"
+            
+            # ======== 如果 tp3=="1"，提现到OKX完成，直接返回 ========
+            if str(tp3) == "1":
+                time.sleep(30)
+                log_print(f"[{browser_id}] [Type21] tp3=1，提现到OKX流程完成，任务结束")
+                return True, ""
+            
+            # ======== 提现到OKX流程结束 ========
+        
+        # ======== 以下是从OKX转入新钱包的流程（步骤10.5-19）========
         time.sleep(60)
-        
         # 10.5 重新进入 OKX 界面（因为 OKX 页面可能已跳转到其他页面）
         log_print(f"[{browser_id}] [Type21] 重新进入 OKX 界面...")
+        okx_extension_id = "mcohilncbfahbmgdjkbpemcciiolgcge"
         okx_popup_url = f"chrome-extension://{okx_extension_id}/popup.html"
         try:
             driver.get(okx_popup_url)
@@ -16220,6 +16235,480 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
         import traceback
         log_print(f"[{browser_id}] [Type21] 错误详情:\n{traceback.format_exc()}")
         return False, f"执行异常: {str(e)}"
+
+
+def process_type22_mission(task_data):
+    """
+    处理 Type 22 任务 - Opinion Foundation Claim 资格检查和数值提取
+    
+    流程：更新代理 → 启动浏览器 → 打开 claim 页面 → 预打开 OKX 钱包解锁 →
+          Connect Wallet + OKX Wallet 连接 → 检测并点击 Check My Eligibility →
+          提取 number__inner 中的数值 → 上传结果
+    
+    Args:
+        task_data: 任务数据，包含 mission 和 exchangeConfig
+        
+    Returns:
+        tuple: (success, failure_reason, claim_value)
+    """
+    mission = task_data.get("mission", {})
+    
+    browser_id = mission.get("numberList", "")
+    mission_id = mission.get("id", "")
+    
+    log_print(f"\n[{browser_id}] ========== 开始处理 Type 22 任务 ==========")
+    log_print(f"[{browser_id}] 任务ID: {mission_id}")
+    
+    driver = None
+    claim_value = ""
+    
+    try:
+        # 1. 检查IP并更新代理
+        current_ip = None
+        current_delay = None
+        log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
+        _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id)
+        
+        # 确保 current_ip 和 current_delay 已初始化
+        if current_ip is None:
+            log_print(f"[{browser_id}] ⚠ current_ip 为 None，尝试从 LAST_PROXY_CONFIG 获取...")
+            last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+            if last_config:
+                current_ip = last_config.get("ip")
+                current_delay = last_config.get("delay")
+        
+        # 2. 打开浏览器
+        log_print(f"[{browser_id}] 步骤2: 打开浏览器...")
+        browser_data = start_adspower_browser(browser_id)
+        
+        if not browser_data:
+            return False, "浏览器启动失败", claim_value
+        
+        # 3. 创建Selenium驱动
+        log_print(f"[{browser_id}] 步骤3: 创建Selenium驱动...")
+        driver = create_selenium_driver(browser_data)
+        
+        # 等待4秒
+        log_print(f"[{browser_id}] 等待4秒...")
+        time.sleep(4)
+        
+        # 4. 打开目标页面
+        target_url = "https://opinion.foundation/claim"
+        log_print(f"[{browser_id}] 步骤4: 打开目标页面 {target_url}...")
+        try:
+            driver.get(target_url)
+            log_print(f"[{browser_id}] ✓ 已打开页面: {target_url}")
+        except WebDriverException as e:
+            error_msg = str(e)
+            log_print(f"[{browser_id}] ✗ 打开目标页面失败: {error_msg}")
+            return False, f"打开目标页面失败: {error_msg}", claim_value
+        
+        # 等待页面加载完成
+        log_print(f"[{browser_id}] 等待页面加载完成...")
+        try:
+            WebDriverWait(driver, 30).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            log_print(f"[{browser_id}] ✓ 页面加载完成")
+        except TimeoutException:
+            log_print(f"[{browser_id}] ⚠ 页面加载超时，继续执行...")
+        
+        time.sleep(2)
+        
+        # 5. 预打开OKX钱包
+        log_print(f"[{browser_id}] 步骤5: 预打开OKX钱包...")
+        main_window = preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
+        
+        # 切换回目标页面
+        log_print(f"[{browser_id}] 切换回目标页面...")
+        driver.switch_to.window(main_window)
+        time.sleep(1)
+        
+        # 6. Connect Wallet + OKX Wallet 连接（Type 22 专用：OKX Wallet 在 span 标签中，点击父节点的父节点）
+        log_print(f"[{browser_id}] 步骤6: 检查并连接钱包（Type 22 专用逻辑）...")
+        try:
+            # 6.1 在10秒内查找 Connect Wallet 按钮或 OKX Wallet span
+            connect_wallet_button = None
+            okx_wallet_span = None
+            start_time = time.time()
+            
+            while time.time() - start_time < 10:
+                try:
+                    # 查找 Connect Wallet 按钮
+                    buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for button in buttons:
+                        if button.text.strip() == "Connect Wallet":
+                            connect_wallet_button = button
+                            log_print(f"[{browser_id}] ✓ 找到 Connect Wallet 按钮")
+                            break
+                    
+                    # 查找 OKX Wallet 的 span 标签
+                    if not connect_wallet_button:
+                        spans = driver.find_elements(By.TAG_NAME, "span")
+                        for span in spans:
+                            if span.text.strip() == "OKX Wallet":
+                                okx_wallet_span = span
+                                log_print(f"[{browser_id}] ✓ 找到 OKX Wallet span")
+                                break
+                    
+                    if connect_wallet_button or okx_wallet_span:
+                        break
+                    
+                    # 3秒后没找到，认为已连接
+                    if time.time() - start_time > 3:
+                        log_print(f"[{browser_id}] ✓ 未找到 Connect Wallet 和 OKX Wallet，钱包已连接")
+                        break
+                    
+                    time.sleep(0.5)
+                except:
+                    time.sleep(0.5)
+            
+            # 6.2 如果有 Connect Wallet 按钮，点击它
+            if connect_wallet_button:
+                log_print(f"[{browser_id}] → 点击 Connect Wallet 按钮...")
+                connect_wallet_button.click()
+                time.sleep(1)
+                okx_wallet_span = None  # 重新查找
+            
+            # 6.3 如果还没有找到 OKX Wallet span，在10秒内查找
+            if not okx_wallet_span and (connect_wallet_button or not okx_wallet_span):
+                log_print(f"[{browser_id}] → 在10秒内查找 OKX Wallet span...")
+                start_time = time.time()
+                
+                while time.time() - start_time < 10:
+                    try:
+                        spans = driver.find_elements(By.TAG_NAME, "span")
+                        for span in spans:
+                            if span.text.strip() == "OKX Wallet":
+                                okx_wallet_span = span
+                                log_print(f"[{browser_id}] ✓ 找到 OKX Wallet span")
+                                break
+                        
+                        if okx_wallet_span:
+                            break
+                        
+                        time.sleep(0.5)
+                    except:
+                        time.sleep(0.5)
+            
+            # 6.4 如果找到了 OKX Wallet span，点击它的父节点的父节点
+            if okx_wallet_span:
+                try:
+                    log_print(f"[{browser_id}] → 点击 OKX Wallet 的父节点的父节点...")
+                    grandparent = okx_wallet_span.find_element(By.XPATH, "../..")
+                    grandparent.click()
+                    log_print(f"[{browser_id}] ✓ 已点击 OKX Wallet 祖父节点")
+                    time.sleep(2)
+                except Exception as e:
+                    log_print(f"[{browser_id}] ⚠ 点击 OKX Wallet 失败: {str(e)}")
+                
+                # 6.5 切换到 OKX 窗口
+                log_print(f"[{browser_id}] → 切换到 OKX 窗口...")
+                okx_window = None
+                all_windows = driver.window_handles
+                
+                for window in all_windows:
+                    if window != main_window:
+                        driver.switch_to.window(window)
+                        if "okx" in driver.current_url.lower() or "mcohilncbfahbmgdjkbpemcciiolgcge" in driver.current_url:
+                            okx_window = window
+                            log_print(f"[{browser_id}] ✓ 找到 OKX 窗口")
+                            break
+                
+                if okx_window:
+                    # 解锁 OKX 钱包
+                    log_print(f"[{browser_id}] → 解锁 OKX 钱包...")
+                    unlock_okx_wallet(driver, browser_id, browser_id)
+                    
+                    # 在10秒内等待并点击确认按钮
+                    log_print(f"[{browser_id}] → 查找确认按钮（10秒超时）...")
+                    start_time = time.time()
+                    button_clicked = False
+                    
+                    while time.time() - start_time < 10:
+                        try:
+                            confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                            if len(confirm_buttons) >= 2:
+                                confirm_buttons[1].click()
+                                log_print(f"[{browser_id}] ✓ 已点击确认按钮（第二个）")
+                                button_clicked = True
+                                break
+                            else:
+                                time.sleep(0.5)
+                        except Exception as e:
+                            log_print(f"[{browser_id}] ⚠ 查找按钮时出错: {str(e)}")
+                            time.sleep(0.5)
+                    
+                    if not button_clicked:
+                        log_print(f"[{browser_id}] ⚠ 未找到足够的确认按钮或超时")
+                    
+                    # 切换回主窗口
+                    driver.switch_to.window(main_window)
+                    log_print(f"[{browser_id}] ✓ 已切换回主窗口")
+                else:
+                    log_print(f"[{browser_id}] ⚠ 未找到 OKX 窗口")
+            else:
+                log_print(f"[{browser_id}] ✓ 未找到 OKX Wallet span，钱包可能已连接")
+        except Exception as e:
+            log_print(f"[{browser_id}] ⚠ 连接钱包异常: {str(e)}")
+        
+        # 切换回目标页面
+        log_print(f"[{browser_id}] 切换回目标页面...")
+        try:
+            driver.switch_to.window(main_window)
+        except:
+            pass
+        
+        # 7. 等待5秒后检测 "Check My Eligibility"
+        log_print(f"[{browser_id}] 步骤7: 等待5秒后检测 'Check My Eligibility'...")
+        time.sleep(5)
+        
+        check_eligibility_found = False
+        start_time = time.time()
+        while time.time() - start_time < 15:
+            try:
+                spans = driver.find_elements(By.TAG_NAME, "span")
+                for span in spans:
+                    try:
+                        if span.text.strip() == "Check My Eligibility":
+                            log_print(f"[{browser_id}] ✓ 找到 'Check My Eligibility' span")
+                            # 点击父节点
+                            try:
+                                parent = span.find_element(By.XPATH, "..")
+                                parent.click()
+                                log_print(f"[{browser_id}] ✓ 已点击 'Check My Eligibility' 的父节点")
+                                check_eligibility_found = True
+                            except Exception as e:
+                                log_print(f"[{browser_id}] ⚠ 点击父节点失败: {str(e)}")
+                            break
+                    except:
+                        continue
+                
+                if check_eligibility_found:
+                    break
+                
+                time.sleep(1)
+            except:
+                time.sleep(1)
+        
+        if not check_eligibility_found:
+            log_print(f"[{browser_id}] ⚠ 未找到 'Check My Eligibility'，继续尝试提取数值...")
+        
+        # 7.5 点击 Check My Eligibility 后，15秒内检测 OKX Wallet span
+        if check_eligibility_found:
+            log_print(f"[{browser_id}] 步骤7.5: 点击 Check My Eligibility 后，15秒内检测 OKX Wallet...")
+            okx_wallet_span = None
+            start_time = time.time()
+            
+            while time.time() - start_time < 15:
+                try:
+                    spans = driver.find_elements(By.TAG_NAME, "span")
+                    for span in spans:
+                        try:
+                            if span.text.strip() == "OKX Wallet":
+                                okx_wallet_span = span
+                                log_print(f"[{browser_id}] ✓ 找到 OKX Wallet span")
+                                break
+                        except:
+                            continue
+                    
+                    if okx_wallet_span:
+                        break
+                    
+                    time.sleep(0.5)
+                except:
+                    time.sleep(0.5)
+            
+            if okx_wallet_span:
+                # 点击父节点的父节点
+                try:
+                    log_print(f"[{browser_id}] → 点击 OKX Wallet 的父节点的父节点...")
+                    grandparent = okx_wallet_span.find_element(By.XPATH, "../..")
+                    grandparent.click()
+                    log_print(f"[{browser_id}] ✓ 已点击 OKX Wallet 祖父节点")
+                    time.sleep(2)
+                except Exception as e:
+                    log_print(f"[{browser_id}] ⚠ 点击 OKX Wallet 失败: {str(e)}")
+                
+                # 切换到 OKX 窗口
+                log_print(f"[{browser_id}] → 切换到 OKX 窗口...")
+                okx_window = None
+                all_windows = driver.window_handles
+                
+                for window in all_windows:
+                    if window != main_window:
+                        driver.switch_to.window(window)
+                        if "okx" in driver.current_url.lower() or "mcohilncbfahbmgdjkbpemcciiolgcge" in driver.current_url:
+                            okx_window = window
+                            log_print(f"[{browser_id}] ✓ 找到 OKX 窗口")
+                            break
+                
+                if okx_window:
+                    # 在10秒内等待并点击确认按钮（第二个按钮）
+                    log_print(f"[{browser_id}] → 查找确认按钮（10秒超时）...")
+                    start_time = time.time()
+                    button_clicked = False
+                    
+                    while time.time() - start_time < 10:
+                        try:
+                            confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                            if len(confirm_buttons) >= 2:
+                                confirm_buttons[1].click()
+                                log_print(f"[{browser_id}] ✓ 已点击确认按钮（第二个）")
+                                button_clicked = True
+                                break
+                            else:
+                                time.sleep(0.5)
+                        except Exception as e:
+                            log_print(f"[{browser_id}] ⚠ 查找按钮时出错: {str(e)}")
+                            time.sleep(0.5)
+                    
+                    if not button_clicked:
+                        log_print(f"[{browser_id}] ⚠ 未找到足够的确认按钮或超时")
+                    
+                    # 切换回主窗口
+                    driver.switch_to.window(main_window)
+                    log_print(f"[{browser_id}] ✓ 已切换回主窗口")
+                else:
+                    log_print(f"[{browser_id}] ⚠ 未找到 OKX 窗口，切换回主窗口")
+                    driver.switch_to.window(main_window)
+            else:
+                log_print(f"[{browser_id}] ✓ 15秒内未检测到 OKX Wallet，继续执行...")
+        
+        # 8. 等待40秒后提取数值
+        log_print(f"[{browser_id}] 步骤8: 等待40秒后提取 number__inner 中的数值...")
+        time.sleep(30)
+        
+        # 使用 JavaScript 提取 number__inner 中的数值
+        log_print(f"[{browser_id}] 开始提取数值...")
+        try:
+            extracted_value = driver.execute_script("""
+                try {
+                    // 数字在 number-flow-react 的 shadow-root 中
+                    var nfElement = document.querySelector('number-flow-react');
+                    if (!nfElement) {
+                        return {error: '未找到 number-flow-react 元素'};
+                    }
+                    
+                    var shadow = nfElement.shadowRoot;
+                    if (!shadow) {
+                        return {error: 'number-flow-react 没有 shadowRoot'};
+                    }
+                    
+                    // 在 shadowRoot 中查找 part="integer" 的 span
+                    var integerSection = shadow.querySelector('[part="integer"]');
+                    if (!integerSection) {
+                        return {error: '在 shadowRoot 中未找到 part=integer 元素'};
+                    }
+                    
+                    var integerPart = '';
+                    var intDigits = integerSection.querySelectorAll('.digit');
+                    for (var i = 0; i < intDigits.length; i++) {
+                        var nums = intDigits[i].querySelectorAll('.digit__num');
+                        for (var j = 0; j < nums.length; j++) {
+                            if (!nums[j].hasAttribute('inert')) {
+                                integerPart += nums[j].textContent.trim();
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 在 shadowRoot 中查找 part="fraction" 的 span
+                    var fractionSection = shadow.querySelector('[part="fraction"]');
+                    var fractionPart = '';
+                    if (fractionSection) {
+                        var fracDigits = fractionSection.querySelectorAll('.digit');
+                        for (var k = 0; k < fracDigits.length; k++) {
+                            var fNums = fracDigits[k].querySelectorAll('.digit__num');
+                            for (var m = 0; m < fNums.length; m++) {
+                                if (!fNums[m].hasAttribute('inert')) {
+                                    fractionPart += fNums[m].textContent.trim();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    var result = integerPart;
+                    if (fractionPart.length > 0) {
+                        result += '.' + fractionPart;
+                    }
+                    
+                    if (result && result.length > 0) {
+                        return {value: result};
+                    } else {
+                        return {error: '提取到的数值为空'};
+                    }
+                } catch(e) {
+                    return {error: e.message};
+                }
+            """)
+            
+            if extracted_value and extracted_value.get('value'):
+                claim_value = extracted_value['value']
+                log_print(f"[{browser_id}] ✓ 提取到数值: {claim_value}")
+            elif extracted_value and extracted_value.get('error'):
+                log_print(f"[{browser_id}] ✗ 提取数值失败: {extracted_value['error']}")
+                return False, f"提取数值失败: {extracted_value['error']}", claim_value
+            else:
+                log_print(f"[{browser_id}] ✗ 提取数值失败: 返回结果为空")
+                return False, "提取数值失败: 返回结果为空", claim_value
+                
+        except Exception as e:
+            log_print(f"[{browser_id}] ✗ 执行 JavaScript 提取数值异常: {str(e)}")
+            return False, f"提取数值异常: {str(e)}", claim_value
+        
+        # 9. 获取现有账户配置并更新字段 v
+        log_print(f"[{browser_id}] 步骤9: 获取现有账户配置并更新字段 v...")
+        try:
+            get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
+            params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
+            
+            response = requests.get(get_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result and result.get('data'):
+                    account_config = result['data']
+                    log_print(f"[{browser_id}] ✓ 已获取现有账户配置")
+                    
+                    # 更新字段 v 为提取到的数值
+                    account_config['v'] = claim_value
+                    log_print(f"[{browser_id}] ✓ 更新字段 v: {claim_value}")
+                    
+                    # 上传更新后的配置
+                    success_upload, result_upload, error_msg = upload_account_config_with_retry(
+                        account_config, 
+                        browser_id=browser_id, 
+                        timeout=15
+                    )
+                    
+                    if success_upload:
+                        log_print(f"[{browser_id}] ✓ 账户配置已上传（字段 v 已更新为 {claim_value}）")
+                    else:
+                        log_print(f"[{browser_id}] ✗ 账户配置上传失败: {error_msg}")
+                else:
+                    log_print(f"[{browser_id}] ✗ 账户配置不存在，无法更新字段 v")
+            else:
+                log_print(f"[{browser_id}] ✗ 获取账户配置失败: HTTP {response.status_code}")
+        except Exception as e:
+            log_print(f"[{browser_id}] ✗ 更新字段 v 异常: {str(e)}")
+        
+        log_print(f"[{browser_id}] ========== Type 22 任务完成，数值: {claim_value} ==========\n")
+        return True, "", claim_value
+    
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗✗✗ Type 22 任务执行异常: {str(e)}")
+        import traceback
+        log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
+        return False, f"执行异常: {str(e)}", claim_value
+    
+    finally:
+        # 关闭浏览器
+        log_print(f"[{browser_id}] 任务完成，正在关闭浏览器...")
+        close_adspower_browser(browser_id)
+        # 调用 removeNumberInUse 接口
+        call_remove_number_in_use(browser_id, "Type 22 任务完成，")
 
 
 def process_type2_mission(task_data, retry_count=0):
@@ -17249,8 +17738,8 @@ def check_and_submit_completed_missions():
             if task_type == 3:
                 # Type 3任务的结果在单浏览器处理时已提交
                 log_print(f"[系统] ✓ Type 3 任务 {mission_id} 已完成")
-            elif task_type == 5 or task_type == 1 or task_type == 6 or task_type == 9:
-                # Type 1/5/6任务的结果已在单浏览器处理时直接上传，这里只做清理
+            elif task_type == 5 or task_type == 1 or task_type == 6 or task_type == 9 or task_type == 22:
+                # Type 1/5/6/22任务的结果已在单浏览器处理时直接上传，这里只做清理
                 log_print(f"[系统] ✓ Type {task_type} 任务 {mission_id} 已完成（结果已直接上传）")
             else:
                 # 其他类型任务
@@ -17555,6 +18044,52 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
                 process_browser_waiting_queue(browser_id)
             return
             
+        elif mission_type == 22:
+            # Type 22: Opinion Foundation Claim 资格检查和数值提取
+            # 初始化变量
+            success = False
+            failure_reason = "未执行"
+            
+            # Type 22 任务开始时调用 addNumberInUse
+            try:
+                log_print(f"[{browser_id}] Type 22 任务开始，调用 addNumberInUse 接口...")
+                add_url = "https://sg.bicoin.com.cn/99l/hedge/addNumberInUse"
+                add_resp = requests.post(add_url, json={"number": browser_id, "group": COMPUTER_GROUP}, timeout=10)
+                log_print(f"[{browser_id}] addNumberInUse 响应: {add_resp.status_code}")
+            except Exception as e:
+                log_print(f"[{browser_id}] addNumberInUse 调用失败: {str(e)}")
+            
+            try:
+                success, failure_reason, claim_value = process_type22_mission(task_data)
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ Type 22 任务执行异常: {str(e)}")
+                success = False
+                failure_reason = f"执行异常: {str(e)}"
+                claim_value = ""
+            
+            # 立即上传任务结果
+            log_print(f"[{browser_id}] Type 22 任务{'成功' if success else '失败'}，立即上传结果...")
+            status = 2 if success else 3
+            msg = claim_value if success else (failure_reason or '')
+            save_mission_result(mission_id, status, msg)
+            log_print(f"[{browser_id}] ✓ Type 22 任务结果已上传，数值: {claim_value}")
+            
+            # 记录任务结果到内存
+            with active_tasks_lock:
+                if mission_id in active_tasks:
+                    active_tasks[mission_id]['results'][browser_id] = {
+                        'success': success,
+                        'reason': failure_reason,
+                        'msg': msg
+                    }
+                    active_tasks[mission_id]['completed'] += 1
+            log_print(f"[{browser_id}] ✓ Type 22 任务结果已记录到内存")
+            
+            # 清除浏览器标记并处理等待队列
+            if browser_id:
+                process_browser_waiting_queue(browser_id)
+            return
+            
         else:
             log_print(f"[{browser_id}] ⚠ 不支持的任务类型: {mission_type}")
             success = False
@@ -17593,7 +18128,7 @@ def execute_mission_in_thread(task_data, mission_id, browser_id):
             process_browser_waiting_queue(browser_id)
         
         # 对于 Type 1/2/5 任务，尝试关闭浏览器（兜底保护，避免浏览器泄漏）
-        if mission_type in [1, 2, 5]:
+        if mission_type in [1, 2, 5, 22]:
             log_print(f"[{browser_id}] Type {mission_type} 任务异常，尝试关闭浏览器（兜底）...")
             try:
                 close_adspower_browser(browser_id)

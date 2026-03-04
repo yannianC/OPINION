@@ -401,6 +401,113 @@
         </div>
       </section>
 
+      <!-- Type22 Claim检测任务表单 -->
+      <section class="section">
+        <h2>Claim检测任务</h2>
+        <div class="task-form">
+          <!-- 选择类型：浏览器id或电脑组 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>选择类型 *</label>
+              <div class="radio-group">
+                <div class="radio-option">
+                  <input 
+                    type="radio" 
+                    id="claim-type-browser" 
+                    value="browser" 
+                    v-model="claimInputType"
+                  />
+                  <label for="claim-type-browser">浏览器ID</label>
+                </div>
+                <div class="radio-option">
+                  <input 
+                    type="radio" 
+                    id="claim-type-group" 
+                    value="group" 
+                    v-model="claimInputType"
+                  />
+                  <label for="claim-type-group">电脑组</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 浏览器ID批次选择和输入框 -->
+          <div class="form-row" v-if="claimInputType === 'browser'">
+            <div class="form-group">
+              <label for="claimBrowserBatchType">电脑批次 *</label>
+              <select
+                id="claimBrowserBatchType"
+                v-model="claimBrowserBatchType"
+              >
+                <option value="first">第一批电脑（1-27）</option>
+                <option value="second">第二批电脑（901-927）</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" v-if="claimInputType === 'browser'">
+            <div class="form-group">
+              <label for="claimBrowserIds">浏览器ID *</label>
+              <input
+                id="claimBrowserIds"
+                v-model="claimBrowserIdsInput"
+                type="text"
+                placeholder="支持格式: 201 或 201,202,203 或 201-203"
+              />
+              <div v-if="parsedClaimBrowserIds.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
+                已解析（共 {{ parsedClaimBrowserIds.length }} 个）: {{ parsedClaimBrowserIds.join(', ') }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 电脑组输入框 -->
+          <div class="form-row" v-if="claimInputType === 'group'">
+            <div class="form-group">
+              <label for="claimGroupNos">电脑组 *</label>
+              <input
+                id="claimGroupNos"
+                v-model="claimGroupNosInput"
+                type="text"
+                placeholder="支持格式: 1 或 1,2,3 或 1-3"
+              />
+              <div v-if="parsedClaimGroupNos.length > 0" style="margin-top: 8px; color: #666; font-size: 12px;">
+                已解析: {{ parsedClaimGroupNos.join(', ') }}
+              </div>
+              <div v-if="validClaimGroupNos.length > 0" style="margin-top: 8px; color: #28a745; font-size: 12px;">
+                有效电脑组: {{ validClaimGroupNos.join(', ') }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 提交按钮 -->
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" @click="handleClaimDetection" :disabled="isSubmittingClaim || (claimInputType === 'group' && validClaimGroupNos.length === 0) || (claimInputType === 'browser' && parsedClaimBrowserIds.length === 0)">
+              <span v-if="isSubmittingClaim">运行中...</span>
+              <span v-else>运行Claim检测任务</span>
+            </button>
+            <button type="button" class="btn btn-secondary" @click="claimGroupNosInput = ''; claimBrowserIdsInput = ''">
+              清空
+            </button>
+          </div>
+        </div>
+
+
+        <!-- Claim检测失败列表 -->
+        <div v-if="failedClaimGroups.length > 0" class="failed-list" style="margin-top: 20px;">
+          <h3 style="font-size: 16px; margin-bottom: 12px; color: #333;">Claim检测失败的电脑组</h3>
+          <div class="failed-item" v-for="(item, index) in failedClaimGroups" :key="index">
+            <span class="failed-id">电脑组: {{ item.groupNo }}</span>
+            <span class="failed-error" v-if="item.error">错误: {{ item.error }}</span>
+          </div>
+          <div class="failed-actions">
+            <button class="btn btn-primary" @click="retryFailedClaim" :disabled="isRetryingClaim">
+              {{ isRetryingClaim ? '重试中...' : '重试失败的电脑组' }}
+            </button>
+            <button class="btn btn-secondary" @click="clearFailedClaimList">清除列表</button>
+          </div>
+        </div>
+      </section>
+
       <!-- OP提现转到新地址任务 -->
       <section class="section">
         <h2>OP提现转到新地址任务</h2>
@@ -548,7 +655,15 @@
           <div class="form-actions">
             <button type="button" class="btn btn-primary" @click="handleWithdrawSubmit" :disabled="isSubmittingWithdraw">
               <span v-if="isSubmittingWithdraw">提交中...</span>
-              <span v-else>提交OP提现任务</span>
+              <span v-else>提交OP提现完整流程任务</span>
+            </button>
+            <button type="button" class="btn btn-primary" @click="handleWithdrawToOKX" :disabled="isSubmittingWithdraw" style="background-color: #e67e22;">
+              <span v-if="isSubmittingWithdraw">提交中...</span>
+              <span v-else>提现到OKX</span>
+            </button>
+            <button type="button" class="btn btn-primary" @click="handleSendFromOKX" :disabled="isSubmittingWithdraw" style="background-color: #27ae60;">
+              <span v-if="isSubmittingWithdraw">提交中...</span>
+              <span v-else>从OKX转入到新钱包</span>
             </button>
             <button type="button" class="btn btn-secondary" @click="resetWithdrawForm">
               重置
@@ -638,6 +753,16 @@ const failedIpGroups = ref([]) // 存储失败的电脑组 [{groupNo, error}]
 const isRetryingIp = ref(false)
 const ipTaskStatusList = ref([]) // 存储任务状态 [{groupNo, taskId, status, msg}]
 const statusPollingInterval = ref(null) // 状态轮询定时器
+
+// Type22 Claim检测任务相关
+const claimInputType = ref('browser') // 'browser' 或 'group'
+const claimBrowserIdsInput = ref('')
+const claimBrowserBatchType = ref('second') // 浏览器ID批次选择
+const claimBatchType = ref('second') // 默认第二批电脑
+const claimGroupNosInput = ref('')
+const isSubmittingClaim = ref(false)
+const failedClaimGroups = ref([]) // 存储失败的电脑组 [{groupNo, error}]
+const isRetryingClaim = ref(false)
 
 // 映射关系
 const browserToGroupMap = ref({}) // 浏览器ID -> 电脑组
@@ -1777,7 +1902,7 @@ watch(ipBatchType, (newVal) => {
  * @param {number} maxRetries - 最大重试次数
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-const submitSingleWithdraw = async (browserId, groupNo, tp1, tp2, maxRetries = 3) => {
+const submitSingleWithdraw = async (browserId, groupNo, tp1, tp2, tp3 = '', maxRetries = 3) => {
   const payload = {
     type: 21,
     groupNo: groupNo,
@@ -1785,6 +1910,11 @@ const submitSingleWithdraw = async (browserId, groupNo, tp1, tp2, maxRetries = 3
     exchangeName: 'OP',
     tp1: String(tp1),
     tp2: String(tp2)
+  }
+  
+  // 如果 tp3 有值，添加到 payload
+  if (tp3) {
+    payload.tp3 = String(tp3)
   }
   
   let lastError = null
@@ -1815,9 +1945,11 @@ const submitSingleWithdraw = async (browserId, groupNo, tp1, tp2, maxRetries = 3
 }
 
 /**
- * 处理OP提现任务提交
+ * 通用OP提现任务提交（支持 tp3 参数区分子任务）
+ * @param {string} tp3Value - tp3 值：'' = 完整流程, '1' = 提现到OKX, '2' = 从OKX转入新钱包
+ * @param {string} actionLabel - 操作描述文本
  */
-const handleWithdrawSubmit = async () => {
+const handleWithdrawAction = async (tp3Value = '', actionLabel = 'OP提现任务') => {
   if (isSubmittingWithdraw.value) return
   
   // 验证参数
@@ -1922,12 +2054,13 @@ const handleWithdrawSubmit = async () => {
           error: '没有对应的电脑组',
           groupNo: null,
           tp1: tp1,
-          tp2: tp2
+          tp2: tp2,
+          tp3: tp3Value
         })
         continue
       }
       
-      const result = await submitSingleWithdraw(browserId, groupNo, tp1, tp2, 3)
+      const result = await submitSingleWithdraw(browserId, groupNo, tp1, tp2, tp3Value, 3)
       
       if (result.success) {
         successCount++
@@ -1938,7 +2071,8 @@ const handleWithdrawSubmit = async () => {
           error: result.error || '提交失败',
           groupNo: groupNo,
           tp1: tp1,
-          tp2: tp2
+          tp2: tp2,
+          tp3: tp3Value
         })
       }
     }
@@ -1946,18 +2080,33 @@ const handleWithdrawSubmit = async () => {
     withdrawCurrentWait.value = ''
     
     if (successCount > 0) {
-      showMessage(`OP提现任务提交完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+      showMessage(`${actionLabel}提交完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
     } else {
-      showMessage(`OP提现任务提交失败：所有请求都失败了`, 'error')
+      showMessage(`${actionLabel}提交失败：所有请求都失败了`, 'error')
     }
   } catch (error) {
-    console.error('OP提现任务提交失败:', error)
-    showMessage('OP提现任务提交失败: ' + (error.message || '未知错误'), 'error')
+    console.error(`${actionLabel}提交失败:`, error)
+    showMessage(`${actionLabel}提交失败: ` + (error.message || '未知错误'), 'error')
   } finally {
     isSubmittingWithdraw.value = false
     withdrawCurrentWait.value = ''
   }
 }
+
+/**
+ * 处理OP提现任务提交（完整流程）
+ */
+const handleWithdrawSubmit = () => handleWithdrawAction('', 'OP提现任务')
+
+/**
+ * 处理提现到OKX任务提交
+ */
+const handleWithdrawToOKX = () => handleWithdrawAction('1', '提现到OKX任务')
+
+/**
+ * 处理从OKX转入到新钱包任务提交
+ */
+const handleSendFromOKX = () => handleWithdrawAction('2', '从OKX转入到新钱包任务')
 
 /**
  * 重试失败的OP提现任务
@@ -1979,7 +2128,7 @@ const retryFailedWithdraw = async () => {
         continue
       }
       
-      const result = await submitSingleWithdraw(item.browserId, item.groupNo, item.tp1, item.tp2, 3)
+      const result = await submitSingleWithdraw(item.browserId, item.groupNo, item.tp1, item.tp2, item.tp3 || '', 3)
       
       if (result.success) {
         successCount++
@@ -2349,6 +2498,220 @@ const clearTaskStatusList = () => {
   ipTaskStatusList.value = []
   showMessage('任务状态列表已清除', 'info')
 }
+
+// ============================================================================
+// Type22 Claim检测任务相关函数
+// ============================================================================
+
+// 解析后的Claim检测浏览器ID列表
+const parsedClaimBrowserIds = computed(() => {
+  return parseInput(claimBrowserIdsInput.value)
+})
+
+// 解析后的Claim检测电脑组列表
+const parsedClaimGroupNos = computed(() => {
+  return parseInput(claimGroupNosInput.value)
+})
+
+// 验证Claim检测的电脑组是否在对应批次中
+const validClaimGroupNos = computed(() => {
+  if (parsedClaimGroupNos.value.length === 0) {
+    return []
+  }
+  
+  // 根据批次类型获取允许的电脑组列表
+  const allowedGroups = claimBatchType.value === 'first' ? firstBatchGroups : secondBatchGroups
+  
+  // 过滤出在允许列表中的电脑组
+  return parsedClaimGroupNos.value.filter(groupNo => allowedGroups.includes(groupNo)).sort((a, b) => a - b)
+})
+
+/**
+ * 提交单个Claim检测请求（带重试）
+ */
+const submitSingleClaimDetection = async (groupNo, browserId = null, maxRetries = 3) => {
+  const payload = {
+    groupNo: String(groupNo),
+    type: 22,
+    exchangeName: 'OP'
+  }
+  
+  // 如果有浏览器ID，添加 numberList 字段
+  if (browserId) {
+    payload.numberList = String(browserId)
+  }
+  
+  let lastError = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`电脑组 ${groupNo} Claim检测第 ${attempt} 次重试，等待5秒...`)
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+      
+      const response = await axios.post('https://sg.bicoin.com.cn/99l/mission/add', payload)
+      
+      if (response.data && response.data.code === 0) {
+        console.log(`电脑组 ${groupNo} Claim检测成功${attempt > 0 ? `（第${attempt}次重试成功）` : ''}`)
+        const taskId = response.data.data?.id || response.data.data?.taskId || null
+        return { success: true, taskId: taskId }
+      } else {
+        lastError = response.data?.msg || '未知错误'
+        console.error(`电脑组 ${groupNo} Claim检测失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+      }
+    } catch (error) {
+      lastError = error.message || '未知错误'
+      console.error(`电脑组 ${groupNo} Claim检测失败${attempt > 0 ? `（第${attempt}次重试）` : ''}:`, lastError)
+    }
+  }
+  
+  return { success: false, error: lastError }
+}
+
+/**
+ * 处理Claim检测任务
+ */
+const handleClaimDetection = async () => {
+  if (isSubmittingClaim.value) return
+  
+  
+  // 存储 {groupNo, browserId} 的列表
+  let tasksToSubmit = []
+  
+  if (claimInputType.value === 'browser') {
+    // 浏览器ID模式：将浏览器ID转换为电脑组，并保留浏览器ID
+    if (parsedClaimBrowserIds.value.length === 0) {
+      showMessage('请正确输入浏览器ID', 'error')
+      return
+    }
+    
+    for (const browserId of parsedClaimBrowserIds.value) {
+      const groupNo = getGroupNoByBrowserIdAndBatch(browserId, claimBrowserBatchType.value)
+      if (groupNo) {
+        tasksToSubmit.push({ groupNo, browserId })
+      } else {
+        console.warn(`浏览器ID ${browserId} 未找到对应的电脑组`)
+      }
+    }
+    
+    if (tasksToSubmit.length === 0) {
+      showMessage('所选浏览器ID没有对应的电脑组', 'error')
+      return
+    }
+  } else {
+    // 电脑组模式：展开为每个浏览器ID
+    if (parsedClaimGroupNos.value.length === 0) {
+      showMessage('请正确输入电脑组', 'error')
+      return
+    }
+    
+    if (validClaimGroupNos.value.length === 0) {
+      showMessage('输入的电脑组不在当前批次中', 'error')
+      return
+    }
+    
+    for (const groupNo of validClaimGroupNos.value) {
+      const browserIds = groupToBrowserMap.value[groupNo] || []
+      for (const browserId of browserIds) {
+        tasksToSubmit.push({ groupNo, browserId })
+      }
+    }
+    
+    if (tasksToSubmit.length === 0) {
+      showMessage('所选电脑组没有对应的浏览器ID', 'error')
+      return
+    }
+  }
+  
+  isSubmittingClaim.value = true
+  failedClaimGroups.value = []
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    
+    for (const task of tasksToSubmit) {
+      const result = await submitSingleClaimDetection(task.groupNo, task.browserId, 3)
+      
+      if (result.success) {
+        successCount++
+      } else {
+        failCount++
+        failedClaimGroups.value.push({
+          groupNo: task.groupNo,
+          error: result.error || 'Claim检测失败'
+        })
+      }
+    }
+    
+    if (successCount > 0) {
+      showMessage(`Claim检测完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+    } else {
+      showMessage(`Claim检测失败：所有请求都失败了`, 'error')
+    }
+    
+    claimGroupNosInput.value = ''
+  } catch (error) {
+    console.error('Claim检测失败:', error)
+    showMessage('Claim检测失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isSubmittingClaim.value = false
+  }
+}
+
+/**
+ * 重试失败的Claim检测任务
+ */
+const retryFailedClaim = async () => {
+  if (isRetryingClaim.value || failedClaimGroups.value.length === 0) return
+  
+  isRetryingClaim.value = true
+  
+  try {
+    let successCount = 0
+    let failCount = 0
+    const newFailedList = []
+    let hasNewTasks = false
+    
+    for (const item of failedClaimGroups.value) {
+      const result = await submitSingleClaimDetection(item.groupNo, null, 3)
+      
+      if (result.success) {
+        successCount++
+      } else {
+        failCount++
+        newFailedList.push({
+          ...item,
+          error: result.error || 'Claim检测失败'
+        })
+      }
+    }
+    
+    failedClaimGroups.value = newFailedList
+    
+    if (successCount > 0) {
+      showMessage(`重试完成：成功 ${successCount} 个，失败 ${failCount} 个`, failCount > 0 ? 'info' : 'success')
+    } else {
+      showMessage(`重试失败：所有请求都失败了`, 'error')
+    }
+  } catch (error) {
+    console.error('重试Claim检测失败:', error)
+    showMessage('重试Claim检测失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    isRetryingClaim.value = false
+  }
+}
+
+/**
+ * 清除Claim检测失败列表
+ */
+const clearFailedClaimList = () => {
+  failedClaimGroups.value = []
+  showMessage('失败列表已清除', 'info')
+}
+
+
 
 // 页面加载时自动加载映射
 onMounted(() => {

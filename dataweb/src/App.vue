@@ -250,6 +250,40 @@
           />
         </div>
         <div class="filter-item">
+          <label>空投范围:</label>
+          <el-input 
+            v-model="filters.airdropMin" 
+            placeholder="最小值"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+          />
+          <span style="margin: 0 8px; color: #666;">-</span>
+          <el-input 
+            v-model="filters.airdropMax" 
+            placeholder="最大值"
+            clearable
+            size="small"
+            style="width: 120px"
+            type="number"
+          />
+          <span style="margin-left: 8px; color: #999; font-size: 12px;">（0-0 筛选空或0）</span>
+        </div>
+        <div class="filter-item">
+          <label>排序方式:</label>
+          <el-select 
+            v-model="sortType" 
+            size="small"
+            style="width: 150px"
+            @change="applyFilters"
+          >
+            <el-option label="默认排序" value="default" />
+            <el-option label="按空投降序" value="airdrop_desc" />
+            <el-option label="按空投升序" value="airdrop_asc" />
+          </el-select>
+        </div>
+        <div class="filter-item">
           <label>余额+Portfolio:</label>
           <el-select 
             v-model="filters.balancePlusPortfolioOperator" 
@@ -460,6 +494,10 @@
             <div class="total-item">
               <span class="total-label">已转金额总计:</span>
               <span class="total-value">{{ formatNumber(filteredSummaryTotals.totalTransferAmount) }}</span>
+            </div>
+            <div class="total-item">
+              <span class="total-label">空投总计:</span>
+              <span class="total-value">{{ formatNumber(filteredSummaryTotals.totalAirdrop) }}</span>
             </div>
           </div>
           
@@ -1058,6 +1096,15 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="空投 (v)" width="150" align="center" sortable :sort-method="(a, b) => sortByNumber(parseFloat(a.v) || 0, parseFloat(b.v) || 0)">
+        <template #default="scope">
+          <div v-if="scope.row.v !== null && scope.row.v !== undefined && scope.row.v !== ''" class="raw-data-text">
+            {{ scope.row.v }}
+          </div>
+          <span v-else class="empty-text">暂无数据</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="操作" width="520" align="center" fixed="right">
         <template #default="scope">
           <el-button 
@@ -1361,6 +1408,9 @@ let nextId = 1
 // 数据总计相关
 const summaryExpanded = ref(false)
 
+// 排序方式
+const sortType = ref('default')  // 'default', 'airdrop_desc', 'airdrop_asc'
+
 /**
  * 匹配事件名称和链上数据的title
  */
@@ -1588,17 +1638,20 @@ const filteredSummaryTotals = computed(() => {
   let totalBalance = 0
   let totalPortfolio = 0
   let totalTransferAmount = 0
+  let totalAirdrop = 0
   
   for (const row of data) {
     totalBalance += parseFloat(row.balance) || 0
     totalPortfolio += parseFloat(row.c) || 0
     totalTransferAmount += parseFloat(row.t) || 0
+    totalAirdrop += parseFloat(row.v) || 0
   }
   
   return {
     totalBalance: totalBalance,
     totalPortfolio: totalPortfolio,
-    totalTransferAmount: totalTransferAmount
+    totalTransferAmount: totalTransferAmount,
+    totalAirdrop: totalAirdrop
   }
 })
 
@@ -1705,7 +1758,9 @@ const filters = ref({
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
   positionTimeValue: null,  // 仓位抓取时间值（时间戳）
-  selectedPointsPeriod: ''  // 选中的积分时间区间（原始描述）
+  selectedPointsPeriod: '',  // 选中的积分时间区间（原始描述）
+  airdropMin: '',  // 空投最小值
+  airdropMax: ''   // 空投最大值
 })
 
 const activeFilters = ref({
@@ -1734,7 +1789,9 @@ const activeFilters = ref({
   openTimeValue: null,  // 打开时间值（时间戳）
   positionTimeOperator: '>',  // 仓位抓取时间比较操作符：> 或 <
   positionTimeValue: null,  // 仓位抓取时间值（时间戳）
-  selectedPointsPeriod: ''  // 选中的积分时间区间（原始描述）
+  selectedPointsPeriod: '',  // 选中的积分时间区间（原始描述）
+  airdropMin: null,  // 空投最小值
+  airdropMax: null   // 空投最大值
 })
 
 /**
@@ -1811,6 +1868,12 @@ const applyFilters = () => {
   const positionTimeValue = filters.value.positionTimeValue ? parseInt(filters.value.positionTimeValue) : null
   const positionTimeOperator = filters.value.positionTimeOperator || '>'
   
+  // 解析空投范围（特殊处理：允许 0 值）
+  const airdropMinStr = filters.value.airdropMin
+  const airdropMaxStr = filters.value.airdropMax
+  const airdropMin = (airdropMinStr !== '' && airdropMinStr !== null && airdropMinStr !== undefined) ? parseFloat(airdropMinStr) : null
+  const airdropMax = (airdropMaxStr !== '' && airdropMaxStr !== null && airdropMaxStr !== undefined) ? parseFloat(airdropMaxStr) : null
+  
   activeFilters.value = {
     computeGroup: parseInputValues(filters.value.computeGroup),
     fingerprintNo: parseInputValues(filters.value.fingerprintNo),
@@ -1837,7 +1900,9 @@ const applyFilters = () => {
     openTimeValue: openTimeValue,
     positionTimeOperator: positionTimeOperator,
     positionTimeValue: positionTimeValue,
-    selectedPointsPeriod: filters.value.selectedPointsPeriod || ''
+    selectedPointsPeriod: filters.value.selectedPointsPeriod || '',
+    airdropMin: airdropMin,
+    airdropMax: airdropMax
   }
   ElMessage.success('筛选已应用')
 }
@@ -1872,8 +1937,11 @@ const clearFilters = () => {
     openTimeValue: null,
     positionTimeOperator: '>',
     positionTimeValue: null,
-    selectedPointsPeriod: ''
+    selectedPointsPeriod: '',
+    airdropMin: '',
+    airdropMax: ''
   }
+  sortType.value = 'default'
   activeFilters.value = {
     computeGroup: [],
     fingerprintNo: [],
@@ -1900,7 +1968,9 @@ const clearFilters = () => {
     openTimeValue: null,
     positionTimeOperator: '>',
     positionTimeValue: null,
-    selectedPointsPeriod: ''
+    selectedPointsPeriod: '',
+    airdropMin: null,
+    airdropMax: null
   }
   ElMessage.info('筛选已清除')
 }
@@ -1946,7 +2016,9 @@ const filteredTableData = computed(() => {
                     filters.showOpenTimeGreaterThanPositionTime ||
                     (filters.openTimeValue !== null && filters.openTimeValue !== undefined) ||
                     (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined) ||
-                    (filters.selectedPointsPeriod && filters.selectedPointsPeriod.trim() !== '')
+                    (filters.selectedPointsPeriod && filters.selectedPointsPeriod.trim() !== '') ||
+                    filters.airdropMin !== null ||
+                    filters.airdropMax !== null
   
   let result = data
   
@@ -2012,6 +2084,27 @@ const filteredTableData = computed(() => {
         }
         if (filters.transferAmountMax !== null && transferAmount > filters.transferAmountMax) {
           return false
+        }
+      }
+      
+      // 空投范围筛选
+      if (filters.airdropMin !== null || filters.airdropMax !== null) {
+        const airdropVal = parseFloat(row.v)
+        const isZeroOrNull = (row.v === null || row.v === undefined || row.v === '' || row.v === 0 || row.v === '0' || airdropVal === 0)
+        
+        // 特殊情况：0-0 筛选出 v 为 0 或 null 的
+        if (filters.airdropMin === 0 && filters.airdropMax === 0) {
+          if (!isZeroOrNull) {
+            return false
+          }
+        } else {
+          const val = isNaN(airdropVal) ? 0 : airdropVal
+          if (filters.airdropMin !== null && val < filters.airdropMin) {
+            return false
+          }
+          if (filters.airdropMax !== null && val > filters.airdropMax) {
+            return false
+          }
         }
       }
       
@@ -2191,7 +2284,21 @@ const filteredTableData = computed(() => {
     })
   }
   
-  // 排序：打开时间>仓位时间的置顶（排除忽略的浏览器）
+  // 排序逻辑
+  const currentSortType = sortType.value
+  
+  if (currentSortType === 'airdrop_desc' || currentSortType === 'airdrop_asc') {
+    // 按空投排序
+    const sortedResult = [...result]
+    sortedResult.sort((a, b) => {
+      const aVal = parseFloat(a.v) || 0
+      const bVal = parseFloat(b.v) || 0
+      return currentSortType === 'airdrop_desc' ? bVal - aVal : aVal - bVal
+    })
+    return sortedResult
+  }
+  
+  // 默认排序：打开时间>仓位时间的置顶（排除忽略的浏览器）
   const ignoredBrowsersSet = getIgnoredBrowsersSet()
   
   // 使用更高效的排序方法：分组后合并
