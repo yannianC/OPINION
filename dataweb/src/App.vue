@@ -324,6 +324,16 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
+          <el-checkbox v-model="filters.showNullAirdrop" @change="applyFilters">
+            显示空投为空
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
+          <el-checkbox v-model="filters.showNullClaim" @change="applyFilters">
+            显示领取为空
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
           <el-checkbox v-model="filters.showHasOrder" @change="applyFilters">
             显示有挂单
           </el-checkbox>
@@ -1105,6 +1115,15 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="领取情况 (w)" width="120" align="center">
+        <template #default="scope">
+          <div v-if="scope.row.w !== null && scope.row.w !== undefined && scope.row.w !== ''" class="raw-data-text">
+            {{ scope.row.w }}
+          </div>
+          <span v-else class="empty-text">暂无数据</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="操作" width="520" align="center" fixed="right">
         <template #default="scope">
           <el-button 
@@ -1760,7 +1779,9 @@ const filters = ref({
   positionTimeValue: null,  // 仓位抓取时间值（时间戳）
   selectedPointsPeriod: '',  // 选中的积分时间区间（原始描述）
   airdropMin: '',  // 空投最小值
-  airdropMax: ''   // 空投最大值
+  airdropMax: '',   // 空投最大值
+  showNullAirdrop: false,  // 显示空投为空
+  showNullClaim: false  // 显示领取为空
 })
 
 const activeFilters = ref({
@@ -1791,7 +1812,9 @@ const activeFilters = ref({
   positionTimeValue: null,  // 仓位抓取时间值（时间戳）
   selectedPointsPeriod: '',  // 选中的积分时间区间（原始描述）
   airdropMin: null,  // 空投最小值
-  airdropMax: null   // 空投最大值
+  airdropMax: null,   // 空投最大值
+  showNullAirdrop: false,  // 显示空投为空
+  showNullClaim: false  // 显示领取为空
 })
 
 /**
@@ -1902,7 +1925,9 @@ const applyFilters = () => {
     positionTimeValue: positionTimeValue,
     selectedPointsPeriod: filters.value.selectedPointsPeriod || '',
     airdropMin: airdropMin,
-    airdropMax: airdropMax
+    airdropMax: airdropMax,
+    showNullAirdrop: filters.value.showNullAirdrop,
+    showNullClaim: filters.value.showNullClaim
   }
   ElMessage.success('筛选已应用')
 }
@@ -1939,7 +1964,9 @@ const clearFilters = () => {
     positionTimeValue: null,
     selectedPointsPeriod: '',
     airdropMin: '',
-    airdropMax: ''
+    airdropMax: '',
+    showNullAirdrop: false,
+    showNullClaim: false
   }
   sortType.value = 'default'
   activeFilters.value = {
@@ -1970,7 +1997,9 @@ const clearFilters = () => {
     positionTimeValue: null,
     selectedPointsPeriod: '',
     airdropMin: null,
-    airdropMax: null
+    airdropMax: null,
+    showNullAirdrop: false,
+    showNullClaim: false
   }
   ElMessage.info('筛选已清除')
 }
@@ -2018,7 +2047,9 @@ const filteredTableData = computed(() => {
                     (filters.positionTimeValue !== null && filters.positionTimeValue !== undefined) ||
                     (filters.selectedPointsPeriod && filters.selectedPointsPeriod.trim() !== '') ||
                     filters.airdropMin !== null ||
-                    filters.airdropMax !== null
+                    filters.airdropMax !== null ||
+                    filters.showNullAirdrop ||
+                    filters.showNullClaim
   
   let result = data
   
@@ -2090,14 +2121,18 @@ const filteredTableData = computed(() => {
       // 空投范围筛选
       if (filters.airdropMin !== null || filters.airdropMax !== null) {
         const airdropVal = parseFloat(row.v)
-        const isZeroOrNull = (row.v === null || row.v === undefined || row.v === '' || row.v === 0 || row.v === '0' || airdropVal === 0)
+        const isNull = (row.v === null || row.v === undefined || row.v === '')
         
-        // 特殊情况：0-0 筛选出 v 为 0 或 null 的
+        // 特殊情况：0-0 筛选出 v 为 0 的（不包含 null）
         if (filters.airdropMin === 0 && filters.airdropMax === 0) {
-          if (!isZeroOrNull) {
+          if (isNull || airdropVal !== 0) {
             return false
           }
         } else {
+          // null 的视为不匹配范围筛选
+          if (isNull) {
+            return false
+          }
           const val = isNaN(airdropVal) ? 0 : airdropVal
           if (filters.airdropMin !== null && val < filters.airdropMin) {
             return false
@@ -2105,6 +2140,20 @@ const filteredTableData = computed(() => {
           if (filters.airdropMax !== null && val > filters.airdropMax) {
             return false
           }
+        }
+      }
+      
+      // 显示空投为空筛选
+      if (filters.showNullAirdrop) {
+        if (row.v !== null && row.v !== undefined && row.v !== '') {
+          return false  // v 不为空，不显示
+        }
+      }
+      
+      // 显示领取为空筛选
+      if (filters.showNullClaim) {
+        if (row.w !== null && row.w !== undefined && row.w !== '') {
+          return false  // w 不为空，不显示
         }
       }
       

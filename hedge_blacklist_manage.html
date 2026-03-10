@@ -303,6 +303,102 @@
             cursor: not-allowed;
         }
 
+        /* 自动拉黑区域样式 */
+        .auto-blacklist-section {
+            grid-column: 1 / -1;
+            background: #fff5f5;
+            border-radius: 8px;
+            padding: 20px;
+            border: 2px solid #dc3545;
+        }
+
+        .auto-blacklist-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #dc3545;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #dc3545;
+        }
+
+        .auto-blacklist-btn {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: none;
+            padding: 14px 40px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+            margin-bottom: 15px;
+        }
+
+        .auto-blacklist-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.6);
+        }
+
+        .auto-blacklist-btn:active {
+            transform: translateY(0);
+        }
+
+        .auto-blacklist-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .auto-blacklist-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-radius: 6px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            display: none;
+        }
+
+        .auto-blacklist-log.show {
+            display: block;
+        }
+
+        .log-info { color: #9cdcfe; }
+        .log-success { color: #4ec9b0; }
+        .log-warning { color: #dcdcaa; }
+        .log-error { color: #f44747; }
+        .log-skip { color: #ce9178; }
+        .log-header { color: #c586c0; font-weight: bold; }
+
+        .auto-blacklist-progress {
+            background: #e9ecef;
+            border-radius: 4px;
+            height: 24px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .auto-blacklist-progress.show {
+            display: block;
+        }
+
+        .auto-blacklist-progress-bar {
+            height: 100%;
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
         @media (max-width: 768px) {
             .content {
                 grid-template-columns: 1fr;
@@ -349,6 +445,20 @@
                 <div class="list-container" id="onlyCloseContainer">
                     <div class="loading">正在加载...</div>
                 </div>
+            </div>
+            <!-- 一键IP检测拉黑 -->
+            <div class="auto-blacklist-section">
+                <div class="auto-blacklist-title">🚫 一键IP检测拉黑</div>
+                <p style="color: #6c757d; font-size: 14px; margin-bottom: 15px;">
+                    获取所有浏览器IP列表，检测IP地理位置。<strong style="color: #28a745;">澳大利亚(AU)、日本(JP)、土耳其(TR)</strong> 的浏览器跳过，其余全部完全拉黑。
+                </p>
+                <button class="auto-blacklist-btn" id="autoBlacklistBtn" onclick="autoBlacklistByIp()">
+                    🔍 开始检测并拉黑
+                </button>
+                <div class="auto-blacklist-progress" id="autoBlacklistProgress">
+                    <div class="auto-blacklist-progress-bar" id="autoBlacklistProgressBar" style="width: 0%;">0%</div>
+                </div>
+                <div class="auto-blacklist-log" id="autoBlacklistLog"></div>
             </div>
         </div>
     </div>
@@ -774,6 +884,231 @@
                 addToOnlyClose();
             }
         });
+
+        // ========== 一键IP检测拉黑功能 ==========
+
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('autoBlacklistLog');
+            const line = document.createElement('div');
+            line.className = `log-${type}`;
+            const time = new Date().toLocaleTimeString();
+            line.textContent = `[${time}] ${message}`;
+            logContainer.appendChild(line);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function updateProgress(current, total) {
+            const progressBar = document.getElementById('autoBlacklistProgressBar');
+            const pct = Math.round((current / total) * 100);
+            progressBar.style.width = pct + '%';
+            progressBar.textContent = `${pct}% (${current}/${total})`;
+        }
+
+        /**
+         * 使用 ip-api.com 批量查询IP地理位置
+         * 每批最多100个IP，免费版限制每分钟15次批量请求
+         */
+        async function batchLookupIps(ipList) {
+            const results = {};
+            const batchSize = 100;
+
+            for (let i = 0; i < ipList.length; i += batchSize) {
+                const batch = ipList.slice(i, i + batchSize);
+                const requestBody = batch.map(ip => ({ query: ip, fields: 'status,countryCode,country,query' }));
+
+                try {
+                    const response = await fetch('http://ip-api.com/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    const data = await response.json();
+
+                    data.forEach(item => {
+                        if (item.status === 'success') {
+                            results[item.query] = { countryCode: item.countryCode, country: item.country };
+                        } else {
+                            results[item.query] = { countryCode: 'UNKNOWN', country: '未知' };
+                        }
+                    });
+
+                    addLog(`IP批量查询完成: 第${Math.floor(i / batchSize) + 1}批 (${batch.length}个IP)`, 'info');
+                } catch (error) {
+                    addLog(`IP批量查询失败: ${error.message}`, 'error');
+                    batch.forEach(ip => {
+                        results[ip] = { countryCode: 'ERROR', country: '查询失败' };
+                    });
+                }
+
+                // 批量之间等待2秒，避免触发频率限制
+                if (i + batchSize < ipList.length) {
+                    addLog('等待2秒避免频率限制...', 'warning');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            }
+
+            return results;
+        }
+
+        async function autoBlacklistByIp() {
+            const btn = document.getElementById('autoBlacklistBtn');
+            const logContainer = document.getElementById('autoBlacklistLog');
+            const progressContainer = document.getElementById('autoBlacklistProgress');
+
+            // 重置UI
+            logContainer.innerHTML = '';
+            logContainer.classList.add('show');
+            progressContainer.classList.add('show');
+            updateProgress(0, 1);
+            btn.disabled = true;
+            btn.textContent = '⏳ 检测中...';
+
+            const SKIP_COUNTRIES = new Set(['AU', 'JP', 'TR']);
+
+            try {
+                // 步骤1: 获取IP列表
+                addLog('========== 开始获取浏览器IP列表 ==========', 'header');
+                const ipResponse = await fetch('https://sg.bicoin.com.cn/99l/bro/getAllIpInfo', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const ipResult = await ipResponse.json();
+
+                if (ipResult.code !== 0 || !ipResult.data || !ipResult.data.list) {
+                    addLog('获取IP列表失败: ' + (ipResult.msg || '未知错误'), 'error');
+                    return;
+                }
+
+                const allItems = ipResult.data.list;
+                addLog(`获取到 ${allItems.length} 条记录`, 'success');
+
+                // 步骤2: 按浏览器编号分组
+                addLog('========== 按浏览器编号分组 ==========', 'header');
+                const browserMap = {}; // { number: Set<ip> }
+                allItems.forEach(item => {
+                    if (item.number && item.ip) {
+                        const num = String(item.number);
+                        if (!browserMap[num]) {
+                            browserMap[num] = new Set();
+                        }
+                        browserMap[num].add(item.ip);
+                    }
+                });
+
+                const browserNumbers = Object.keys(browserMap);
+                addLog(`共 ${browserNumbers.length} 个浏览器`, 'success');
+
+                // 步骤3: 获取当前黑名单，避免重复拉黑
+                addLog('========== 获取当前黑名单 ==========', 'header');
+                let existingBlacklist = new Set();
+                try {
+                    const blResponse = await fetch(`${API_BASE}/tempBlackList`);
+                    const blResult = await blResponse.json();
+                    if (blResult.code === 0 && blResult.data && Array.isArray(blResult.data.list)) {
+                        blResult.data.list.forEach(item => {
+                            existingBlacklist.add(String(item.number || item));
+                        });
+                    }
+                    addLog(`当前黑名单中有 ${existingBlacklist.size} 个浏览器`, 'info');
+                } catch (e) {
+                    addLog('获取当前黑名单失败，继续执行: ' + e.message, 'warning');
+                }
+
+                // 步骤4: 收集所有唯一IP进行批量地理位置查询
+                addLog('========== 批量查询IP地理位置 ==========', 'header');
+                const allUniqueIps = new Set();
+                browserNumbers.forEach(num => {
+                    browserMap[num].forEach(ip => allUniqueIps.add(ip));
+                });
+                addLog(`共 ${allUniqueIps.size} 个唯一IP需要查询`, 'info');
+
+                const geoResults = await batchLookupIps([...allUniqueIps]);
+                addLog(`地理位置查询完成`, 'success');
+
+                // 步骤5: 判断并拉黑
+                addLog('========== 开始检测并拉黑 ==========', 'header');
+                let blacklistedCount = 0;
+                let skippedCount = 0;
+                let alreadyBlacklistedCount = 0;
+                let failedCount = 0;
+
+                for (let i = 0; i < browserNumbers.length; i++) {
+                    const num = browserNumbers[i];
+                    const ips = [...browserMap[num]];
+                    updateProgress(i + 1, browserNumbers.length);
+
+                    // 检查是否已在黑名单
+                    if (existingBlacklist.has(num)) {
+                        addLog(`浏览器 ${num}: 已在黑名单中，跳过`, 'skip');
+                        alreadyBlacklistedCount++;
+                        continue;
+                    }
+
+                    // 检查所有IP的国家
+                    const countries = ips.map(ip => {
+                        const geo = geoResults[ip];
+                        return geo ? geo.countryCode : 'UNKNOWN';
+                    });
+                    const countryDetails = ips.map(ip => {
+                        const geo = geoResults[ip];
+                        return `${ip}(${geo ? geo.country || geo.countryCode : '未知'})`;
+                    }).join(', ');
+
+                    // 判断：如果所有IP都属于白名单国家，跳过
+                    const allWhitelisted = countries.every(c => SKIP_COUNTRIES.has(c));
+
+                    if (allWhitelisted) {
+                        addLog(`浏览器 ${num}: ${countryDetails} → ✅ 白名单国家，跳过`, 'skip');
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // 拉黑
+                    addLog(`浏览器 ${num}: ${countryDetails} → 🚫 需要拉黑`, 'warning');
+                    try {
+                        const addResponse = await fetch(`${API_BASE}/addTempBlack`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ number: num })
+                        });
+                        const addResult = await addResponse.json();
+
+                        if (addResult.code === 0) {
+                            addLog(`浏览器 ${num}: 拉黑成功 ✔`, 'success');
+                            blacklistedCount++;
+                        } else {
+                            addLog(`浏览器 ${num}: 拉黑失败 - ${addResult.msg || '未知错误'}`, 'error');
+                            failedCount++;
+                        }
+                    } catch (error) {
+                        addLog(`浏览器 ${num}: 拉黑请求异常 - ${error.message}`, 'error');
+                        failedCount++;
+                    }
+                }
+
+                // 步骤6: 总结
+                addLog('========== 执行完成 ==========', 'header');
+                addLog(`总计浏览器: ${browserNumbers.length}`, 'info');
+                addLog(`已在黑名单: ${alreadyBlacklistedCount}`, 'info');
+                addLog(`白名单国家跳过(AU/JP/TR): ${skippedCount}`, 'success');
+                addLog(`成功拉黑: ${blacklistedCount}`, 'success');
+                if (failedCount > 0) {
+                    addLog(`拉黑失败: ${failedCount}`, 'error');
+                }
+
+                showToast(`检测完成！拉黑 ${blacklistedCount} 个，跳过 ${skippedCount} 个`, 'success');
+
+                // 刷新黑名单列表
+                loadBlacklist();
+
+            } catch (error) {
+                addLog(`执行异常: ${error.message}`, 'error');
+                showToast('执行异常: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 开始检测并拉黑';
+            }
+        }
 
         // 页面加载时自动加载数据
         window.addEventListener('DOMContentLoaded', () => {

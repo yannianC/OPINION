@@ -8993,29 +8993,83 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
             log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
         
-        # 6.0.1 打开登录页面
-        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.0.1: 打开登录页面")
-        log_print(f"[{browser_id}] 步骤6.0.1: 打开登录页面...")
-        login_url = "https://app.opinion.trade/login"
-        login_page_loaded = False
-        for login_attempt in range(3):
-            try:
-                log_print(f"[{browser_id}] 尝试打开登录页面（第{login_attempt+1}次）...")
-                driver.get(login_url)
-                WebDriverWait(driver, 45).until(
-                    lambda d: d.execute_script("return document.readyState") == "complete"
-                )
-                log_print(f"[{browser_id}] ✓ 登录页面加载完成")
-                login_page_loaded = True
-                break
-            except Exception as e:
-                log_print(f"[{browser_id}] ✗ 登录页面加载失败（第{login_attempt+1}次）: {str(e)}")
-                time.sleep(2)
+        # 6.0.1 点击用户头像并登出
+        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.0.1: 点击用户头像并登出")
+        log_print(f"[{browser_id}] 步骤6.0.1: 点击用户头像并登出...")
         
-        if not login_page_loaded:
-            add_bro_log_entry(bro_log_list, browser_id, "[5]登陆页面打开失败")
-            log_print(f"[{browser_id}] ✗ 登录页面3次加载均失败")
-            return False, "[5]登陆页面打开失败", None
+        # 先尝试查找用户头像
+        avatar_found = False
+        try:
+            avatar_img = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'img[data-sentry-source-file="AvatarMenu.tsx"]'))
+            )
+            avatar_found = True
+            log_print(f"[{browser_id}] ✓ 找到用户头像 img")
+        except Exception as e:
+            log_print(f"[{browser_id}] ⚠ 未找到用户头像，将回退到打开登录页面: {str(e)}")
+        
+        if avatar_found:
+            # 找到头像，执行登出流程
+            try:
+                # 找到 img 的父节点并点击
+                avatar_parent = avatar_img.find_element(By.XPATH, "..")
+                avatar_parent.click()
+                log_print(f"[{browser_id}] ✓ 已点击用户头像父节点")
+                
+                # 等待3秒
+                time.sleep(3)
+                
+                # 找到内容等于 "Log Out" 的 p 标签
+                logout_p = None
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
+                for p in p_tags:
+                    if p.text.strip() == "Log Out":
+                        logout_p = p
+                        break
+                
+                if logout_p:
+                    log_print(f"[{browser_id}] ✓ 找到 Log Out 按钮")
+                    # 找到 p 标签的父节点的父节点并点击
+                    logout_parent1 = logout_p.find_element(By.XPATH, "..")
+                    logout_parent2 = logout_parent1.find_element(By.XPATH, "..")
+                    logout_parent2.click()
+                    log_print(f"[{browser_id}] ✓ 已点击 Log Out 按钮的父节点的父节点")
+                else:
+                    log_print(f"[{browser_id}] ✗ 未找到 Log Out 按钮")
+                    add_bro_log_entry(bro_log_list, browser_id, "[5]未找到Log Out按钮")
+                    return False, "[5]未找到Log Out按钮", None
+                
+                # 等待60秒
+                log_print(f"[{browser_id}] 等待60秒...")
+                time.sleep(60)
+                log_print(f"[{browser_id}] ✓ 60秒等待完成")
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ 点击用户头像并登出失败: {str(e)}")
+                add_bro_log_entry(bro_log_list, browser_id, f"[5]点击用户头像并登出失败: {str(e)}")
+                return False, "[5]点击用户头像并登出失败", None
+        else:
+            # 未找到头像，回退到打开登录页面
+            log_print(f"[{browser_id}] → 回退到打开登录页面...")
+            login_url = "https://app.opinion.trade/login"
+            login_page_loaded = False
+            for login_attempt in range(3):
+                try:
+                    log_print(f"[{browser_id}] 尝试打开登录页面（第{login_attempt+1}次）...")
+                    driver.get(login_url)
+                    WebDriverWait(driver, 45).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
+                    )
+                    log_print(f"[{browser_id}] ✓ 登录页面加载完成")
+                    login_page_loaded = True
+                    break
+                except Exception as e:
+                    log_print(f"[{browser_id}] ✗ 登录页面加载失败（第{login_attempt+1}次）: {str(e)}")
+                    time.sleep(2)
+            
+            if not login_page_loaded:
+                add_bro_log_entry(bro_log_list, browser_id, "[5]登陆页面打开失败")
+                log_print(f"[{browser_id}] ✗ 登录页面3次加载均失败")
+                return False, "[5]登陆页面打开失败", None
         
         # 6.1 检查并连接钱包
         add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1: 检查并连接钱包")
@@ -16649,17 +16703,216 @@ def process_type22_mission(task_data):
                 log_print(f"[{browser_id}] ✓ 提取到数值: {claim_value}")
             elif extracted_value and extracted_value.get('error'):
                 log_print(f"[{browser_id}] ✗ 提取数值失败: {extracted_value['error']}")
-                return False, f"提取数值失败: {extracted_value['error']}", claim_value
+                # 检测是否有 "Unfortunately you are not eligible" 的 p 标签
+                not_eligible = False
+                try:
+                    p_tags = driver.find_elements(By.TAG_NAME, "p")
+                    for p in p_tags:
+                        if "Unfortunately you are not eligible" in p.text.strip():
+                            not_eligible = True
+                            log_print(f"[{browser_id}] ✓ 检测到 'Unfortunately you are not eligible'，设置数值为 0")
+                            break
+                except:
+                    pass
+                
+                if not_eligible:
+                    claim_value = "0"
+                else:
+                    return False, f"提取数值失败: {extracted_value['error']}", claim_value
             else:
                 log_print(f"[{browser_id}] ✗ 提取数值失败: 返回结果为空")
                 return False, "提取数值失败: 返回结果为空", claim_value
                 
         except Exception as e:
             log_print(f"[{browser_id}] ✗ 执行 JavaScript 提取数值异常: {str(e)}")
-            return False, f"提取数值异常: {str(e)}", claim_value
+            # 检测是否有 "Unfortunately you are not eligible" 的 p 标签
+            not_eligible = False
+            try:
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
+                for p in p_tags:
+                    if "Unfortunately you are not eligible" in p.text.strip():
+                        not_eligible = True
+                        log_print(f"[{browser_id}] ✓ 检测到 'Unfortunately you are not eligible'，设置数值为 0")
+                        break
+            except:
+                pass
+            
+            if not_eligible:
+                claim_value = "0"
+            else:
+                return False, f"提取数值异常: {str(e)}", claim_value
         
-        # 9. 获取现有账户配置并更新字段 v
-        log_print(f"[{browser_id}] 步骤9: 获取现有账户配置并更新字段 v...")
+        # 8.5 如果成功获取到数字且不为0，检查是否已领取或执行领取流程
+        update_w = False  # 标记是否需要更新 w 字段为 1
+        
+        if claim_value and claim_value != "0":
+            log_print(f"[{browser_id}] 步骤8.5: 数值不为0（{claim_value}），检查是否已领取...")
+            
+            # 检查是否有 "You've successfully claimed" 的 p 标签
+            already_claimed = False
+            try:
+                p_tags = driver.find_elements(By.TAG_NAME, "p")
+                for p in p_tags:
+                    if "successfully claimed" in p.text.strip():
+                        already_claimed = True
+                        log_print(f"[{browser_id}] ✓ 检测到 'successfully claimed'，已领取成功")
+                        break
+            except:
+                pass
+            
+            if already_claimed:
+                update_w = True
+                log_print(f"[{browser_id}] ✓ 已领取成功，将更新 v 和 w 字段")
+            else:
+                # 执行领取流程
+                log_print(f"[{browser_id}] → 未检测到已领取，开始执行领取流程...")
+                
+                try:
+                    # 8.5.1 找到包含 "Claim" 和 "Now" 的 button（button 下的 span 包含这些文字）
+                    log_print(f"[{browser_id}] → 查找 Claim Now 按钮...")
+                    claim_button = None
+                    buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for button in buttons:
+                        try:
+                            spans = button.find_elements(By.TAG_NAME, "span")
+                            for span in spans:
+                                span_text = span.text.strip()
+                                if "Claim" in span_text and "Now" in span_text:
+                                    claim_button = button
+                                    log_print(f"[{browser_id}] ✓ 找到 Claim Now 按钮")
+                                    break
+                            if claim_button:
+                                break
+                        except:
+                            continue
+                    
+                    if not claim_button:
+                        log_print(f"[{browser_id}] ✗ 未找到 Claim Now 按钮")
+                    else:
+                        # 点击 Claim Now 按钮
+                        claim_button.click()
+                        log_print(f"[{browser_id}] ✓ 已点击 Claim Now 按钮")
+                        time.sleep(3)
+                        
+                        # 8.5.2 找到包含 "I have read and agree to the Opinion Foundation Terms of Service" 的 span
+                        log_print(f"[{browser_id}] → 查找 Terms of Service span...")
+                        tos_span = None
+                        spans = driver.find_elements(By.TAG_NAME, "span")
+                        for span in spans:
+                            try:
+                                if "I have read and agree to the Opinion Foundation Terms of Service" in span.text.strip():
+                                    tos_span = span
+                                    log_print(f"[{browser_id}] ✓ 找到 Terms of Service span")
+                                    break
+                            except:
+                                continue
+                        
+                        if tos_span:
+                            # 在 span 的父节点下找到同级 div 并点击
+                            try:
+                                tos_parent = tos_span.find_element(By.XPATH, "..")
+                                tos_div = tos_parent.find_element(By.TAG_NAME, "div")
+                                tos_div.click()
+                                log_print(f"[{browser_id}] ✓ 已点击 Terms of Service 同级 div（勾选协议）")
+                            except Exception as e:
+                                log_print(f"[{browser_id}] ⚠ 点击 Terms of Service div 失败: {str(e)}")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 未找到 Terms of Service span")
+                        
+                        # 等待3秒
+                        time.sleep(3)
+                        
+                        # 8.5.3 找到内容为 "Confirm" 的 button 并点击
+                        log_print(f"[{browser_id}] → 查找 Confirm 按钮...")
+                        confirm_button = None
+                        buttons = driver.find_elements(By.TAG_NAME, "button")
+                        for button in buttons:
+                            try:
+                                if button.text.strip() == "Confirm":
+                                    confirm_button = button
+                                    log_print(f"[{browser_id}] ✓ 找到 Confirm 按钮")
+                                    break
+                            except:
+                                continue
+                        
+                        if confirm_button:
+                            confirm_button.click()
+                            log_print(f"[{browser_id}] ✓ 已点击 Confirm 按钮")
+                        else:
+                            log_print(f"[{browser_id}] ✗ 未找到 Confirm 按钮")
+                        
+                        # 等待5秒
+                        time.sleep(5)
+                        
+                        # 8.5.4 切换到 OKX 界面，点击第二个确认按钮
+                        log_print(f"[{browser_id}] → 切换到 OKX 窗口并点击确认按钮...")
+                        okx_window = None
+                        all_windows = driver.window_handles
+                        
+                        for window in all_windows:
+                            if window != main_window:
+                                driver.switch_to.window(window)
+                                if "okx" in driver.current_url.lower() or "mcohilncbfahbmgdjkbpemcciiolgcge" in driver.current_url:
+                                    okx_window = window
+                                    log_print(f"[{browser_id}] ✓ 找到 OKX 窗口")
+                                    break
+                        
+                        if okx_window:
+                            # 在10秒内等待并点击确认按钮（第二个按钮）
+                            log_print(f"[{browser_id}] → 查找 OKX 确认按钮（10秒超时）...")
+                            start_time = time.time()
+                            button_clicked = False
+                            
+                            while time.time() - start_time < 10:
+                                try:
+                                    confirm_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                                    if len(confirm_buttons) >= 2:
+                                        confirm_buttons[1].click()
+                                        log_print(f"[{browser_id}] ✓ 已点击 OKX 确认按钮（第二个）")
+                                        button_clicked = True
+                                        break
+                                    else:
+                                        time.sleep(0.5)
+                                except Exception as e:
+                                    log_print(f"[{browser_id}] ⚠ 查找 OKX 按钮时出错: {str(e)}")
+                                    time.sleep(0.5)
+                            
+                            if not button_clicked:
+                                log_print(f"[{browser_id}] ⚠ 未找到足够的 OKX 确认按钮或超时")
+                            
+                            # 切换回主窗口
+                            driver.switch_to.window(main_window)
+                            log_print(f"[{browser_id}] ✓ 已切换回主窗口")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 未找到 OKX 窗口，切换回主窗口")
+                            driver.switch_to.window(main_window)
+                        
+                        # 8.5.5 等待30秒，检查是否有 "You Have Successfully Claimed" 的 h2
+                        log_print(f"[{browser_id}] → 等待30秒后检查领取结果...")
+                        time.sleep(30)
+                        
+                        claim_success = False
+                        try:
+                            h2_tags = driver.find_elements(By.TAG_NAME, "h2")
+                            for h2 in h2_tags:
+                                if "You Have Successfully Claimed" in h2.text.strip():
+                                    claim_success = True
+                                    log_print(f"[{browser_id}] ✓ 检测到 'You Have Successfully Claimed'，领取成功！")
+                                    break
+                        except:
+                            pass
+                        
+                        if claim_success:
+                            update_w = True
+                            log_print(f"[{browser_id}] ✓ 领取成功，将更新 v 和 w 字段")
+                        else:
+                            log_print(f"[{browser_id}] ⚠ 未检测到领取成功标识，仅更新 v 字段")
+                
+                except Exception as e:
+                    log_print(f"[{browser_id}] ✗ 领取流程异常: {str(e)}")
+        
+        # 9. 获取现有账户配置并更新字段 v（以及可能的 w 字段）
+        log_print(f"[{browser_id}] 步骤9: 获取现有账户配置并更新字段 v{' 和 w' if update_w else ''}...")
         try:
             get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
             params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
@@ -16676,6 +16929,11 @@ def process_type22_mission(task_data):
                     account_config['v'] = claim_value
                     log_print(f"[{browser_id}] ✓ 更新字段 v: {claim_value}")
                     
+                    # 如果领取成功，同时更新字段 w 为 1
+                    if update_w:
+                        account_config['w'] = 1
+                        log_print(f"[{browser_id}] ✓ 更新字段 w: 1（领取成功）")
+                    
                     # 上传更新后的配置
                     success_upload, result_upload, error_msg = upload_account_config_with_retry(
                         account_config, 
@@ -16684,17 +16942,17 @@ def process_type22_mission(task_data):
                     )
                     
                     if success_upload:
-                        log_print(f"[{browser_id}] ✓ 账户配置已上传（字段 v 已更新为 {claim_value}）")
+                        log_print(f"[{browser_id}] ✓ 账户配置已上传（v={claim_value}{', w=1' if update_w else ''}）")
                     else:
                         log_print(f"[{browser_id}] ✗ 账户配置上传失败: {error_msg}")
                 else:
-                    log_print(f"[{browser_id}] ✗ 账户配置不存在，无法更新字段 v")
+                    log_print(f"[{browser_id}] ✗ 账户配置不存在，无法更新")
             else:
                 log_print(f"[{browser_id}] ✗ 获取账户配置失败: HTTP {response.status_code}")
         except Exception as e:
-            log_print(f"[{browser_id}] ✗ 更新字段 v 异常: {str(e)}")
+            log_print(f"[{browser_id}] ✗ 更新账户配置异常: {str(e)}")
         
-        log_print(f"[{browser_id}] ========== Type 22 任务完成，数值: {claim_value} ==========\n")
+        log_print(f"[{browser_id}] ========== Type 22 任务完成，数值: {claim_value}, 领取: {'成功' if update_w else '未领取/未成功'} ==========")
         return True, "", claim_value
     
     except Exception as e:
