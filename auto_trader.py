@@ -840,13 +840,59 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0, mission_id=None):
 
 
 
-def update_adspower_proxy(browser_id, proxy_config):
+def update_adspower_no_proxy(browser_id):
+    """
+    仅更新AdsPower浏览器的proxy_soft为no_proxy（不需要IP/端口等信息）
+    用于tp7=1但没有获取到IP的情况
+    
+    Args:
+        browser_id: 浏览器编号
+        
+    Returns:
+        bool: 更新是否成功
+    """
+    try:
+        user_id = FINGERPRINT_TO_USERID.get(str(browser_id))
+        if not user_id:
+            log_print(f"[{browser_id}] ✗ 无法找到浏览器环境ID映射")
+            return False
+        
+        url = f"{ADSPOWER_BASE_URL}/api/v1/user/update"
+        payload = {
+            "user_id": user_id,
+            "user_proxy_config": {
+                "proxy_soft": "no_proxy"
+            }
+        }
+        
+        log_print(f"[{browser_id}] 发送no_proxy更新请求（仅设置proxy_soft=no_proxy）...")
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("code") == 0:
+                log_print(f"[{browser_id}] ✓ no_proxy配置更新成功")
+                return True
+            else:
+                log_print(f"[{browser_id}] ✗ no_proxy配置更新失败: {result.get('msg', '未知错误')}")
+                return False
+        else:
+            log_print(f"[{browser_id}] ✗ no_proxy配置更新请求失败: HTTP {response.status_code}")
+            return False
+            
+    except Exception as e:
+        log_print(f"[{browser_id}] ✗ no_proxy配置更新异常: {str(e)}")
+        return False
+
+
+def update_adspower_proxy(browser_id, proxy_config, no_proxy=False):
     """
     更新AdsPower浏览器的代理配置
     
     Args:
         browser_id: 浏览器编号
         proxy_config: 代理配置字典，包含 ip, port, username, password, type, isMain
+        no_proxy: 是否不使用代理（tp7="1"时为True），如果为True则设置proxy_soft为"no_proxy"
         
     Returns:
         bool: 更新成功返回True，失败返回False
@@ -859,7 +905,11 @@ def update_adspower_proxy(browser_id, proxy_config):
             return False
         
         is_main = proxy_config.get('isMain', 0)
-        log_print(f"[{browser_id}] 开始更新AdsPower代理配置，环境ID: {user_id}, isMain: {is_main}")
+        
+        # 根据no_proxy决定proxy_soft的值
+        proxy_soft_value = "no_proxy" if no_proxy else "other"
+        
+        log_print(f"[{browser_id}] 开始更新AdsPower代理配置，环境ID: {user_id}, isMain: {is_main}, proxy_soft: {proxy_soft_value}")
         log_print(f"[{browser_id}] 代理配置: IP={proxy_config['ip']}, Port={proxy_config['port']}, Type={proxy_config['type']}, Username={proxy_config['username']}")
         
         # 构建请求参数
@@ -872,7 +922,7 @@ def update_adspower_proxy(browser_id, proxy_config):
                 "proxy_user": proxy_config['username'],
                 "proxy_password": proxy_config['password'],
                 "proxy_type": proxy_config['type'],
-                "proxy_soft": "other"
+                "proxy_soft": proxy_soft_value
             }
         }
         headers = {
@@ -1097,7 +1147,7 @@ def get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=None):
         return None
 
 
-def try_update_ip_before_start(browser_id, bro_log_list=None, mission_id=None):
+def try_update_ip_before_start(browser_id, bro_log_list=None, mission_id=None, no_proxy=False):
     """
     在打开浏览器前尝试获取并更新代理配置（8秒超时）
     
@@ -1105,23 +1155,24 @@ def try_update_ip_before_start(browser_id, bro_log_list=None, mission_id=None):
         browser_id: 浏览器编号
         bro_log_list: 浏览器日志列表（可选），如果提供则记录日志
         mission_id: 任务ID（可选），如果传入则会将选择的IP和代理方式更新到任务的tp6字段
+        no_proxy: 是否不使用代理（tp7="1"时为True），传递给update_adspower_proxy
         
     Returns:
         tuple: (bool, str, int) - (是否成功更新了代理配置, 当前使用的IP, 延迟)
                如果未获取到新配置或更新失败，返回 (False, None, None)
     """
     try:
-        log_print(f"[{browser_id}] 尝试在打开浏览器前获取新代理配置...")
+        log_print(f"[{browser_id}] 尝试在打开浏览器前获取新代理配置...{'（no_proxy模式）' if no_proxy else ''}")
         if bro_log_list is not None:
-            add_bro_log_entry(bro_log_list, browser_id, "尝试在打开浏览器前获取新代理配置...")
+            add_bro_log_entry(bro_log_list, browser_id, f"尝试在打开浏览器前获取新代理配置...{'（no_proxy模式）' if no_proxy else ''}")
         
         proxy_config = get_new_ip_for_browser(browser_id, timeout=8, ip_index=0, mission_id=mission_id)
         
         if proxy_config:
             current_ip = proxy_config.get("ip")
             current_delay = proxy_config.get("delay")
-            log_print(f"[{browser_id}] 在8秒内获取到新代理配置: IP={current_ip}, Delay={current_delay}, 开始更新...")
-            update_success = update_adspower_proxy(browser_id, proxy_config)
+            log_print(f"[{browser_id}] 在8秒内获取到新代理配置: IP={current_ip}, Delay={current_delay}, 开始更新...{'（no_proxy模式）' if no_proxy else ''}")
+            update_success = update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy)
             
             if update_success:
                 log_print(f"[{browser_id}] ✓ 代理配置更新成功")
@@ -1136,6 +1187,25 @@ def try_update_ip_before_start(browser_id, bro_log_list=None, mission_id=None):
                     add_bro_log_entry(bro_log_list, browser_id, f"[0]代理配置更新失败，但已保存配置: IP={current_ip}, Delay={current_delay}")
                 return False, current_ip, current_delay
         else:
+            # no_proxy模式下，即使没有获取到IP，也需要更新proxy_soft为no_proxy
+            if no_proxy:
+                log_print(f"[{browser_id}] no_proxy模式：未获取到IP，但仍需更新proxy_soft为no_proxy")
+                update_success = update_adspower_no_proxy(browser_id)
+                if update_success:
+                    log_print(f"[{browser_id}] ✓ no_proxy代理配置更新成功（无需IP）")
+                    if bro_log_list is not None:
+                        add_bro_log_entry(bro_log_list, browser_id, "[0]no_proxy模式: proxy_soft已设为no_proxy")
+                    # 尝试从LAST_PROXY_CONFIG获取上次的IP信息
+                    last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                    if last_config:
+                        return True, last_config.get("ip"), last_config.get("delay")
+                    return True, None, None
+                else:
+                    log_print(f"[{browser_id}] ⚠ no_proxy代理配置更新失败")
+                    if bro_log_list is not None:
+                        add_bro_log_entry(bro_log_list, browser_id, "[0]no_proxy模式: 更新失败")
+                    return False, None, None
+            
             log_print(f"[{browser_id}] 8秒内未获取到新代理配置")
             # 尝试从LAST_PROXY_CONFIG获取当前使用的IP和延迟
             last_config = LAST_PROXY_CONFIG.get(str(browser_id))
@@ -7050,6 +7120,8 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
     ps_side = mission.get("psSide", 1)  # 1=Yes, 2=No
     price = mission.get("price")
     amount = mission.get("amt", 0)
+    tp7 = mission.get("tp7")  # tp7="1"表示不使用代理
+    no_proxy = (str(tp7) == "1") if tp7 else False
     
     # 转换交易方向
     trade_type = "Buy" if side == 1 else "Sell"
@@ -7119,16 +7191,14 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     log_print(f"[{browser_id}] 使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                 else:
                     log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                    _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id)
+                    _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
                     if current_ip:
                         add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             else:
                 # 浏览器未运行，需要更新IP并启动浏览器
                 add_bro_log_entry(bro_log_list, browser_id, "[0]步骤2: 检查IP并更新代理")
                 log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id)
-    
-                
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
                 # 3. 启动浏览器
                 add_bro_log_entry(bro_log_list, browser_id, "[0]步骤3: 启动浏览器")
                 log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
@@ -7156,7 +7226,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id)
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
                 if current_ip:
                     add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             
@@ -7317,7 +7387,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     # 3. 更新代理配置
                     add_bro_log_entry(bro_log_list, browser_id, "[1]步骤3: 更新代理配置")
                     log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                    if not update_adspower_proxy(browser_id, proxy_config):
+                    if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                         add_bro_log_entry(bro_log_list, browser_id, "[1]更新代理失败")
                         log_print(f"[{browser_id}] ✗ 更新代理失败")
                         if keep_browser_open:
@@ -7389,7 +7459,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 # 3. 更新代理配置
                 add_bro_log_entry(bro_log_list, browser_id, "[2]步骤3: 更新代理配置")
                 log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                if not update_adspower_proxy(browser_id, proxy_config):
+                if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                     add_bro_log_entry(bro_log_list, browser_id, "[2]更新代理失败")
                     log_print(f"[{browser_id}] ✗ 更新代理失败")
                     if keep_browser_open:
@@ -7513,7 +7583,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 # 3. 更新代理配置
                 add_bro_log_entry(bro_log_list, browser_id, "[8]步骤3: 更新代理配置")
                 log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                if not update_adspower_proxy(browser_id, proxy_config):
+                if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                     add_bro_log_entry(bro_log_list, browser_id, "[8]更新代理失败")
                     log_print(f"[{browser_id}] ✗ 更新代理失败")
                     if keep_browser_open:
@@ -16309,6 +16379,8 @@ def process_type22_mission(task_data):
     
     browser_id = mission.get("numberList", "")
     mission_id = mission.get("id", "")
+    tp7 = mission.get("tp7")  # tp7="1"表示不使用代理
+    no_proxy = (str(tp7) == "1") if tp7 else False
     
     log_print(f"\n[{browser_id}] ========== 开始处理 Type 22 任务 ==========")
     log_print(f"[{browser_id}] 任务ID: {mission_id}")
@@ -16321,7 +16393,7 @@ def process_type22_mission(task_data):
         current_ip = None
         current_delay = None
         log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
-        _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id)
+        _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
         
         # 确保 current_ip 和 current_delay 已初始化
         if current_ip is None:
@@ -16986,6 +17058,8 @@ def process_type2_mission(task_data, retry_count=0):
     mission_id = mission.get("id", "")
     exchange_name = mission.get("exchangeName", "")
     mission_type = mission.get("type", 2)  # 默认为 Type 2
+    tp7 = mission.get("tp7")  # tp7="1"表示不使用代理
+    no_proxy = (str(tp7) == "1") if tp7 else False
     
     log_print(f"\n[{browser_id}] ========== 开始处理 Type {mission_type} 任务 {'(重试第' + str(retry_count) + '次)' if retry_count > 0 else ''} ==========")
     log_print(f"[{browser_id}] 任务ID: {mission_id}")
@@ -17000,7 +17074,7 @@ def process_type2_mission(task_data, retry_count=0):
         current_delay = None
         if retry_count == 0:
             log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
-            _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id)
+            _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
         else:
             log_print(f"[{browser_id}] 步骤1: 跳过IP更新（重试中，IP已在重试流程中更新）...")
             # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
@@ -17011,7 +17085,7 @@ def process_type2_mission(task_data, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id)
+                _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
         
         # 确保 current_ip 和 current_delay 已初始化（用于后续代码使用）
         if current_ip is None:
@@ -17075,7 +17149,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 3. 更新代理配置
                         log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                        if not update_adspower_proxy(browser_id, proxy_config):
+                        if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                             log_print(f"[{browser_id}] ✗ 更新代理失败")
                             return False, "更新代理失败", collected_data
                         
@@ -17129,7 +17203,7 @@ def process_type2_mission(task_data, retry_count=0):
                     
                     # 3. 更新代理配置
                     log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                    if not update_adspower_proxy(browser_id, proxy_config):
+                    if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                         log_print(f"[{browser_id}] ✗ 更新代理失败")
                         return False, "更新代理失败", collected_data
                     
@@ -17216,7 +17290,7 @@ def process_type2_mission(task_data, retry_count=0):
                             
                             # 3. 更新代理配置
                             log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                            if not update_adspower_proxy(browser_id, proxy_config):
+                            if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                                 log_print(f"[{browser_id}] ✗ 更新代理失败")
                                 return False, "更新代理失败", collected_data
                             
@@ -17294,7 +17368,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 3. 更新代理配置
                         log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                        if not update_adspower_proxy(browser_id, proxy_config):
+                        if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                             log_print(f"[{browser_id}] ✗ 更新代理失败")
                             return False, "更新代理失败", collected_data
                         
@@ -17354,7 +17428,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 3. 更新代理配置
                         log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                        if not update_adspower_proxy(browser_id, proxy_config):
+                        if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                             log_print(f"[{browser_id}] ✗ 更新代理失败")
                             return False, "更新代理失败", collected_data
                         
@@ -17861,7 +17935,7 @@ def process_type2_mission(task_data, retry_count=0):
                         
                         # 3. 更新代理配置
                         log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                        if not update_adspower_proxy(browser_id, proxy_config):
+                        if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
                             log_print(f"[{browser_id}] ✗ 更新代理失败")
                             return False, "更新代理失败", collected_data
                         

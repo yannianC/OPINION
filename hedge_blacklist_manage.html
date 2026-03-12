@@ -303,6 +303,36 @@
             cursor: not-allowed;
         }
 
+        .remove-all-btn {
+            background: linear-gradient(135deg, #fd7e14 0%, #e85d00 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(253, 126, 20, 0.4);
+            margin-bottom: 15px;
+            width: 100%;
+        }
+
+        .remove-all-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(253, 126, 20, 0.6);
+        }
+
+        .remove-all-btn:active {
+            transform: translateY(0);
+        }
+
+        .remove-all-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         /* 自动拉黑区域样式 */
         .auto-blacklist-section {
             grid-column: 1 / -1;
@@ -425,6 +455,9 @@
                         ➕ 添加到黑名单
                     </button>
                 </div>
+                <button class="remove-all-btn" id="removeAllBlacklistBtn" onclick="removeAllFromBlacklist()">
+                    🗑️ 全部取消拉黑
+                </button>
                 <div class="list-container" id="blacklistContainer">
                     <div class="loading">正在加载...</div>
                 </div>
@@ -885,6 +918,59 @@
             }
         });
 
+        // ========== 全部取消拉黑功能 ==========
+
+        async function removeAllFromBlacklist() {
+            const container = document.getElementById('blacklistContainer');
+            const items = container.querySelectorAll('.list-item');
+
+            if (items.length === 0) {
+                showToast('黑名单中没有浏览器', 'error');
+                return;
+            }
+
+            const numbers = [];
+            items.forEach(item => {
+                const num = item.querySelector('.list-item-number').textContent.trim();
+                if (num) numbers.push(num);
+            });
+
+            if (!confirm(`确定要取消拉黑全部 ${numbers.length} 个浏览器吗？`)) {
+                return;
+            }
+
+            const btn = document.getElementById('removeAllBlacklistBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ 处理中...';
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const number of numbers) {
+                try {
+                    const response = await fetch(`${API_BASE}/removeTempBlack`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ number: number })
+                    });
+                    const result = await response.json();
+                    if (result.code === 0) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (e) {
+                    failCount++;
+                }
+            }
+
+            btn.disabled = false;
+            btn.textContent = '🗑️ 全部取消拉黑';
+
+            showToast(`取消拉黑完成：成功 ${successCount} 个${failCount > 0 ? '，失败 ' + failCount + ' 个' : ''}`, failCount > 0 ? 'error' : 'success');
+            loadBlacklist();
+        }
+
         // ========== 一键IP检测拉黑功能 ==========
 
         function addLog(message, type = 'info') {
@@ -905,45 +991,62 @@
         }
 
         /**
-         * 使用 ip-api.com 批量查询IP地理位置
-         * 每批最多100个IP，免费版限制每分钟15次批量请求
+         * 使用 JSONP 方式查询 ip-api.com（绕过CORS限制）
+         * 通过动态创建 script 标签，不受同源策略限制
+         * 免费版限制每分钟45次请求
          */
-        async function batchLookupIps(ipList) {
-            const results = {};
-            const batchSize = 100;
+        function lookupSingleIp(ip) {
+            return new Promise((resolve) => {
+                const callbackName = '_ipCb_' + Math.random().toString(36).substr(2, 9);
+                const script = document.createElement('script');
+                const timeout = setTimeout(() => {
+                    cleanup();
+                    resolve({ ip, countryCode: 'UNKNOWN', country: '超时' });
+                }, 8000);
 
-            for (let i = 0; i < ipList.length; i += batchSize) {
-                const batch = ipList.slice(i, i + batchSize);
-                const requestBody = batch.map(ip => ({ query: ip, fields: 'status,countryCode,country,query' }));
-
-                try {
-                    const response = await fetch('http://ip-api.com/batch', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody)
-                    });
-                    const data = await response.json();
-
-                    data.forEach(item => {
-                        if (item.status === 'success') {
-                            results[item.query] = { countryCode: item.countryCode, country: item.country };
-                        } else {
-                            results[item.query] = { countryCode: 'UNKNOWN', country: '未知' };
-                        }
-                    });
-
-                    addLog(`IP批量查询完成: 第${Math.floor(i / batchSize) + 1}批 (${batch.length}个IP)`, 'info');
-                } catch (error) {
-                    addLog(`IP批量查询失败: ${error.message}`, 'error');
-                    batch.forEach(ip => {
-                        results[ip] = { countryCode: 'ERROR', country: '查询失败' };
-                    });
+                function cleanup() {
+                    clearTimeout(timeout);
+                    delete window[callbackName];
+                    if (script.parentNode) script.parentNode.removeChild(script);
                 }
 
-                // 批量之间等待2秒，避免触发频率限制
-                if (i + batchSize < ipList.length) {
-                    addLog('等待2秒避免频率限制...', 'warning');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                window[callbackName] = function(data) {
+                    cleanup();
+                    if (data && data.status === 'success') {
+                        resolve({ ip, countryCode: data.countryCode, country: data.country });
+                    } else {
+                        resolve({ ip, countryCode: 'UNKNOWN', country: '未知' });
+                    }
+                };
+
+                script.src = `http://ip-api.com/json/${ip}?fields=status,countryCode,country&callback=${callbackName}`;
+                script.onerror = () => {
+                    cleanup();
+                    resolve({ ip, countryCode: 'ERROR', country: '查询失败' });
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        async function batchLookupIps(ipList) {
+            const results = {};
+            const concurrency = 3; // 每批3个并发，控制频率
+
+            for (let i = 0; i < ipList.length; i += concurrency) {
+                const batch = ipList.slice(i, i + concurrency);
+                const promises = batch.map(ip => lookupSingleIp(ip));
+                const batchResults = await Promise.all(promises);
+
+                batchResults.forEach(result => {
+                    results[result.ip] = { countryCode: result.countryCode, country: result.country };
+                });
+
+                const done = Math.min(i + concurrency, ipList.length);
+                addLog(`IP查询进度: ${done}/${ipList.length}`, 'info');
+
+                // 每批间隔2.5秒，确保不超过45次/分钟
+                if (i + concurrency < ipList.length) {
+                    await new Promise(resolve => setTimeout(resolve, 2500));
                 }
             }
 

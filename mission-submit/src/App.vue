@@ -289,6 +289,15 @@
             </div>
           </div>
 
+          <!-- 是否使用代理 -->
+          <div style="margin-bottom: 16px;">
+            <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: #555;">
+              <input type="checkbox" v-model="useProxy" style="width: auto;" />
+              使用代理
+            </label>
+            <div v-if="!useProxy" style="margin-top: 4px; color: #e67e22; font-size: 12px;">⚠ 将不使用代理（tp7=1）</div>
+          </div>
+
           <!-- 提交按钮 -->
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" :disabled="isSubmitting || isUpdatingPosition || isLooping">
@@ -351,6 +360,15 @@
                 有效电脑组: {{ validIpGroupNos.join(', ') }}
               </div>
             </div>
+          </div>
+
+          <!-- 是否使用代理 -->
+          <div style="margin-bottom: 16px;">
+            <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: #555;">
+              <input type="checkbox" v-model="ipUseProxy" style="width: auto;" />
+              使用代理
+            </label>
+            <div v-if="!ipUseProxy" style="margin-top: 4px; color: #e67e22; font-size: 12px;">⚠ 将不使用代理（tp7=1）</div>
           </div>
 
           <!-- 提交按钮 -->
@@ -477,6 +495,15 @@
                 有效电脑组: {{ validClaimGroupNos.join(', ') }}
               </div>
             </div>
+          </div>
+
+          <!-- 是否使用代理 -->
+          <div style="margin-bottom: 16px;">
+            <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: #555;">
+              <input type="checkbox" v-model="claimUseProxy" style="width: auto;" />
+              使用代理
+            </label>
+            <div v-if="!claimUseProxy" style="margin-top: 4px; color: #e67e22; font-size: 12px;">⚠ 将不使用代理（tp7=1）</div>
           </div>
 
           <!-- 提交按钮 -->
@@ -651,6 +678,15 @@
             </div>
           </div>
 
+          <!-- 是否使用代理 -->
+          <div style="margin-bottom: 16px;">
+            <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: #555;">
+              <input type="checkbox" v-model="withdrawUseProxy" style="width: auto;" />
+              使用代理
+            </label>
+            <div v-if="!withdrawUseProxy" style="margin-top: 4px; color: #e67e22; font-size: 12px;">⚠ 将不使用代理（tp7=1）</div>
+          </div>
+
           <!-- 提交按钮 -->
           <div class="form-actions">
             <button type="button" class="btn btn-primary" @click="handleWithdrawSubmit" :disabled="isSubmittingWithdraw">
@@ -764,6 +800,12 @@ const isSubmittingClaim = ref(false)
 const failedClaimGroups = ref([]) // 存储失败的电脑组 [{groupNo, error}]
 const isRetryingClaim = ref(false)
 
+// 是否使用代理（各任务区域的复选框，默认勾选=使用代理）
+const useProxy = ref(true) // 提交任务
+const withdrawUseProxy = ref(true) // OP提现任务
+const claimUseProxy = ref(true) // Claim检测任务
+const ipUseProxy = ref(true) // IP检测任务
+
 // 映射关系
 const browserToGroupMap = ref({}) // 浏览器ID -> 电脑组
 const groupToBrowserMap = ref({}) // 电脑组 -> 浏览器ID数组
@@ -773,6 +815,27 @@ const firstBatchGroups = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 
 // 第二批电脑组列表（第一批+900）
 const secondBatchGroups = firstBatchGroups.map(g => g + 900)
+
+// 从yinse.txt写死的浏览器编号到电脑组的映射 [电脑组, 浏览器编号]
+const YINSE_HARDCODED_MAPPINGS = [
+  [3, 280],
+  [5, 301], [5, 309], [5, 311], [5, 312], [5, 313], [5, 314], [5, 315], [5, 316], [5, 317], [5, 318],
+  [5, 319], [5, 320], [5, 321], [5, 322], [5, 323], [5, 324], [5, 325], [5, 326], [5, 327], [5, 331],
+  [5, 334], [5, 335], [5, 336], [5, 337], [5, 338], [5, 339], [5, 359], [5, 360], [5, 361], [5, 363],
+  [5, 364], [5, 365], [5, 366], [5, 367], [5, 368], [5, 369], [5, 370], [5, 371], [5, 373], [5, 374],
+  [5, 375], [5, 377], [5, 379], [5, 380], [5, 382], [5, 383], [5, 384], [5, 385], [5, 386], [5, 387],
+  [5, 388], [5, 391], [5, 392], [5, 393], [5, 394], [5, 395], [5, 396], [5, 398], [5, 399],
+  [7, 705], [7, 706], [7, 707], [7, 708], [7, 709], [7, 710], [7, 711], [7, 712], [7, 713], [7, 714],
+  [7, 716], [7, 717], [7, 718], [7, 719], [7, 720], [7, 721], [7, 722], [7, 723], [7, 724], [7, 725],
+  [7, 726], [7, 727], [7, 728], [7, 729], [7, 730], [7, 731], [7, 732], [7, 733], [7, 734], [7, 737],
+  [7, 738], [7, 739], [7, 740], [7, 742], [7, 743], [7, 744], [7, 745],
+  [3, 805], [3, 806], [3, 810], [3, 814], [3, 818], [3, 822], [3, 823], [3, 825], [3, 827], [3, 828],
+  [3, 829], [3, 830], [3, 833], [3, 834], [3, 837], [3, 838], [3, 845], [3, 846], [3, 848], [3, 849],
+  [3, 850], [3, 851], [3, 852], [3, 855], [3, 857], [3, 858], [3, 859], [3, 861], [3, 862], [3, 863],
+  [3, 864], [3, 867], [3, 868], [3, 871], [3, 872], [3, 873], [3, 874], [3, 875], [3, 876], [3, 878],
+  [3, 879], [3, 881], [3, 883], [3, 884],
+  [10, 1606],
+]
 
 /**
  * 根据浏览器ID和批次获取对应的电脑组
@@ -1037,6 +1100,29 @@ const fetchAccountConfig = async () => {
         }
       })
       
+      // 合并yinse.txt写死的映射（不覆盖接口已有的数据）
+      YINSE_HARDCODED_MAPPINGS.forEach(([groupNo, browserId]) => {
+        const browserIdStr = String(browserId)
+        const browserIdNum = Number(browserId)
+        
+        // 浏览器ID -> 电脑组（不覆盖已有映射）
+        if (!(browserIdStr in browserToGroup)) {
+          browserToGroup[browserIdStr] = groupNo
+        }
+        if (!isNaN(browserIdNum) && !(browserIdNum in browserToGroup)) {
+          browserToGroup[browserIdNum] = groupNo
+        }
+        
+        // 电脑组 -> 浏览器ID数组
+        if (!groupToBrowser[groupNo]) {
+          groupToBrowser[groupNo] = []
+        }
+        if (!groupToBrowser[groupNo].includes(browserIdNum)) {
+          groupToBrowser[groupNo].push(browserIdNum)
+        }
+      })
+      console.log(`已合并yinse.txt写死的映射，共 ${YINSE_HARDCODED_MAPPINGS.length} 条`)
+      
       browserToGroupMap.value = browserToGroup
       groupToBrowserMap.value = groupToBrowser
       
@@ -1047,14 +1133,54 @@ const fetchAccountConfig = async () => {
       
       return response.data.data.length > 0
     } else {
-      console.warn('获取账户配置失败: 无数据')
+      console.warn('获取账户配置失败: 无数据，仅使用写死的映射')
+      // 接口无数据时，仍然应用写死的映射
+      const browserToGroup = {}
+      const groupToBrowser = {}
+      YINSE_HARDCODED_MAPPINGS.forEach(([groupNo, browserId]) => {
+        const browserIdStr = String(browserId)
+        const browserIdNum = Number(browserId)
+        browserToGroup[browserIdStr] = groupNo
+        if (!isNaN(browserIdNum)) {
+          browserToGroup[browserIdNum] = groupNo
+        }
+        if (!groupToBrowser[groupNo]) {
+          groupToBrowser[groupNo] = []
+        }
+        if (!groupToBrowser[groupNo].includes(browserIdNum)) {
+          groupToBrowser[groupNo].push(browserIdNum)
+        }
+      })
+      browserToGroupMap.value = browserToGroup
+      groupToBrowserMap.value = groupToBrowser
+      console.log(`无接口数据，已应用yinse.txt写死的映射，共 ${YINSE_HARDCODED_MAPPINGS.length} 条`)
       accountConfigLoaded.value = true
       return false
     }
   } catch (error) {
     console.error('获取账户配置失败:', error)
+    // 接口报错时，仍然应用写死的映射
+    const browserToGroup = {}
+    const groupToBrowser = {}
+    YINSE_HARDCODED_MAPPINGS.forEach(([groupNo, browserId]) => {
+      const browserIdStr = String(browserId)
+      const browserIdNum = Number(browserId)
+      browserToGroup[browserIdStr] = groupNo
+      if (!isNaN(browserIdNum)) {
+        browserToGroup[browserIdNum] = groupNo
+      }
+      if (!groupToBrowser[groupNo]) {
+        groupToBrowser[groupNo] = []
+      }
+      if (!groupToBrowser[groupNo].includes(browserIdNum)) {
+        groupToBrowser[groupNo].push(browserIdNum)
+      }
+    })
+    browserToGroupMap.value = browserToGroup
+    groupToBrowserMap.value = groupToBrowser
+    console.log(`接口报错，已应用yinse.txt写死的映射，共 ${YINSE_HARDCODED_MAPPINGS.length} 条`)
     accountConfigLoaded.value = true
-    showMessage('获取账户配置失败: ' + (error.message || '未知错误'), 'error')
+    showMessage('获取账户配置失败: ' + (error.message || '未知错误') + '，已使用写死的映射', 'error')
     return false
   } finally {
     isLoadingAccountConfig.value = false
@@ -1159,6 +1285,11 @@ const submitSingleBrowser = async (browserId, groupNo, tp1, maxRetries = 3) => {
     tp1: tp1
   }
   
+  // 如果不使用代理，添加tp7="1"
+  if (!useProxy.value) {
+    payload.tp7 = '1'
+  }
+  
   let lastError = null
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1207,6 +1338,11 @@ const submitSingleBrowserWithTime = async (browserId, groupNo, tp1, tp5, maxRetr
     tp5: tp5
   }
   
+  // 如果不使用代理，添加tp7="1"
+  if (!useProxy.value) {
+    payload.tp7 = '1'
+  }
+  
   let lastError = null
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1249,6 +1385,11 @@ const submitSinglePositionUpdate = async (browserId, groupNo, maxRetries = 3) =>
     groupNo: groupNo,
     numberList: String(browserId),
     exchangeName: 'OP'
+  }
+  
+  // 如果不使用代理，添加tp7="1"
+  if (!useProxy.value) {
+    payload.tp7 = '1'
   }
   
   let lastError = null
@@ -1917,6 +2058,11 @@ const submitSingleWithdraw = async (browserId, groupNo, tp1, tp2, tp3 = '', maxR
     payload.tp3 = String(tp3)
   }
   
+  // 如果不使用代理，添加tp7="1"
+  if (!withdrawUseProxy.value) {
+    payload.tp7 = '1'
+  }
+  
   let lastError = null
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -2247,6 +2393,11 @@ const submitSingleIpDetection = async (groupNo, maxRetries = 3) => {
     exchangeName: 'OP'
   }
   
+  // 如果不使用代理，添加tp7="1"
+  if (!ipUseProxy.value) {
+    payload.tp7 = '1'
+  }
+  
   let lastError = null
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -2539,6 +2690,11 @@ const submitSingleClaimDetection = async (groupNo, browserId = null, maxRetries 
   // 如果有浏览器ID，添加 numberList 字段
   if (browserId) {
     payload.numberList = String(browserId)
+  }
+  
+  // 如果不使用代理，添加tp7="1"
+  if (!claimUseProxy.value) {
+    payload.tp7 = '1'
   }
   
   let lastError = null
