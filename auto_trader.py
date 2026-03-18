@@ -622,10 +622,10 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0, mission_id=None):
     try:
         log_print(f"[{browser_id}] 调用获取IP状态列表接口（超时: {timeout}秒，ip_index={ip_index}）...")
         
-        url = "https://sg.bicoin.com.cn/99l/bro/ipStatusByNumber"
-        params = {"number": browser_id}
+        url = "https://sg.bicoin.com.cn/99l/bro/newIpSplit"
+        payload = {"number": browser_id}
         
-        response = requests.get(url, params=params, timeout=timeout)
+        response = requests.post(url, json=payload, timeout=timeout)
         
         if response.status_code == 200:
             result = response.json()
@@ -633,11 +633,21 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0, mission_id=None):
             
             code = result.get("code")
             if code == 0:
-                data = result.get("data", {})
-                ip_list = data.get("list", [])
+                data = result.get("data")
+                if not data:
+                    log_print(f"[{browser_id}] ⚠ 返回数据中的 data 为空")
+                    return None
+                
+                # 兼容返回格式：如果是字典且包含 list 则取 list；如果是列表直接使用；如果是单个对象则转为列表
+                if isinstance(data, dict) and "list" in data:
+                    ip_list = data.get("list", [])
+                elif isinstance(data, list):
+                    ip_list = data
+                else:
+                    ip_list = [data]
                 
                 if not ip_list:
-                    log_print(f"[{browser_id}] ⚠ 返回数据中没有IP列表")
+                    log_print(f"[{browser_id}] ⚠ 返回数据中没有IP配置信息")
                     return None
                 
                 # 筛选出每个IP能用的模式以及延迟（每个IP最多只选一个，如果http和socks5都通，选延迟低的）
@@ -793,8 +803,8 @@ def get_new_ip_for_browser(browser_id, timeout=15, ip_index=0, mission_id=None):
                 
                 # 根据ip_index选择
                 if ip_index >= len(available_options):
-                    log_print(f"[{browser_id}] ⚠ ip_index={ip_index} 超出可用配置数量({len(available_options)})")
-                    return None
+                    log_print(f"[{browser_id}] ⚠ ip_index={ip_index} 超出可用配置数量({len(available_options)})，重置为 0")
+                    ip_index = 0
                 
                 selected_option = available_options[ip_index]
                 log_print(f"[{browser_id}] ✓ 选择第{ip_index+1}个配置: IP={selected_option['ip']}, Port={selected_option['port']}, Type={selected_option['type']}, Delay={selected_option['delay']}")
@@ -929,26 +939,36 @@ def update_adspower_proxy(browser_id, proxy_config, no_proxy=False):
             'Authorization': f'Bearer {ADSPOWER_API_KEY}'
         }
         
-        log_print(f"[{browser_id}] 发送更新请求到: {url}")
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            result = response.json()
-            log_print(f"[{browser_id}] 服务器响应: {result}")
-            code = result.get("code")
-            
-            if code == 0:
-                log_print(f"[{browser_id}] ✓ AdsPower代理配置更新成功")
-                # 记录成功更新的代理配置
-                LAST_PROXY_CONFIG[str(browser_id)] = proxy_config.copy()
-                return True
-            else:
-                log_print(f"[{browser_id}] ✗ AdsPower代理配置更新失败: code={code}, msg={result.get('msg')}")
-                return False
-        else:
-            log_print(f"[{browser_id}] ✗ AdsPower代理配置更新失败: HTTP状态码 {response.status_code}")
-            log_print(f"[{browser_id}] 响应内容: {response.text}")
-            return False
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                log_print(f"[{browser_id}] 发送更新请求到: {url} (尝试 {attempt + 1}/{max_retries})")
+                response = requests.post(url, json=payload, headers=headers, timeout=15)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    log_print(f"[{browser_id}] 服务器响应: {result}")
+                    code = result.get("code")
+                    
+                    if code == 0:
+                        log_print(f"[{browser_id}] ✓ AdsPower代理配置更新成功")
+                        # 记录成功更新的代理配置
+                        LAST_PROXY_CONFIG[str(browser_id)] = proxy_config.copy()
+                        return True
+                    else:
+                        log_print(f"[{browser_id}] ✗ AdsPower代理配置更新失败: code={code}, msg={result.get('msg')}")
+                else:
+                    log_print(f"[{browser_id}] ✗ AdsPower代理配置更新失败: HTTP状态码 {response.status_code}")
+                    log_print(f"[{browser_id}] 响应内容: {response.text}")
+                    
+            except Exception as e:
+                log_print(f"[{browser_id}] ✗ 单次更新请求异常: {str(e)}")
+                
+            if attempt < max_retries - 1:
+                log_print(f"[{browser_id}] 等待3秒后重试更新代理...")
+                time.sleep(3)
+                
+        return False
             
     except Exception as e:
         log_print(f"[{browser_id}] ✗ 更新AdsPower代理配置异常: {str(e)}")
@@ -1042,14 +1062,14 @@ def call_change_ip_to_err(browser_id, current_ip, timeout=15):
     """
     try:
         if not current_ip:
-            log_print(f"[{browser_id}] ⚠ 无法调用 changeIpToErr：current_ip 为空")
+            log_print(f"[{browser_id}] ⚠ 无法调用 newIpStatus：current_ip 为空")
             return False
             
-        log_print(f"[{browser_id}] 调用 changeIpToErr 接口（IP: {current_ip}，超时: {timeout}秒）...")
+        log_print(f"[{browser_id}] 调用 newIpStatus 接口标记IP错误（IP: {current_ip}，超时: {timeout}秒）...")
         
-        url = "https://sg.bicoin.com.cn/99l/bro/changeIpToErr"
+        url = "https://sg.bicoin.com.cn/99l/bro/newIpStatus"
         payload = {
-            "number": browser_id,
+            "status": 0,
             "ip": current_ip
         }
         
@@ -1057,67 +1077,31 @@ def call_change_ip_to_err(browser_id, current_ip, timeout=15):
         
         if response.status_code == 200:
             result = response.json()
-            log_print(f"[{browser_id}] changeIpToErr 接口返回: {result}")
+            log_print(f"[{browser_id}] newIpStatus 接口返回: {result}")
             
             code = result.get("code")
             if code == 0:
-                log_print(f"[{browser_id}] ✓ 成功调用 changeIpToErr 接口")
+                log_print(f"[{browser_id}] ✓ 成功调用 newIpStatus 接口")
                 return True
             else:
-                log_print(f"[{browser_id}] ⚠ changeIpToErr 调用失败: code={code}, msg={result.get('msg')}")
+                log_print(f"[{browser_id}] ⚠ newIpStatus 调用失败: code={code}, msg={result.get('msg')}")
                 return False
         else:
-            log_print(f"[{browser_id}] ✗ changeIpToErr 请求失败: HTTP状态码 {response.status_code}")
+            log_print(f"[{browser_id}] ✗ newIpStatus 请求失败: HTTP状态码 {response.status_code}")
             return False
         
     except requests.exceptions.Timeout:
-        log_print(f"[{browser_id}] ✗ changeIpToErr 请求超时（{timeout}秒）")
+        log_print(f"[{browser_id}] ✗ newIpStatus 请求超时（{timeout}秒）")
         return False
     except requests.exceptions.RequestException as e:
-        log_print(f"[{browser_id}] ✗ changeIpToErr 网络请求失败: {str(e)}")
+        log_print(f"[{browser_id}] ✗ newIpStatus 网络请求失败: {str(e)}")
         return False
     except Exception as e:
-        log_print(f"[{browser_id}] ✗ changeIpToErr 异常: {str(e)}")
+        log_print(f"[{browser_id}] ✗ newIpStatus 异常: {str(e)}")
         import traceback
         log_print(f"[{browser_id}] 错误详情:\n{traceback.format_exc()}")
         return False
 
-
-def get_ip_list_by_number(browser_id, timeout=15):
-    """
-    获取浏览器IP状态列表
-    
-    Args:
-        browser_id: 浏览器编号
-        timeout: 请求超时时间（秒），默认15秒
-        
-    Returns:
-        list: IP列表（已按delay排序），失败返回None
-    """
-    try:
-        url = "https://sg.bicoin.com.cn/99l/bro/ipStatusByNumber"
-        params = {"number": browser_id}
-        
-        response = requests.get(url, params=params, timeout=timeout)
-        
-        if response.status_code == 200:
-            result = response.json()
-            code = result.get("code")
-            if code == 0:
-                data = result.get("data", {})
-                ip_list = data.get("list", [])
-                # 按delay排序
-                sorted_ip_list = sorted(ip_list, key=lambda x: x.get("delay", 999999))
-                return sorted_ip_list
-            else:
-                log_print(f"[{browser_id}] ⚠ 获取IP列表失败: code={code}, msg={result.get('msg')}")
-                return None
-        else:
-            log_print(f"[{browser_id}] ✗ 获取IP列表请求失败: HTTP状态码 {response.status_code}")
-            return None
-    except Exception as e:
-        log_print(f"[{browser_id}] ✗ 获取IP列表异常: {str(e)}")
-        return None
 
 
 def get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=None):
@@ -7191,14 +7175,19 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     log_print(f"[{browser_id}] 使用已存在的代理配置: IP={current_ip}, Delay={current_delay}")
                 else:
                     log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                    _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
-                    if current_ip:
+                    update_success, new_ip, new_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
+                    if new_ip:
+                        current_ip = new_ip
+                        current_delay = new_delay
                         add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             else:
                 # 浏览器未运行，需要更新IP并启动浏览器
                 add_bro_log_entry(bro_log_list, browser_id, "[0]步骤2: 检查IP并更新代理")
                 log_print(f"[{browser_id}] 步骤2: 检查IP并更新代理...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
+                update_success, new_ip, new_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
+                if new_ip:
+                    current_ip = new_ip
+                    current_delay = new_delay
                 # 3. 启动浏览器
                 add_bro_log_entry(bro_log_list, browser_id, "[0]步骤3: 启动浏览器")
                 log_print(f"[{browser_id}] 步骤3: 启动浏览器...")
@@ -7226,8 +7215,10 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
-                if current_ip:
+                update_success, new_ip, new_delay = try_update_ip_before_start(browser_id, bro_log_list, mission_id=mission_id, no_proxy=no_proxy)
+                if new_ip:
+                    current_ip = new_ip
+                    current_delay = new_delay
                     add_bro_log_entry(bro_log_list, browser_id, f"[0]更新IP完成: IP={current_ip}, Delay={current_delay}")
             
             # 检查浏览器状态（重试时浏览器应该已关闭，需要重新启动）
@@ -7326,7 +7317,7 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
                     add_bro_log_entry(bro_log_list, browser_id, f"[1]重试打开页面 (第 {page_retry}/{max_page_retries} 次)")
                     log_print(f"[{browser_id}] 重试打开页面 (第 {page_retry}/{max_page_retries} 次)...")
                     time.sleep(2)  # 重试前等待2秒
-                driver.get(target_url)
+                driver.get("https://app.opinion.trade/login")
                 page_load_success = True
                 add_bro_log_entry(bro_log_list, browser_id, "[1]页面加载成功")
                 log_print(f"[{browser_id}] ✓ 页面加载成功")
@@ -7480,6 +7471,21 @@ def process_trading_mission(task_data, keep_browser_open=False, retry_count=0):
         add_bro_log_entry(bro_log_list, browser_id, f"[3]步骤6: 开始处理{exchange_type}交易流程")
         if exchange_type == "OP":
             success, failure_reason, available_balance = process_opinion_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, trending_part1, task_data, retry_count, trending, target_url, current_ip, current_delay, bro_log_list, trendingId)
+            
+            try:
+                ip_to_report = current_ip
+                if not ip_to_report:
+                    last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                    if last_config:
+                        ip_to_report = last_config.get("ip")
+                if ip_to_report:
+                    status_val = 0 if (not success and failure_reason == "NEED_IP_RETRY") else 1
+                    status_url = "https://sg.bicoin.com.cn/99l/bro/newIpStatus"
+                    status_payload = {"ip": ip_to_report, "status": status_val}
+                    requests.post(status_url, json=status_payload, timeout=10)
+                    log_print(f"[{browser_id}] 上报IP状态: IP={ip_to_report}, status={status_val}")
+            except Exception as e:
+                log_print(f"[{browser_id}] ⚠ 上报IP状态异常: {str(e)}")
         else:
             success, failure_reason = process_polymarket_trade(driver, browser_id, trade_type, price_type, option_type, price, amount, is_new_browser, current_ip, current_delay)
             available_balance = None  # Polymarket 暂不支持
@@ -9010,14 +9016,17 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
     initial_available_balance = None
     
     try:
-        # 5. 等待页面加载
-        add_bro_log_entry(bro_log_list, browser_id, "[4]步骤5: 等待交易页面加载")
-        log_print(f"[{browser_id}] 步骤5: 等待页面加载...")
-        trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
+      
+              # 6. 预打开OKX钱包并连接（仅在新启动的浏览器时执行）
+        if is_new_browser:
+            add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 预打开OKX钱包（浏览器新启动）")
+            log_print(f"[{browser_id}] 步骤6: 预打开OKX钱包（浏览器新启动）...")
+            preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
+        else:
+            add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
+            log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
         
-        if not trade_box:
-            add_bro_log_entry(bro_log_list, browser_id, "[4]交易页面加载失败，需要换IP重试")
-            return False, "NEED_IP_RETRY", None
+    
         
         # 5.5 检查地区限制（Trading is not available）
         add_bro_log_entry(bro_log_list, browser_id, "[5]步骤5.5: 检查地区限制（Trading is not available）")
@@ -9054,195 +9063,85 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             add_bro_log_entry(bro_log_list, browser_id, f"[5]检查地区限制时出现异常: {str(e)}，继续执行")
             log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
         
-        # 6. 预打开OKX钱包并连接（仅在新启动的浏览器时执行）
-        if is_new_browser:
-            add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 预打开OKX钱包（浏览器新启动）")
-            log_print(f"[{browser_id}] 步骤6: 预打开OKX钱包（浏览器新启动）...")
-            preopen_okx_wallet(driver, browser_id, current_ip, current_delay)
-        else:
-            add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
-            log_print(f"[{browser_id}] 步骤6: 跳过预打开OKX钱包（浏览器已在运行）")
-        
-        # 6.0.1 点击用户头像并登出
-        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.0.1: 点击用户头像并登出")
-        log_print(f"[{browser_id}] 步骤6.0.1: 点击用户头像并登出...")
-        
-        # 先尝试查找用户头像
-        avatar_found = False
-        try:
-            avatar_img = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'img[data-sentry-source-file="AvatarMenu.tsx"]'))
-            )
-            avatar_found = True
-            log_print(f"[{browser_id}] ✓ 找到用户头像 img")
-        except Exception as e:
-            log_print(f"[{browser_id}] ⚠ 未找到用户头像，将回退到打开登录页面: {str(e)}")
-        
-        if avatar_found:
-            # 找到头像，执行登出流程
-            try:
-                # 找到 img 的父节点并点击
-                avatar_parent = avatar_img.find_element(By.XPATH, "..")
-                avatar_parent.click()
-                log_print(f"[{browser_id}] ✓ 已点击用户头像父节点")
-                
-                # 等待3秒
-                time.sleep(3)
-                
-                # 找到内容等于 "Log Out" 的 p 标签
-                logout_p = None
-                p_tags = driver.find_elements(By.TAG_NAME, "p")
-                for p in p_tags:
-                    if p.text.strip() == "Log Out":
-                        logout_p = p
-                        break
-                
-                if logout_p:
-                    log_print(f"[{browser_id}] ✓ 找到 Log Out 按钮")
-                    # 找到 p 标签的父节点的父节点并点击
-                    logout_parent1 = logout_p.find_element(By.XPATH, "..")
-                    logout_parent2 = logout_parent1.find_element(By.XPATH, "..")
-                    logout_parent2.click()
-                    log_print(f"[{browser_id}] ✓ 已点击 Log Out 按钮的父节点的父节点")
-                else:
-                    log_print(f"[{browser_id}] ✗ 未找到 Log Out 按钮")
-                    add_bro_log_entry(bro_log_list, browser_id, "[5]未找到Log Out按钮")
-                    return False, "[5]未找到Log Out按钮", None
-                
-                # 等待60秒
-                log_print(f"[{browser_id}] 等待60秒...")
-                time.sleep(60)
-                log_print(f"[{browser_id}] ✓ 60秒等待完成")
-            except Exception as e:
-                log_print(f"[{browser_id}] ✗ 点击用户头像并登出失败: {str(e)}")
-                add_bro_log_entry(bro_log_list, browser_id, f"[5]点击用户头像并登出失败: {str(e)}")
-                return False, "[5]点击用户头像并登出失败", None
-        else:
-            # 未找到头像，回退到打开登录页面
-            log_print(f"[{browser_id}] → 回退到打开登录页面...")
-            login_url = "https://app.opinion.trade/login"
-            login_page_loaded = False
-            for login_attempt in range(3):
-                try:
-                    log_print(f"[{browser_id}] 尝试打开登录页面（第{login_attempt+1}次）...")
-                    driver.get(login_url)
-                    WebDriverWait(driver, 45).until(
-                        lambda d: d.execute_script("return document.readyState") == "complete"
-                    )
-                    log_print(f"[{browser_id}] ✓ 登录页面加载完成")
-                    login_page_loaded = True
-                    break
-                except Exception as e:
-                    log_print(f"[{browser_id}] ✗ 登录页面加载失败（第{login_attempt+1}次）: {str(e)}")
-                    time.sleep(2)
-            
-            if not login_page_loaded:
-                add_bro_log_entry(bro_log_list, browser_id, "[5]登陆页面打开失败")
-                log_print(f"[{browser_id}] ✗ 登录页面3次加载均失败")
-                return False, "[5]登陆页面打开失败", None
-        
-        # 6.1 检查并连接钱包
+
+
+
+            # 6.1 检查并连接钱包
         add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1: 检查并连接钱包")
         log_print(f"[{browser_id}] 步骤6.1: 检查并连接钱包...")
         connect_wallet_if_needed(driver, browser_id)
-        
-        # 6.1.1 检查并切换到包含 app.opinion.trade 的标签页
+
+        time.sleep(30)
+            # 6.1.1 检查并切换到包含 app.opinion.trade 的标签页
         log_print(f"[{browser_id}] 步骤6.1.1: 检查并切换到 app.opinion.trade 标签页...")
         try:
-            current_url = driver.current_url
-            if "https://app.opinion.trade" not in current_url:
-                log_print(f"[{browser_id}] 当前URL不包含 app.opinion.trade: {current_url}")
-                # 查找包含 app.opinion.trade 的标签页
-                all_windows = driver.window_handles
-                opinion_window = None
-                
-                for window_handle in all_windows:
-                    try:
-                        driver.switch_to.window(window_handle)
-                        window_url = driver.current_url
-                        if "https://app.opinion.trade" in window_url or "app.opinion.trade" in window_url:
-                            opinion_window = window_handle
-                            log_print(f"[{browser_id}] ✓ 找到包含 app.opinion.trade 的标签页: {window_url}")
-                            break
-                    except Exception as e:
-                        # 某些标签页可能无法访问URL（如chrome://等系统页面），跳过继续查找
-                        log_print(f"[{browser_id}] ⚠ 跳过无法访问的标签页: {str(e)}")
-                        continue
-                
-                if opinion_window:
-                    # 切换到包含 app.opinion.trade 的标签页
-                    driver.switch_to.window(opinion_window)
-                    log_print(f"[{browser_id}] ✓ 已切换到包含 app.opinion.trade 的标签页")
-                    time.sleep(2)  # 等待页面加载
+                current_url = driver.current_url
+                if "https://app.opinion.trade" not in current_url:
+                    log_print(f"[{browser_id}] 当前URL不包含 app.opinion.trade: {current_url}")
+                    # 查找包含 app.opinion.trade 的标签页
+                    all_windows = driver.window_handles
+                    opinion_window = None
+
+                    for window_handle in all_windows:
+                        try:
+                            driver.switch_to.window(window_handle)
+                            window_url = driver.current_url
+                            if "https://app.opinion.trade" in window_url or "app.opinion.trade" in window_url:
+                                opinion_window = window_handle
+                                log_print(f"[{browser_id}] ✓ 找到包含 app.opinion.trade 的标签页: {window_url}")
+                                break
+                        except Exception as e:
+                            # 某些标签页可能无法访问URL（如chrome://等系统页面），跳过继续查找
+                            log_print(f"[{browser_id}] ⚠ 跳过无法访问的标签页: {str(e)}")
+                            continue
+
+                    if opinion_window:
+                        # 切换到包含 app.opinion.trade 的标签页
+                        driver.switch_to.window(opinion_window)
+                        log_print(f"[{browser_id}] ✓ 已切换到包含 app.opinion.trade 的标签页")
+                        time.sleep(2)  # 等待页面加载
+                    else:
+                        log_print(f"[{browser_id}] ⚠ 未找到包含 app.opinion.trade 的标签页，在当前标签页打开")
+                        driver.get("https://app.opinion.trade")
+                        time.sleep(2)
                 else:
-                    log_print(f"[{browser_id}] ⚠ 未找到包含 app.opinion.trade 的标签页，在当前标签页打开")
-                    driver.get("https://app.opinion.trade")
-                    time.sleep(2)
-            else:
-                log_print(f"[{browser_id}] ✓ 当前标签页已包含 app.opinion.trade")
+                    log_print(f"[{browser_id}] ✓ 当前标签页已包含 app.opinion.trade")
         except Exception as e:
-            log_print(f"[{browser_id}] ⚠ 检查并切换标签页时出现异常: {str(e)}，继续执行...")
-        
-        # 6.1.1.1 重新打开目标页面
+                log_print(f"[{browser_id}] ⚠ 检查并切换标签页时出现异常: {str(e)}，继续执行...")
+
+            # 6.1.1.1 重新打开目标页面
         add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1.1.1: 重新打开目标页面")
         log_print(f"[{browser_id}] 步骤6.1.1.1: 重新打开目标页面 {target_url}...")
         target_page_loaded = False
         for target_attempt in range(3):
             try:
-                log_print(f"[{browser_id}] 尝试打开目标页面（第{target_attempt+1}次）...")
-                driver.get(target_url)
-                WebDriverWait(driver, 45).until(
-                    lambda d: d.execute_script("return document.readyState") == "complete"
-                )
-                log_print(f"[{browser_id}] ✓ 目标页面加载完成")
-                target_page_loaded = True
-                break
+                    log_print(f"[{browser_id}] 尝试打开目标页面（第{target_attempt+1}次）...")
+                    driver.get(target_url)
+                    WebDriverWait(driver, 45).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
+                    )
+                    log_print(f"[{browser_id}] ✓ 目标页面加载完成")
+                    target_page_loaded = True
+                    break
             except Exception as e:
-                log_print(f"[{browser_id}] ✗ 目标页面加载失败（第{target_attempt+1}次）: {str(e)}")
-                time.sleep(2)
-        
+                    log_print(f"[{browser_id}] ✗ 目标页面加载失败（第{target_attempt+1}次）: {str(e)}")
+                    time.sleep(2)
+
         if not target_page_loaded:
             add_bro_log_entry(bro_log_list, browser_id, "[6] 重新打开目标页面失败")
             log_print(f"[{browser_id}] ✗ 目标页面3次加载均失败")
             return False, "[6] 重新打开目标页面失败", None
+
+    
+        # 5. 等待页面加载
+        add_bro_log_entry(bro_log_list, browser_id, "[4]步骤5: 等待交易页面加载")
+        log_print(f"[{browser_id}] 步骤5: 等待页面加载...")
+        trade_box = wait_for_opinion_trade_box(driver, browser_id, max_retries=3)
         
-        # 6.1.2 检查地区限制
-        add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1.2: 检查地区限制")
-        log_print(f"[{browser_id}] 步骤6.1.2: 检查地区限制...")
-        try:
-            start_time = time.time()
-            region_restricted = False
-            while time.time() - start_time < 3:
-                try:
-                    # 查找所有div元素
-                    all_divs = driver.find_elements(By.TAG_NAME, "div")
-                    for div in all_divs:
-                        div_text = div.text
-                        if "API is not available to persons located in the" in div_text:
-                            region_restricted = True
-                            log_print(f"[{browser_id}] ✗ 检测到地区限制提示: {div_text[:100]}...")
-                            break
-                    if region_restricted:
-                        break
-                    time.sleep(0.2)  # 短暂等待后重试
-                except Exception as e:
-                    # 查找过程中出现异常，继续尝试
-                    time.sleep(0.2)
-                    continue
-            
-            if region_restricted:
-                add_bro_log_entry(bro_log_list, browser_id, "[5]IP通畅，但地区不符合，需要换IP")
-                log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
-                # 调用 changeIpToErr 接口
-                call_change_ip_to_err(browser_id, current_ip)
-                return False, "NEED_IP_RETRY", None
-            else:
-                add_bro_log_entry(bro_log_list, browser_id, "[5]未检测到地区限制")
-                log_print(f"[{browser_id}] ✓ 未检测到地区限制")
-        except Exception as e:
-            add_bro_log_entry(bro_log_list, browser_id, f"[5]检查地区限制时出现异常: {str(e)}，继续执行")
-            log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
-        
+        if not trade_box:
+            add_bro_log_entry(bro_log_list, browser_id, "[4]交易页面加载失败，需要换IP重试")
+            return False, "NEED_IP_RETRY", None
+
         # 6.1.5 等待Position按钮出现（带重试机制）
         add_bro_log_entry(bro_log_list, browser_id, "[6]步骤6.1.5: 等待Position按钮出现")
         log_print(f"[{browser_id}] 步骤6.1.5: 等待Position按钮出现...")
@@ -9286,6 +9185,28 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                     add_bro_log_entry(bro_log_list, browser_id, "[6]钱包已连接")
                     log_print(f"[{browser_id}] ✓ 钱包已连接")
                     time.sleep(30)
+
+                    add_bro_log_entry(bro_log_list, browser_id, "[5]步骤6.1.1.1: 重新打开目标页面")
+                    log_print(f"[{browser_id}] 步骤6.1.1.1: 重新打开目标页面 {target_url}...")
+                    target_page_loaded = False
+                    for target_attempt in range(3):
+                        try:
+                                log_print(f"[{browser_id}] 尝试打开目标页面（第{target_attempt+1}次）...")
+                                driver.get(target_url)
+                                WebDriverWait(driver, 45).until(
+                                    lambda d: d.execute_script("return document.readyState") == "complete"
+                                )
+                                log_print(f"[{browser_id}] ✓ 目标页面加载完成")
+                                target_page_loaded = True
+                                break
+                        except Exception as e:
+                                log_print(f"[{browser_id}] ✗ 目标页面加载失败（第{target_attempt+1}次）: {str(e)}")
+                                time.sleep(2)
+
+                    if not target_page_loaded:
+                        add_bro_log_entry(bro_log_list, browser_id, "[6] 重新打开目标页面失败")
+                        log_print(f"[{browser_id}] ✗ 目标页面3次加载均失败")
+                        return False, "[6] 重新打开目标页面失败", None
                 else:
                     add_bro_log_entry(bro_log_list, browser_id, "[6]钱包未连接，再次尝试连接钱包")
                     return False, "[5]钱包多次连接未成功", None
@@ -9294,6 +9215,8 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
             log_print(f"[{browser_id}] ⚠ 检查钱包连接状态时出现异常: {str(e)}，继续执行...")
         
         
+     
+
         
         # 6.1.6 如果有 trendingPart1，点击子主题
         if trending_part1:
@@ -9591,7 +9514,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                             
                             # 5分钟内每隔10秒检查状态
                             sync_start_time = time.time()
-                            sync_timeout = 420  # 7分钟
+                            sync_timeout = 900  # 7分钟
                             sync_check_interval = 10  # 10秒
                             sync_success = False
                             
@@ -9889,7 +9812,7 @@ def process_opinion_trade(driver, browser_id, trade_type, price_type, option_typ
                             
                             task1_id = tp1
                             start_time = time.time()
-                            timeout = 600  # 10分钟 = 600秒
+                            timeout = 900  # 10分钟 = 600秒
                             if mission_type == 6 or mission_type == 9:
                                 timeout = 60 # 1分钟
                             check_interval = 15  # 每20秒检查一次
@@ -16156,148 +16079,162 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
             return False, "10s内未找到最终确认按钮"
         
         # ======== BNB 转出流程 ========
-        log_print(f"[{browser_id}] [Type21] ======== 开始 BNB 转出流程 ========")
-        time.sleep(5)
-        
-        # BNB-12. 找到 BNB div 并点击其父节点的父节点的父节点
-        log_print(f"[{browser_id}] [Type21] [BNB] 查找 BNB 币种...")
-        bnb_clicked = False
-        
-        bnb_balance_value = None
-        try:
-            bnb_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="home-page-common-coin-list-item"]')
-            for div in bnb_divs:
-                try:
-                    if "BNB" in div.text:
-                        parent1 = div.find_element(By.XPATH, '..')
-                        parent2 = parent1.find_element(By.XPATH, '..')
-                        parent3 = parent2.find_element(By.XPATH, '..')
-                        
-                        # 获取 BNB 余额
-                        try:
-                            balance_display = parent3.find_element(By.CSS_SELECTOR, 'div[data-testid="home-page-coin-balance-display"]')
-                            first_child_div = balance_display.find_element(By.CSS_SELECTOR, 'div:first-child')
-                            bnb_balance_str = first_child_div.text.strip()
-                            log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额原始值: {bnb_balance_str}")
-                            bnb_balance_value = parse_locale_number(bnb_balance_str)
-                            if bnb_balance_value is not None:
-                                log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额: {bnb_balance_value}")
-                            else:
-                                log_print(f"[{browser_id}] [Type21] [BNB] ⚠ BNB 余额无法转换为数字: {bnb_balance_str}")
-                        except Exception as e:
-                            log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 获取 BNB 余额异常: {str(e)}")
-                        
-                        parent3.click()
-                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击 BNB 的父节点的父节点的父节点")
-                        bnb_clicked = True
-                        break
-                except Exception as e:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 处理 BNB div 时出错: {str(e)}")
-                    continue
-        except Exception as e:
-            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 查找 BNB div 异常: {str(e)}")
-        
-        if not bnb_clicked:
-            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到或未能点击 BNB，跳过 BNB 转出")
-        else:
-            # BNB-13. 等待5s，找到 textarea 并填入地址（同 USDT 的 s 字段地址）
-            time.sleep(5)
-            log_print(f"[{browser_id}] [Type21] [BNB] 填入地址（s 字段）...")
+        # 先判断已转出额（t字段）是否已有值且大于0
+        t_value_check = account_config.get('t')
+        skip_bnb = False
+        if t_value_check is not None and str(t_value_check).strip() != '' and str(t_value_check).strip().lower() != 'null':
             try:
-                bnb_textareas = driver.find_elements(By.CSS_SELECTOR, 'textarea[data-testid="okd-input"]')
-                if bnb_textareas:
-                    bnb_textareas[0].clear()
-                    bnb_textareas[0].send_keys(str(s_value).strip())
-                    log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已填入地址")
-                else:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到 textarea，跳过 BNB 转出")
-            except Exception as e:
-                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 填入地址异常: {str(e)}，跳过 BNB 转出")
-            
-            # BNB-14. 等待5s，在10s内找到 okd-button 并点击
+                original_t_test = float(str(t_value_check).replace('$', '').replace(',', '').strip())
+                if original_t_test > 0:
+                    skip_bnb = True
+            except:
+                pass
+                
+        if skip_bnb:
+            log_print(f"[{browser_id}] [Type21] 现有信息中已转出额(t)已有值: {t_value_check} 且大于0，跳过 BNB 转出流程")
+        else:
+            log_print(f"[{browser_id}] [Type21] ======== 开始 BNB 转出流程 ========")
             time.sleep(5)
-            log_print(f"[{browser_id}] [Type21] [BNB] 在10s内查找确认按钮...")
-            start_time = time.time()
-            bnb_confirm_clicked = False
             
-            while time.time() - start_time < 10:
-                try:
-                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
-                    if buttons:
-                        buttons[0].click()
-                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击确认按钮")
-                        bnb_confirm_clicked = True
-                        break
-                    else:
-                        time.sleep(0.5)
-                except Exception as e:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 查找确认按钮时出错: {str(e)}")
-                    time.sleep(0.5)
+            # BNB-12. 找到 BNB div 并点击其父节点的父节点的父节点
+            log_print(f"[{browser_id}] [Type21] [BNB] 查找 BNB 币种...")
+            bnb_clicked = False
             
-            if not bnb_confirm_clicked:
-                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 10s内未找到确认按钮，跳过 BNB 转出")
-            else:
-                # BNB-15. 等待5s，找到 data-testid="okd-input" 的 input，填入 BNB 余额的一半
-                time.sleep(5)
-                
-                if bnb_balance_value is not None and bnb_balance_value > 0:
-                    bnb_amount = round(bnb_balance_value / 2, 6)
-                    log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额的一半: {bnb_amount}")
-                else:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ BNB 余额无效({bnb_balance_value})，跳过 BNB 转出")
-                    bnb_amount = None
-                
-                if bnb_amount is not None:
+            bnb_balance_value = None
+            try:
+                bnb_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="home-page-common-coin-list-item"]')
+                for div in bnb_divs:
                     try:
-                        bnb_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[data-testid="okd-input"]')
-                        if bnb_inputs:
-                            bnb_inputs[0].clear()
-                            bnb_inputs[0].send_keys(str(bnb_amount))
-                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已填入 BNB 金额: {bnb_amount}")
-                        else:
-                            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到金额输入框，跳过 BNB 转出")
+                        if "BNB" in div.text:
+                            parent1 = div.find_element(By.XPATH, '..')
+                            parent2 = parent1.find_element(By.XPATH, '..')
+                            parent3 = parent2.find_element(By.XPATH, '..')
+                            
+                            # 获取 BNB 余额
+                            try:
+                                balance_display = parent3.find_element(By.CSS_SELECTOR, 'div[data-testid="home-page-coin-balance-display"]')
+                                first_child_div = balance_display.find_element(By.CSS_SELECTOR, 'div:first-child')
+                                bnb_balance_str = first_child_div.text.strip()
+                                log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额原始值: {bnb_balance_str}")
+                                bnb_balance_value = parse_locale_number(bnb_balance_str)
+                                if bnb_balance_value is not None:
+                                    log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额: {bnb_balance_value}")
+                                else:
+                                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ BNB 余额无法转换为数字: {bnb_balance_str}")
+                            except Exception as e:
+                                log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 获取 BNB 余额异常: {str(e)}")
+                            
+                            parent3.click()
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击 BNB 的父节点的父节点的父节点")
+                            bnb_clicked = True
+                            break
                     except Exception as e:
-                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ 填入 BNB 金额异常: {str(e)}，跳过 BNB 转出")
-                
-                # BNB-17. 找到金额确认按钮并点击
-                time.sleep(3)
-                log_print(f"[{browser_id}] [Type21] [BNB] 查找并点击金额确认按钮...")
-                try:
-                    bnb_confirm_amount_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-amount-confirm-button"], button[data-testid="send-amount-page-confirm-button"]')
-                    if bnb_confirm_amount_buttons:
-                        bnb_confirm_amount_buttons[0].click()
-                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击金额确认按钮")
-                    else:
-                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到金额确认按钮，跳过 BNB 转出")
-                except Exception as e:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ 点击金额确认按钮异常: {str(e)}，跳过 BNB 转出")
-                
-                # BNB-18. 等待5s，在10s内找到最终确认按钮并点击
+                        log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 处理 BNB div 时出错: {str(e)}")
+                        continue
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 查找 BNB div 异常: {str(e)}")
+            
+            if not bnb_clicked:
+                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到或未能点击 BNB，跳过 BNB 转出")
+            else:
+                # BNB-13. 等待5s，找到 textarea 并填入地址（同 USDT 的 s 字段地址）
                 time.sleep(5)
-                log_print(f"[{browser_id}] [Type21] [BNB] 在10s内查找最终确认按钮...")
+                log_print(f"[{browser_id}] [Type21] [BNB] 填入地址（s 字段）...")
+                try:
+                    bnb_textareas = driver.find_elements(By.CSS_SELECTOR, 'textarea[data-testid="okd-input"]')
+                    if bnb_textareas:
+                        bnb_textareas[0].clear()
+                        bnb_textareas[0].send_keys(str(s_value).strip())
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已填入地址")
+                    else:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到 textarea，跳过 BNB 转出")
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ 填入地址异常: {str(e)}，跳过 BNB 转出")
+                
+                # BNB-14. 等待5s，在10s内找到 okd-button 并点击
+                time.sleep(5)
+                log_print(f"[{browser_id}] [Type21] [BNB] 在10s内查找确认按钮...")
                 start_time = time.time()
-                bnb_final_confirm_clicked = False
+                bnb_confirm_clicked = False
                 
                 while time.time() - start_time < 10:
                     try:
-                        bnb_final_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-confirm-button"], button[data-testid="send-confirm-page-confirm-button"]')
-                        if bnb_final_buttons:
-                            bnb_final_buttons[0].click()
-                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击最终确认按钮")
-                            bnb_final_confirm_clicked = True
+                        buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                        if buttons:
+                            buttons[0].click()
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击确认按钮")
+                            bnb_confirm_clicked = True
                             break
                         else:
                             time.sleep(0.5)
                     except Exception as e:
-                        log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 查找最终确认按钮时出错: {str(e)}")
+                        log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 查找确认按钮时出错: {str(e)}")
                         time.sleep(0.5)
                 
-                if bnb_final_confirm_clicked:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ✓ BNB 转出流程完成")
+                if not bnb_confirm_clicked:
+                    log_print(f"[{browser_id}] [Type21] [BNB] ✗ 10s内未找到确认按钮，跳过 BNB 转出")
                 else:
-                    log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 10s内未找到最终确认按钮，BNB 转出可能未完成")
-        
-        log_print(f"[{browser_id}] [Type21] ======== BNB 转出流程结束 ========")
+                    # BNB-15. 等待5s，找到 data-testid="okd-input" 的 input，填入 BNB 余额的一半
+                    time.sleep(5)
+                    
+                    if bnb_balance_value is not None and bnb_balance_value > 0:
+                        bnb_amount = round(bnb_balance_value / 2, 6)
+                        log_print(f"[{browser_id}] [Type21] [BNB] BNB 余额的一半: {bnb_amount}")
+                    else:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ BNB 余额无效({bnb_balance_value})，跳过 BNB 转出")
+                        bnb_amount = None
+                    
+                    if bnb_amount is not None:
+                        try:
+                            bnb_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[data-testid="okd-input"]')
+                            if bnb_inputs:
+                                bnb_inputs[0].clear()
+                                bnb_inputs[0].send_keys(str(bnb_amount))
+                                log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已填入 BNB 金额: {bnb_amount}")
+                            else:
+                                log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到金额输入框，跳过 BNB 转出")
+                        except Exception as e:
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 填入 BNB 金额异常: {str(e)}，跳过 BNB 转出")
+                    
+                    # BNB-17. 找到金额确认按钮并点击
+                    time.sleep(3)
+                    log_print(f"[{browser_id}] [Type21] [BNB] 查找并点击金额确认按钮...")
+                    try:
+                        bnb_confirm_amount_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-amount-confirm-button"], button[data-testid="send-amount-page-confirm-button"]')
+                        if bnb_confirm_amount_buttons:
+                            bnb_confirm_amount_buttons[0].click()
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击金额确认按钮")
+                        else:
+                            log_print(f"[{browser_id}] [Type21] [BNB] ✗ 未找到金额确认按钮，跳过 BNB 转出")
+                    except Exception as e:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✗ 点击金额确认按钮异常: {str(e)}，跳过 BNB 转出")
+                    
+                    # BNB-18. 等待5s，在10s内找到最终确认按钮并点击
+                    time.sleep(5)
+                    log_print(f"[{browser_id}] [Type21] [BNB] 在10s内查找最终确认按钮...")
+                    start_time = time.time()
+                    bnb_final_confirm_clicked = False
+                    
+                    while time.time() - start_time < 10:
+                        try:
+                            bnb_final_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-confirm-button"], button[data-testid="send-confirm-page-confirm-button"]')
+                            if bnb_final_buttons:
+                                bnb_final_buttons[0].click()
+                                log_print(f"[{browser_id}] [Type21] [BNB] ✓ 已点击最终确认按钮")
+                                bnb_final_confirm_clicked = True
+                                break
+                            else:
+                                time.sleep(0.5)
+                        except Exception as e:
+                            log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 查找最终确认按钮时出错: {str(e)}")
+                            time.sleep(0.5)
+                    
+                    if bnb_final_confirm_clicked:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ✓ BNB 转出流程完成")
+                    else:
+                        log_print(f"[{browser_id}] [Type21] [BNB] ⚠ 10s内未找到最终确认按钮，BNB 转出可能未完成")
+            
+            log_print(f"[{browser_id}] [Type21] ======== BNB 转出流程结束 ========")
         
         # 19. 更新 t 字段（累加转出额）
         log_print(f"[{browser_id}] [Type21] 更新 t 字段（累加转出额）...")
@@ -16393,7 +16330,10 @@ def process_type22_mission(task_data):
         current_ip = None
         current_delay = None
         log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
-        _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
+        update_success, new_ip, new_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
+        if new_ip:
+            current_ip = new_ip
+            current_delay = new_delay
         
         # 确保 current_ip 和 current_delay 已初始化
         if current_ip is None:
@@ -17074,7 +17014,10 @@ def process_type2_mission(task_data, retry_count=0):
         current_delay = None
         if retry_count == 0:
             log_print(f"[{browser_id}] 步骤1: 检查IP并更新代理...")
-            _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
+            update_success, new_ip, new_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
+            if new_ip:
+                current_ip = new_ip
+                current_delay = new_delay
         else:
             log_print(f"[{browser_id}] 步骤1: 跳过IP更新（重试中，IP已在重试流程中更新）...")
             # 从 LAST_PROXY_CONFIG 获取当前使用的IP和延迟
@@ -17085,7 +17028,10 @@ def process_type2_mission(task_data, retry_count=0):
                 log_print(f"[{browser_id}] 使用已更新的代理配置: IP={current_ip}, Delay={current_delay}")
             else:
                 log_print(f"[{browser_id}] ⚠ 无法从 LAST_PROXY_CONFIG 获取IP信息，尝试更新...")
-                _, current_ip, current_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
+                update_success, new_ip, new_delay = try_update_ip_before_start(browser_id, mission_id=mission_id, no_proxy=no_proxy)
+                if new_ip:
+                    current_ip = new_ip
+                    current_delay = new_delay
         
         # 确保 current_ip 和 current_delay 已初始化（用于后续代码使用）
         if current_ip is None:
@@ -17167,55 +17113,55 @@ def process_type2_mission(task_data, retry_count=0):
             
             # 4.0.4 检查并点击 "I Understand and Agree" p标签（如果存在）
             log_print(f"[{browser_id}] 步骤4.0.4: 检查是否存在 'I Understand and Agree' p标签...")
-            if check_and_click_understand_agree(driver, browser_id, timeout=5):
-                # 如果存在并点击了，需要换IP重试（重试次数小于2）
-                if retry_count < 2:
-                    log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
+            check_and_click_understand_agree(driver, browser_id, timeout=5)
+                # # 如果存在并点击了，需要换IP重试（重试次数小于2）
+                # if retry_count < 2:
+                #     log_print(f"[{browser_id}] Type=2 任务检测到 'I Understand and Agree'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                     
-                    # 调用 changeIpToErr 接口（确保 current_ip 不为 None）
-                    ip_to_report = current_ip
-                    if not ip_to_report:
-                        last_config = LAST_PROXY_CONFIG.get(str(browser_id))
-                        if last_config:
-                            ip_to_report = last_config.get("ip")
-                    call_change_ip_to_err(browser_id, ip_to_report)
+                #     # 调用 changeIpToErr 接口（确保 current_ip 不为 None）
+                #     ip_to_report = current_ip
+                #     if not ip_to_report:
+                #         last_config = LAST_PROXY_CONFIG.get(str(browser_id))
+                #         if last_config:
+                #             ip_to_report = last_config.get("ip")
+                #     call_change_ip_to_err(browser_id, ip_to_report)
                     
-                    # 1. 关闭浏览器
-                    log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
-                    try:
-                        if driver:
-                            driver.quit()
-                    except:
-                        pass
-                    close_adspower_browser(browser_id)
-                    log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
-                    time.sleep(120)  # Type=2任务等待2分钟
+                #     # 1. 关闭浏览器
+                #     log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+                #     try:
+                #         if driver:
+                #             driver.quit()
+                #     except:
+                #         pass
+                #     close_adspower_browser(browser_id)
+                #     log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
+                #     time.sleep(120)  # Type=2任务等待2分钟
                     
-                    # 2. 根据重试次数获取IP
-                    log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                    proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
+                #     # 2. 根据重试次数获取IP
+                #     log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+                #     proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                     
-                    if not proxy_config:
-                        log_print(f"[{browser_id}] ✗ 获取新IP失败")
-                        return False, "换IP失败", collected_data
+                #     if not proxy_config:
+                #         log_print(f"[{browser_id}] ✗ 获取新IP失败")
+                #         return False, "换IP失败", collected_data
                     
-                    log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+                #     log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
                     
-                    # 3. 更新代理配置
-                    log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                    if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
-                        log_print(f"[{browser_id}] ✗ 更新代理失败")
-                        return False, "更新代理失败", collected_data
+                #     # 3. 更新代理配置
+                #     log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+                #     if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
+                #         log_print(f"[{browser_id}] ✗ 更新代理失败")
+                #         return False, "更新代理失败", collected_data
                     
-                    log_print(f"[{browser_id}] ✓ 代理配置已更新")
-                    time.sleep(10)
+                #     log_print(f"[{browser_id}] ✓ 代理配置已更新")
+                #     time.sleep(10)
                     
-                    # 4. 递归重试任务（retry_count+1）
-                    log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
-                    return process_type2_mission(task_data, retry_count=retry_count+1)
-                else:
-                    log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
-                    return False, "检测到 'I Understand and Agree' 且已重试2次", collected_data
+                #     # 4. 递归重试任务（retry_count+1）
+                #     log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+                #     return process_type2_mission(task_data, retry_count=retry_count+1)
+                # else:
+                #     log_print(f"[{browser_id}] ✗ 已经重试过2次，不再重试")
+                #     return False, "检测到 'I Understand and Agree' 且已重试2次", collected_data
             
             
           
@@ -17314,74 +17260,74 @@ def process_type2_mission(task_data, retry_count=0):
             log_print(f"[{browser_id}] 步骤4.1: 检查并连接钱包...")
             connect_wallet_if_needed(driver, browser_id)
             
-              # 6.1.2 检查地区限制
-            log_print(f"[{browser_id}] 步骤6.1.2: 检查地区限制...")
-            try:
-                start_time = time.time()
-                region_restricted = False
-                while time.time() - start_time < 3:
-                    try:
-                        # 查找所有div元素
-                        all_divs = driver.find_elements(By.TAG_NAME, "div")
-                        for div in all_divs:
-                            div_text = div.text
-                            if "API is not available to persons located in the" in div_text:
-                                region_restricted = True
-                                log_print(f"[{browser_id}] ✗ 检测到地区限制提示: {div_text[:100]}...")
-                                break
-                        if region_restricted:
-                            break
-                        time.sleep(0.2)  # 短暂等待后重试
-                    except Exception as e:
-                        # 查找过程中出现异常，继续尝试
-                        time.sleep(0.2)
-                        continue
+            #   # 6.1.2 检查地区限制
+            # log_print(f"[{browser_id}] 步骤6.1.2: 检查地区限制...")
+            # try:
+            #     start_time = time.time()
+            #     region_restricted = False
+            #     while time.time() - start_time < 3:
+            #         try:
+            #             # 查找所有div元素
+            #             all_divs = driver.find_elements(By.TAG_NAME, "div")
+            #             for div in all_divs:
+            #                 div_text = div.text
+            #                 if "API is not available to persons located in the" in div_text:
+            #                     region_restricted = True
+            #                     log_print(f"[{browser_id}] ✗ 检测到地区限制提示: {div_text[:100]}...")
+            #                     break
+            #             if region_restricted:
+            #                 break
+            #             time.sleep(0.2)  # 短暂等待后重试
+            #         except Exception as e:
+            #             # 查找过程中出现异常，继续尝试
+            #             time.sleep(0.2)
+            #             continue
                 
-                if region_restricted:
-                    log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
-                     # 调用 changeIpToErr 接口
-                    call_change_ip_to_err(browser_id, current_ip)
-                    # 如果存在并点击了，需要换IP重试（重试次数小于2）
-                    if retry_count < 2:
-                        log_print(f"[{browser_id}] Type=2 任务检测到 'API is not available to persons located in the'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
+            #     if region_restricted:
+            #         log_print(f"[{browser_id}] ✗ IP通畅，但地区不符合")
+            #          # 调用 changeIpToErr 接口
+            #         call_change_ip_to_err(browser_id, current_ip)
+            #         # 如果存在并点击了，需要换IP重试（重试次数小于2）
+            #         if retry_count < 2:
+            #             log_print(f"[{browser_id}] Type=2 任务检测到 'API is not available to persons located in the'，需要换IP重试（第{retry_count+1}次），开始执行重试流程...")
                         
-                        # 1. 关闭浏览器
-                        log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
-                        try:
-                            if driver:
-                                driver.quit()
-                        except:
-                            pass
-                        close_adspower_browser(browser_id)
-                        log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
-                        time.sleep(120)  # Type=2任务等待2分钟
+            #             # 1. 关闭浏览器
+            #             log_print(f"[{browser_id}] 步骤1: 关闭浏览器...")
+            #             try:
+            #                 if driver:
+            #                     driver.quit()
+            #             except:
+            #                 pass
+            #             close_adspower_browser(browser_id)
+            #             log_print(f"[{browser_id}] Type=2 任务换IP：关闭浏览器后等待2分钟...")
+            #             time.sleep(120)  # Type=2任务等待2分钟
                         
-                        # 2. 根据重试次数获取IP
-                        log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
-                        proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
+            #             # 2. 根据重试次数获取IP
+            #             log_print(f"[{browser_id}] 步骤2: 更换IP（第{retry_count+1}次）...")
+            #             proxy_config = get_ip_for_retry(browser_id, retry_count, timeout=15, mission_id=mission_id)
                         
-                        if not proxy_config:
-                            log_print(f"[{browser_id}] ✗ 获取新IP失败")
-                            return False, "换IP失败", collected_data
+            #             if not proxy_config:
+            #                 log_print(f"[{browser_id}] ✗ 获取新IP失败")
+            #                 return False, "换IP失败", collected_data
                         
-                        log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
+            #             log_print(f"[{browser_id}] ✓ 获取新IP: {proxy_config['ip']}")
                         
-                        # 3. 更新代理配置
-                        log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
-                        if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
-                            log_print(f"[{browser_id}] ✗ 更新代理失败")
-                            return False, "更新代理失败", collected_data
+            #             # 3. 更新代理配置
+            #             log_print(f"[{browser_id}] 步骤3: 更新代理配置...")
+            #             if not update_adspower_proxy(browser_id, proxy_config, no_proxy=no_proxy):
+            #                 log_print(f"[{browser_id}] ✗ 更新代理失败")
+            #                 return False, "更新代理失败", collected_data
                         
-                        log_print(f"[{browser_id}] ✓ 代理配置已更新")
-                        time.sleep(10)
+            #             log_print(f"[{browser_id}] ✓ 代理配置已更新")
+            #             time.sleep(10)
                         
-                        # 4. 递归重试任务（retry_count+1）
-                        log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
-                        return process_type2_mission(task_data, retry_count=retry_count+1)
-                else:
-                    log_print(f"[{browser_id}] ✓ 未检测到地区限制")
-            except Exception as e:
-                log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
+            #             # 4. 递归重试任务（retry_count+1）
+            #             log_print(f"[{browser_id}] 步骤4: 重新执行任务（重试次数: {retry_count+1}）...")
+            #             return process_type2_mission(task_data, retry_count=retry_count+1)
+            #     else:
+            #         log_print(f"[{browser_id}] ✓ 未检测到地区限制")
+            # except Exception as e:
+            #     log_print(f"[{browser_id}] ⚠ 检查地区限制时出现异常: {str(e)}，继续执行...")
             
             
             
@@ -18679,6 +18625,606 @@ def initialize_fingerprint_mapping():
     # 映射数据
     mapping_data = """3100	k15mek1c
 3099	k15mek1b
+3700	k19ahkjj
+3699	k19ahkji
+3698	k19ahkjg
+3697	k19ahkjf
+3696	k19ahkje
+3695	k19ahkjd
+3694	k19ahkjc
+3693	k19ahkjb
+3692	k19ahkja
+3691	k19ahkj8
+3690	k19ahkj7
+3689	k19ahkj6
+3688	k19ahkj5
+3687	k19ahkj4
+3686	k19ahkj3
+3685	k19ahkj2
+3684	k19ahkj1
+3683	k19ahkj0
+3682	k19ahkiy
+3681	k19ahkix
+3680	k19ahkiw
+3679	k19ahkiv
+3678	k19ahkiu
+3677	k19ahkit
+3676	k19ahkis
+3675	k19ahkir
+3674	k19ahkiq
+3673	k19ahkip
+3672	k19ahkio
+3671	k19ahkin
+3670	k19ahkim
+3669	k19ahkij
+3668	k19ahkii
+3667	k19ahkih
+3666	k19ahkig
+3665	k19ahkif
+3664	k19ahkie
+3663	k19ahkid
+3662	k19ahkic
+3661	k19ahkib
+3660	k19ahkia
+3659	k19ahki9
+3658	k19ahki8
+3657	k19ahki7
+3656	k19ahki6
+3655	k19ahki5
+3654	k19ahki4
+3653	k19ahki3
+3652	k19ahki2
+3651	k19ahki1
+3650	k19ahki0
+3649	k19ahkhy
+3648	k19ahkhx
+3647	k19ahkhw
+3646	k19ahkhv
+3645	k19ahkhu
+3644	k19ahkhs
+3643	k19ahkhr
+3642	k19ahkhp
+3641	k19ahkho
+3640	k19ahkhn
+3639	k19ahkhm
+3638	k19ahkhl
+3637	k19ahkhk
+3636	k19ahkhj
+3635	k19ahkhi
+3634	k19ahkhh
+3633	k19ahkhg
+3632	k19ahkhf
+3631	k19ahkhe
+3630	k19ahkhd
+3629	k19ahkhc
+3628	k19ahkhb
+3627	k19ahkh8
+3626	k19ahkh6
+3625	k19ahkh4
+3624	k19ahkh2
+3623	k19ahkh1
+3622	k19ahkh0
+3621	k19ahkgx
+3620	k19ahkgw
+3619	k19ahkgv
+3618	k19ahkgs
+3617	k19ahkgq
+3616	k19ahkgo
+3615	k19ahkgl
+3614	k19ahkgj
+3613	k19ahkgh
+3612	k19ahkgf
+3611	k19ahkgb
+3610	k19ahkg9
+3609	k19ahkg8
+3608	k19ahkg5
+3607	k19ahkg4
+3606	k19ahkg3
+3605	k19ahkg2
+3604	k19ahkg1
+3603	k19ahkg0
+3602	k19ahkfy
+3601	k19ahkfx
+3600	k1998ki0
+3599	k1998khy
+3598	k1998khx
+3597	k1998khw
+3596	k1998khv
+3595	k1998khu
+3594	k1998kht
+3593	k1998khs
+3592	k1998khr
+3591	k1998khq
+3590	k1998khp
+3589	k1998kho
+3588	k1998khn
+3587	k1998khm
+3586	k1998khl
+3585	k1998khk
+3584	k1998khj
+3583	k1998khi
+3582	k1998khh
+3581	k1998khg
+3580	k1998khe
+3579	k1998khc
+3578	k1998khb
+3577	k1998kha
+3576	k1998kh9
+3575	k1998kh8
+3574	k1998kh7
+3573	k1998kh6
+3572	k1998kh5
+3571	k1998kh4
+3570	k1998kh3
+3569	k1998kh2
+3568	k1998kh1
+3567	k1998kh0
+3566	k1998kgy
+3565	k1998kgw
+3564	k1998kgv
+3563	k1998kgu
+3562	k1998kgt
+3561	k1998kgs
+3560	k1998kgr
+3559	k1998kgq
+3558	k1998kgo
+3557	k1998kgn
+3556	k1998kgm
+3555	k1998kgk
+3554	k1998kgj
+3553	k1998kgi
+3552	k1998kgh
+3551	k1998kgg
+3550	k1998kge
+3549	k1998kgd
+3548	k1998kgc
+3547	k1998kga
+3546	k1998kg9
+3545	k1998kg8
+3544	k1998kg6
+3543	k1998kg3
+3542	k1998kg2
+3541	k1998kg1
+3540	k1998kg0
+3539	k1998kfy
+3538	k1998kfx
+3537	k1998kfv
+3536	k1998kfu
+3535	k1998kft
+3534	k1998kfs
+3533	k1998kfr
+3532	k1998kfq
+3531	k1998kfp
+3530	k1998kfo
+3529	k1998kfn
+3528	k1998kfm
+3527	k1998kfl
+3526	k1998kfk
+3525	k1998kfj
+3524	k1998kfi
+3523	k1998kfh
+3522	k1998kfg
+3521	k1998kff
+3520	k1998kfe
+3519	k1998kfc
+3518	k1998kfa
+3517	k1998kf9
+3516	k1998kf8
+3515	k1998kf7
+3514	k1998kf6
+3513	k1998kf4
+3512	k1998kf3
+3511	k1998kf2
+3510	k1998kf0
+3509	k1998kex
+3508	k1998kew
+3507	k1998kev
+3506	k1998keu
+3505	k1998ket
+3504	k1998kes
+3503	k1998ker
+3502	k1998keq
+3501	k1998kep
+3500	k19864ox
+3499	k19864ow
+3498	k19864ov
+3497	k19864ou
+3496	k19864os
+3495	k19864or
+3494	k19864oq
+3493	k19864oo
+3492	k19864on
+3491	k19864om
+3490	k19864ol
+3489	k19864ok
+3488	k19864oj
+3487	k19864oi
+3486	k19864oh
+3485	k19864og
+3484	k19864of
+3483	k19864oe
+3482	k19864od
+3481	k19864oc
+3480	k19864ob
+3479	k19864o9
+3478	k19864o7
+3477	k19864o6
+3476	k19864o5
+3475	k19864o4
+3474	k19864o3
+3473	k19864o2
+3472	k19864o1
+3471	k19864o0
+3470	k19864nx
+3469	k19864nw
+3468	k19864nv
+3467	k19864nu
+3466	k19864nt
+3465	k19864ns
+3464	k19864nr
+3463	k19864nq
+3462	k19864np
+3461	k19864no
+3460	k19864nn
+3459	k19864nm
+3458	k19864nl
+3457	k19864ni
+3456	k19864nh
+3455	k19864ng
+3454	k19864nf
+3453	k19864ne
+3452	k19864nd
+3451	k19864nc
+3450	k19864nb
+3449	k19864na
+3448	k19864n9
+3447	k19864n8
+3446	k19864n7
+3445	k19864n6
+3444	k19864n5
+3443	k19864n4
+3442	k19864n3
+3441	k19864n2
+3440	k19864n0
+3439	k19864my
+3438	k19864mx
+3437	k19864mv
+3436	k19864mt
+3435	k19864ms
+3434	k19864mr
+3433	k19864mp
+3432	k19864mn
+3431	k19864mm
+3430	k19864ml
+3429	k19864mk
+3428	k19864mj
+3427	k19864mi
+3426	k19864mh
+3425	k19864mg
+3424	k19864mf
+3423	k19864me
+3422	k19864md
+3421	k19864mc
+3420	k19864ma
+3419	k19864m9
+3418	k19864m7
+3417	k19864m6
+3416	k19864m5
+3415	k19864m3
+3414	k19864m2
+3413	k19864m1
+3412	k19864m0
+3411	k19864ly
+3410	k19864lx
+3409	k19864lw
+3408	k19864lv
+3407	k19864lu
+3406	k19864lt
+3405	k19864ls
+3404	k19864lr
+3403	k19864lq
+3402	k19864lp
+3401	k19864lo
+3400	k18mokn9
+3399	k18mokn8
+3398	k18mokn6
+3397	k18mokn5
+3396	k18mokn4
+3395	k18mokn2
+3394	k18mokn1
+3393	k18mokn0
+3392	k18mokmy
+3391	k18mokmx
+3390	k18mokmw
+3389	k18mokmv
+3388	k18mokmu
+3387	k18mokmt
+3386	k18mokms
+3385	k18mokmr
+3384	k18mokmq
+3383	k18mokmo
+3382	k18mokmn
+3381	k18mokml
+3380	k18mokmk
+3379	k18mokmj
+3378	k18mokmi
+3377	k18mokmh
+3376	k18mokmf
+3375	k18mokme
+3374	k18mokmd
+3373	k18mokmc
+3372	k18mokmb
+3371	k18mokma
+3370	k18mokm9
+3369	k18mokm8
+3368	k18mokm7
+3367	k18mokm6
+3366	k18mokm5
+3365	k18mokm4
+3364	k18mokm2
+3363	k18mokm0
+3362	k18moklw
+3361	k18moklv
+3360	k18moklu
+3359	k18mokls
+3358	k18moklr
+3357	k18moklq
+3356	k18moklp
+3355	k18moklo
+3354	k18moklm
+3353	k18mokll
+3352	k18moklk
+3351	k18moklj
+3350	k18mokli
+3349	k18moklg
+3348	k18mokle
+3347	k18mokld
+3346	k18moklc
+3345	k18moklb
+3344	k18mokla
+3343	k18mokl9
+3342	k18mokl8
+3341	k18mokl7
+3340	k18mokl6
+3339	k18mokl5
+3338	k18mokl4
+3337	k18mokl2
+3336	k18mokl0
+3335	k18mokky
+3334	k18mokkx
+3333	k18mokkw
+3332	k18mokkv
+3331	k18mokku
+3330	k18mokkt
+3329	k18mokks
+3328	k18mokkr
+3327	k18mokkq
+3326	k18mokko
+3325	k18mokkn
+3324	k18mokkm
+3323	k18mokkl
+3322	k18mokkk
+3321	k18mokkj
+3320	k18mokki
+3319	k18mokkh
+3318	k18mokkg
+3317	k18mokke
+3316	k18mokkd
+3315	k18mokkc
+3314	k18mokkb
+3313	k18mokka
+3312	k18mokk9
+3311	k18mokk8
+3310	k18mokk7
+3309	k18mokk6
+3308	k18mokk4
+3307	k18mokk3
+3306	k18mokk2
+3305	k18mokk1
+3304	k18mokjy
+3303	k18mokjx
+3302	k18mokjw
+3301	k18mokjv
+3300	k18mokju
+3299	k18mokjt
+3298	k18mokjs
+3297	k18mokjr
+3296	k18mokjq
+3295	k18mokjp
+3294	k18mokjo
+3293	k18mokjn
+3292	k18mokjm
+3291	k18mokjl
+3290	k18mokjk
+3289	k18mokjj
+3288	k18mokji
+3287	k18mokjg
+3286	k18mokjf
+3285	k18mokje
+3284	k18mokjd
+3283	k18mokjc
+3282	k18mokjb
+3281	k18mokja
+3280	k18mokj9
+3279	k18mokj8
+3278	k18mokj7
+3277	k18mokj6
+3276	k18mokj5
+3275	k18mokj3
+3274	k18mokj2
+3273	k18mokj1
+3272	k18mokj0
+3271	k18mokiy
+3270	k18mokix
+3269	k18mokiw
+3268	k18mokiv
+3267	k18mokiu
+3266	k18mokit
+3265	k18mokis
+3264	k18mokir
+3263	k18mokio
+3262	k18mokin
+3261	k18mokim
+3260	k18mokij
+3259	k18mokii
+3258	k18mokih
+3257	k18mokig
+3256	k18mokif
+3255	k18mokie
+3254	k18mokid
+3253	k18mokic
+3252	k18mokib
+3251	k18moki9
+3250	k18moki8
+3249	k18moki7
+3248	k18moki6
+3247	k18moki5
+3246	k18moki4
+3245	k18moki3
+3244	k18moki2
+3243	k18moki0
+3242	k18mokhv
+3241	k18mokhs
+3240	k18mokhp
+3239	k18mokhm
+3238	k18mokhl
+3237	k18mokhk
+3236	k18mokhj
+3235	k18mokhi
+3234	k18mokhh
+3233	k18mokhg
+3232	k18mokhf
+3231	k18mokhe
+3230	k18mokhd
+3229	k18mokhc
+3228	k18mokhb
+3227	k18mokh9
+3226	k18mokh8
+3225	k18mokh7
+3224	k18mokh6
+3223	k18mokh5
+3222	k18mokh4
+3221	k18mokh3
+3220	k18mokh2
+3219	k18mokh1
+3218	k18mokh0
+3217	k18mokgy
+3216	k18mokgx
+3215	k18mokgw
+3214	k18mokgv
+3213	k18mokgu
+3212	k18mokgt
+3211	k18mokgs
+3210	k18mokgq
+3209	k18mokgp
+3208	k18mokgo
+3207	k18mokgn
+3206	k18mokgm
+3205	k18mokgl
+3204	k18mokgk
+3203	k18mokgj
+3202	k18mokgh
+3201	k18mokgg
+3200	k18mokge
+3199	k18mokgd
+3198	k18mokgc
+3197	k18mokgb
+3196	k18mokga
+3195	k18mokg9
+3194	k18mokg8
+3193	k18mokg7
+3192	k18mokg6
+3191	k18mokg5
+3190	k18mokg4
+3189	k18mokg3
+3188	k18mokg2
+3187	k18mokg0
+3186	k18mokfy
+3185	k18mokfx
+3184	k18mokfw
+3183	k18mokfv
+3182	k18mokfu
+3181	k18mokft
+3180	k18mokfs
+3179	k18mokfr
+3178	k18mokfq
+3177	k18mokfp
+3176	k18mokfn
+3175	k18mokfm
+3174	k18mokfl
+3173	k18mokfk
+3172	k18mokfj
+3171	k18mokfi
+3170	k18mokff
+3169	k18mokfe
+3168	k18mokfd
+3167	k18mokfc
+3166	k18mokfb
+3165	k18mokfa
+3164	k18mokf9
+3163	k18mokf8
+3162	k18mokf7
+3161	k18mokf5
+3160	k18mokf4
+3159	k18mokf3
+3158	k18mokf2
+3157	k18mokf1
+3156	k18mokf0
+3155	k18mokey
+3154	k18mokex
+3153	k18mokew
+3152	k18mokev
+3151	k18moket
+3150	k18mokes
+3149	k18moker
+3148	k18mokeq
+3147	k18mokep
+3146	k18mokeo
+3145	k18moken
+3144	k18mokem
+3143	k18mokel
+3142	k18mokek
+3141	k18mokej
+3140	k18mokei
+3139	k18mokef
+3138	k18mokee
+3137	k18moked
+3136	k18mokec
+3135	k18mokeb
+3134	k18mokea
+3133	k18moke9
+3132	k18moke8
+3131	k18moke7
+3130	k18moke6
+3129	k18moke4
+3128	k18moke3
+3127	k18moke2
+3126	k18moke1
+3125	k18mokdy
+3124	k18mokdx
+3123	k18mokdw
+3122	k18mokdv
+3121	k18mokdu
+3120	k18mokdt
+3119	k18mokds
+3118	k18mokdr
+3117	k18mokdq
+3116	k18mokdp
+3115	k18mokdo
+3114	k18mokdm
+3113	k18mokdl
+3112	k18mokdh
+3111	k18mokdf
+3110	k18mokdc
+3109	k18mokd9
+3108	k18mokd6
+3107	k18mokd4
+3106	k18mokd2
+3105	k18mokd0
+3104	k18mokcx
+3103	k18mokcw
+3102	k18modiu
+3101	k18modis
 3098	k15mek19
 3097	k15mek18
 3096	k15mek17

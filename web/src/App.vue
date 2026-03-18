@@ -6551,7 +6551,8 @@ const processMarketsToFullTopics = (markets) => {
           trending: `${mainMarket.marketTitle}###${childMarket.marketTitle}`,
           yesTokenId: childMarket.yesTokenId,
           noTokenId: childMarket.noTokenId,
-          marketId: childMarket.marketId
+          marketId: childMarket.marketId,
+          slug: mainMarket.slug
         })
       })
     } else {
@@ -6565,7 +6566,8 @@ const processMarketsToFullTopics = (markets) => {
         trending: mainMarket.marketTitle,
         yesTokenId: mainMarket.yesTokenId,
         noTokenId: mainMarket.noTokenId,
-        marketId: mainMarket.marketId
+        marketId: mainMarket.marketId,
+        slug: mainMarket.slug
       })
     }
   })
@@ -6634,8 +6636,8 @@ const syncConfigFromMarkets = async () => {
           trendingPart1: topic.yesTokenId,
           trendingPart2: topic.noTokenId,
           trendingPart3: config.trendingPart3,
-          opUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
-          polyUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
+          opUrl: `https://app.opinion.trade/market/${topic.slug}`,
+          polyUrl: `https://app.opinion.trade/market/${topic.slug}`,
           opTopicId: String(topic.marketId),
           weight: config.weight || 2,
           isOpen: config.isOpen || 0
@@ -6673,8 +6675,8 @@ const syncConfigFromMarkets = async () => {
         trendingPart1: topic.yesTokenId,
         trendingPart2: topic.noTokenId,
         trendingPart3: null,
-        opUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
-        polyUrl: `https://app.opinion.trade/detail?topicId=${topic.marketId}`,
+        opUrl: `https://app.opinion.trade/market/${topic.slug}`,
+        polyUrl: `https://app.opinion.trade/market/${topic.slug}`,
         opTopicId: String(topic.marketId),
         weight: 2,
         isOpen: 0
