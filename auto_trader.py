@@ -1956,7 +1956,7 @@ def refresh_page_with_opinion_check(driver, serial_number=""):
                 log_print(f"[{serial_number}] ✗ 刷新页面失败: {str(e)}")
 
 
-def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=None):
+def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=None, skip_beijing_time=False):
     """
     预先打开OKX钱包页面，解锁钱包并处理所有待确认的弹窗
     
@@ -1965,6 +1965,7 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
         serial_number: 浏览器序列号
         current_ip: 当前使用的IP地址（可选）
         current_delay: 当前IP的延迟（可选，单位：毫秒）
+        skip_beijing_time: 是否跳过打开 beijing_time.html（可选，默认False）
         
     Returns:
         str: 主窗口句柄
@@ -1975,7 +1976,10 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
     main_window = driver.current_window_handle
     
     # 先预打开 beijing_time.html 页面
-    try:
+    if skip_beijing_time:
+        log_print(f"[{serial_number}] [预处理] 跳过 beijing_time.html 页面")
+    else:
+     try:
         log_print(f"[{serial_number}] → 预打开 beijing_time.html 页面...")
         
         # 构建URL，包含IP和延迟参数
@@ -2154,7 +2158,7 @@ def preopen_okx_wallet(driver, serial_number, current_ip=None, current_delay=Non
         except:
             pass
         time.sleep(1)
-    except Exception as e:
+     except Exception as e:
         log_print(f"[{serial_number}] ⚠ 预打开 beijing_time.html 异常: {str(e)}，继续执行...")
         try:
             driver.switch_to.window(main_window)
@@ -15933,7 +15937,7 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
             get_url = f"{SERVER_BASE_URL}/boost/findAccountConfigByNo"
             params = {"no": browser_id, "computeGroup": COMPUTER_GROUP}
             response = requests.get(get_url, params=params, timeout=10)
-                
+            
             if response.status_code == 200:
                 result = response.json()
                 if result and result.get('data'):
@@ -15941,23 +15945,20 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
                     log_print(f"[{browser_id}] [Type21] ✓ 已获取账户配置")
                 else:
                     log_print(f"[{browser_id}] [Type21] ✗ 账户配置不存在")
-                        return False, "账户配置不存在"
+                    return False, "账户配置不存在"
             else:
-                    log_print(f"[{browser_id}] [Type21] ✗ 获取账户配置失败: HTTP {response.status_code}")
-                    return False, f"获取账户配置失败: HTTP {response.status_code}"
+                log_print(f"[{browser_id}] [Type21] ✗ 获取账户配置失败: HTTP {response.status_code}")
+                return False, f"获取账户配置失败: HTTP {response.status_code}"
         except Exception as e:
-                log_print(f"[{browser_id}] [Type21] ✗ 获取账户配置异常: {str(e)}")
-                return False, f"获取账户配置异常: {str(e)}"
+            log_print(f"[{browser_id}] [Type21] ✗ 获取账户配置异常: {str(e)}")
+            return False, f"获取账户配置异常: {str(e)}"
 
+        s_value = account_config.get('s')
 
         if usdt_clicked:
             # 13. 等待2s，找到 textarea 并填入地址
             time.sleep(5)
             log_print(f"[{browser_id}] [Type21] 获取浏览器账户数据（s 字段）...")
-        
-            
-            
-            s_value = account_config.get('s')
             if s_value and str(s_value).strip():
                 log_print(f"[{browser_id}] [Type21] s 字段值: {s_value}")
                 
@@ -16080,11 +16081,148 @@ def process_type21_withdraw_and_send(driver, browser_id, mission, portfolio_valu
                 log_print(f"[{browser_id}] [Type21] ✗ 10s内未找到最终确认按钮")
                 return False, "10s内未找到最终确认按钮"
         
+        # ======== ASTER 和 OPN 转出流程 ========
+        for coin_name in ["ASTER", "OPN"]:
+            log_print(f"[{browser_id}] [Type21] ======== 开始 {coin_name} 转出流程 ========")
+            time.sleep(5)
+            
+            # 查找币种 div 并点击其父节点的父节点的父节点
+            log_print(f"[{browser_id}] [Type21] [{coin_name}] 查找 {coin_name} 币种...")
+            coin_clicked = False
+            
+            try:
+                coin_divs = driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="home-page-common-coin-list-item"]')
+                for div in coin_divs:
+                    try:
+                        if coin_name in div.text:
+                            parent1 = div.find_element(By.XPATH, '..')
+                            parent2 = parent1.find_element(By.XPATH, '..')
+                            parent3 = parent2.find_element(By.XPATH, '..')
+                            parent3.click()
+                            log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ 已点击 {coin_name} 的父节点的父节点的父节点")
+                            coin_clicked = True
+                            break
+                    except Exception as e:
+                        log_print(f"[{browser_id}] [Type21] [{coin_name}] ⚠ 处理 {coin_name} div 时出错: {str(e)}")
+                        continue
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 查找 {coin_name} div 异常: {str(e)}")
+            
+            if not coin_clicked:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 未找到 {coin_name}，跳过 {coin_name} 转出")
+                continue
+            
+            # 填入地址
+            time.sleep(5)
+            log_print(f"[{browser_id}] [Type21] [{coin_name}] 填入地址（s 字段）...")
+            try:
+                coin_textareas = driver.find_elements(By.CSS_SELECTOR, 'textarea[data-testid="okd-input"]')
+                if coin_textareas:
+                    coin_textareas[0].clear()
+                    coin_textareas[0].send_keys(str(s_value).strip())
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ 已填入地址")
+                else:
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 未找到 textarea，跳过 {coin_name} 转出")
+                    continue
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 填入地址异常: {str(e)}，跳过 {coin_name} 转出")
+                continue
+            
+            # 确认按钮1（okd-button）
+            time.sleep(5)
+            log_print(f"[{browser_id}] [Type21] [{coin_name}] 在10s内查找确认按钮...")
+            start_time = time.time()
+            coin_confirm1 = False
+            
+            while time.time() - start_time < 10:
+                try:
+                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                    if buttons:
+                        buttons[0].click()
+                        log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ 已点击确认按钮")
+                        coin_confirm1 = True
+                        break
+                    else:
+                        time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ⚠ 查找确认按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not coin_confirm1:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 10s内未找到确认按钮，跳过 {coin_name} 转出")
+                continue
+            
+            # 确认按钮2（第二次 okd-button）
+            time.sleep(5)
+            log_print(f"[{browser_id}] [Type21] [{coin_name}] 在10s内查找第二次确认按钮...")
+            start_time = time.time()
+            coin_confirm2 = False
+            
+            while time.time() - start_time < 10:
+                try:
+                    buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="okd-button"]')
+                    if buttons:
+                        buttons[0].click()
+                        log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ 已点击第二次确认按钮")
+                        coin_confirm2 = True
+                        break
+                    else:
+                        time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ⚠ 查找第二次确认按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if not coin_confirm2:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 10s内未找到第二次确认按钮，跳过 {coin_name} 转出")
+                continue
+            
+            # 金额确认按钮
+            time.sleep(3)
+            log_print(f"[{browser_id}] [Type21] [{coin_name}] 查找并点击金额确认按钮...")
+            try:
+                coin_amount_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-amount-confirm-button"], button[data-testid="send-amount-page-confirm-button"]')
+                if coin_amount_buttons:
+                    coin_amount_buttons[0].click()
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ 已点击金额确认按钮")
+                else:
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 未找到金额确认按钮，跳过 {coin_name} 转出")
+                    continue
+            except Exception as e:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✗ 点击金额确认按钮异常: {str(e)}，跳过 {coin_name} 转出")
+                continue
+            
+            # 最终确认按钮
+            time.sleep(5)
+            log_print(f"[{browser_id}] [Type21] [{coin_name}] 在10s内查找最终确认按钮...")
+            start_time = time.time()
+            coin_final_confirm = False
+            
+            while time.time() - start_time < 10:
+                try:
+                    coin_final_buttons = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="send-page-send-confirm-button"], button[data-testid="send-confirm-page-confirm-button"]')
+                    if coin_final_buttons:
+                        coin_final_buttons[0].click()
+                        log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ 已点击最终确认按钮")
+                        coin_final_confirm = True
+                        break
+                    else:
+                        time.sleep(0.5)
+                except Exception as e:
+                    log_print(f"[{browser_id}] [Type21] [{coin_name}] ⚠ 查找最终确认按钮时出错: {str(e)}")
+                    time.sleep(0.5)
+            
+            if coin_final_confirm:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ✓ {coin_name} 转出流程完成")
+            else:
+                log_print(f"[{browser_id}] [Type21] [{coin_name}] ⚠ 10s内未找到最终确认按钮，{coin_name} 转出可能未完成")
+            
+            log_print(f"[{browser_id}] [Type21] ======== {coin_name} 转出流程结束 ========")
+        
         # ======== BNB 转出流程 ========
         # 先判断已转出额（t字段）是否已有值且大于0
         t_value_check = account_config.get('t')
         skip_bnb = False
-
+        time.sleep(5)
         if skip_bnb:
             log_print(f"[{browser_id}] [Type21] 现有信息中已转出额(t)已有值: {t_value_check} 且大于0，跳过 BNB 转出流程")
         else:
@@ -17054,6 +17192,31 @@ def process_type2_mission(task_data, retry_count=0):
         # 3.5 等待4秒后再进入目标页面
         log_print(f"[{browser_id}] 等待4秒...")
         time.sleep(4)
+        
+        # ======== Type 21 + tp3=="2" 快捷流程：跳过 profile 页面，直接进入 OKX 转出 ========
+        tp3_value = mission.get('tp3')
+        if mission_type == 21 and str(tp3_value) == "2":
+            log_print(f"[{browser_id}] [Type21] tp3=2，跳过 profile 页面，直接预打开 OKX 钱包并进入转出流程")
+            
+            # 预打开 OKX 钱包并解锁
+            log_print(f"[{browser_id}] [Type21] 预打开 OKX 钱包...")
+            main_window = preopen_okx_wallet(driver, browser_id, current_ip, current_delay, skip_beijing_time=True)
+            
+            # 保持在 OKX 界面，等待 10s
+            log_print(f"[{browser_id}] [Type21] 保持在 OKX 界面，等待 10s...")
+            time.sleep(10)
+            
+            # 直接调用 process_type21_withdraw_and_send
+            log_print(f"[{browser_id}] [Type21] 直接进入 process_type21_withdraw_and_send 流程...")
+            type21_success, type21_reason = process_type21_withdraw_and_send(
+                driver, browser_id, mission, "0", "0"
+            )
+            if type21_success:
+                log_print(f"[{browser_id}] [Type21] ✓ Type 21 tp3=2 任务执行成功")
+                return True, "", collected_data
+            else:
+                log_print(f"[{browser_id}] [Type21] ✗ Type 21 tp3=2 任务执行失败: {type21_reason}")
+                return False, type21_reason, collected_data
         
         # 4. 判断交易所
         if exchange_name.upper() == "OP":

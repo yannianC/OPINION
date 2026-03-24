@@ -309,6 +309,11 @@
           </el-checkbox>
         </div>
         <div class="filter-item">
+          <el-checkbox v-model="filters.showNoNewReceiveAddress" @change="applyFilters">
+            无新接收地址
+          </el-checkbox>
+        </div>
+        <div class="filter-item">
           <el-checkbox v-model="filters.showDuplicateAddress" @change="applyFilters">
             显示地址重复
           </el-checkbox>
@@ -1765,6 +1770,7 @@ const filters = ref({
   balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
   balancePlusPortfolioValue: '',  // 余额+Portfolio值
   showNoAddress: false,  // 显示无地址
+  showNoNewReceiveAddress: false,  // 无新接收地址(s为空)
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
   showNoPosition: false,  // 显示无持有仓位
@@ -1797,6 +1803,7 @@ const activeFilters = ref({
   balancePlusPortfolioOperator: '>',  // 余额+Portfolio比较操作符：> 或 <
   balancePlusPortfolioValue: null,  // 余额+Portfolio值
   showNoAddress: false,  // 显示无地址
+  showNoNewReceiveAddress: false,  // 无新接收地址(s为空)
   showDuplicateAddress: false,  // 显示地址重复
   showNoPoints: false,  // 显示无积分
   showNoPosition: false,  // 显示无持有仓位
@@ -1910,6 +1917,7 @@ const applyFilters = () => {
     balancePlusPortfolioOperator: balancePlusPortfolioOperator,
     balancePlusPortfolioValue: isNaN(balancePlusPortfolioValue) ? null : balancePlusPortfolioValue,
     showNoAddress: filters.value.showNoAddress,
+    showNoNewReceiveAddress: filters.value.showNoNewReceiveAddress,
     showDuplicateAddress: filters.value.showDuplicateAddress,
     showNoPoints: filters.value.showNoPoints,
     showNoPosition: filters.value.showNoPosition,
@@ -1949,6 +1957,7 @@ const clearFilters = () => {
     balancePlusPortfolioOperator: '>',
     balancePlusPortfolioValue: '',
     showNoAddress: false,
+    showNoNewReceiveAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
     showNoPosition: false,
@@ -1982,6 +1991,7 @@ const clearFilters = () => {
     balancePlusPortfolioOperator: '>',
     balancePlusPortfolioValue: null,
     showNoAddress: false,
+    showNoNewReceiveAddress: false,
     showDuplicateAddress: false,
     showNoPoints: false,
     showNoPosition: false,
@@ -2034,6 +2044,7 @@ const filteredTableData = computed(() => {
                     filters.transferAmountMax !== null ||
                     (filters.balancePlusPortfolioValue !== null && filters.balancePlusPortfolioValue !== undefined) ||
                     filters.showNoAddress ||
+                    filters.showNoNewReceiveAddress ||
                     filters.showDuplicateAddress ||
                     filters.showNoPoints ||
                     filters.showNoPosition ||
@@ -2177,6 +2188,13 @@ const filteredTableData = computed(() => {
       if (filters.showNoAddress) {
         if (row.h && row.h.trim()) {
           return false  // 有地址，不显示
+        }
+      }
+      
+      // 无新接收地址筛选（s字段为空）
+      if (filters.showNoNewReceiveAddress) {
+        if (row.s && row.s.trim()) {
+          return false  // 有新接收地址，不显示
         }
       }
       
